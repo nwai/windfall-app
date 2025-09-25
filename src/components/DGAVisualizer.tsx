@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import type { DiamondShape } from '../types/Diamond'; // uses the shape type
 import { isCellInShape } from '../lib/diamondShapes'; // shape membership helper
 import type { Diamond as DGADiamond } from '../dga';
+import { DiamondShapeSelector } from './controls/DiamondShapeSelector'; 
 
 /* -------------------------------------------------------------------------- */
 /* Types                                                                      */
@@ -25,6 +26,7 @@ type HighlightShape = {
 };
 
 type Diamond = DGADiamond & {
+id: string; 
   rawRadius?: number;             // requested radius (pre-clip)
   clipped?: boolean;              // indicates partial or shrunk
   clipMode?: 'partial' | 'shrunk';// which clipping logic applied
@@ -260,10 +262,15 @@ export const DGAVisualizer: React.FC<DGAVisualizerProps> = ({
   const [importMessage, setImportMessage] = useState('');
 
   /* Compose diamond list */
-  const allDiamonds = useMemo(
-    () => [...diamonds, ...customDiamonds],
-    [diamonds, customDiamonds]
-  );
+// find existing allDiamonds useMemo and replace it with this:
+
+const allDiamonds = useMemo(() => {
+  return [...diamonds, ...customDiamonds].map((d, i) => {
+    // Only add an id if missing
+    if ((d as any).id) return d;
+    return { ...d, id: `d${i}` };
+  });
+}, [diamonds, customDiamonds]);
 
   const diamondOptions = useMemo(
     () =>
@@ -587,18 +594,18 @@ export const DGAVisualizer: React.FC<DGAVisualizerProps> = ({
       return;
     }
 
-    const newDiamond: Diamond = {
-      centerRow,
-      centerCol,
-      radius: finalRadius,
-      rawRadius,
-      clipped,
-      clipMode,
-      fillColor: diamondFillDefault,
-      edgeColor: diamondEdgeDefault,
-      boundaryOnly: diamondBoundaryOnly,
-      // Optional: shape can be added later via future UI; default remains 'manhattan'
-    };
+const newDiamond: Diamond = {
+  id: `custom-${Date.now()}-${customDiamonds.length}`,
+  centerRow,
+  centerCol,
+  radius: finalRadius,
+  rawRadius,
+  clipped,
+  clipMode,
+  fillColor: diamondFillDefault,
+  edgeColor: diamondEdgeDefault,
+  boundaryOnly: diamondBoundaryOnly,
+};
 
     setCustomDiamonds(prev => [...prev, newDiamond]);
     setDiamondMessage(
@@ -617,6 +624,15 @@ export const DGAVisualizer: React.FC<DGAVisualizerProps> = ({
     const customIndex = index - autoLen;
     setCustomDiamonds(prev => prev.filter((_, i) => i !== customIndex));
   }
+
+function updateDiamondShape(index: number, shape: DiamondShape) {
+  const autoLen = diamonds.length;
+  if (index < autoLen) return; // skip external diamonds
+  const customIndex = index - autoLen;
+  setCustomDiamonds(prev =>
+    prev.map((d, i) => (i === customIndex ? { ...d, shape } : d))
+  );
+}
 
   function updateDiamondColor(index: number, fill?: string, edge?: string) {
     const autoLen = diamonds.length;
@@ -1281,114 +1297,126 @@ export const DGAVisualizer: React.FC<DGAVisualizerProps> = ({
 
       {/* Diamond List / Edit */}
       {allDiamonds.length > 0 && (
-        <details style={{ marginBottom: 10 }}>
-          <summary style={{ cursor: 'pointer' }}>
-            <b>Diamonds ({allDiamonds.length})</b>
-          </summary>
-          <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.4 }}>
-            {allDiamonds.map((d, idx) => {
-              const autoLen = diamonds.length;
-              const isCustom = idx >= autoLen;
-              const clipInfo =
-                d.clipMode === 'partial'
-                  ? ' (partial)'
-                  : d.clipMode === 'shrunk'
-                  ? ' (shrunk)'
-                  : '';
-              return (
-                <div
-                  key={idx}
-                  style={{
-                    padding: '4px 6px',
-                    marginBottom: 4,
-                    border: '1px solid #ccc',
-                    borderRadius: 4,
-                    background: '#fafafa',
-                    display: 'flex',
-                    flexWrap: 'wrap',
-                    alignItems: 'center',
-                    gap: 8,
-                  }}
+  <details style={{ marginBottom: 10 }}>
+    <summary style={{ cursor: 'pointer' }}>
+      <b>Diamonds ({allDiamonds.length})</b>
+    </summary>
+    <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.4 }}>
+      {allDiamonds.map((d, idx) => {
+        const autoLen = diamonds.length;
+        const isCustom = idx >= autoLen;
+        const clipInfo =
+          d.clipMode === 'partial'
+            ? ' (partial)'
+            : d.clipMode === 'shrunk'
+            ? ' (shrunk)'
+            : '';
+        return (
+          <div
+            key={d.id || idx}
+            style={{
+              padding: '4px 6px',
+              marginBottom: 4,
+              border: '1px solid #ccc',
+              borderRadius: 4,
+              background: '#fafafa',
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              gap: 8,
+            }}
+          >
+            <span>
+              #{idx + 1} center=({d.centerRow + 1},{d.centerCol + 1}) r={d.radius}
+              {clipInfo}
+              {d.rawRadius && d.rawRadius !== d.radius
+                ? ` raw=${d.rawRadius}`
+                : d.clipMode === 'partial'
+                ? ' raw preserved'
+                : ''}
+              {d.boundaryOnly ? ' [boundary-only]' : ''}
+              {d.shape ? ` shape=${d.shape}` : ''}
+            </span>
+
+            {isCustom && (
+              <>
+                <DiamondShapeSelector
+                  diamond={d}
+                  onChange={updated =>
+                    updateDiamondShape(idx, updated.shape ?? 'manhattan')
+                  }
+                />
+
+                <label>
+                  Fill:
+                  <input
+                    type="color"
+                    value={
+                      /^rgba?\(/.test(d.fillColor || '')
+                        ? '#ff00b4'
+                        : d.fillColor || '#ff00b4'
+                    }
+                    onChange={e => {
+                      const hex = e.target.value;
+                      updateDiamondColor(
+                        idx,
+                        `rgba(${parseInt(hex.slice(1, 3), 16)},${parseInt(
+                          hex.slice(3, 5),
+                          16
+                        )},${parseInt(hex.slice(5, 7), 16)},0.30)`
+                      );
+                    }}
+                    style={{ width: 36, marginLeft: 4 }}
+                  />
+                </label>
+
+                <label>
+                  Edge:
+                  <input
+                    type="color"
+                    value={
+                      /^rgba?\(/.test(d.edgeColor || '')
+                        ? '#ff00b4'
+                        : d.edgeColor || '#ff00b4'
+                    }
+                    onChange={e => {
+                      const hex = e.target.value;
+                      updateDiamondColor(
+                        idx,
+                        undefined,
+                        `rgba(${parseInt(hex.slice(1, 3), 16)},${parseInt(
+                          hex.slice(3, 5),
+                          16
+                        )},${parseInt(hex.slice(5, 7), 16)},0.85)`
+                      );
+                    }}
+                    style={{ width: 36, marginLeft: 4 }}
+                  />
+                </label>
+
+                <button
+                  onClick={() => toggleDiamondBoundaryOnly(idx)}
+                  style={{ fontSize: 11 }}
                 >
-                  <span>
-                    #{idx + 1} center=({d.centerRow + 1},{d.centerCol + 1}) r={d.radius}
-                    {clipInfo}
-                    {d.rawRadius && d.rawRadius !== d.radius
-                      ? ` raw=${d.rawRadius}`
-                      : d.clipMode === 'partial'
-                      ? ' raw preserved'
-                      : ''}
-                    {d.boundaryOnly ? ' [boundary-only]' : ''}
-                    {d.shape ? ` shape=${d.shape}` : ''}
-                  </span>
-                  {isCustom && (
-                    <>
-                      <label>
-                        Fill:
-                        <input
-                          type="color"
-                          value={
-                            /^rgba?\(/.test(d.fillColor || '')
-                              ? '#ff00b4'
-                              : d.fillColor || '#ff00b4'
-                          }
-                          onChange={e => {
-                            const hex = e.target.value;
-                            updateDiamondColor(
-                              idx,
-                              `rgba(${parseInt(hex.slice(1, 3), 16)},${parseInt(
-                                hex.slice(3, 5),
-                                16
-                              )},${parseInt(hex.slice(5, 7), 16)},0.30)`
-                            );
-                          }}
-                          style={{ width: 36, marginLeft: 4 }}
-                        />
-                      </label>
-                      <label>
-                        Edge:
-                        <input
-                          type="color"
-                          value={
-                            /^rgba?\(/.test(d.edgeColor || '')
-                              ? '#ff00b4'
-                              : d.edgeColor || '#ff00b4'
-                          }
-                          onChange={e => {
-                            const hex = e.target.value;
-                            updateDiamondColor(
-                              idx,
-                              undefined,
-                              `rgba(${parseInt(hex.slice(1, 3), 16)},${parseInt(
-                                hex.slice(3, 5),
-                                16
-                              )},${parseInt(hex.slice(5, 7), 16)},0.85)`
-                            );
-                          }}
-                          style={{ width: 36, marginLeft: 4 }}
-                        />
-                      </label>
-                      <button
-                        onClick={() => toggleDiamondBoundaryOnly(idx)}
-                        style={{ fontSize: 11 }}
-                      >
-                        {d.boundaryOnly ? 'Fill On' : 'Boundary Only'}
-                      </button>
-                      <button
-                        onClick={() => handleRemoveDiamond(idx)}
-                        style={{ fontSize: 11, color: '#c00' }}
-                      >
-                        Remove
-                      </button>
-                    </>
-                  )}
-                  {!isCustom && <span style={{ color: '#999' }}>auto</span>}
-                </div>
-              );
-            })}
+                  {d.boundaryOnly ? 'Fill On' : 'Boundary Only'}
+                </button>
+
+                <button
+                  onClick={() => handleRemoveDiamond(idx)}
+                  style={{ fontSize: 11, color: '#c00' }}
+                >
+                  Remove
+                </button>
+              </>
+            )}
+
+            {!isCustom && <span style={{ color: '#999' }}>auto</span>}
           </div>
-        </details>
-      )}
+        );
+      })}
+    </div>
+  </details>
+)}
 
       {/* Diamond center presets */}
       <div
