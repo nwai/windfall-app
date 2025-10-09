@@ -1,8 +1,8 @@
 import React, { useMemo, useState } from 'react';
-import type { DiamondShape } from '../types/Diamond'; // uses the shape type
-import { isCellInShape } from '../lib/diamondShapes'; // shape membership helper
+import type { DiamondShape } from '../types/Diamond';
+import { isCellInShape } from '../lib/diamondShapes';
 import type { Diamond as DGADiamond } from '../dga';
-import { DiamondShapeSelector } from './controls/DiamondShapeSelector'; 
+import { DiamondShapeSelector } from './controls/DiamondShapeSelector';
 
 /* -------------------------------------------------------------------------- */
 /* Types                                                                      */
@@ -25,27 +25,41 @@ type HighlightShape = {
   renderStyle?: HighlightRenderStyle;
 };
 
-type Diamond = DGADiamond & {
-id: string; 
-  rawRadius?: number;             // requested radius (pre-clip)
-  clipped?: boolean;              // indicates partial or shrunk
-  clipMode?: 'partial' | 'shrunk';// which clipping logic applied
+type BaseDiamond = DGADiamond;
+
+// Keep external/custom shape as-is (id optional, matches incoming data)
+type Diamond = BaseDiamond & {
+  id?: string;
+  rawRadius?: number;
+  clipped?: boolean;
+  clipMode?: 'partial' | 'shrunk';
   fillColor?: string;
   edgeColor?: string;
   boundaryOnly?: boolean;
-
-  // New (optional) shape fields to support variants; defaults to 'manhattan'
   shape?: DiamondShape;
-  // These are optional and not currently used by this component,
-  // but included for future extensibility
   fill?: boolean;
   opacity?: number;
   hidden?: boolean;
 };
 
-type DGAVisualizerProps = {
+// Locally guaranteed id (used for UI + selector)
+type DiamondWithId = BaseDiamond & {
+  id: string;
+  rawRadius?: number;
+  clipped?: boolean;
+  clipMode?: 'partial' | 'shrunk';
+  fillColor?: string;
+  edgeColor?: string;
+  boundaryOnly?: boolean;
+  shape?: DiamondShape;
+  fill?: boolean;
+  opacity?: number;
+  hidden?: boolean;
+};
+
+export interface DGAVisualizerProps {
   grid: number[][];
-  diamonds: Diamond[];          // external diamonds (if any)
+  diamonds: Diamond[];
   predictions: number[];
   drawLabels: string[];
   numberLabels: string[];
@@ -54,7 +68,9 @@ type DGAVisualizerProps = {
   maxCount: number;
   highlights: HighlightShape[];
   setHighlights: React.Dispatch<React.SetStateAction<HighlightShape[]>>;
-};
+  controlsPosition?: 'above' | 'below'; // default 'above'
+focusNumber?: number | null;
+}
 
 type SolveMode = 'center-and-targets' | 'targets-only';
 
@@ -93,7 +109,6 @@ function getHeatmapColor(count: number, min: number, max: number) {
   return `rgba(${r},${g},${b},0.20)`;
 }
 
-// Build digital membership for a highlight.
 function buildDigitalCells(
   r1: number,
   c1: number,
@@ -125,7 +140,6 @@ function buildDigitalCells(
   return set;
 }
 
-// Membership if analog.
 function isOnAdjustableX(
   rIdx: number,
   cIdx: number,
@@ -152,10 +166,6 @@ function isOnAdjustableX(
   return onDownArm || onUpArm;
 }
 
-/**
- * Shape-aware diamond membership using isCellInShape.
- * Returns inside/boundary flags for the given diamond and cell indices.
- */
 function diamondCellMembership(d: Diamond, rIdx: number, cIdx: number) {
   const dr = rIdx - d.centerRow;
   const dc = cIdx - d.centerCol;
@@ -193,6 +203,8 @@ export const DGAVisualizer: React.FC<DGAVisualizerProps> = ({
   maxCount,
   highlights,
   setHighlights,
+  controlsPosition = 'above',
+focusNumber = null,
 }) => {
   // Defensive defaults
   grid = grid || [];
@@ -215,8 +227,7 @@ export const DGAVisualizer: React.FC<DGAVisualizerProps> = ({
   /* Center + Targets inputs */
   const [inputRow, setInputRow] = useState('');
   const [inputCol, setInputCol] = useState('');
-  const [aimMode, setAimMode] =
-    useState<'edge-right' | 'edge-left' | 'custom-col'>('edge-right');
+  const [aimMode, setAimMode] = useState<'edge-right' | 'edge-left' | 'custom-col'>('edge-right');
   const [customAimCol, setCustomAimCol] = useState('');
 
   /* Targets (both modes) */
@@ -234,7 +245,7 @@ export const DGAVisualizer: React.FC<DGAVisualizerProps> = ({
   const [inputTol, setInputTol] = useState('0.49');
   const [advancedRadius, setAdvancedRadius] = useState('');
 
-  /* Diamond creation */
+  /* Diamonds (custom/additional) */
   const [customDiamonds, setCustomDiamonds] = useState<Diamond[]>([]);
   const [manualWestRow, setManualWestRow] = useState('');
   const [manualWestCol, setManualWestCol] = useState('');
@@ -244,57 +255,48 @@ export const DGAVisualizer: React.FC<DGAVisualizerProps> = ({
   const [autoClipDiamond, setAutoClipDiamond] = useState(true);
   const [permitPartialDiamond, setPermitPartialDiamond] = useState(false);
   const [diamondBoundaryOnly, setDiamondBoundaryOnly] = useState(false);
-  const [diamondFillDefault, setDiamondFillDefault] =
-    useState(DEFAULT_DIAMOND_FILL);
-  const [diamondEdgeDefault, setDiamondEdgeDefault] =
-    useState(DEFAULT_DIAMOND_EDGE);
+  const [diamondFillDefault, setDiamondFillDefault] = useState(DEFAULT_DIAMOND_FILL);
+  const [diamondEdgeDefault, setDiamondEdgeDefault] = useState(DEFAULT_DIAMOND_EDGE);
   const [diamondMessage, setDiamondMessage] = useState('');
   const [showDiamonds, setShowDiamonds] = useState(true);
 
-  /* Per-diamond quick recolor UI state */
-  const [editingDiamondIndex, setEditingDiamondIndex] = useState<number | null>(
-    null
-  );
+  /* Per-diamond recolor UI */
+  const [editingDiamondIndex, setEditingDiamondIndex] = useState<number | null>(null);
 
   /* Export / Import */
   const [exportJSON, setExportJSON] = useState('');
   const [importJSON, setImportJSON] = useState('');
   const [importMessage, setImportMessage] = useState('');
 
-  /* Compose diamond list */
-// find existing allDiamonds useMemo and replace it with this:
-
-const allDiamonds = useMemo(() => {
+  /* Prepare diamonds list with ids */
+const allDiamonds = useMemo<DiamondWithId[]>(() => {
   return [...diamonds, ...customDiamonds].map((d, i) => {
-    // Only add an id if missing
-    if ((d as any).id) return d;
-    return { ...d, id: `d${i}` };
+    // guarantee id is a string
+    const id = d.id ?? `d${i}`;
+    return { ...d, id } as DiamondWithId;
   });
 }, [diamonds, customDiamonds]);
 
-  const diamondOptions = useMemo(
-    () =>
-      allDiamonds.map((d, i) => {
-        const clipTag =
-          d.clipMode === 'partial'
-            ? ' (partial)'
-            : d.clipMode === 'shrunk'
-            ? ' (shrunk)'
-            : '';
-        return {
-          label: `#${i + 1} r=${d.radius}${clipTag} @ (${d.centerRow + 1}, ${
-            d.centerCol + 1
-          })`,
-          value: i,
-          d,
-        };
-      }),
-    [allDiamonds]
-  );
-  const [selectedDiamondIdx, setSelectedDiamondIdx] = useState(0);
-  const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d;
+const diamondOptions = useMemo(
+  () =>
+    allDiamonds.map((d, i) => {
+      const clipTag =
+        d.clipMode === 'partial'
+          ? ' (partial)'
+          : d.clipMode === 'shrunk'
+          ? ' (shrunk)'
+          : '';
+      return {
+        label: `#${i + 1} r=${d.radius}${clipTag} @ (${d.centerRow + 1}, ${d.centerCol + 1})`,
+        value: i,
+        d, // d is DiamondWithId
+      };
+    }),
+  [allDiamonds]
+);
+const [selectedDiamondIdx, setSelectedDiamondIdx] = useState(0);
+const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId | undefined
 
-  /* Highlight cell membership summary */
   function getHighlightInfos(rIdx: number, cIdx: number) {
     const infos: {
       idx: number;
@@ -594,24 +596,22 @@ const allDiamonds = useMemo(() => {
       return;
     }
 
-const newDiamond: Diamond = {
-  id: `custom-${Date.now()}-${customDiamonds.length}`,
-  centerRow,
-  centerCol,
-  radius: finalRadius,
-  rawRadius,
-  clipped,
-  clipMode,
-  fillColor: diamondFillDefault,
-  edgeColor: diamondEdgeDefault,
-  boundaryOnly: diamondBoundaryOnly,
-};
+    const newDiamond: Diamond = {
+      id: `custom-${Date.now()}-${customDiamonds.length}`,
+      centerRow,
+      centerCol,
+      radius: finalRadius,
+      rawRadius,
+      clipped,
+      clipMode,
+      fillColor: diamondFillDefault,
+      edgeColor: diamondEdgeDefault,
+      boundaryOnly: diamondBoundaryOnly,
+    };
 
     setCustomDiamonds(prev => [...prev, newDiamond]);
     setDiamondMessage(
-      `Added diamond center=(${centerRow + 1},${centerCol + 1}) r=${finalRadius}${
-        clipMode ? ` (${clipMode})` : ''
-      }.`
+      `Added diamond center=(${centerRow + 1},${centerCol + 1}) r=${finalRadius}${clipMode ? ` (${clipMode})` : ''}.`
     );
   }
 
@@ -625,14 +625,12 @@ const newDiamond: Diamond = {
     setCustomDiamonds(prev => prev.filter((_, i) => i !== customIndex));
   }
 
-function updateDiamondShape(index: number, shape: DiamondShape) {
-  const autoLen = diamonds.length;
-  if (index < autoLen) return; // skip external diamonds
-  const customIndex = index - autoLen;
-  setCustomDiamonds(prev =>
-    prev.map((d, i) => (i === customIndex ? { ...d, shape } : d))
-  );
-}
+  function updateDiamondShape(index: number, shape: DiamondShape) {
+    const autoLen = diamonds.length;
+    if (index < autoLen) return;
+    const customIndex = index - autoLen;
+    setCustomDiamonds(prev => prev.map((d, i) => (i === customIndex ? { ...d, shape } : d)));
+  }
 
   function updateDiamondColor(index: number, fill?: string, edge?: string) {
     const autoLen = diamonds.length;
@@ -655,11 +653,7 @@ function updateDiamondShape(index: number, shape: DiamondShape) {
     const autoLen = diamonds.length;
     if (index < autoLen) return;
     const customIndex = index - autoLen;
-    setCustomDiamonds(prev =>
-      prev.map((d, i) =>
-        i === customIndex ? { ...d, boundaryOnly: !d.boundaryOnly } : d
-      )
-    );
+    setCustomDiamonds(prev => prev.map((d, i) => (i === customIndex ? { ...d, boundaryOnly: !d.boundaryOnly } : d)));
   }
 
   const preview = useMemo(() => {
@@ -760,7 +754,6 @@ function updateDiamondShape(index: number, shape: DiamondShape) {
     inputBiasDown,
   ]);
 
-  /* Export */
   function handleExport() {
     const payload: ExportPayload = {
       version: 1,
@@ -785,7 +778,6 @@ function updateDiamondShape(index: number, shape: DiamondShape) {
     }
   }
 
-  /* Import (clean version) */
   function handleImport() {
     setImportMessage('');
     try {
@@ -797,9 +789,7 @@ function updateDiamondShape(index: number, shape: DiamondShape) {
       }
 
       if (parsed.version && parsed.version !== 1) {
-        setImportMessage(
-          `Warning: Unknown version ${parsed.version}, attempting best-effort import.`
-        );
+        setImportMessage(`Warning: Unknown version ${parsed.version}, attempting best-effort import.`);
       }
 
       if (parsed.diamonds) {
@@ -807,7 +797,7 @@ function updateDiamondShape(index: number, shape: DiamondShape) {
           setImportMessage('Import error: diamonds is not an array.');
           return;
         }
-        const cleanedDiamonds = parsed.diamonds
+        const cleanedDiamonds: Diamond[] = parsed.diamonds
           .filter(
             (d: any) =>
               d &&
@@ -822,21 +812,12 @@ function updateDiamondShape(index: number, shape: DiamondShape) {
             radius: d.radius,
             rawRadius: Number.isInteger(d.rawRadius) ? d.rawRadius : d.radius,
             clipped: !!d.clipped,
-            clipMode:
-              d.clipMode === 'partial' || d.clipMode === 'shrunk'
-                ? d.clipMode
-                : undefined,
-            fillColor:
-              typeof d.fillColor === 'string' ? d.fillColor : diamondFillDefault,
-            edgeColor:
-              typeof d.edgeColor === 'string' ? d.edgeColor : diamondEdgeDefault,
+            clipMode: d.clipMode === 'partial' || d.clipMode === 'shrunk' ? d.clipMode : undefined,
+            fillColor: typeof d.fillColor === 'string' ? d.fillColor : diamondFillDefault,
+            edgeColor: typeof d.edgeColor === 'string' ? d.edgeColor : diamondEdgeDefault,
             boundaryOnly: !!d.boundaryOnly,
-            // Preserve shape if present in imported data
             shape:
-              d.shape === 'manhattan' ||
-              d.shape === 'square' ||
-              d.shape === 'circle' ||
-              d.shape === 'doubleHelix'
+              d.shape === 'manhattan' || d.shape === 'square' || d.shape === 'circle' || d.shape === 'doubleHelix'
                 ? d.shape
                 : undefined,
           }));
@@ -848,7 +829,7 @@ function updateDiamondShape(index: number, shape: DiamondShape) {
           setImportMessage('Import error: highlights is not an array.');
           return;
         }
-        const rebuilt = parsed.highlights
+        const rebuilt: HighlightShape[] = parsed.highlights
           .filter(
             (h: any) =>
               h &&
@@ -863,16 +844,10 @@ function updateDiamondShape(index: number, shape: DiamondShape) {
             const biasUp = typeof h.biasUp === 'number' ? h.biasUp : 0;
             const biasDown = typeof h.biasDown === 'number' ? h.biasDown : 0;
             const slopeUp = typeof h.slopeUp === 'number' ? h.slopeUp : undefined;
-            const slopeDown =
-              typeof h.slopeDown === 'number' ? h.slopeDown : undefined;
-            const renderStyle =
-              h.renderStyle === 'hatch' || h.renderStyle === 'solid'
-                ? h.renderStyle
-                : 'solid';
+            const slopeDown = typeof h.slopeDown === 'number' ? h.slopeDown : undefined;
+            const renderStyle = h.renderStyle === 'hatch' || h.renderStyle === 'solid' ? h.renderStyle : 'solid';
             const color =
-              typeof h.color === 'string' && h.color.startsWith('rgba')
-                ? h.color
-                : DEFAULT_COLOR;
+              typeof h.color === 'string' && h.color.startsWith('rgba') ? h.color : DEFAULT_COLOR;
 
             let cellsSet: Set<string> | undefined;
             if (h.digital) {
@@ -905,7 +880,6 @@ function updateDiamondShape(index: number, shape: DiamondShape) {
               renderStyle,
             } as HighlightShape;
           });
-
         setHighlights(rebuilt);
       }
 
@@ -913,14 +887,10 @@ function updateDiamondShape(index: number, shape: DiamondShape) {
         const s = parsed.settings;
         if (typeof s.includeNextCol === 'boolean') setIncludeNextCol(s.includeNextCol);
         if (typeof s.useDigitalLine === 'boolean') setUseDigitalLine(s.useDigitalLine);
-        if (typeof s.useIndependentAngles === 'boolean')
-          setUseIndependentAngles(s.useIndependentAngles);
-        if (s.solveMode === 'targets-only' || s.solveMode === 'center-and-targets')
-          setSolveMode(s.solveMode);
-        if (typeof s.defaultDiamondFill === 'string')
-          setDiamondFillDefault(s.defaultDiamondFill);
-        if (typeof s.defaultDiamondEdge === 'string')
-          setDiamondEdgeDefault(s.defaultDiamondEdge);
+        if (typeof s.useIndependentAngles === 'boolean') setUseIndependentAngles(s.useIndependentAngles);
+        if (s.solveMode === 'targets-only' || s.solveMode === 'center-and-targets') setSolveMode(s.solveMode);
+        if (typeof s.defaultDiamondFill === 'string') setDiamondFillDefault(s.defaultDiamondFill);
+        if (typeof s.defaultDiamondEdge === 'string') setDiamondEdgeDefault(s.defaultDiamondEdge);
       }
 
       setImportMessage('Import successful.');
@@ -929,7 +899,6 @@ function updateDiamondShape(index: number, shape: DiamondShape) {
     }
   }
 
-  /* Derived keys for rerender */
   const gridKey = grid.map(r => r.join(',')).join('|');
   const highlightsKey = highlights
     .map(
@@ -951,15 +920,14 @@ function updateDiamondShape(index: number, shape: DiamondShape) {
 
   const disableCenterInputs = solveMode === 'targets-only';
 
-  /* ---------------------------------------------------------------------- */
-  /* Render                                                                 */
-  /* ---------------------------------------------------------------------- */
+  /* ------------------------------- Rendering ------------------------------ */
 
-  return (
-    <div>
+  const renderControls = () => (
+    <>
       {/* Aim Helper */}
       <div
         style={{
+          marginTop: 10,
           marginBottom: 10,
           display: 'flex',
           flexWrap: 'wrap',
@@ -1245,16 +1213,14 @@ function updateDiamondShape(index: number, shape: DiamondShape) {
           Fill:
           <input
             type="color"
-            value={
-              /^rgba?\(/.test(diamondFillDefault) ? '#ff00b4' : diamondFillDefault
-            }
+            value={/^rgba?\(/.test(diamondFillDefault) ? '#ff00b4' : diamondFillDefault}
             onChange={e => {
               const hex = e.target.value;
               setDiamondFillDefault(
-                `rgba(${parseInt(hex.slice(1, 3), 16)},${parseInt(
-                  hex.slice(3, 5),
+                `rgba(${parseInt(hex.slice(1, 3), 16)},${parseInt(hex.slice(3, 5), 16)},${parseInt(
+                  hex.slice(5, 7),
                   16
-                )},${parseInt(hex.slice(5, 7), 16)},0.30)`
+                )},0.30)`
               );
             }}
             style={{ width: 40, marginLeft: 4 }}
@@ -1264,16 +1230,14 @@ function updateDiamondShape(index: number, shape: DiamondShape) {
           Edge:
           <input
             type="color"
-            value={
-              /^rgba?\(/.test(diamondEdgeDefault) ? '#ff00b4' : diamondEdgeDefault
-            }
+            value={/^rgba?\(/.test(diamondEdgeDefault) ? '#ff00b4' : diamondEdgeDefault}
             onChange={e => {
               const hex = e.target.value;
               setDiamondEdgeDefault(
-                `rgba(${parseInt(hex.slice(1, 3), 16)},${parseInt(
-                  hex.slice(3, 5),
+                `rgba(${parseInt(hex.slice(1, 3), 16)},${parseInt(hex.slice(3, 5), 16)},${parseInt(
+                  hex.slice(5, 7),
                   16
-                )},${parseInt(hex.slice(5, 7), 16)},0.85)`
+                )},0.85)`
               );
             }}
             style={{ width: 40, marginLeft: 4 }}
@@ -1297,126 +1261,105 @@ function updateDiamondShape(index: number, shape: DiamondShape) {
 
       {/* Diamond List / Edit */}
       {allDiamonds.length > 0 && (
-  <details style={{ marginBottom: 10 }}>
-    <summary style={{ cursor: 'pointer' }}>
-      <b>Diamonds ({allDiamonds.length})</b>
-    </summary>
-    <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.4 }}>
-      {allDiamonds.map((d, idx) => {
-        const autoLen = diamonds.length;
-        const isCustom = idx >= autoLen;
-        const clipInfo =
-          d.clipMode === 'partial'
-            ? ' (partial)'
-            : d.clipMode === 'shrunk'
-            ? ' (shrunk)'
-            : '';
-        return (
-          <div
-            key={d.id || idx}
-            style={{
-              padding: '4px 6px',
-              marginBottom: 4,
-              border: '1px solid #ccc',
-              borderRadius: 4,
-              background: '#fafafa',
-              display: 'flex',
-              flexWrap: 'wrap',
-              alignItems: 'center',
-              gap: 8,
-            }}
-          >
-            <span>
-              #{idx + 1} center=({d.centerRow + 1},{d.centerCol + 1}) r={d.radius}
-              {clipInfo}
-              {d.rawRadius && d.rawRadius !== d.radius
-                ? ` raw=${d.rawRadius}`
-                : d.clipMode === 'partial'
-                ? ' raw preserved'
-                : ''}
-              {d.boundaryOnly ? ' [boundary-only]' : ''}
-              {d.shape ? ` shape=${d.shape}` : ''}
-            </span>
-
-            {isCustom && (
-              <>
-                <DiamondShapeSelector
-                  diamond={d}
-                  onChange={updated =>
-                    updateDiamondShape(idx, updated.shape ?? 'manhattan')
-                  }
-                />
-
-                <label>
-                  Fill:
-                  <input
-                    type="color"
-                    value={
-                      /^rgba?\(/.test(d.fillColor || '')
-                        ? '#ff00b4'
-                        : d.fillColor || '#ff00b4'
-                    }
-                    onChange={e => {
-                      const hex = e.target.value;
-                      updateDiamondColor(
-                        idx,
-                        `rgba(${parseInt(hex.slice(1, 3), 16)},${parseInt(
-                          hex.slice(3, 5),
-                          16
-                        )},${parseInt(hex.slice(5, 7), 16)},0.30)`
-                      );
-                    }}
-                    style={{ width: 36, marginLeft: 4 }}
-                  />
-                </label>
-
-                <label>
-                  Edge:
-                  <input
-                    type="color"
-                    value={
-                      /^rgba?\(/.test(d.edgeColor || '')
-                        ? '#ff00b4'
-                        : d.edgeColor || '#ff00b4'
-                    }
-                    onChange={e => {
-                      const hex = e.target.value;
-                      updateDiamondColor(
-                        idx,
-                        undefined,
-                        `rgba(${parseInt(hex.slice(1, 3), 16)},${parseInt(
-                          hex.slice(3, 5),
-                          16
-                        )},${parseInt(hex.slice(5, 7), 16)},0.85)`
-                      );
-                    }}
-                    style={{ width: 36, marginLeft: 4 }}
-                  />
-                </label>
-
-                <button
-                  onClick={() => toggleDiamondBoundaryOnly(idx)}
-                  style={{ fontSize: 11 }}
+        <details style={{ marginBottom: 10 }}>
+          <summary style={{ cursor: 'pointer' }}>
+            <b>Diamonds ({allDiamonds.length})</b>
+          </summary>
+          <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.4 }}>
+            {allDiamonds.map((d, idx) => {
+              const autoLen = diamonds.length;
+              const isCustom = idx >= autoLen;
+              const clipInfo = d.clipMode === 'partial' ? ' (partial)' : d.clipMode === 'shrunk' ? ' (shrunk)' : '';
+              return (
+                <div
+                  key={d.id || idx}
+                  style={{
+                    padding: '4px 6px',
+                    marginBottom: 4,
+                    border: '1px solid #ccc',
+                    borderRadius: 4,
+                    background: '#fafafa',
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    alignItems: 'center',
+                    gap: 8,
+                  }}
                 >
-                  {d.boundaryOnly ? 'Fill On' : 'Boundary Only'}
-                </button>
+                  <span>
+                    #{idx + 1} center=({d.centerRow + 1},{d.centerCol + 1}) r={d.radius}
+                    {clipInfo}
+                    {d.rawRadius && d.rawRadius !== d.radius
+                      ? ` raw=${d.rawRadius}`
+                      : d.clipMode === 'partial'
+                      ? ' raw preserved'
+                      : ''}
+                    {d.boundaryOnly ? ' [boundary-only]' : ''}
+                    {d.shape ? ` shape=${d.shape}` : ''}
+                  </span>
 
-                <button
-                  onClick={() => handleRemoveDiamond(idx)}
-                  style={{ fontSize: 11, color: '#c00' }}
-                >
-                  Remove
-                </button>
-              </>
-            )}
+                  {isCustom && (
+                    <>
+                      <DiamondShapeSelector
+                        diamond={d}
+                        onChange={updated => updateDiamondShape(idx, updated.shape ?? 'manhattan')}
+                      />
 
-            {!isCustom && <span style={{ color: '#999' }}>auto</span>}
+                      <label>
+                        Fill:
+                        <input
+                          type="color"
+                          value={/^rgba?\(/.test(d.fillColor || '') ? '#ff00b4' : d.fillColor || '#ff00b4'}
+                          onChange={e => {
+                            const hex = e.target.value;
+                            updateDiamondColor(
+                              idx,
+                              `rgba(${parseInt(hex.slice(1, 3), 16)},${parseInt(hex.slice(3, 5), 16)},${parseInt(
+                                hex.slice(5, 7),
+                                16
+                              )},0.30)`
+                            );
+                          }}
+                          style={{ width: 36, marginLeft: 4 }}
+                        />
+                      </label>
+
+                      <label>
+                        Edge:
+                        <input
+                          type="color"
+                          value={/^rgba?\(/.test(d.edgeColor || '') ? '#ff00b4' : d.edgeColor || '#ff00b4'}
+                          onChange={e => {
+                            const hex = e.target.value;
+                            updateDiamondColor(
+                              idx,
+                              undefined,
+                              `rgba(${parseInt(hex.slice(1, 3), 16)},${parseInt(hex.slice(3, 5), 16)},${parseInt(
+                                hex.slice(5, 7),
+                                16
+                              )},0.85)`
+                            );
+                          }}
+                          style={{ width: 36, marginLeft: 4 }}
+                        />
+                      </label>
+
+                      <button onClick={() => toggleDiamondBoundaryOnly(idx)} style={{ fontSize: 11 }}>
+                        {d.boundaryOnly ? 'Fill On' : 'Boundary Only'}
+                      </button>
+
+                      <button onClick={() => handleRemoveDiamond(idx)} style={{ fontSize: 11, color: '#c00' }}>
+                        Remove
+                      </button>
+                    </>
+                  )}
+
+                  {!isCustom && <span style={{ color: '#999' }}>auto</span>}
+                </div>
+              );
+            })}
           </div>
-        );
-      })}
-    </div>
-  </details>
-)}
+        </details>
+      )}
 
       {/* Diamond center presets */}
       <div
@@ -1448,10 +1391,7 @@ function updateDiamondShape(index: number, shape: DiamondShape) {
             <option>No diamonds</option>
           )}
         </select>
-        <button
-          onClick={() => setCenterFromDiamond('top')}
-          disabled={!selectedDiamond || solveMode === 'targets-only'}
-        >
+        <button onClick={() => setCenterFromDiamond('top')} disabled={!selectedDiamond || solveMode === 'targets-only'}>
           Use Top
         </button>
         <button
@@ -1460,25 +1400,17 @@ function updateDiamondShape(index: number, shape: DiamondShape) {
         >
           Use Bottom
         </button>
-        <button
-          onClick={() => setCenterFromDiamond('left')}
-          disabled={!selectedDiamond || solveMode === 'targets-only'}
-        >
+        <button onClick={() => setCenterFromDiamond('left')} disabled={!selectedDiamond || solveMode === 'targets-only'}>
           Use Left
         </button>
-        <button
-          onClick={() => setCenterFromDiamond('right')}
-          disabled={!selectedDiamond || solveMode === 'targets-only'}
-        >
+        <button onClick={() => setCenterFromDiamond('right')} disabled={!selectedDiamond || solveMode === 'targets-only'}>
           Use Right
         </button>
         {diamondOptions.length === 0 && (
           <span style={{ fontSize: 12, color: '#a67c00' }}>Add or load diamonds to enable.</span>
         )}
         {solveMode === 'targets-only' && (
-          <span style={{ fontSize: 12, color: '#555' }}>
-            (Center computed; diamond buttons disabled)
-          </span>
+          <span style={{ fontSize: 12, color: '#555' }}>(Center computed; diamond buttons disabled)</span>
         )}
       </div>
 
@@ -1603,12 +1535,7 @@ function updateDiamondShape(index: number, shape: DiamondShape) {
         <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button onClick={handleExport}>Export (copy JSON)</button>
-            <button
-              onClick={() => {
-                setExportJSON('');
-              }}
-              disabled={!exportJSON}
-            >
+            <button onClick={() => setExportJSON('')} disabled={!exportJSON}>
               Clear Export
             </button>
           </div>
@@ -1630,12 +1557,7 @@ function updateDiamondShape(index: number, shape: DiamondShape) {
               Clear Import
             </button>
             {importMessage && (
-              <span
-                style={{
-                  color: /success/i.test(importMessage) ? 'green' : '#c00',
-                  fontSize: 12,
-                }}
-              >
+              <span style={{ color: /success/i.test(importMessage) ? 'green' : '#c00', fontSize: 12 }}>
                 {importMessage}
               </span>
             )}
@@ -1648,296 +1570,283 @@ function updateDiamondShape(index: number, shape: DiamondShape) {
           />
         </div>
       </details>
+    </>
+  );
 
-      {/* Grid */}
-      <div style={{ overflowX: 'auto', border: '1px solid #ccc', background: '#fff' }}>
-        <table key={tableKey} style={{ borderCollapse: 'collapse', fontSize: 13 }}>
-          <thead>
-            <tr>
-              <th style={{ background: '#f9f9f9' }}></th>
-              {drawLabels.map((label, cIdx) => (
-                <th
-                  key={cIdx}
-                  style={{
-                    minWidth: 20,
-                    textAlign: 'center',
-                    background: '#f9f9f9',
-                    border: '1px solid #eee',
-                  }}
-                >
-                  {label}
-                </th>
-              ))}
-              {includeNextCol && (
-                <th
-                  style={{
-                    minWidth: 20,
-                    textAlign: 'center',
-                    background: '#f0f7ff',
-                    border: '1px solid #dbeaff',
-                  }}
-                  title="Next draw (synthetic column)"
-                >
-                  Next
-                </th>
-              )}
-            </tr>
-          </thead>
-          <tbody>
-            {grid.map((rowArr, rIdx) => (
-              <tr key={rIdx}>
-                <td
-                  style={{
-                    textAlign: 'right',
-                    background: getHeatmapColor(numberCounts[rIdx], minCount, maxCount),
-                    border: '1px solid #eee',
-                    fontWeight: 600,
-                  }}
-                >
-                  {numberLabels[rIdx]}
-                </td>
-                {rowArr.map((cell, cIdx) => {
-                  const highlightInfos = getHighlightInfos(rIdx, cIdx);
-                  const hasHighlight = highlightInfos.length > 0;
-                  const firstHighlight = hasHighlight
-                    ? highlights[highlightInfos[0].idx]
-                    : undefined;
-
-                  let usedDiamond: Diamond | undefined;
-                  let diamondBoundary = false;
-                  if (showDiamonds) {
-                    for (const d of allDiamonds) {
-                      if (d.hidden) continue;
-                      const info = diamondCellMembership(d, rIdx, cIdx);
-                      if (info.inside) {
-                        if (!usedDiamond) usedDiamond = d;
-                        if (info.boundary) diamondBoundary = true;
-                      }
-                    }
-                  }
-
-                  const baseHeat = getHeatmapColor(numberCounts[rIdx], minCount, maxCount);
-                  let background = baseHeat;
-                  let bgImage: string | undefined;
-                  let border = '1px solid #eee';
-
-                  if (hasHighlight) {
-                    if (firstHighlight?.renderStyle === 'hatch') {
-                      background = baseHeat;
-                      bgImage = `repeating-linear-gradient(45deg, ${
-                        firstHighlight.color
-                      } 0 ${HATCH_WIDTH}px, transparent ${HATCH_WIDTH}px ${HATCH_GAP}px)`;
-                    } else {
-                      background = firstHighlight?.color || baseHeat;
-                    }
-                  } else if (usedDiamond && showDiamonds && !usedDiamond.boundaryOnly) {
-                    background = usedDiamond.fillColor || DEFAULT_DIAMOND_FILL;
-                  }
-
-                  if (!hasHighlight && usedDiamond && showDiamonds && diamondBoundary) {
-                    border = `1px solid ${usedDiamond.edgeColor || DEFAULT_DIAMOND_EDGE}`;
-                    if (usedDiamond.boundaryOnly) {
-                      background = baseHeat;
-                    }
-                  }
-
-                  let symbol: React.ReactNode = '';
-                  let cellType = '';
-                  if (cell === 1) {
-                    symbol = '⬢';
-                    cellType = 'Main';
-                  } else if (cell === 2) {
-                    symbol = '◯';
-                    cellType = 'Supp';
-                  }
-                  const isPred =
-                    predictions && predictions.includes(rIdx + 1) && cIdx === baseCols - 1;
-                  if (isPred) cellType = cellType ? cellType + ', Prediction' : 'Prediction';
-
-                  let tt = `Number: ${numberLabels[rIdx]}, Draw: ${drawLabels[cIdx]}`;
-                  if (cellType) tt += `\nType: ${cellType}`;
-                  if (highlightInfos.length > 0) {
-                    tt +=
-                      '\nHighlights: ' +
-                      highlightInfos
-                        .map(
-                          h =>
-                            `#${h.idx + 1} center=(${h.row},${h.col}), r=${h.radius}, slope=${h.slope}, biasUp=${h.biasUp}, biasDown=${h.biasDown}, tol=${h.tol}`
-                        )
-                        .join('; ');
-                  }
-                  if (showDiamonds) {
-                    const diamondsHere = [];
-                    for (const d of allDiamonds) {
-                      if (d.hidden) continue;
-                      const info = diamondCellMembership(d, rIdx, cIdx);
-                      if (info.inside) {
-                        const clipTag =
-                          d.clipMode === 'partial'
-                            ? ' (partial)'
-                            : d.clipMode === 'shrunk'
-                            ? ' (shrunk)'
-                            : '';
-                        const rawTag =
-                          d.rawRadius && d.rawRadius !== d.radius
-                            ? ` raw=${d.rawRadius}`
-                            : d.clipMode === 'partial'
-                            ? ' raw preserved'
-                            : '';
-                        diamondsHere.push(
-                          `center=(${d.centerRow + 1},${d.centerCol + 1}), r=${d.radius}${clipTag}${rawTag}${
-                            d.shape ? `, shape=${d.shape}` : ''
-                          }`
-                        );
-                      }
-                    }
-                    if (diamondsHere.length > 0) {
-                      tt += '\nDiamonds: ' + diamondsHere.join('; ');
-                    }
-                  }
-                  tt += `\nHot/Cold: ${numberCounts[rIdx]} times`;
-
-                  const style: React.CSSProperties = {
-                    minWidth: 20,
-                    height: 20,
-                    textAlign: 'center',
-                    border,
-                    position: 'relative',
-                    cursor: 'pointer',
-                    background,
-                  };
-                  if (bgImage) style.backgroundImage = bgImage;
-
-                  return (
-                    <td key={cIdx} style={style} title={tt}>
-                      {symbol}
-                    </td>
-                  );
-                })}
-
-                {/* Next Column (patched to avoid duplicate border) */}
-                {includeNextCol && (
-                  <td
-                    key="next"
-                    style={(() => {
-                      const cIdx = baseCols;
-                      const highlightInfos = getHighlightInfos(rIdx, cIdx);
-                      const hasHighlight = highlightInfos.length > 0;
-                      const firstHighlight = hasHighlight
-                        ? highlights[highlightInfos[0].idx]
-                        : undefined;
-
-                      let usedDiamond: Diamond | undefined;
-                      let diamondBoundary = false;
-                      if (showDiamonds) {
-                        for (const d of allDiamonds) {
-                          if (d.hidden) continue;
-                          const info = diamondCellMembership(d, rIdx, cIdx);
-                          if (info.inside) {
-                            if (!usedDiamond) usedDiamond = d;
-                            if (info.boundary) diamondBoundary = true;
-                          }
-                        }
-                      }
-
-                      const baseHeat = getHeatmapColor(
-                        numberCounts[rIdx],
-                        minCount,
-                        maxCount
-                      );
-
-                      const style: React.CSSProperties = {
-                        minWidth: 20,
-                        height: 20,
-                        textAlign: 'center',
-                        position: 'relative',
-                        cursor: 'pointer',
-                        background: baseHeat,
-                        border: '1px solid #eee',
-                      };
-
-                      if (hasHighlight) {
-                        if (firstHighlight?.renderStyle === 'hatch') {
-                          style.backgroundImage = `repeating-linear-gradient(45deg, ${
-                            firstHighlight.color
-                          } 0 ${HATCH_WIDTH}px, transparent ${HATCH_WIDTH}px ${HATCH_GAP}px)`;
-                        } else {
-                          style.background = firstHighlight?.color || baseHeat;
-                        }
-                      } else if (
-                        usedDiamond &&
-                        showDiamonds &&
-                        !usedDiamond.boundaryOnly
-                      ) {
-                        style.background =
-                          usedDiamond.fillColor || DEFAULT_DIAMOND_FILL;
-                      }
-
-                      if (!hasHighlight && usedDiamond && showDiamonds && diamondBoundary) {
-                        style.border = `1px solid ${
-                          usedDiamond.edgeColor || DEFAULT_DIAMOND_EDGE
-                        }`;
-                        if (usedDiamond.boundaryOnly) {
-                          style.background = baseHeat;
-                        }
-                      }
-
-                      return style;
-                    })()}
-                    title={(() => {
-                      const cIdx = baseCols;
-                      const highlightInfos = getHighlightInfos(rIdx, cIdx);
-                      let tt = `Number: ${numberLabels[rIdx]}, Draw: Next`;
-                      if (highlightInfos.length > 0) {
-                        tt +=
-                          '\nHighlights: ' +
-                          highlightInfos
-                            .map(
-                              h =>
-                                `#${h.idx + 1} center=(${h.row},${h.col}), r=${h.radius}, slope=${h.slope}, biasUp=${h.biasUp}, biasDown=${h.biasDown}, tol=${h.tol}`
-                            )
-                            .join('; ');
-                      }
-                      if (showDiamonds) {
-                        const ds: string[] = [];
-                        for (const d of allDiamonds) {
-                          if (d.hidden) continue;
-                          const info = diamondCellMembership(d, rIdx, cIdx);
-                          if (info.inside) {
-                            const clipTag =
-                              d.clipMode === 'partial'
-                                ? ' (partial)'
-                                : d.clipMode === 'shrunk'
-                                ? ' (shrunk)'
-                                : '';
-                            const rawTag =
-                              d.rawRadius && d.rawRadius !== d.radius
-                                ? ` raw=${d.rawRadius}`
-                                : d.clipMode === 'partial'
-                                ? ' raw preserved'
-                                : '';
-                            ds.push(
-                              `center=(${d.centerRow + 1},${d.centerCol + 1}), r=${d.radius}${clipTag}${rawTag}${
-                                d.shape ? `, shape=${d.shape}` : ''
-                              }`
-                            );
-                          }
-                        }
-                        if (ds.length > 0) tt += '\nDiamonds: ' + ds.join('; ');
-                      }
-                      const isPred = predictions && predictions.includes(rIdx + 1);
-                      if (isPred) tt += '\nType: Prediction';
-                      return tt;
-                    })()}
-                  >
-                    {predictions && predictions.includes(rIdx + 1) ? '•' : ''}
-                  </td>
-                )}
-              </tr>
+  const renderGrid = () => (
+    <div style={{ overflowX: 'auto', border: '1px solid #ccc', background: '#fff' }}>
+      <table key={tableKey} style={{ borderCollapse: 'collapse', fontSize: 13 }}>
+        <thead>
+          <tr>
+            <th style={{ background: '#f9f9f9' }}></th>
+            {drawLabels.map((label, cIdx) => (
+              <th
+                key={cIdx}
+                style={{
+                  minWidth: 20,
+                  textAlign: 'center',
+                  background: '#f9f9f9',
+                  border: '1px solid #eee',
+                }}
+              >
+                {label}
+              </th>
             ))}
-          </tbody>
-        </table>
-      </div>
+            {includeNextCol && (
+              <th
+                style={{
+                  minWidth: 20,
+                  textAlign: 'center',
+                  background: '#f0f7ff',
+                  border: '1px solid #dbeaff',
+                }}
+                title="Next draw (synthetic column)"
+              >
+                Next
+              </th>
+            )}
+          </tr>
+        </thead>
+       <tbody>
+  {grid.map((rowArr, rIdx) => {
+    const isFocusedRow = focusNumber === rIdx + 1;
+
+    return (
+      <tr key={rIdx}>
+        {/* Row header (number label) */}
+        <td
+          style={{
+            textAlign: 'right',
+            background: getHeatmapColor(numberCounts[rIdx], minCount, maxCount),
+            border: isFocusedRow ? '2px solid #ff9800' : '1px solid #eee',
+            fontWeight: 700,
+            position: 'sticky',
+            left: 0,
+            zIndex: 1,
+            boxShadow: isFocusedRow ? 'inset 0 0 0 9999px rgba(255,235,59,0.08)' : undefined,
+          }}
+          title={isFocusedRow ? 'Focused number' : undefined}
+        >
+          {numberLabels[rIdx]}
+        </td>
+
+        {/* Grid cells */}
+        {rowArr.map((cell, cIdx) => {
+          const highlightInfos = getHighlightInfos(rIdx, cIdx);
+          const hasHighlight = highlightInfos.length > 0;
+          const firstHighlight = hasHighlight ? highlights[highlightInfos[0].idx] : undefined;
+
+          let usedDiamond: Diamond | undefined;
+          let diamondBoundary = false;
+          if (showDiamonds) {
+            for (const d of allDiamonds) {
+              if (d.hidden) continue;
+              const info = diamondCellMembership(d, rIdx, cIdx);
+              if (info.inside) {
+                if (!usedDiamond) usedDiamond = d;
+                if (info.boundary) diamondBoundary = true;
+              }
+            }
+          }
+
+          const baseHeat = getHeatmapColor(numberCounts[rIdx], minCount, maxCount);
+          let background = baseHeat;
+          let bgImage: string | undefined;
+          let border = '1px solid #eee';
+
+          if (hasHighlight) {
+            if (firstHighlight?.renderStyle === 'hatch') {
+              background = baseHeat;
+              bgImage = `repeating-linear-gradient(45deg, ${firstHighlight.color} 0 2px, transparent 2px 4px)`;
+            } else {
+              background = firstHighlight?.color || baseHeat;
+            }
+          } else if (usedDiamond && showDiamonds && !usedDiamond.boundaryOnly) {
+            background = usedDiamond.fillColor || DEFAULT_DIAMOND_FILL;
+          }
+
+          if (!hasHighlight && usedDiamond && showDiamonds && diamondBoundary) {
+            border = `1px solid ${usedDiamond.edgeColor || DEFAULT_DIAMOND_EDGE}`;
+            if (usedDiamond.boundaryOnly) {
+              background = baseHeat;
+            }
+          }
+
+          let symbol: React.ReactNode = '';
+          let cellType = '';
+          if (cell === 1) {
+            symbol = '⬢';
+            cellType = 'Main';
+          } else if (cell === 2) {
+            symbol = '◯';
+            cellType = 'Supp';
+          }
+          const isPred = predictions && predictions.includes(rIdx + 1) && cIdx === (grid[0]?.length || 1) - 1;
+          if (isPred) cellType = cellType ? `${cellType}, Prediction` : 'Prediction';
+
+          let tt = `Number: ${numberLabels[rIdx]}, Draw: ${drawLabels[cIdx]}`;
+          if (cellType) tt += `\nType: ${cellType}`;
+          if (highlightInfos.length > 0) {
+            tt +=
+              '\nHighlights: ' +
+              highlightInfos
+                .map(
+                  h =>
+                    `#${h.idx + 1} center=(${h.row},${h.col}), r=${h.radius}, slope=${h.slope}, biasUp=${h.biasUp}, biasDown=${h.biasDown}, tol=${h.tol}`
+                )
+                .join('; ');
+          }
+          if (showDiamonds) {
+            const diamondsHere: string[] = [];
+            for (const d of allDiamonds) {
+              if (d.hidden) continue;
+              const info = diamondCellMembership(d, rIdx, cIdx);
+              if (info.inside) {
+                const clipTag = d.clipMode === 'partial' ? ' (partial)' : d.clipMode === 'shrunk' ? ' (shrunk)' : '';
+                const rawTag =
+                  d.rawRadius && d.rawRadius !== d.radius
+                    ? ` raw=${d.rawRadius}`
+                    : d.clipMode === 'partial'
+                    ? ' raw preserved'
+                    : '';
+                diamondsHere.push(
+                  `center=(${d.centerRow + 1},${d.centerCol + 1}), r=${d.radius}${clipTag}${rawTag}${d.shape ? `, shape=${d.shape}` : ''}`
+                );
+              }
+            }
+            if (diamondsHere.length > 0) {
+              tt += '\nDiamonds: ' + diamondsHere.join('; ');
+            }
+          }
+          tt += `\nHot/Cold: ${numberCounts[rIdx]} times`;
+
+          const style: React.CSSProperties = {
+            minWidth: 20,
+            height: 20,
+            textAlign: 'center',
+            border,
+            position: 'relative',
+            cursor: 'pointer',
+            background,
+          };
+          if (bgImage) style.backgroundImage = bgImage;
+          if (isFocusedRow) style.boxShadow = 'inset 0 0 0 9999px rgba(255,235,59,0.08)';
+
+          return (
+            <td key={cIdx} style={style} title={tt}>
+              {symbol}
+            </td>
+          );
+        })}
+
+        {/* Next column */}
+        {includeNextCol && (
+          <td
+            key="next"
+            style={(() => {
+              const cIdx = (grid[0]?.length || 1);
+              const highlightInfos = getHighlightInfos(rIdx, cIdx);
+              const hasHighlight = highlightInfos.length > 0;
+              const firstHighlight = hasHighlight ? highlights[highlightInfos[0].idx] : undefined;
+
+              let usedDiamond: Diamond | undefined;
+              let diamondBoundary = false;
+              if (showDiamonds) {
+                for (const d of allDiamonds) {
+                  if (d.hidden) continue;
+                  const info = diamondCellMembership(d, rIdx, cIdx);
+                  if (info.inside) {
+                    if (!usedDiamond) usedDiamond = d;
+                    if (info.boundary) diamondBoundary = true;
+                  }
+                }
+              }
+
+              const baseHeat = getHeatmapColor(numberCounts[rIdx], minCount, maxCount);
+              const style: React.CSSProperties = {
+                minWidth: 20,
+                height: 20,
+                textAlign: 'center',
+                position: 'relative',
+                cursor: 'pointer',
+                background: baseHeat,
+                border: '1px solid #eee',
+              };
+
+              if (hasHighlight) {
+                if (firstHighlight?.renderStyle === 'hatch') {
+                  style.backgroundImage = `repeating-linear-gradient(45deg, ${firstHighlight.color} 0 2px, transparent 2px 4px)`;
+                } else {
+                  style.background = firstHighlight?.color || baseHeat;
+                }
+              } else if (usedDiamond && showDiamonds && !usedDiamond.boundaryOnly) {
+                style.background = usedDiamond.fillColor || DEFAULT_DIAMOND_FILL;
+              }
+
+              if (!hasHighlight && usedDiamond && showDiamonds && diamondBoundary) {
+                style.border = `1px solid ${usedDiamond.edgeColor || DEFAULT_DIAMOND_EDGE}`;
+                if (usedDiamond.boundaryOnly) {
+                  style.background = baseHeat;
+                }
+              }
+
+              if (isFocusedRow) style.boxShadow = 'inset 0 0 0 9999px rgba(255,235,59,0.08)';
+
+              return style;
+            })()}
+            title={(() => {
+              let tt = `Number: ${numberLabels[rIdx]}, Draw: Next`;
+              const cIdx = (grid[0]?.length || 1);
+              const highlightInfos = getHighlightInfos(rIdx, cIdx);
+              if (highlightInfos.length > 0) {
+                tt +=
+                  '\nHighlights: ' +
+                  highlightInfos
+                    .map(
+                      h =>
+                        `#${h.idx + 1} center=(${h.row},${h.col}), r=${h.radius}, slope=${h.slope}, biasUp=${h.biasUp}, biasDown=${h.biasDown}, tol=${h.tol}`
+                    )
+                    .join('; ');
+              }
+              if (showDiamonds) {
+                const ds: string[] = [];
+                for (const d of allDiamonds) {
+                  if (d.hidden) continue;
+                  const info = diamondCellMembership(d, rIdx, cIdx);
+                  if (info.inside) {
+                    const clipTag = d.clipMode === 'partial' ? ' (partial)' : d.clipMode === 'shrunk' ? ' (shrunk)' : '';
+                    const rawTag =
+                      d.rawRadius && d.rawRadius !== d.radius
+                        ? ` raw=${d.rawRadius}`
+                        : d.clipMode === 'partial'
+                        ? ' raw preserved'
+                        : '';
+                    ds.push(`center=(${d.centerRow + 1},${d.centerCol + 1}), r=${d.radius}${clipTag}${rawTag}${d.shape ? `, shape=${d.shape}` : ''}`);
+                  }
+                }
+                if (ds.length > 0) tt += '\nDiamonds: ' + ds.join('; ');
+              }
+              const isPred = predictions && predictions.includes(rIdx + 1);
+              if (isPred) tt += '\nType: Prediction';
+              return tt;
+            })()}
+          >
+            {predictions && predictions.includes(rIdx + 1) ? '•' : ''}
+          </td>
+        )}
+      </tr>
+    );
+  })}
+</tbody>
+      </table>
     </div>
+  );
+
+  return (
+    <section style={{ width: '100%' }}>
+      {controlsPosition === 'above' && renderControls()}
+      {renderGrid()}
+      {controlsPosition === 'below' && renderControls()}
+    </section>
   );
 };

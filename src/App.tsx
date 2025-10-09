@@ -1,34 +1,46 @@
+// NOTE: Step-3 consolidated updates and fixes:
+// - Pass only user exclusions to generator (fix trace "User excluded").
+// - WFMQY: add user exclusion checkboxes (1–45) in a single horizontal line.
+// - Unified status badges (adds OGA + core threshold switches).
+// - Lambda enable/disable toggle (disables slider when off, reflected in badges/trace).
+// - Trace: append a concise block for factors affecting generation.
+//
+// Keep existing imports; removed unused ones previously.
 import React, { useState, useRef, useEffect, useMemo } from "react";
-import { CandidatesProvider } from './shared/CandidatesContext';
-import { AppLayout } from './components/layout/AppLayout';
-import { usePersistence } from './shared/usePersistence';
-import { MonteCarloAnalyzer } from "./components/MonteCarloAnalyzer";
-import { SurvivalAnalyzer } from "./components/SurvivalAnalyzer";
 import { OperatorsPanel } from "./components/OperatorsPanel";
-import { OGAHistogram } from "./components/OGAHistogram";
 import { NumberTrendsTable, NumberTrend } from "./components/NumberTrendsTable";
-import { checkHardConstraints } from "./hardConstraints";
-import { gpwfScore } from "./gpwf";
-import { entropy, minHamming, maxJaccard, fingerprint } from "./analytics";
-import { applyOctagonalPostProcess } from "./octagonal";
+import { entropy, minHamming, maxJaccard } from "./analytics";
+import { fetchDraws } from './lib/fetchDraws';
+import { getUniqueRandomNumbers } from './lib/random';
 import { parseCSVorJSON } from "./parseCSVorJSON";
 import { getSDE1FilteredPool } from "./sde1";
-import {
-  buildDrawGrid,
-  findDiamondsAllRadii,
-  getPredictedNumbers,
-} from "./dga";
+import { buildDrawGrid, findDiamondsAllRadii, getPredictedNumbers } from "./dga";
 import { DGAVisualizer } from "./components/DGAVisualizer";
-import { validateTrickyRule } from "./trickyRule";
 import { computeOGA, getOGAPercentile } from "./utils/oga";
 import { Draw, Knobs, CandidateSet } from "./types";
-import { sampleCandidates } from "./candidateUtils";
-import { generateCandidates } from "./generateCandidates";
-import { MonteCarloLayout } from "./types";
+import { GeneratedCandidatesPanel } from "./components/candidates/GeneratedCandidatesPanel";
 import { buildTrendWeights } from "./lib/trendBias";
-import { isCellInShape } from './lib/diamondShapes';
-import type { DiamondModel, DiamondShape } from './types/Diamond';
-
+import { OGAHistogram } from "./components/OGAHistogram";
+import { DGA_CELL_SIZE } from "./constants/ui";
+import { TemperatureHeatmap } from "./components/TemperatureHeatmap";
+import { TracePanel } from "./components/TracePanel";
+import { MonteCarloPanel } from "./components/candidates/MonteCarloPanel";
+import { SurvivalAnalyzer } from "./components/SurvivalAnalyzer";
+import { DroughtHazardPanel } from "./components/DroughtHazardPanel";
+import { BatesPanel } from "./components/BatesPanel";
+import { computeTemperatureSignal } from "./lib/temperatureSignal";
+import { buildConditionalProb } from "./lib/conditionalProbability";
+import { computeTrendMap, trendRatioTag, TrendClass } from "./lib/trend";
+import { generateCandidates } from "./generateCandidates";
+import { ModulationDiagnosticsPanel } from "./components/ModulationDiagnosticsPanel";
+import { BatesDiagnostics } from "./lib/batesDiagnostics";
+import { computeHistoricalTrendRatios } from "./lib/computeHistoricalTrendRatios";
+import { TrendRatioHistoryPanel } from "./components/TrendRatioHistoryPanel";
+import { UserSelectedNumbersPanel } from "./components/UserSelectedNumbersPanel";
+import { ParameterSearchPanel } from "./components/ParameterSearchPanel";
+import { BatesParameterSet } from "./lib/batesWeightsCore";
+import { WeightedTargetListPanel } from "./components/WeightedTargetListPanel";
+ import { RankingWeightsPanel } from "./components/RankingWeightsPanel";
 
 const WINDOW_OPTIONS = [
   { key: "W", label: "Weekly (3 draws)", size: 3 },
@@ -38,16 +50,6 @@ const WINDOW_OPTIONS = [
   { key: "Y", label: "Year (156 draws)", size: 156 },
   { key: "H", label: "History (all draws)", size: null },
   { key: "Custom", label: "Custom", size: null },
-];
-
-const ANALYTIC_FIELDS: [keyof Knobs, string][] = [
-  ["enableSDE1", "SDE1 (Second Digit Exclusion)"],
-  ["enableHC3", "HC3 (Exclude numbers repeated in last two draws)"],
-  ["enableOGA", "Octagonal Grid Analysis (OGA)"],
-  ["enableGPWF", "GPWF (Weighted Frequency)"],
-  ["enableEntropy", "Entropy"],
-  ["enableHamming", "Hamming"],
-  ["enableJaccard", "Jaccard"],
 ];
 
 const NUM_MAINS = 6;
@@ -81,123 +83,15 @@ const defaultKnobs: Knobs = {
   gpwf_targeted_mode: false,
 };
 
-function getUniqueRandomNumbers(
-  n: number,
-  min: number,
-  max: number,
-  exclude: number[] = [],
-  pool?: number[]
-) {
-  let source: number[] = pool
-    ? pool.filter((x: number) => !exclude.includes(x))
-    : [];
-  if (!pool) {
-    for (let i = min; i <= max; ++i) {
-      if (!exclude.includes(i)) source.push(i);
-    }
-  }
-  const nums: number[] = [];
-  while (nums.length < n && source.length) {
-    let idx = Math.floor(Math.random() * source.length);
-    nums.push(source[idx]);
-    source.splice(idx, 1);
-  }
-  return nums.sort((a: number, b: number) => a - b);
-}
 
-type HighlightShape = {
-  row: number;
-  col: number;
-  radius: number;
-  color: string;
-};
 
-async function fetchDraws(
-  setHistory: (history: Draw[]) => void,
-  setTrace: React.Dispatch<React.SetStateAction<string[]>>,
-  setHighlights: React.Dispatch<React.SetStateAction<HighlightShape[]>>
-) {
-  setTrace((t) => [
-    ...t,
-    "[TRACE] Fetching draws from primary public endpoint...",
-  ]);
-  try {
-    const res = await fetch(API_URL, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        Accept: "application/json",
-      },
-    });
-    if (!res.ok) throw new Error("Non-200 response");
-    const data = await res.json();
-    const draws: Draw[] = (data?.DrawResults || [])
-      .filter((d: any) => d.ProductId === "WeekdayWindfall")
-      .map((d: any) => ({
-        main: d.PrimaryNumbers,
-        supp: d.SecondaryNumbers,
-        date: d.DrawDate,
-      }));
-
-    const validDraws = strictValidateDraws(draws);
-    if (draws.length !== validDraws.length) {
-      setTrace((t) => [
-        ...t,
-        `[TRACE] Warning: ${
-          draws.length - validDraws.length
-        } draws were discarded due to invalid format/range/duplicates.`,
-      ]);
-    }
-
-    if (validDraws.length >= MIN_VALID_DRAWS) {
-      const isNewestFirst =
-        new Date(validDraws[0].date) >
-        new Date(validDraws[validDraws.length - 1].date);
-      const ordered = isNewestFirst
-        ? validDraws.slice().reverse()
-        : validDraws.slice();
-      setHistory(ordered);
-      setHighlights([]);
-      setTrace((t) => [
-        ...t,
-        `[TRACE] Got ${validDraws.length} valid draws. Using ALL draws.`,
-      ]);
-      return;
-    }
-    setTrace((t) => [
-      ...t,
-      "[TRACE] Fewer than 45 valid draws; fallback (stub) history used.",
-    ]);
-  } catch (e) {
-    setTrace((t) => [
-      ...t,
-      `[TRACE] Error fetching draws: ${String(e)}. Using stub data.`,
-    ]);
-  }
-  let stub: Draw[] = [];
-  let now = Date.now();
-  for (let i = 0; i < 45; ++i) {
-    stub.push({
-      main: getUniqueRandomNumbers(NUM_MAINS, MAIN_MIN, MAIN_MAX),
-      supp: getUniqueRandomNumbers(2, MAIN_MIN, MAIN_MAX),
-      date: new Date(now - (44 - i) * 86400 * 1000).toISOString().slice(0, 10),
-    });
-  }
-  setHistory(stub);
-  setHighlights([]);
-}
-
+// Utilities (unchanged)
 function strictValidateDraws(draws: Draw[]): Draw[] {
   return draws.filter((draw) => {
     if (!Array.isArray(draw.main) || !Array.isArray(draw.supp)) return false;
     if (draw.main.length !== 6 || draw.supp.length !== 2) return false;
     const allNumbers = [...draw.main, ...draw.supp];
-    if (
-      !allNumbers.every(
-        (n) => typeof n === "number" && n >= 1 && n <= 45 && Number.isInteger(n)
-      )
-    )
-      return false;
+    if (!allNumbers.every((n) => Number.isInteger(n) && n >= 1 && n <= 45)) return false;
     const hasDupes = (arr: number[]) => new Set(arr).size !== arr.length;
     if (hasDupes(draw.main) || hasDupes(draw.supp)) return false;
     if (draw.supp.some((n) => draw.main.includes(n))) return false;
@@ -205,28 +99,6 @@ function strictValidateDraws(draws: Draw[]): Draw[] {
     return true;
   });
 }
-
-function countMatches(candidate: CandidateSet, mostRecentDraw: Draw): number[] {
-  const candNums = new Set([...candidate.main, ...candidate.supp]);
-  const drawNums = new Set([...mostRecentDraw.main, ...mostRecentDraw.supp]);
-  return Array.from(candNums).filter((n) => drawNums.has(n));
-}
-
-function getCandidateNumberFrequencies(
-  candidates: CandidateSet[]
-): { number: number; count: number }[] {
-  const freq = new Map<number, number>();
-  candidates.forEach((c) => {
-    [...c.main, ...c.supp].forEach((n) => {
-      freq.set(n, (freq.get(n) || 0) + 1);
-    });
-  });
-  return Array.from({ length: 45 }, (_, i) => ({
-    number: i + 1,
-    count: freq.get(i + 1) || 0,
-  })).sort((a, b) => b.count - a.count || a.number - b.number);
-}
-
 function getNumberFrequencies(history: Draw[]): Map<number, number> {
   const freq = new Map<number, number>();
   for (const draw of history) {
@@ -236,32 +108,13 @@ function getNumberFrequencies(history: Draw[]): Map<number, number> {
   }
   return freq;
 }
-
 function computeNumberTrends(history: Draw[]): NumberTrend[] {
-  // Use draw-count windows aligned to ~3 draws/week
   const spans = {
-    d3: 3,
-    d9: 9,
-    d15: 15,
-    fortnight: 6,   // ~2 weeks × 3 draws
-    month: 12,      // ~4 weeks × 3 draws
-    quarter: 36,    // ~12 weeks × 3 draws
-    year: 156,      // ~52 weeks × 3 draws
-    all: history.length,
+    d3: 3, d9: 9, d15: 15, fortnight: 6, month: 12, quarter: 36, year: 156, all: history.length,
   };
   const result: NumberTrend[] = [];
   for (let n = 1; n <= 45; n++) {
-    const trend: NumberTrend = {
-      number: n,
-      d3: 0,
-      d9: 0,
-      d15: 0,
-      fortnight: 0,
-      month: 0,
-      quarter: 0,
-      year: 0,
-      all: 0,
-    };
+    const trend: NumberTrend = { number: n, d3: 0, d9: 0, d15: 0, fortnight: 0, month: 0, quarter: 0, year: 0, all: 0 };
     for (const [spanName, spanLen] of Object.entries(spans)) {
       const draws = history.slice(-spanLen);
       let count = 0;
@@ -274,42 +127,6 @@ function computeNumberTrends(history: Draw[]): NumberTrend[] {
   }
   return result;
 }
-
-function traceFormat(
-  history: Draw[],
-  knobs: Knobs,
-  candidates: CandidateSet[]
-): string {
-  return [
-    "[TRACE START]",
-    `History size: ${history.length} draws`,
-    `Knobs: ${Object.entries(knobs)
-      .map(([k, v]) => `${k}=${v}`)
-      .join(", ")}`,
-    ...candidates.map(
-      (c, idx) =>
-        `Candidate ${String.fromCharCode(65 + idx)}: {${c.main.join(
-          ","
-        )}} | Supp: {${c.supp.join(",")}} | Score: ${c.score}` +
-        (c.trace && c.trace.length > 0
-          ? " | Trace: " + c.trace.join("; ")
-          : "") +
-        (c.octagonalScore !== undefined
-          ? ` | OGA: ${
-              c.octagonalScore
-            } | SpokeProfile: [${c.octagonalProfile?.join(",")}]`
-          : "")
-    ),
-    "[TRACE END]",
-  ].join("\n");
-}
-
-function getOddEvenRatio(nums: number[]): string {
-  const odd = nums.filter((n) => n % 2 === 1).length;
-  const even = nums.length - odd;
-  return `${odd}:${even}`;
-}
-
 function computeOddEvenRatios(
   history: Draw[]
 ): { ratio: string; count: number; percent: number }[] {
@@ -321,93 +138,175 @@ function computeOddEvenRatios(
     ratioCount.set(ratio, (ratioCount.get(ratio) || 0) + 1);
     total += 1;
   }
-  const ratios = Array.from(ratioCount.entries())
+  return Array.from(ratioCount.entries())
     .map(([ratio, count]) => ({
       ratio,
       count,
       percent: Math.round((count / total) * 100),
     }))
     .sort((a, b) => b.count - a.count || a.ratio.localeCompare(b.ratio));
-  return ratios;
 }
-
-function extractAnalytics(trace: string[] | undefined) {
-  let entropy = "",
-    hamming = "",
-    jaccard = "";
-  if (trace) {
-    for (const item of trace) {
-      if (item.startsWith("Entropy:")) entropy = item.replace("Entropy:", "");
-      if (item.startsWith("MinHamming:"))
-        hamming = item.replace("MinHamming:", "");
-      if (item.startsWith("MaxJaccard:"))
-        jaccard = item.replace("MaxJaccard:", "");
-    }
+function getOddEvenRatio(nums: number[]): string {
+  const odd = nums.filter((n) => n % 2 === 1).length;
+  const even = nums.length - odd;
+  return `${odd}:${even}`;
+}
+// Trace formatter (append per-candidate analytics)
+function traceFormat(
+  history: Draw[],
+  effectiveKnobs: Knobs, // IMPORTANT: pass the effective flags/values you actually used for generation
+  candidates: CandidateSet[],
+  flags: {
+    enableOGA: boolean;
+    entropyEnabled: boolean;
+    hammingEnabled: boolean;
+    jaccardEnabled: boolean;
+    gpwfEnabled: boolean;
+    lambdaEnabled: boolean;
   }
-  return { entropy, hamming, jaccard };
-}
+): string {
+  const last = history[history.length - 1];
 
-const KNOB_FIELDS: [keyof Knobs, string, number | boolean, number?, number?][] =
-  [
-    ["gpwf_window_size", "GPWF Window", 27, 5, 45],
-    ["gpwf_bias_factor", "GPWF Bias", 0.05, 0, 1],
-    ["gpwf_floor", "GPWF Floor", 0.5, 0, 1],
-    ["gpwf_scale_multiplier", "GPWF Scale", 0.7, 0, 1],
-    ["octagonal_top", "Octagonal Top", 9, 1, 45],
-    ["exact_set_override", "Exact Set Override", false],
-    ["hamming_relax", "Hamming Relax", false],
-    ["gpwf_targeted_mode", "GPWF Targeted", false],
-    ["enableHC3", "Enable HC3", true],
+  const header = [
+    "[TRACE START]",
+    `History size: ${history.length} draws`,
+    // Show EFFECTIVE flags actually used for generation (not the raw defaults)
+    `Effective Flags: OGA=${flags.enableOGA ? "on" : "off"}, Entropy=${flags.entropyEnabled ? "on" : "off"}, Hamming=${flags.hammingEnabled ? "on" : "off"}, Jaccard=${flags.jaccardEnabled ? "on" : "off"}, GPWF=${flags.gpwfEnabled ? "on" : "off"}, Lambda=${flags.lambdaEnabled ? "on" : "off"}`,
+    // Also show the effective knobs you used
+    `Effective Knobs: ${Object.entries(effectiveKnobs).map(([k, v]) => `${k}=${v}`).join(", ")}`,
   ];
 
+  const perCandidate: string[] = candidates.map((c, idx) => {
+    const nums = [...c.main, ...c.supp];
+
+    // Always compute scores for visibility
+    const ent = entropy(c).toFixed(3);
+    const ham = minHamming(c, history);
+    const jac = maxJaccard(c, history).toFixed(3);
+
+    const oga = (c as any).ogaScore !== undefined ? (c as any).ogaScore.toFixed(2) : "";
+    const ogaPct = (c as any).ogaPercentile !== undefined ? (c as any).ogaPercentile.toFixed(1) : "";
+
+    const oddEven = getOddEvenRatio(nums);
+
+    let matchesRecent = 0;
+    if (last) {
+      const setLast = new Set([...last.main, ...last.supp]);
+      matchesRecent = nums.filter(n => setLast.has(n)).length;
+    }
+
+    // Tag [on]/[off] to show whether each score affected generation
+    const entTag = flags.entropyEnabled ? "[on]" : "[off]";
+    const hamTag = flags.hammingEnabled ? "[on]" : "[off]";
+    const jacTag = flags.jaccardEnabled ? "[on]" : "[off]";
+    const gpwfTag = flags.gpwfEnabled ? "[on]" : "[off]";
+    const lambdaTag = flags.lambdaEnabled ? "[on]" : "[off]";
+    const ogaTag = flags.enableOGA ? "[on]" : "[off]";
+
+    return [
+      `Candidate ${String.fromCharCode(65 + idx)}:`,
+      `Main=[${c.main.join(", ")}]`,
+      `Supp=[${c.supp.join(", ")}]`,
+      `OGA=${oga} OGA%=${ogaPct} ${ogaTag}`,
+      `OddEven=${oddEven}`,
+      `Entropy=${ent} ${entTag}`,
+      `Hamming=${ham} ${hamTag}`,
+      `Jaccard=${jac} ${jacTag}`,
+      `GPWF=${gpwfTag}`,
+      `Lambda=${(effectiveKnobs as any).lambda ?? ""} ${lambdaTag}`,
+      `MatchesRecent=${matchesRecent}`,
+    ].join(" | ");
+  });
+
+  return [...header, ...perCandidate, "[TRACE END]"].join("\n");
+}
+
+const UserExclusionsStrip: React.FC<{
+  excludedNumbers: number[];
+  setExcludedNumbers: (updater: (prev: number[]) => number[]) => void;
+  title?: string;
+}> = ({ excludedNumbers, setExcludedNumbers, title }) => (
+  <div style={{ marginTop: 8 }}>
+    {title && <b>{title}</b>}
+    <div
+      style={{
+        display: "flex",
+        gap: 8,
+        overflowX: "auto",
+        whiteSpace: "nowrap",
+        paddingTop: 6,
+        paddingBottom: 4,
+        borderTop: "1px dashed #ddd",
+        marginTop: title ? 6 : 0,
+      }}
+    >
+      {Array.from({ length: 45 }, (_, i) => i + 1).map((n) => {
+        const checked = excludedNumbers.includes(n);
+        return (
+          <label key={n} style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", minWidth: 28 }} title={`Exclude ${n}`}>
+            <input
+              type="checkbox"
+              checked={checked}
+              onChange={() => {
+                setExcludedNumbers((prev) => (prev.includes(n) ? prev.filter((x) => x !== n) : [...prev, n]));
+              }}
+            />
+            <span style={{ fontSize: 11, marginTop: 2 }}>{n}</span>
+          </label>
+        );
+      })}
+    </div>
+  </div>
+);
+
+
+
 const App: React.FC = () => {
-  // State
-  const [entropyEnabled, setEntropyEnabled] = useState<boolean>(
-    defaultKnobs.enableEntropy
-  );
-  const [hammingEnabled, setHammingEnabled] = useState<boolean>(
-    defaultKnobs.enableHamming
-  );
-  const [jaccardEnabled, setJaccardEnabled] = useState<boolean>(
-    defaultKnobs.enableJaccard
-  );
-  const [gpwfEnabled, setGPWFEnabled] = useState<boolean>(
-    defaultKnobs.enableGPWF
-  );
+
+
+const [rankingWeights, setRankingWeights] = useState({ oga: 0.7, sel: 0.2, recent: 0.1 });
+const [weightedTargets, setWeightedTargets] = useState<Record<number, number>>({});
+const [batesParams, setBatesParams] = useState<Partial<BatesParameterSet>>({});
+const [probOverlay, setProbOverlay] = useState<{
+  pAtLeastRaw: number;
+  pAtLeastWeighted: number;
+  targetRaw: number;
+  targetWeighted: number;
+} | null>(null);
+const [traceVerbose, setTraceVerbose] = useState<boolean>(false);
+  const [entropyEnabled, setEntropyEnabled] = useState<boolean>(defaultKnobs.enableEntropy);
+  const [hammingEnabled, setHammingEnabled] = useState<boolean>(defaultKnobs.enableHamming);
+  const [jaccardEnabled, setJaccardEnabled] = useState<boolean>(defaultKnobs.enableJaccard);
+  const [gpwfEnabled, setGPWFEnabled] = useState<boolean>(defaultKnobs.enableGPWF);
 
   const [entropyThreshold, setEntropyThreshold] = useState<number>(1.0);
   const [hammingThreshold, setHammingThreshold] = useState<number>(3);
   const [jaccardThreshold, setJaccardThreshold] = useState<number>(0.5);
+
+  // Lambda enable/disable + value (lambda not heavily used right now but tracked)
+  const [lambdaEnabled, setLambdaEnabled] = useState<boolean>(true);
   const [lambda, setLambda] = useState<number>(0.85);
-  const [selectedNumbers, setSelectedNumbers] = useState<number[]>([]);
+
+const [selectedNumbers, setSelectedNumbers] = useState<number[]>([]);
   const [history, setHistory] = useState<Draw[]>([]);
-  const [windowMode, setWindowMode] = useState<
-    "W" | "F" | "M" | "Q" | "Y" | "H" | "Custom"
-  >("H");
+  const [windowMode, setWindowMode] = useState<"W" | "F" | "M" | "Q" | "Y" | "H" | "Custom">("H");
   const [customDrawCount, setCustomDrawCount] = useState<number>(1);
   const [windowEnabled, setWindowEnabled] = useState<boolean>(true);
+
   const [knobs, setKnobs] = useState<Knobs>(defaultKnobs);
-  const [gpwf_window_size, setGPWFWindowSize] = useState<number>(
-    defaultKnobs.gpwf_window_size
-  );
-  const [gpwf_bias_factor, setGPWFBiasFactor] = useState<number>(
-    defaultKnobs.gpwf_bias_factor
-  );
-  const [gpwf_floor, setGPWFFloor] = useState<number>(
-    defaultKnobs.gpwf_floor
-  );
-  const [gpwf_scale_multiplier, setGPWFScaleMultiplier] = useState<number>(
-    defaultKnobs.gpwf_scale_multiplier
-  );
+  const [gpwf_window_size, setGPWFWindowSize] = useState<number>(defaultKnobs.gpwf_window_size);
+  const [gpwf_bias_factor, setGPWFBiasFactor] = useState<number>(defaultKnobs.gpwf_bias_factor);
+  const [gpwf_floor, setGPWFFloor] = useState<number>(defaultKnobs.gpwf_floor);
+  const [gpwf_scale_multiplier, setGPWFScaleMultiplier] = useState<number>(defaultKnobs.gpwf_scale_multiplier);
+
   const [candidates, setCandidates] = useState<CandidateSet[]>([]);
   const [ratioSummary, setRatioSummary] = useState<any>(null);
-  const [quotaWarning, setQuotaWarning] = useState<string | undefined>(
-    undefined
-  );
+  const [quotaWarning, setQuotaWarning] = useState<string | undefined>(undefined);
   const [trace, setTrace] = useState<string[]>([]);
   const [numCandidates, setNumCandidates] = useState<number>(8);
+  const [isGenerating, setIsGenerating] = useState<boolean>(false);
+const [octagonalTop, setOctagonalTop] = useState<number>(defaultKnobs.octagonal_top);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [simulatedDraw, setSimulatedDraw] = useState<Draw | null>(null);
   const [dgaGrid, setDgaGrid] = useState<number[][]>([]);
   const [dgaDiamonds, setDgaDiamonds] = useState<any[]>([]);
   const [dgaPredictions, setDgaPredictions] = useState<number[]>([]);
@@ -415,32 +314,42 @@ const App: React.FC = () => {
   const [numberCounts, setNumberCounts] = useState<number[]>([]);
   const [minCount, setMinCount] = useState<number>(0);
   const [maxCount, setMaxCount] = useState<number>(0);
-  const [minRecentMatches, setMinRecentMatches] = React.useState<number>(0);
-  const [recentMatchBias, setRecentMatchBias] = React.useState<number>(0);
-  const [selectedCandidateIdx, setSelectedCandidateIdx] =
-    useState<number>(0);
+  const [minRecentMatches, setMinRecentMatches] = useState<number>(0);
+  const [recentMatchBias, setRecentMatchBias] = useState<number>(0);
+
   const [highlightMsg, setHighlightMsg] = useState<string>("");
   const [highlights, setHighlights] = useState<any[]>([]);
+  // User-only exclusions (SDE1/HC3 are added separately)
   const [excludedNumbers, setExcludedNumbers] = useState<number[]>([]);
-  const [ratioOptions, setRatioOptions] = useState<
-    { ratio: string; count: number; percent: number }[]
-  >([]);
+  const [ratioOptions, setRatioOptions] = useState<{ ratio: string; count: number; percent: number }[]>([]);
   const [selectedRatios, setSelectedRatios] = useState<string[]>([]);
   const [useTrickyRule, setUseTrickyRule] = useState<boolean>(false);
   const [minOGAPercentile, setMinOGAPercentile] = useState<number>(0);
-  const [trendSelectedNumbers, setTrendSelectedNumbers] = useState<number[]>(
-    []
-  );
-  const handleTrendNumberToggle = (n: number) => {
-    setTrendSelectedNumbers((prev) =>
-      prev.includes(n) ? prev.filter((x) => x !== n) : [...prev, n]
-    );
-  };
+  const [trendSelectedNumbers, setTrendSelectedNumbers] = useState<number[]>([]);
+const [focusNumber, setFocusNumber] = useState<number | null>(null);
+const [tempMetric, setTempMetric] = useState<"ema" | "recency" | "hybrid">("hybrid");
+  const [repeatWindowSizeW, setRepeatWindowSizeW] = useState<number>(12);
+const [minFromRecentUnionM, setMinFromRecentUnionM] = useState<number>(0);
+const [userSelectedNumbers, setUserSelectedNumbers] = useState<number[]>([]);
+
 
   useEffect(() => {
-    if (history.length > 0) {
-      setCustomDrawCount(history.length);
-    }
+    fetchDraws({
+      apiUrl: API_URL,
+      minValidDraws: MIN_VALID_DRAWS,
+      numMains: NUM_MAINS,
+      mainMin: MAIN_MIN,
+      mainMax: MAIN_MAX,
+      setHistory,
+      setTrace,
+      setHighlights,
+      rng: getUniqueRandomNumbers,
+      strictValidateDraws,
+    });
+  }, []);
+
+  useEffect(() => {
+    if (history.length > 0) setCustomDrawCount(history.length);
   }, [history]);
 
   function getActiveWindowSize() {
@@ -450,65 +359,305 @@ const App: React.FC = () => {
     if (!windowOption || windowOption.size === null) return history.length;
     return Math.min(windowOption.size, history.length);
   }
-
   const activeWindowSize = getActiveWindowSize();
   const filteredHistory = history.slice(-activeWindowSize);
 
-  // Compute full exclusion list for analyzers (user + SDE1 + HC3)
-  const sde1Exclusions = getSDE1FilteredPool(filteredHistory).excludedNumbers;
-  let hc3Exclusions: number[] = [];
-  if (knobs.enableHC3 && filteredHistory.length >= 2) {
-    const last = filteredHistory[filteredHistory.length - 1];
-    const prev = filteredHistory[filteredHistory.length - 2];
-    hc3Exclusions = [...last.main, ...last.supp].filter((n) =>
-      [...prev.main, ...prev.supp].includes(n)
-    );
+// Unified exclusions for panels (display only) — RESPECT global toggles
+const sde1Exclusions = knobs.enableSDE1
+  ? getSDE1FilteredPool(filteredHistory).excludedNumbers
+  : [];
+
+let hc3Exclusions: number[] = [];
+if (knobs.enableHC3 && filteredHistory.length >= 2) {
+  const last = filteredHistory[filteredHistory.length - 1];
+  const prev = filteredHistory[filteredHistory.length - 2];
+  hc3Exclusions = [...last.main, ...last.supp].filter((n) =>
+    [...prev.main, ...prev.supp].includes(n)
+  );
+}
+
+const allExclusions = Array.from(
+  new Set([...excludedNumbers, ...sde1Exclusions, ...hc3Exclusions])
+);
+
+  useEffect(() => {
+    setRatioOptions(computeOddEvenRatios(filteredHistory));
+    setSelectedRatios((ratios) => ratios.filter((r) => ratioOptions.some((opt) => opt.ratio === r)));
+  }, [filteredHistory]);
+
+
+  // Row simulation
+  const [simulatedDraw, setSimulatedDraw] = useState<any>(null);
+
+useEffect(() => {
+  setKnobs((prev) => ({
+    ...prev,
+    gpwf_window_size,
+    gpwf_bias_factor,
+    gpwf_floor,
+    gpwf_scale_multiplier,
+    lambda: lambda,
+    octagonal_top: octagonalTop, // NEW
+  }));
+}, [gpwf_window_size, gpwf_bias_factor, gpwf_floor, gpwf_scale_multiplier, lambda, octagonalTop]);
+
+useEffect(() => {
+  const draws = filteredHistory.length;
+  if (draws < 2) { // CHANGED: was 10
+    setDgaDiamonds([]); setDgaPredictions([]); setDgaGrid([]); setDgaDrawLabels([]);
+    setNumberCounts([]); setMinCount(0); setMaxCount(0);
+    setHighlightMsg("Insufficient valid draws for visualization.");
+    return;
   }
-  const allExclusions = Array.from(
-    new Set([...excludedNumbers, ...sde1Exclusions, ...hc3Exclusions])
+    let grid = buildDrawGrid(filteredHistory, 45, draws).map((row) => [...row, 0]);
+    let drawLabels = Array.from({ length: draws }, (_, i) => (i + 1).toString());
+    drawLabels = [...drawLabels, (draws + 1).toString() + (simulatedDraw ? "*" : "")];
+    if (simulatedDraw) {
+      for (const n of simulatedDraw.main) if (n >= 1 && n <= 45) grid[n - 1][grid[0].length - 1] = 1;
+      for (const n of simulatedDraw.supp) if (n >= 1 && n <= 45) grid[n - 1][grid[0].length - 1] = 2;
+    }
+    const diamonds = findDiamondsAllRadii(grid, 1, 4);
+    const predictions = getPredictedNumbers(diamonds, grid[0].length - 1);
+    setDgaGrid(grid); setDgaDiamonds(diamonds); setDgaPredictions(predictions); setDgaDrawLabels(drawLabels);
+
+    const counts: number[] = Array(45).fill(0);
+    filteredHistory.forEach((draw) => {
+      draw.main.forEach((n) => (n >= 1 && n <= 45 ? counts[n - 1]++ : null));
+      draw.supp.forEach((n) => (n >= 1 && n <= 45 ? counts[n - 1]++ : null));
+    });
+    setNumberCounts(counts);
+    setMinCount(Math.min(...counts));
+    setMaxCount(Math.max(...counts));
+    setHighlightMsg("");
+  }, [filteredHistory, simulatedDraw]);
+
+ // Manual simulation state
+ // ---- TREND + MANUAL SIM ADDITIONS START ----
+  const [manualSimSelected, setManualSimSelected] = useState<number[]>([]);
+  const [trendLookback, setTrendLookback] = useState(4);
+  const [trendThreshold, setTrendThreshold] = useState(0.02);
+  const [allowedTrendRatios, setAllowedTrendRatios] = useState<string[]>([]);
+  const toggleTrendRatio = (tag: string) => {
+    setAllowedTrendRatios(prev => prev.includes(tag) ? prev.filter(x => x !== tag) : [...prev, tag]);
+  };
+  const allTrendRatioOptions = useMemo(() => {
+    const list: string[] = [];
+    for (let u = 0; u <= 8; u++) {
+      for (let d = 0; d <= 8 - u; d++) {
+        const f = 8 - u - d;
+        list.push(`${u}-${d}-${f}`);
+      }
+    }
+    return list;
+  }, []);
+  const handleManualSimChanged = () => {
+    setSimulatedDraw(null);
+    setSelectedCandidateIdx(-1);
+  };
+  const manualSimDraw = useMemo(() => {
+    if (!manualSimSelected.length) return null;
+    const capped = manualSimSelected.slice(0, 8);
+    const main = capped.slice(0, 6).sort((a, b) => a - b);
+    const supp = capped.slice(6, 8).sort((a, b) => a - b);
+    return { main, supp, date: "ManualSim", isSimulated: true };
+  }, [manualSimSelected]);
+  const activeSimulatedDraw = manualSimDraw || simulatedDraw;
+  const overlayNumbers = useMemo(
+    () => activeSimulatedDraw ? [...activeSimulatedDraw.main, ...activeSimulatedDraw.supp] : [],
+    [activeSimulatedDraw]
   );
 
-  const matchingCandidateCount = useMemo(() => {
-    if (selectedNumbers.length === 0) return 0;
-    return candidates.filter((c) =>
-      selectedNumbers.every((n) => c.main.includes(n) || c.supp.includes(n))
-    ).length;
-  }, [candidates, selectedNumbers]);
+/* ========== TREND / TEMPERATURE BLOCK (BEGIN) ========== */
 
-  const numberTrends = useMemo(
-    () => computeNumberTrends(filteredHistory),
+  /* 1. Temperature signal (next-draw weighting signal) */
+  const temperatureSignal = useMemo(
+    () => computeTemperatureSignal(filteredHistory, {
+      alpha: 0.25,
+      hybridWeight: 0.6,
+      emaNormalize: "per-number",
+      enforcePeaks: true,
+      metric: "hybrid",
+      heightNumbers: 45
+    }),
     [filteredHistory]
   );
 
-// Reduce to the shape trendBias needs
-const shortTrends = useMemo(
-  () =>
-    numberTrends.map(t => ({
-      number: t.number,
-      fortnight: t.fortnight,
-      month: t.month,
-    })),
-  [numberTrends]
-);
+  /* 2. Per-number time series (oldest -> newest) for trend deltas */
+  const trendValueSeries = useMemo(() => {
+    const draws = filteredHistory;
+    const alpha = 0.25;
+    const wHybrid = 0.6;
+    const N = 45;
 
-// Build trend weights INSIDE the component
-const trendWeights = useMemo(
-  () => buildTrendWeights(shortTrends, { method: "exp", beta: 3.0 }),
-  [shortTrends]
-);
+    const series: number[][] = Array.from({ length: N }, () => []);
+    const ema = Array(N).fill(0);
+    const lastAge = Array(N).fill(Infinity);
+
+    for (let t = 0; t < draws.length; t++) {
+      const d = draws[t];
+      const present = new Set<number>([...d.main, ...d.supp]);
+      for (let n = 1; n <= N; n++) {
+        const i = n - 1;
+        const hit = present.has(n) ? 1 : 0;
+
+        // Update EMA
+        ema[i] = alpha * hit + (1 - alpha) * ema[i];
+
+        // Update age
+        if (hit) lastAge[i] = 0;
+        else lastAge[i] = Math.min(lastAge[i] + 1, 9999);
+
+        // Recency component (0..1)
+        const rec = draws.length > 1
+          ? 1 - Math.min(1, lastAge[i] / (draws.length - 1))
+          : 0;
+
+        // Hybrid
+        let hybrid = wHybrid * ema[i] + (1 - wHybrid) * rec;
+        if (hit) hybrid = 1; // enforce peak
+        series[i].push(hybrid);
+      }
+    }
+    return series;
+  }, [filteredHistory]);
+
+  /* 3. Current trend classification (optional) */
+  const trendMap = useMemo(() => {
+    const map = new Map<number, 'UP' | 'DOWN' | 'FLAT'>();
+    const L = trendLookback;
+    const thresh = trendThreshold;
+
+    if (!trendValueSeries.length || !trendValueSeries[0].length) {
+      for (let n = 1; n <= 45; n++) map.set(n, 'FLAT');
+      return map;
+    }
+
+    const latestIndex = trendValueSeries[0].length - 1;
+    const prevIndex = latestIndex - L;
+    if (prevIndex < 0) {
+      for (let n = 1; n <= 45; n++) map.set(n, 'FLAT');
+      return map;
+    }
+
+    for (let n = 1; n <= 45; n++) {
+      const arr = trendValueSeries[n - 1];
+      if (arr.length <= latestIndex || arr.length <= prevIndex) {
+        map.set(n, 'FLAT');
+        continue;
+      }
+      const delta = arr[latestIndex] - arr[prevIndex];
+      if (delta >= thresh) map.set(n, 'UP');
+      else if (delta <= -thresh) map.set(n, 'DOWN');
+      else map.set(n, 'FLAT');
+    }
+    return map;
+  }, [trendValueSeries, trendLookback, trendThreshold]);
+
+  /* 4. Historical trend ratio stats */
+  const historicalTrendRatioStats = useMemo(() => {
+    return computeHistoricalTrendRatios({
+      lookback: trendLookback,
+      threshold: trendThreshold,
+      valueSeries: trendValueSeries,
+      historyDraws: filteredHistory.map(d => ({ main: d.main, supp: d.supp }))
+    });
+  }, [trendLookback, trendThreshold, trendValueSeries, filteredHistory]);
+
+  /* 5. Draws considered (sum of counts) */
+const trendRatioDrawsConsidered = useMemo(
+    () => Math.max(0, activeWindowSize - trendLookback),
+    [activeWindowSize, trendLookback]
+  );
+
+// HELPER: enrichment & resort (place above component return, after computeOGA utilities are available)
+  function recomputeCompositeRanking(base: CandidateSet[]): CandidateSet[] {
+    if (!base.length) return base;
+    const recentDraw = filteredHistory[filteredHistory.length - 1];
+    const recentSet = recentDraw ? new Set([...recentDraw.main, ...recentDraw.supp]) : null;
+    const selectedSet = new Set(userSelectedNumbers);
+
+    // Normalize weights
+    const sum = rankingWeights.oga + rankingWeights.sel + rankingWeights.recent || 1;
+    const wOGA = rankingWeights.oga / sum;
+    const wSel = rankingWeights.sel / sum;
+    const wRecent = rankingWeights.recent / sum;
+    const EPS = 0.003;
+
+    // Pre-calc past OGA distribution
+    return base
+      .map((c: any) => {
+        const nums = [...c.main, ...c.supp];
+        // OGA score / percentile may already exist; recompute defensively if missing
+        const ogaScore = c.ogaScore ?? computeOGA(nums, filteredHistory);
+        const ogaPercentile = c.ogaPercentile ?? getOGAPercentile(ogaScore, pastOGAScores);
+        const selHits = nums.filter(n => selectedSet.has(n)).length;
+        const recentHits = recentSet ? nums.filter(n => recentSet.has(n)).length : 0;
+        const ogaNorm = Math.max(0, Math.min(1, ogaPercentile / 100));
+        const finalComposite = wOGA * ogaNorm + wSel * (selHits / 8) + wRecent * (recentHits / 8);
+        return {
+          ...c,
+          ogaScore,
+          ogaPercentile,
+          selHits,
+          recentHits,
+          finalComposite
+        };
+      })
+      .sort((a: any, b: any) => {
+        if (b.finalComposite !== a.finalComposite) return b.finalComposite - a.finalComposite;
+        const diff = Math.abs(b.finalComposite - a.finalComposite);
+        if (diff < EPS) {
+          if (b.selHits !== a.selHits) return b.selHits - a.selHits;
+          if (b.recentHits !== a.recentHits) return b.recentHits - a.recentHits;
+          return b.ogaPercentile - a.ogaPercentile;
+        }
+        return 0;
+      });
+  }
+
+  /* ========== TREND / TEMPERATURE BLOCK (END) ========== */
+
+  // Active candidate index (row selection)
+  const [selectedCandidateIdx, setSelectedCandidateIdx] = useState<number>(-1);
+
+  // Bates diagnostics
+  const [batesDiagnostics, setBatesDiagnostics] = useState<BatesDiagnostics | null>(null);
+
+const conditionalProb = useMemo(
+    () => buildConditionalProb(filteredHistory, temperatureSignal, 0.5, 0.3),
+    [filteredHistory, temperatureSignal]
+  );
+
+  const pastOGAScores = useMemo(
+    () =>
+      filteredHistory.map((draw, idx, arr) =>
+        computeOGA([...draw.main, ...draw.supp], arr.slice(0, idx) || [])
+      ),
+    [filteredHistory]
+  );
+
+  /* ----- Historical Trend Ratio Distribution ----- */
+
+  const numberTrends = useMemo(() => computeNumberTrends(filteredHistory), [filteredHistory]);
+  const shortTrends = useMemo(
+    () => numberTrends.map((t) => ({ number: t.number, fortnight: t.fortnight, month: t.month })),
+    [numberTrends]
+  );
+  const trendWeights = useMemo(
+    () => buildTrendWeights(shortTrends, { method: "exp", beta: 3.0 }),
+    [shortTrends]
+  );
 
   function getMatchCount(candidate: CandidateSet, selected: number[]): number {
     const set = new Set([...candidate.main, ...candidate.supp]);
     return selected.filter((n) => set.has(n)).length;
   }
+// EFFECT: when weights or user selections change, re-enrich & resort
+  useEffect(() => {
+    setCandidates(prev => recomputeCompositeRanking(prev));
+  }, [rankingWeights, userSelectedNumbers, filteredHistory, pastOGAScores]);
 
-  const pastOGAScores = useMemo(() => {
-    return filteredHistory.map((draw, idx, arr) =>
-      computeOGA([...draw.main, ...draw.supp], arr.slice(0, idx) || [])
-    );
-  }, [filteredHistory]);
-
-  React.useEffect(() => {
+  useEffect(() => {
     if (!candidates.length || !filteredHistory.length) return;
     setCandidates((prev) =>
       prev.map((c) => {
@@ -520,142 +669,125 @@ const trendWeights = useMemo(
     );
   }, [candidates, pastOGAScores, filteredHistory]);
 
+// EFFECT: when weights or user selections change, re-enrich & resort
   useEffect(() => {
-    setRatioOptions(computeOddEvenRatios(filteredHistory));
-    setSelectedRatios((ratios) =>
-      ratios.filter((r) => ratioOptions.some((opt) => opt.ratio === r))
-    );
-  }, [filteredHistory]);
+    setCandidates(prev => recomputeCompositeRanking(prev));
+  }, [rankingWeights, userSelectedNumbers, filteredHistory, pastOGAScores]);
 
-  useEffect(() => {
-    fetchDraws(setHistory, setTrace, setHighlights);
-  }, []);
-
-  useEffect(() => {
-    setKnobs((prev) => ({
-      ...prev,
-      gpwf_window_size,
-      gpwf_bias_factor,
-      gpwf_floor,
-      gpwf_scale_multiplier,
-    }));
-  }, [gpwf_window_size, gpwf_bias_factor, gpwf_floor, gpwf_scale_multiplier]);
-
-  useEffect(() => {
-    const recentHistory = filteredHistory;
-    const draws = recentHistory.length;
-    if (draws < 10) {
-      setDgaDiamonds([]);
-      setDgaPredictions([]);
-      setDgaGrid([]);
-      setDgaDrawLabels([]);
-      setNumberCounts([]);
-      setMinCount(0);
-      setMaxCount(0);
-      setHighlightMsg("Insufficient valid draws for visualization.");
-      return;
-    }
-
-    let grid = buildDrawGrid(recentHistory, 45, draws);
-    let drawLabels = Array.from({ length: draws }, (_: unknown, i: number) =>
-      (i + 1).toString()
-    );
-    grid = grid.map((row: number[]) => [...row, 0]);
-    drawLabels = [
-      ...drawLabels,
-      (draws + 1).toString() + (simulatedDraw ? "*" : ""),
-    ];
-
-    if (simulatedDraw) {
-      for (const n of simulatedDraw.main) {
-        if (n >= 1 && n <= 45) grid[n - 1][grid[0].length - 1] = 1;
-      }
-      for (const n of simulatedDraw.supp) {
-        if (n >= 1 && n <= 45) grid[n - 1][grid[0].length - 1] = 2;
-      }
-    }
-
-    const diamonds = findDiamondsAllRadii(grid, 1, 4);
-    const predictions = getPredictedNumbers(diamonds, grid[0].length - 1);
-
-    setDgaGrid(grid);
-    setDgaDiamonds(diamonds);
-    setDgaPredictions(predictions);
-    setDgaDrawLabels(drawLabels);
-
-    const counts: number[] = Array(45).fill(0);
-    recentHistory.forEach((draw) => {
-      draw.main.forEach((n) => (n >= 1 && n <= 45 ? counts[n - 1]++ : null));
-      draw.supp.forEach((n) => (n >= 1 && n <= 45 ? counts[n - 1]++ : null));
+  // Explicit simulate handler
+  const handleSimulateCandidate = (idx: number) => {
+    const cand = candidates[idx];
+    if (!cand) return;
+    setSelectedCandidateIdx(idx);
+    setSimulatedDraw({
+      main: cand.main.slice(),
+      supp: cand.supp.slice(),
+      date: "Simulated",
+      isSimulated: true,
     });
-    setNumberCounts(counts);
-    setMinCount(Math.min(...counts));
-    setMaxCount(Math.max(...counts));
-    setHighlightMsg("");
-  }, [filteredHistory, simulatedDraw]);
-
-  const handleKnobChange = (k: keyof Knobs, v: any) => {
-    setKnobs((prev: Knobs) => ({
-      ...prev,
-      [k]: typeof v === "boolean" ? v : Number(v),
-    }));
   };
 
-  const mostRecentDraw =
-    filteredHistory.length > 0
-      ? filteredHistory[filteredHistory.length - 1]
-      : null;
-  const mostRecentNumbers = mostRecentDraw
-    ? [...mostRecentDraw.main, ...mostRecentDraw.supp]
-    : [];
 
-  const handleGenerate = () => {
-    setTrace([]);
-    const result = generateCandidates(
-      numCandidates,
+ // Inside handleGenerate (replace the block that builds args and logs to Trace):
+
+const handleGenerate = () => {
+  setIsGenerating(true);
+  setTrace([]); // keep if you like a fresh panel
+
+  // EFFECTIVE toggles and thresholds – these are what generation will actually use
+  const entropyThresholdEff = entropyEnabled ? entropyThreshold : 0;   // ≥0 always passes
+  const hammingThresholdEff = hammingEnabled ? hammingThreshold : 0;   // ≥0 always passes
+  const jaccardThresholdEff = jaccardEnabled ? jaccardThreshold : 1;   // ≤1 always passes
+
+  const effectiveKnobsForGen: Knobs = {
+    ...knobs,
+    enableEntropy: entropyEnabled,
+    enableHamming: hammingEnabled,
+    enableJaccard: jaccardEnabled,
+    enableGPWF: gpwfEnabled,
+    lambda: lambdaEnabled ? lambda : 0.0, // already neutralized when off
+  };
+
+  // Optional: if you implemented Trace Verbose
+  const traceDispatch: React.Dispatch<React.SetStateAction<string[]>> =
+    traceVerbose ? setTrace : (((_updater: React.SetStateAction<string[]>) => {}) as any);
+
+  const result = generateCandidates(
+    numCandidates,
+    filteredHistory,
+    effectiveKnobsForGen,   // <-- use EFFECTIVE flags/values
+    traceDispatch,
+    excludedNumbers,
+    selectedRatios,
+    useTrickyRule,
+    minOGAPercentile,
+    pastOGAScores as any,
+    trendSelectedNumbers,
+    // pass EFFECTIVE thresholds
+    entropyThresholdEff,
+    hammingThresholdEff,
+    jaccardThresholdEff,
+    // lambda is already in effectiveKnobsForGen.lambda (but if generateCandidates also takes this explicitly, keep sending it)
+    lambdaEnabled ? lambda : 0.0,
+    ratioOptions,
+    minRecentMatches,
+    recentMatchBias
+  );
+
+  let processedCandidates = [...result.candidates];
+console.log('[DEBUG] excludedNumbers state before generate:', excludedNumbers);
+  // ... your existing post-processing/sorting for matchesRecent, etc.
+
+// UPDATE inside handleGenerate, right before setCandidates(processedCandidates):
+  processedCandidates = recomputeCompositeRanking(processedCandidates);
+
+
+
+setCandidates(processedCandidates);
+setRatioSummary(result.ratioSummary);
+setQuotaWarning(result.quotaWarning);
+setSelectedCandidateIdx(0);
+
+if (traceVerbose) {
+  const stateLines = [
+    `[TRACE] Window: ${activeWindowSize} draws`,
+    `[TRACE] OGA: ${knobs.enableOGA ? "on" : "off"}`,
+    `[TRACE] Entropy: ${entropyEnabled ? `on (>=${entropyThresholdEff})` : "off"}`,
+    `[TRACE] Hamming: ${hammingEnabled ? `on (>=${hammingThresholdEff})` : "off"}`,
+    `[TRACE] Jaccard: ${jaccardEnabled ? `on (<=${jaccardThresholdEff})` : "off"}`,
+    `[TRACE] GPWF: ${gpwfEnabled ? `on (win=${gpwf_window_size}, bias=${gpwf_bias_factor}, floor=${gpwf_floor}, scale=${gpwf_scale_multiplier})` : "off"}`,
+    `[TRACE] Lambda: ${lambdaEnabled ? lambda : "off"}`,
+    `[TRACE] MinRecentMatches: ${minRecentMatches}, RecentMatchBias: ${recentMatchBias}`,
+    `[TRACE] Ratios selected: ${selectedRatios.length ? selectedRatios.join(", ") : "none"}${useTrickyRule ? " (Tricky Rule)" : ""}`,
+    `[TRACE] User excluded: [${excludedNumbers.join(", ")}]`,
+    `[TRACE] Forced inclusion: [${trendSelectedNumbers.join(", ")}]`,
+  ];
+
+  const s = result.rejectionStats;
+  const rejSummary = `[TRACE] Rejections: Entropy=${s.entropy}, Hamming=${s.hamming}, Jaccard=${s.jaccard}, OddEven=${s.oddEven}, Tricky=${s.tricky}, MinRecent=${s.minRecent}, RecentBias=${s.recentBias} | Attempts=${s.totalAttempts}, Accepted=${s.accepted}`;
+
+  setTrace((t) => [
+    ...t,
+    ...stateLines,
+    rejSummary,
+    traceFormat(
       filteredHistory,
-      knobs,
-      setTrace,
-      excludedNumbers,
-      selectedRatios,
-      useTrickyRule,
-      minOGAPercentile,
-      pastOGAScores,
-      trendSelectedNumbers,
-      entropyThreshold,
-      hammingThreshold,
-      jaccardThreshold,
-      lambda,
-      ratioOptions,
-      minRecentMatches,
-      recentMatchBias
-    );
-    let processedCandidates = [...result.candidates];
-    if (mostRecentDraw) {
-      const numberFreq = getNumberFrequencies(filteredHistory);
-      processedCandidates.forEach((c) => {
-        c.matchedNumbers = countMatches(c, mostRecentDraw);
-        c.numMatches = c.matchedNumbers.length;
-        c.matchHistoryFrequency = c.matchedNumbers.reduce(
-          (sum, n) => sum + (numberFreq.get(n) || 0),
-          0
-        );
-      });
-      processedCandidates.sort(
-        (a, b) =>
-          (b.numMatches ?? 0) - (a.numMatches ?? 0) ||
-          (b.matchHistoryFrequency ?? 0) - (a.matchHistoryFrequency ?? 0)
-      );
-    }
-    setCandidates(processedCandidates);
-    setRatioSummary(result.ratioSummary);
-    setQuotaWarning(result.quotaWarning);
-    setSelectedCandidateIdx(0);
-    setTrace((t) => [
-      ...t,
-      traceFormat(filteredHistory, knobs, processedCandidates),
-    ]);
-  };
+      effectiveKnobsForGen,
+      processedCandidates,
+      {
+        enableOGA: knobs.enableOGA,
+        entropyEnabled,
+        hammingEnabled,
+        jaccardEnabled,
+        gpwfEnabled,
+        lambdaEnabled,
+      }
+    ),
+  ]);
+}
+
+setIsGenerating(false);
+};
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -669,24 +801,16 @@ const trendWeights = useMemo(
         if (parsed.length !== validDraws.length) {
           setTrace((t) => [
             ...t,
-            `[TRACE] Warning: ${
-              parsed.length - validDraws.length
-            } draws were discarded due to invalid format/range/duplicates.`,
+            `[TRACE] Warning: ${parsed.length - validDraws.length} draws were discarded due to invalid format/range/duplicates.`,
           ]);
         }
         if (validDraws.length >= MIN_VALID_DRAWS) {
           const isNewestFirst =
-            new Date(validDraws[0].date) >
-            new Date(validDraws[validDraws.length - 1].date);
-          const ordered = isNewestFirst
-            ? validDraws.slice().reverse()
-            : validDraws.slice();
+            new Date(validDraws[0].date) > new Date(validDraws[validDraws.length - 1].date);
+          const ordered = isNewestFirst ? validDraws.slice().reverse() : validDraws.slice();
           setHistory(ordered);
           setHighlights([]);
-          setTrace((t) => [
-            ...t,
-            `[TRACE] Imported ${validDraws.length} valid draws from file.`,
-          ]);
+          setTrace((t) => [...t, `[TRACE] Imported ${validDraws.length} valid draws from file.`]);
         } else {
           setTrace((t) => [
             ...t,
@@ -700,75 +824,30 @@ const trendWeights = useMemo(
     reader.readAsText(file);
   };
 
-  const handleSimulateDraw = () => {
-    if (!candidates[selectedCandidateIdx]) return;
-    setSimulatedDraw({
-      main: [...candidates[selectedCandidateIdx].main],
-      supp: [...candidates[selectedCandidateIdx].supp],
-      date: "(simulated)",
-    });
-  };
-
-  const handleConfirmSimulatedDraw = () => {
-    if (!simulatedDraw) return;
-    const markedDraw = { ...simulatedDraw, isSimulated: true };
-    setHistory([...history, markedDraw]);
-    setSimulatedDraw(null);
-    setCandidates([]);
-    setTrace((t) => [...t, "[TRACE] Simulated draw added to history."]);
-    setHighlights([]);
-  };
-
-  const handleResetSimulatedDraw = () => setSimulatedDraw(null);
-
   const handleRatioToggle = (ratio: string) => {
-    setSelectedRatios((prev) => {
-      if (prev.includes(ratio)) {
-        return prev.filter((r) => r !== ratio);
-      } else {
-        return [...prev, ratio];
-      }
-    });
+    setSelectedRatios((prev) => (prev.includes(ratio) ? prev.filter((r) => r !== ratio) : [...prev, ratio]));
     setUseTrickyRule(false);
   };
   const handleTrickyToggle = () => {
     setUseTrickyRule((prev) => !prev);
     if (!useTrickyRule) setSelectedRatios([]);
   };
+  const handleTrendNumberToggle = (n: number) => {
+    setTrendSelectedNumbers((prev) => (prev.includes(n) ? prev.filter((x) => x !== n) : [...prev, n]));
+  };
+
+  const currentCandidate = candidates[selectedCandidateIdx];
 
   const previewStats = useMemo(() => {
-    const candidate = candidates[selectedCandidateIdx];
+    const candidate = currentCandidate;
     return {
       hamming: candidate ? minHamming(candidate, filteredHistory) : 0,
       entropy: candidate ? entropy(candidate) : 0,
       jaccard: candidate ? maxJaccard(candidate, filteredHistory) : 0,
     };
-  }, [candidates, selectedCandidateIdx, filteredHistory]);
+  }, [currentCandidate, filteredHistory]);
 
-  const currentCandidate = candidates[selectedCandidateIdx];
-  const currentOGA = currentCandidate?.ogaScore;
-  const currentOGAPercentile = currentCandidate?.ogaPercentile;
-
-  const candidatesWithMatch = useMemo(() => {
-    return candidates.filter((c) => getMatchCount(c, selectedNumbers) > 0)
-      .length;
-  }, [candidates, selectedNumbers]);
-
-  const avgMatches = useMemo(() => {
-    if (!candidates.length || !selectedNumbers.length) return "0";
-    const totalMatches = candidates.reduce(
-      (acc, c) => acc + getMatchCount(c, selectedNumbers),
-      0
-    );
-    return (totalMatches / candidates.length).toFixed(2);
-  }, [candidates, selectedNumbers]);
-
-  const maxGPWFWindow =
-    filteredHistory.length > 0 ? filteredHistory.length : 45;
-
-  // NEW: global Monte Carlo layout state (inside component)
-  const [mcLayout, setMcLayout] = useState<MonteCarloLayout>("grid");
-  const [mcColumns, setMcColumns] = useState<number>(4);
+  const maxGPWFWindow = filteredHistory.length > 0 ? filteredHistory.length : 45;
 
   return (
     <div style={{ fontFamily: "monospace", padding: 20, maxWidth: 1700 }}>
@@ -777,7 +856,7 @@ const trendWeights = useMemo(
         <span style={{ fontSize: 16, color: "#666" }}>TypeScript Demo</span>
       </h2>
 
-      {/* --- Number Trends Table section --- */}
+      {/* Number Trends */}
       <details open>
         <summary>
           <b>Number Trends Table</b>
@@ -785,28 +864,38 @@ const trendWeights = useMemo(
             (Click a number to mark for forced inclusion)
           </span>
         </summary>
-<NumberTrendsTable
-  trends={numberTrends}
-  onToggle={handleTrendNumberToggle}
-  selected={trendSelectedNumbers}
-/>
+        <NumberTrendsTable trends={numberTrends} onToggle={handleTrendNumberToggle} selected={trendSelectedNumbers} />
         <div style={{ fontSize: 12, color: "#888", marginBottom: 8 }}>
-          Colored rows indicate numbers you have selected to include in the next candidate generation.
+          Colored rows indicate numbers you have selected for forced inclusion.
         </div>
       </details>
 
-      {/* --------- Phase 0: Draw History Section --------- */}
+      {/* Phase 0 History */}
       <details open>
         <summary>
           <b>Phase 0: Draw History ({history.length} draws)</b>
         </summary>
+        <button onClick={() => fileInputRef.current?.click()} style={{ marginRight: 8, marginBottom: 5 }}>
+          Import Draws (CSV/JSON)
+        </button>
         <button
-          onClick={() => {
-            if (fileInputRef.current) fileInputRef.current.click();
-          }}
+          onClick={() =>
+            fetchDraws({
+              apiUrl: API_URL,
+              minValidDraws: MIN_VALID_DRAWS,
+              numMains: NUM_MAINS,
+              mainMin: MAIN_MIN,
+              mainMax: MAIN_MAX,
+              setHistory,
+              setTrace,
+              setHighlights,
+              rng: getUniqueRandomNumbers,
+              strictValidateDraws,
+            })
+          }
           style={{ marginRight: 8, marginBottom: 5 }}
         >
-          Import Draws (CSV/JSON)
+          Re-fetch Draws
         </button>
         <input
           ref={fileInputRef}
@@ -816,34 +905,17 @@ const trendWeights = useMemo(
           onChange={handleFileUpload}
         />
         <pre style={{ maxHeight: 160, overflow: "auto", fontSize: 12 }}>
-          {history
-            .map(
-              (d, i) =>
-                `${d.date}: [${d.main.join(", ")}] | Sup: [${d.supp.join(
-                  ", "
-                )}]`
-            )
-            .join("\n")}
+          {history.map((d) => `${d.date}: [${d.main.join(", ")}] | Sup: [${d.supp.join(",")}]`).join("\n")}
+          {history.length === 0 && (
+            <div style={{ fontSize: 12, color: "#c00", marginBottom: 8 }}>
+              No draws loaded yet. Check network or click "Re-fetch Draws".
+            </div>
+          )}
         </pre>
       </details>
 
-      <MonteCarloAnalyzer
-  history={history}
-  excludedNumbers={excludedNumbers}
-  trendWeights={trendWeights}
-        layout={mcLayout}
-        columns={mcColumns}
-        showLayoutControls={false}
-      />
-      <SurvivalAnalyzer
-        history={filteredHistory}
-        excludedNumbers={allExclusions}
-        probabilityHeading="Probability of Appearance in Next Draw (Per Number):"
-trendWeights={trendWeights}
-      />
-
-      {/* --------- Odd/Even Ratio & Tricky Rule Section --------- */}
-      <details open>
+      {/* Odd/Even Ratios (add small space below) */}
+      <details open style={{ marginBottom: 10 }}>
         <summary>
           <b>Odd/Even Ratio Filters</b>
           <span style={{ fontWeight: 400, fontSize: 13, marginLeft: 10 }}>
@@ -864,10 +936,7 @@ trendWeights={trendWeights}
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 18 }}>
           {ratioOptions.map(({ ratio, count, percent }) => (
-            <label
-              key={ratio}
-              style={{ marginRight: 16, opacity: useTrickyRule ? 0.4 : 1.0 }}
-            >
+            <label key={ratio} style={{ marginRight: 16, opacity: useTrickyRule ? 0.4 : 1 }}>
               <input
                 type="checkbox"
                 checked={selectedRatios.includes(ratio)}
@@ -880,206 +949,26 @@ trendWeights={trendWeights}
           ))}
         </div>
         <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>
-          Applies to total (all 8 numbers in a draw). Only ratios seen in history are available.
+          Ratios apply to all 8 numbers. Only ratios observed in selected window are shown.
         </div>
       </details>
 
-      {/* --------- Candidate Controls & Table --------- */}
-      <div style={{ padding: 32, fontFamily: "sans-serif", maxWidth: 900 }}>
-        <details open>
-          <summary>
-            <b>Operator’s Panel – Candidate Generation Controls</b>
-          </summary>
-          <OperatorsPanel
-            entropy={entropyThreshold}
-            setEntropy={setEntropyThreshold}
-            entropyEnabled={entropyEnabled}
-            setEntropyEnabled={setEntropyEnabled}
-            hamming={hammingThreshold}
-            setHamming={setHammingThreshold}
-            hammingEnabled={hammingEnabled}
-            setHammingEnabled={setHammingEnabled}
-            jaccard={jaccardThreshold}
-            setJaccard={setJaccardThreshold}
-            jaccardEnabled={jaccardEnabled}
-            setJaccardEnabled={setJaccardEnabled}
-            lambda={lambda}
-            setLambda={setLambda}
-            minRecentMatches={minRecentMatches}
-            setMinRecentMatches={setMinRecentMatches}
-            recentMatchBias={recentMatchBias}
-            setRecentMatchBias={setRecentMatchBias}
-            previewStats={previewStats}
-            gpwfEnabled={gpwfEnabled}
-            setGPWFEnabled={setGPWFEnabled}
-            gpwf_window_size={gpwf_window_size}
-            setGPWFWindowSize={setGPWFWindowSize}
-            maxGPWFWindow={maxGPWFWindow}
-            gpwf_bias_factor={gpwf_bias_factor}
-            setGPWFBiasFactor={setGPWFBiasFactor}
-            gpwf_floor={gpwf_floor}
-            setGPWFFloor={setGPWFFloor}
-            gpwf_scale_multiplier={gpwf_scale_multiplier}
-            setGPWFScaleMultiplier={setGPWFScaleMultiplier}
-            mcLayout={mcLayout}
-            setMcLayout={setMcLayout}
-            mcColumns={mcColumns}
-            setMcColumns={setMcColumns}
-          />
-        </details>
-
-        <details>
-          <summary>
-            <b>Analytics Filters</b>
-          </summary>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 20 }}>
-            {ANALYTIC_FIELDS.filter(
-              ([k]) =>
-                ![
-                  "enableEntropy",
-                  "enableHamming",
-                  "enableJaccard",
-                  "enableGPWF",
-                ].includes(k)
-            ).map(([k, label]) => (
-              <label key={String(k)}>
-                <input
-                  type="checkbox"
-                  checked={knobs[k] as boolean}
-                  onChange={(e) =>
-                    setKnobs((prev: Knobs) => ({
-                      ...prev,
-                      [k]: e.target.checked,
-                    }))
-                  }
-                  style={{ marginRight: 6 }}
-                />
-                {label}
-              </label>
-            ))}
-          </div>
-        </details>
-
-        <details open>
-          <summary>
-            <b>Exclude Numbers</b>
-            <span style={{ fontWeight: 400, fontSize: 13, marginLeft: 10 }}>
-              (Checked numbers will be excluded)
-            </span>
-          </summary>
-          <div
-            style={{
-              display: "flex",
-              flexWrap: "wrap",
-              gap: 8,
-              margin: "8px 0 12px 0",
-            }}
-          >
-            {Array.from({ length: 45 }, (_, i) => {
-              const n = i + 1;
-              const checked = excludedNumbers.includes(n);
-              return (
-                <label
-                  key={n}
-                  style={{ width: 40, textAlign: "center", margin: "2px 0" }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => {
-                      setExcludedNumbers((prev) =>
-                        checked
-                          ? prev.filter((num) => num !== n)
-                          : [...prev, n]
-                      );
-                    }}
-                    style={{ marginRight: 4 }}
-                  />
-                  {n}
-                </label>
-              );
-            })}
-          </div>
-        </details>
-
-        <details>
-          <summary>
-            <b>Knobs & Flags</b>
-          </summary>
-          <div
-            style={{
-              display: "flex",
-              flexWrap: "wrap",
-              gap: 20,
-              alignItems: "center",
-            }}
-          >
-            {KNOB_FIELDS.map(([k, label, def, min, max]) => (
-              <label key={String(k)} style={{ margin: 4 }}>
-                {label}:{" "}
-                {typeof def === "boolean" ? (
-                  <input
-                    type="checkbox"
-                    checked={!!knobs[k as keyof Knobs]}
-                    onChange={(e) =>
-                      handleKnobChange(k as keyof Knobs, e.target.checked)
-                    }
-                  />
-                ) : (
-                  <input
-                    type="number"
-                    style={{ width: 60 }}
-                    value={
-                      typeof knobs[k as keyof Knobs] === "number"
-                        ? (knobs[k as keyof Knobs] as number)
-                        : ""
-                    }
-                    min={min}
-                    max={max}
-                    step="any"
-                    onChange={(e) =>
-                      handleKnobChange(k as keyof Knobs, e.target.value)
-                    }
-                  />
-                )}
-              </label>
-            ))}
-          </div>
-        </details>
-
-        <details open>
-          <summary>
-            <b>OGA Percentile Filter</b>
-            <span style={{ fontWeight: 400, fontSize: 13, marginLeft: 10 }}>
-              (Minimum percentile required, 0% = no filter)
-            </span>
-          </summary>
-          <div style={{ margin: "8px 0" }}>
-            <input
-              type="number"
-              min={0}
-              max={100}
-              value={minOGAPercentile}
-              onChange={(e) => setMinOGAPercentile(Number(e.target.value))}
-              style={{ width: 60, marginRight: 6 }}
-            />
-            %
-          </div>
-          <OGAHistogram
-            ogaScores={pastOGAScores}
-            candidateOGA={currentOGA}
-            candidatePercentile={currentOGAPercentile}
-          />
-        </details>
-
-        {/* -------- Select window UI -------- */}
+      {/* WFMQY + Unified Toggles + User Exclusions */}
+      <details open>
+        <summary>
+          <b>Windowed Draw Filtering (WFMQYH)</b>
+        </summary>
         <div
           style={{
-            marginBottom: 18,
+            marginBottom: 12,
             border: "1px solid #eee",
             padding: 14,
             borderRadius: 7,
             background: "#f4f9ff",
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 16,
+            alignItems: "center",
           }}
         >
           <label style={{ fontWeight: "bold", marginRight: 16 }}>
@@ -1089,9 +978,9 @@ trendWeights={trendWeights}
               onChange={(e) => setWindowEnabled(e.target.checked)}
               style={{ marginRight: 7 }}
             />
-            Enable windowed draw filtering (WFMQYH)
+            Enable windowed filtering
           </label>
-          <span style={{ marginLeft: 18 }}>
+          <span>
             {WINDOW_OPTIONS.map((opt) => (
               <label key={opt.key} style={{ marginRight: 14 }}>
                 <input
@@ -1105,514 +994,517 @@ trendWeights={trendWeights}
                 {opt.label}
               </label>
             ))}
-            {windowMode === "Custom" && (
-              <input
-                type="number"
-                min={1}
-                max={history.length}
-                value={customDrawCount}
-                disabled={!windowEnabled}
-                onChange={(e) => setCustomDrawCount(Number(e.target.value))}
-                style={{ width: 70, marginLeft: 6 }}
-                placeholder="Draw count"
-              />
-            )}
           </span>
-        </div>
-        <div style={{ marginBottom: 8, fontSize: 15, color: "#1976d2" }}>
-          Currently using the last <b>{activeWindowSize}</b> draws for candidate
-          generation and analysis.
-        </div>
-        {windowEnabled && activeWindowSize < 10 && (
-          <div style={{ color: "#d32f2f", fontWeight: "bold", fontSize: 14 }}>
-            Warning: Too few draws selected. Increase window for reliable
-            results.
-          </div>
-        )}
-
-        {/* -------- Generate Button -------- */}
-        <div style={{ margin: "18px 0" }}>
-          <label>
-            Number of candidates to generate:{" "}
+          {windowMode === "Custom" && (
             <input
               type="number"
               min={1}
-              max={32}
-              value={numCandidates}
-              onChange={(e) => setNumCandidates(Number(e.target.value))}
-              style={{ width: 50 }}
+              max={history.length}
+              value={customDrawCount}
+              disabled={!windowEnabled}
+              onChange={(e) => setCustomDrawCount(Number(e.target.value))}
+              style={{ width: 70 }}
+              placeholder="Draw count"
             />
-          </label>{" "}
-          <button onClick={handleGenerate}>Generate!</button>
+          )}
+
+          {/* Unified toggles */}
+          <span style={{ marginLeft: 12 }}>
+            <label style={{ marginRight: 12 }}>
+              <input
+                type="checkbox"
+                checked={knobs.enableSDE1}
+                onChange={(e) => setKnobs((prev) => ({ ...prev, enableSDE1: e.target.checked }))}
+                style={{ marginRight: 6 }}
+              />
+              SDE1
+            </label>
+            <label style={{ marginRight: 12 }}>
+              <input
+                type="checkbox"
+                checked={knobs.enableHC3}
+                onChange={(e) => setKnobs((prev) => ({ ...prev, enableHC3: e.target.checked }))}
+                style={{ marginRight: 6 }}
+              />
+              HC3
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={knobs.enableOGA}
+                onChange={(e) => setKnobs((prev) => ({ ...prev, enableOGA: e.target.checked }))}
+                style={{ marginRight: 6 }}
+              />
+              OGA
+            </label>
+  <label style={{ marginLeft: 16 }}>
+    <input
+      type="checkbox"
+      checked={traceVerbose}
+      onChange={(e) => setTraceVerbose(e.target.checked)}
+      style={{ marginRight: 6 }}
+    />
+    Trace Verbose
+  </label>
+          </span>
         </div>
 
-        {/* --------- Ratio Summary and Warnings --------- */}
-        {ratioSummary && (
-          <div style={{ margin: "12px 0", fontSize: 13 }}>
-            <b>Ratio Distribution:</b>
-            <ul>
-              {Object.entries(ratioSummary).map(
-                ([ratio, { target, actual }]: any) => (
-                  <li
-                    key={ratio}
-                    style={{
-                      color: actual < (target || 0) ? "#c00" : undefined,
-                    }}
-                  >
-                    {ratio}: generated <b>{actual}</b>
-                    {target ? ` (target ${target})` : ""}
-                  </li>
-                )
-              )}
-            </ul>
-            {quotaWarning && (
-              <div style={{ color: "#c00", fontWeight: "bold" }}>
-                {quotaWarning}
-              </div>
+        {/* Status badges */}
+        <div style={{ marginBottom: 8, fontSize: 15, color: "#1976d2", display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <span>Using last <b>{activeWindowSize}</b> draws</span>
+          <span>
+            {knobs.enableSDE1 ? (
+              <span style={{ background: "#ffe6cc", color: "#a04c00", padding: "1px 6px", borderRadius: 4 }}>SDE1 Active</span>
+            ) : (
+              <span style={{ background: "#f2f2f2", color: "#555", padding: "1px 6px", borderRadius: 4 }}>SDE1 Off</span>
             )}
+          </span>
+          <span>
+            {knobs.enableHC3 ? (
+              <span style={{ background: "#e8f5e9", color: "#2e7d32", padding: "1px 6px", borderRadius: 4 }}>HC3 Active</span>
+            ) : (
+              <span style={{ background: "#f2f2f2", color: "#555", padding: "1px 6px", borderRadius: 4 }}>HC3 Off</span>
+            )}
+          </span>
+          <span>
+            {knobs.enableOGA ? (
+              <span style={{ background: "#e8eefc", color: "#1a4fa3", padding: "1px 6px", borderRadius: 4 }}>OGA On</span>
+            ) : (
+              <span style={{ background: "#f2f2f2", color: "#555", padding: "1px 6px", borderRadius: 4 }}>OGA Off</span>
+            )}
+          </span>
+          <span>
+            {entropyEnabled ? (
+              <span style={{ background: "#eceff1", color: "#37474f", padding: "1px 6px", borderRadius: 4 }}>Entropy ≥ {entropyThreshold}</span>
+            ) : (
+              <span style={{ background: "#f2f2f2", color: "#555", padding: "1px 6px", borderRadius: 4 }}>Entropy Off</span>
+            )}
+          </span>
+          <span>
+            {hammingEnabled ? (
+              <span style={{ background: "#eceff1", color: "#37474f", padding: "1px 6px", borderRadius: 4 }}>Hamming ≥ {hammingThreshold}</span>
+            ) : (
+              <span style={{ background: "#f2f2f2", color: "#555", padding: "1px 6px", borderRadius: 4 }}>Hamming Off</span>
+            )}
+          </span>
+          <span>
+            {jaccardEnabled ? (
+              <span style={{ background: "#eceff1", color: "#37474f", padding: "1px 6px", borderRadius: 4 }}>Jaccard ≤ {jaccardThreshold}</span>
+            ) : (
+              <span style={{ background: "#f2f2f2", color: "#555", padding: "1px 6px", borderRadius: 4 }}>Jaccard Off</span>
+            )}
+          </span>
+          <span>
+            {gpwfEnabled ? (
+              <span style={{ background: "#e3f2fd", color: "#1565c0", padding: "1px 6px", borderRadius: 4 }}>
+                GPWF (win {gpwf_window_size})
+              </span>
+            ) : (
+              <span style={{ background: "#f2f2f2", color: "#555", padding: "1px 6px", borderRadius: 4 }}>GPWF Off</span>
+            )}
+          </span>
+          <span>
+            {lambdaEnabled ? (
+              <span style={{ background: "#fff3e0", color: "#e65100", padding: "1px 6px", borderRadius: 4 }}>
+                Lambda {lambda}
+              </span>
+            ) : (
+              <span style={{ background: "#f2f2f2", color: "#555", padding: "1px 6px", borderRadius: 4 }}>Lambda Off</span>
+            )}
+          </span>
+        </div>
+
+        {windowEnabled && activeWindowSize < 10 && (
+          <div style={{ color: "#d32f2f", fontWeight: "bold", fontSize: 14 }}>
+            Warning: Too few draws selected. Increase window for reliability.
           </div>
         )}
 
-        {/* --------- Generated Candidates Table --------- */}
+        {/* User exclusions (single line, numbers under checkboxes) */}
+        <div style={{ marginTop: 8 }}>
+          <b>User Exclusions:</b>
+          <div
+            style={{
+              display: "flex",
+              gap: 8,
+              overflowX: "auto",
+              whiteSpace: "nowrap",
+              paddingTop: 6,
+              paddingBottom: 4,
+              borderTop: "1px dashed #ddd",
+              marginTop: 6
+            }}
+          >
+            {Array.from({ length: 45 }, (_, i) => i + 1).map((n) => {
+              const checked = excludedNumbers.includes(n);
+              return (
+                <label
+                  key={n}
+                  style={{
+                    display: "inline-flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    minWidth: 28
+                  }}
+                  title={`Exclude ${n}`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => {
+                      setExcludedNumbers((prev) =>
+                        prev.includes(n) ? prev.filter((x) => x !== n) : [...prev, n]
+                      );
+                    }}
+                  />
+                  <span style={{ fontSize: 11, marginTop: 2 }}>{n}</span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      </details>
+
+{/* Monte Carlo temporarily disabled */}
+{/* // Monte Carlo (WFMQY window, unified exclusions)
+<MonteCarloPanel
+  history={filteredHistory}
+  enableSDE1={knobs.enableSDE1}
+  excludedNumbers={allExclusions}
+  trendWeights={trendWeights}
+  defaultWindow={activeWindowSize}
+  showSimulation={true}
+  forcedNumbers={trendSelectedNumbers}
+  selectedCheckNumbers={selectedNumbers}
+  externalFocusNumber={focusNumber}
+  onFocusChange={setFocusNumber}
+/>*/}
+
+<TrendRatioHistoryPanel
+  stats={historicalTrendRatioStats}
+  allowedTrendRatios={allowedTrendRatios}
+  toggleTrendRatio={toggleTrendRatio}
+  lookback={trendLookback}
+  threshold={trendThreshold}
+  drawsConsidered={trendRatioDrawsConsidered}
+  windowDraws={activeWindowSize}
+/>
+
+
+
+// Survival (WFMQY window, badges reflect global) — toggles hidden, show forced/selected
+<SurvivalAnalyzer
+  history={filteredHistory}
+  excludedNumbers={allExclusions}
+  probabilityHeading="Probability of Appearance in Next Draw (Per Number):"
+  trendWeights={trendWeights}
+  externalWindowSize={activeWindowSize}
+  enableSDE1Global={knobs.enableSDE1}
+  enableHC3Global={knobs.enableHC3}
+  hideBiasToggles={true}
+  forcedNumbers={trendSelectedNumbers}
+  selectedCheckNumbers={selectedNumbers}
+focusNumber={focusNumber}
+/>
+
+      {/* Operators + Lambda enable, GPWF, thresholds */}
+      <div style={{ padding: 32, fontFamily: "sans-serif" }}>
         <details open>
           <summary>
-            <b>Generated Candidates</b>
+            <b>Operator’s Panel – Candidate Generation Controls</b>
           </summary>
-
-          {/* --- Number selection grid and count --- */}
-          <div style={{ margin: "14px 0" }}>
-            <b>Select numbers to check against generated candidates:</b>
-            <div
-              style={{
-                display: "flex",
-                flexWrap: "wrap",
-                gap: 5,
-                margin: "6px 0 10px 0",
-              }}
-            >
-              {Array.from({ length: 45 }, (_, i) => {
-                const n = i + 1;
-                return (
-                  <label key={n} style={{ width: 28 }}>
-                    <input
-                      type="checkbox"
-                      checked={selectedNumbers.includes(n)}
-                      onChange={() => {
-                        setSelectedNumbers((prev) =>
-                          prev.includes(n)
-                            ? prev.filter((x) => x !== n)
-                            : [...prev, n]
-                        );
-                      }}
-                    />
-                    {n}
-                  </label>
-                );
-              })}
-            </div>
-            <span style={{ fontSize: 15 }}>
-              <b>
-                Candidates with ≥1 selected number:{" "}
-                <span style={{ color: "#1976d2" }}>
-                  {candidatesWithMatch}
-                </span>{" "}
-                / {candidates.length}
-                &nbsp;|&nbsp; Avg. matches per candidate:{" "}
-                <span style={{ color: "#d32f2f" }}>{avgMatches}</span> /{" "}
-                {selectedNumbers.length}
-              </b>
-            </span>
+          {/* Lambda enable next to slider label row */}
+          <div style={{ margin: "6px 0 10px 0", fontSize: 13 }}>
+            <label>
+              <input
+                type="checkbox"
+                checked={lambdaEnabled}
+                onChange={(e) => setLambdaEnabled(e.target.checked)}
+                style={{ marginRight: 6 }}
+              />
+              Enable Lambda (Recency Weight)
+            </label>
           </div>
-
-          {candidates.length === 0 ? (
-            <i>No candidates generated yet.</i>
-          ) : (
-            <>
-              <table
-                style={{
-                  borderCollapse: "collapse",
-                  fontSize: 15,
-                  marginTop: 8,
-                  minWidth: 690,
-                }}
-              >
-                <thead>
-                  <tr>
-                    <th>#</th>
-                    <th>Main Numbers</th>
-                    <th>Supps</th>
-                    <th>Score</th>
-                    <th>Entropy</th>
-                    <th>Hamming</th>
-                    <th>Jaccard</th>
-                    <th>OGA</th>
-                    <th>OGA %ile</th>
-                    <th>Odd/Even</th>
-                    <th>Sel. #s Matched</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {candidates.map((c, i) => {
-                    const { entropy, hamming, jaccard } =
-                      extractAnalytics(c.trace);
-                    const oddEven = getOddEvenRatio([
-                      ...c.main,
-                      ...c.supp,
-                    ]);
-                    const matchedCount = getMatchCount(
-                      c,
-                      selectedNumbers
-                    );
-                    const candidateHasSelected = matchedCount > 0;
-                    return (
-                      <tr
-                        key={i}
-                        style={{
-                          background: candidateHasSelected
-                            ? "#E3FCEC"
-                            : i === selectedCandidateIdx
-                            ? "#FFF9C4"
-                            : undefined,
-                          cursor: "pointer",
-                        }}
-                        onClick={() => setSelectedCandidateIdx(i)}
-                        title="Click to select this candidate"
-                      >
-                        <td style={{ textAlign: "right" }}>{i + 1}</td>
-                        <td>
-                          <b>
-                            {c.main.map((n: number) => (
-                              <span
-                                key={n}
-                                style={{
-                                  display: "inline-block",
-                                  width: 26,
-                                  textAlign: "center",
-                                  background: mostRecentNumbers.includes(n)
-                                    ? "#ffe58f"
-                                    : undefined,
-                                  borderRadius: 4,
-                                  fontWeight: mostRecentNumbers.includes(n)
-                                    ? "bold"
-                                    : undefined,
-                                }}
-                              >
-                                {n}
-                              </span>
-                            ))}
-                          </b>
-                        </td>
-                        <td>
-                          <b>
-                            {c.supp.map((n: number) => (
-                              <span
-                                key={n}
-                                style={{
-                                  display: "inline-block",
-                                  width: 26,
-                                  textAlign: "center",
-                                  color: "#1976d2",
-                                  background: mostRecentNumbers.includes(n)
-                                    ? "#ffe58f"
-                                    : undefined,
-                                  borderRadius: 4,
-                                  fontWeight: mostRecentNumbers.includes(n)
-                                    ? "bold"
-                                    : undefined,
-                                }}
-                              >
-                                {n}
-                              </span>
-                            ))}
-                          </b>
-                        </td>
-                        <td style={{ textAlign: "right" }}>{c.score}</td>
-                        <td style={{ textAlign: "right" }}>{entropy}</td>
-                        <td style={{ textAlign: "right" }}>{hamming}</td>
-                        <td style={{ textAlign: "right" }}>{jaccard}</td>
-                        <td style={{ textAlign: "right" }}>
-                          {c.ogaScore !== undefined
-                            ? c.ogaScore.toFixed(2)
-                            : ""}
-                        </td>
-                        <td style={{ textAlign: "right" }}>
-                          {c.ogaPercentile !== undefined
-                            ? c.ogaPercentile.toFixed(1)
-                            : ""}
-                        </td>
-                        <td style={{ textAlign: "right" }}>{oddEven}</td>
-                        <td style={{ textAlign: "right" }}>
-                          {matchedCount} / {selectedNumbers.length}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-
-              {/* --- Number Frequency Table, sorted high to low --- */}
-              <div style={{ margin: "24px 0 10px 0" }}>
-                <b>
-                  Number Frequency in Generated Candidates (sorted high to low):
-                </b>
-                <div
-                  style={{
-                    display: "flex",
-                    flexWrap: "wrap",
-                    gap: 20,
-                    marginTop: 8,
-                  }}
-                >
-                  {(() => {
-                    const freqList =
-                      getCandidateNumberFrequencies(candidates);
-                    const columns = 5;
-                    const rows = Math.ceil(freqList.length / columns);
-
-                    const cols = Array.from({ length: columns }, (_, colIdx) =>
-                      freqList.slice(colIdx * rows, (colIdx + 1) * rows)
-                    );
-                    return (
-                      <div style={{ display: "flex", gap: 20 }}>
-                        {cols.map((col, colIdx) => (
-                          <table
-                            key={colIdx}
-                            style={{
-                              borderCollapse: "collapse",
-                              fontSize: 15,
-                              minWidth: 110,
-                              background: "#f6faff",
-                              border: "1px solid #e0e0e0",
-                            }}
-                          >
-                            <thead>
-                              <tr>
-                                <th style={{ padding: "2px 8px" }}>
-                                  Number
-                                </th>
-                                <th style={{ padding: "2px 8px" }}>
-                                  Count
-                                </th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {col.map(({ number, count }) => (
-                                <tr key={number}>
-                                  <td
-                                    style={{
-                                      padding: "2px 8px",
-                                      textAlign: "right",
-                                      fontWeight: "bold",
-                                      background: "#e3fcec",
-                                      borderRight: "2px solid #fff",
-                                    }}
-                                  >
-                                    <span
-                                      style={{
-                                        display: "inline-block",
-                                        minWidth: "32px",
-                                        fontWeight: "bold",
-                                        fontSize: "16px",
-                                        color: "#333",
-                                      }}
-                                    >
-                                      {number}
-                                    </span>
-                                  </td>
-                                  <td
-                                    style={{
-                                      padding: "2px 8px",
-                                      textAlign: "right",
-                                      background: "#dbeafe",
-                                      color: "#1976d2",
-                                      borderRadius: "7px",
-                                      fontWeight: 700,
-                                      fontSize: "15px",
-                                    }}
-                                  >
-                                    <span
-                                      style={{
-                                        background: "#fff",
-                                        padding: "2px 8px",
-                                        borderRadius: "6px",
-                                        border: "1px solid #90caf9",
-                                        color: "#1976d2",
-                                        fontWeight: 700,
-                                        minWidth: "28px",
-                                        display: "inline-block",
-                                      }}
-                                    >
-                                      {count}
-                                    </span>
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        ))}
-                      </div>
-                    );
-                  })()}
-                </div>
-                <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>
-                  Count = number of times each lottery number appears among all
-                  generated candidates (main + supp).
-                </div>
-              </div>
-            </>
-          )}
+<OperatorsPanel
+  entropy={entropyThreshold}
+  setEntropy={setEntropyThreshold}
+  entropyEnabled={entropyEnabled}
+  setEntropyEnabled={setEntropyEnabled}
+  hamming={hammingThreshold}
+  setHamming={setHammingThreshold}
+  hammingEnabled={hammingEnabled}
+  setHammingEnabled={setHammingEnabled}
+  jaccard={jaccardThreshold}
+  setJaccard={setJaccardThreshold}
+  jaccardEnabled={jaccardEnabled}
+  setJaccardEnabled={setJaccardEnabled}
+  lambda={lambda}
+  setLambda={setLambda}
+  minRecentMatches={minRecentMatches}
+  setMinRecentMatches={setMinRecentMatches}
+  recentMatchBias={recentMatchBias}
+  setRecentMatchBias={setRecentMatchBias}
+  previewStats={previewStats}
+  gpwfEnabled={gpwfEnabled}
+  setGPWFEnabled={setGPWFEnabled}
+  gpwf_window_size={gpwf_window_size}
+  setGPWFWindowSize={setGPWFWindowSize}
+  maxGPWFWindow={Math.min(maxGPWFWindow, filteredHistory.length)}
+  gpwf_bias_factor={gpwf_bias_factor}
+  setGPWFBiasFactor={setGPWFBiasFactor}
+  gpwf_floor={gpwf_floor}
+  setGPWFFloor={setGPWFFloor}
+  gpwf_scale_multiplier={gpwf_scale_multiplier}
+  setGPWFScaleMultiplier={setGPWFScaleMultiplier}
+  octagonal_top={octagonalTop}
+  setOctagonalTop={setOctagonalTop}
+/>
         </details>
-      </div>
 
-      {/* --------- Simulation Section --------- */}
-      <div style={{ margin: "22px 0" }}>
-        {candidates.length > 1 && (
-          <span style={{ marginRight: 12 }}>
-            Simulate using candidate:{" "}
-            <select
-              value={selectedCandidateIdx}
-              onChange={(e) =>
-                setSelectedCandidateIdx(Number(e.target.value))
-              }
-              style={{ fontSize: 15 }}
-            >
-              {candidates.map((c, i) => (
-                <option key={i} value={i}>
-                  {i + 1}
-                </option>
-              ))}
-            </select>
-          </span>
-        )}
-        <button
-          onClick={handleSimulateDraw}
-          disabled={!candidates[selectedCandidateIdx] || !!simulatedDraw}
-          style={{ marginRight: 12 }}
-        >
-          Simulate Draw (use candidate {selectedCandidateIdx + 1})
-        </button>
-        {simulatedDraw && (
-          <>
-            <span style={{ color: "#1976d2" }}>
-              Simulated draw shown in DGA grid.
-            </span>
+  {/* Trend Filter UI */}
+        <details open style={{ marginTop: 18 }}>
+          <summary><b>Trend Ratio Filter (UP / DOWN / FLAT)</b></summary>
+          <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 20, fontSize: 13 }}>
+            <label title="Lookback L draws">
+              Lookback L:
+              <input
+                type="number"
+                min={1}
+                max={20}
+                value={trendLookback}
+                onChange={e => setTrendLookback(Math.max(1, Number(e.target.value) || 1))}
+                style={{ width: 70, marginLeft: 6 }}
+              />
+            </label>
+              <label title="Slope threshold θ">
+              Threshold θ:
+              <input
+                type="number"
+                step={0.005}
+                min={0.001}
+                max={0.2}
+                value={trendThreshold}
+                onChange={e => setTrendThreshold(Math.max(0.0001, Number(e.target.value) || 0.02))}
+                style={{ width: 80, marginLeft: 6 }}
+              />
+            </label>
             <button
-              onClick={handleConfirmSimulatedDraw}
-              style={{ marginLeft: 16, marginRight: 8 }}
+              type="button"
+              onClick={() => setAllowedTrendRatios([])}
+              style={{ padding: "4px 10px", border: "1px solid #ccc", borderRadius: 4, background: "#fff", cursor: "pointer" }}
+              title="Clear all allowed ratios"
             >
-              Confirm Draw
+              Clear Ratios
             </button>
-            <button onClick={handleResetSimulatedDraw}>
-              Reset Simulation
-            </button>
-          </>
-        )}
-        {/* Remove Last Simulated Draw button */}
-        {history.length > 0 &&
-          (history as any)[history.length - 1].isSimulated && (
-            <button
-              onClick={() => {
-                setHistory(history.slice(0, -1));
-                setTrace((t) => [
-                  ...t,
-                  "[TRACE] Last simulated draw removed from history.",
-                ]);
-              }}
-              style={{ marginLeft: 12, color: "#c00" }}
-            >
-              Remove Last Simulated Draw
-            </button>
-          )}
-      </div>
-
-      {/* --------- Diamond Grid Visualization --------- */}
-      <details open style={{ marginTop: 18 }}>
-        <summary>
-          <b>Diamond Grid Analysis (DGA) – White Diamond Visualization</b>
-        </summary>
-        {highlightMsg && (
-          <div style={{ color: "#c00", marginBottom: 12 }}>
-            {highlightMsg}
           </div>
-        )}
-        {dgaGrid.length > 0 ? (
-          <DGAVisualizer
-            grid={dgaGrid}
-            diamonds={dgaDiamonds}
-            predictions={dgaPredictions}
-            drawLabels={dgaDrawLabels}
-            numberLabels={Array.from(
-              { length: 45 },
-              (_: unknown, i: number) => String(i + 1)
-            )}
-            numberCounts={numberCounts}
-            minCount={minCount}
-            maxCount={maxCount}
-            highlights={highlights}
-            setHighlights={setHighlights}
-          />
-        ) : (
-          <i>No grid data available.</i>
-        )}
-      </details>
+          <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {allTrendRatioOptions.map(tag => {
+              const sel = allowedTrendRatios.includes(tag);
+              return (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => toggleTrendRatio(tag)}
+                  style={{
+                    padding: "4px 8px",
+                    fontSize: 11,
+                    borderRadius: 4,
+                    border: sel ? "1px solid #1976d2" : "1px solid #bbb",
+                    background: sel ? "#1976d2" : "#fff",
+                    color: sel ? "#fff" : "#222",
+                    cursor: "pointer"
+                  }}
+                  title="Toggle allow ratio"
+                >
+                  {tag}
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ marginTop: 6, fontSize: 11, color: "#555" }}>
+            If no ratios are selected, trend filtering is disabled. A ratio is (#UP-#DOWN-#FLAT).
+          </div>
+        </details>
 
-      {/* --------- Trace Log --------- */}
-      <details style={{ marginTop: 14 }} open>
-        <summary>
-          <b>Trace Log</b>
-        </summary>
-        <pre style={{ background: "#fafafa", padding: 10, fontSize: 13 }}>
-          {trace.join("\n")}
-        </pre>
-      </details>
+<ParameterSearchPanel
+          userSelectedNumbers={userSelectedNumbers}
+          weightedTargets={weightedTargets}
+          forcedNumbers={trendSelectedNumbers}
+          excludedNumbers={excludedNumbers}
+          recentSignal={temperatureSignal}
+          conditionalProb={conditionalProb}
+          onAdoptParameters={p => setBatesParams(p)}
+          onProbabilityUpdate={p => setProbOverlay(p)}
+        />
 
-      {/* --------- Notes Section --------- */}
-      <div style={{ marginTop: 32, color: "#888", fontSize: 13 }}>
-        <b>Note:</b> SDE1 is enforced at pool level: candidate main numbers are
-        drawn only from numbers whose last digit does <b>not</b> appear more
-        than once in the most recent draw. The SDE1 exclusion is logged with
-        full diagnostics at the top of the trace. Also, candidates must now have
-        at least one pair of main numbers sharing the same second digit (hard
-        constraint).
-        <br />
-        <br />
-        <b>Diamond Grid Analysis (DGA):</b> This visualization shows all "white"
-        diamonds (of variable size) across the grid of recent draws and numbers,
-        and highlights the leading edge as predictions for the next draw. Each
-        number is colored distinctly. <br />
-        <span style={{ background: "#e6f7ff", padding: "1px 5px" }}>
-          Diamond
-        </span>{" "}
-        <span style={{ background: "#ffe58f", padding: "1px 5px" }}>
-          Prediction Edge
-        </span>{" "}
-        <span
-          style={{
-            display: "inline-block",
-            width: 16,
-            height: 12,
-            background: `rgba(0,0,255,0.25)`,
-            border: "1px solid #999",
-            marginLeft: 6,
-            marginRight: 2,
-            verticalAlign: "middle",
-          }}
-        />{" "}
-        Coldest{" "}
-        <span
-          style={{
-            display: "inline-block",
-            width: 16,
-            height: 12,
-            background: `rgba(255,0,0,0.7)`,
-            border: "1px solid #999",
-            marginLeft: 2,
-            marginRight: 2,
-            verticalAlign: "middle",
-          }}
-        />{" "}
-        Hottest
+        {/* Bates Panel with diagnostics hook */}
+        <BatesPanel
+          excludedNumbers={excludedNumbers}
+          forcedNumbers={trendSelectedNumbers}
+          recentSignal={temperatureSignal}
+          conditionalProb={conditionalProb}
+          controlledParams={batesParams}
+          onParamsChange={p => setBatesParams(p)}
+          probabilityOverlay={probOverlay}
+        />
+
+<WeightedTargetListPanel
+          userSelectedNumbers={userSelectedNumbers}
+          weightedTargets={weightedTargets}
+          setWeightedTargets={setWeightedTargets}
+        />
+
+        <ModulationDiagnosticsPanel
+          diagnostics={batesDiagnostics}
+          currentBatesParams={batesParams as any}
+        />
+
+        <UserSelectedNumbersPanel
+          userSelectedNumbers={userSelectedNumbers}
+          setUserSelectedNumbers={setUserSelectedNumbers}
+        />
+
+<RankingWeightsPanel weights={rankingWeights} setWeights={setRankingWeights} />
+
+        <GeneratedCandidatesPanel
+          onGenerate={handleGenerate}
+          candidates={candidates}
+          quotaWarning={quotaWarning}
+          isGenerating={isGenerating}
+          numCandidates={numCandidates}
+          setNumCandidates={setNumCandidates}
+          userSelectedNumbers={userSelectedNumbers}
+          setUserSelectedNumbers={setUserSelectedNumbers}
+          onSelectCandidate={setSelectedCandidateIdx}
+          onSimulateCandidate={handleSimulateCandidate}
+          selectedCandidateIdx={selectedCandidateIdx}
+          mostRecentDraw={filteredHistory[filteredHistory.length - 1] || null}
+          manualSimSelected={manualSimSelected}
+          setManualSimSelected={setManualSimSelected}
+          onManualSimulationChanged={handleManualSimChanged}
+        />
+
+{/* NEW: OGA Histogram */}
+<div style={{ width: "100%" }}>
+  <OGAHistogram
+    ogaScores={pastOGAScores}
+    candidateOGA={(currentCandidate as any)?.ogaScore}
+    candidatePercentile={(currentCandidate as any)?.ogaPercentile}
+  />
+</div>
       </div>
+
+      {/* DGA */}
+
+<details open style={{ marginTop: 18 }}>
+  <summary>
+    <b>Diamond Grid Analysis (DGA) – White Diamond Visualization</b>
+  </summary>
+
+<div style={{ width: "100%", marginTop: 8, marginBottom: 10 }}>
+  <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6 }}>
+    <h4 style={{ margin: 0 }}>Temperature Heatmap</h4>
+    <label style={{ fontSize: 13 }}>
+      Metric:
+      <select
+        value={tempMetric}
+        onChange={(e) => setTempMetric(e.target.value as any)}
+        style={{ marginLeft: 6 }}
+        title="EMA (momentum) • Recency (time since hit) • Hybrid (max of both)"
+      >
+        <option value="hybrid">Hybrid (EMA ⊕ Recency)</option>
+        <option value="ema">EMA only</option>
+        <option value="recency">Recency only</option>
+      </select>
+    </label>
+  </div>
+<div style={{ width: "100%", marginTop: 8, marginBottom: 10 }}>
+  {/* existing TemperatureHeatmap block */}
+  <DroughtHazardPanel history={filteredHistory} top={12} title="Most likely to break a drought next draw" />
+</div>
+
+<TemperatureHeatmap
+  history={filteredHistory}
+  alpha={0.25}
+  cellSize={DGA_CELL_SIZE}
+  metric={tempMetric}
+  buckets={10}
+  bucketStops={[0.05, 0.12, 0.20, 0.30, 0.42, 0.55, 0.68, 0.82, 0.92]}
+  bucketLabels={[
+    "prehistoric","frozen","permafrost","cold","cool",
+    "temperate","warm","hot","tropical","volcanic"
+  ]}
+  hybridWeight={0.6}
+  emaNormalize="per-number"
+  enforcePeaks={true}
+  onHoverNumber={setFocusNumber}
+  showLegendCounts={true}
+  overlayNumbers={overlayNumbers} // <-- this is required for white dots
+/>
+</div>
+
+  {highlightMsg && (
+    <div style={{ color: "#c00", marginBottom: 12 }}>{highlightMsg}</div>
+  )}
+<div style={{ marginTop: 8 }}>
+    <b>User Exclusions (quick access):</b>
+    <div
+      style={{
+        display: "flex",
+        gap: 8,
+        overflowX: "auto",
+        whiteSpace: "nowrap",
+        paddingTop: 6,
+        paddingBottom: 4,
+        borderTop: "1px dashed #ddd",
+        marginTop: 6
+      }}
+    >
+      {Array.from({ length: 45 }, (_, i) => i + 1).map((n) => {
+        const checked = excludedNumbers.includes(n);
+        return (
+          <label
+            key={`ux2-${n}`}
+            style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", minWidth: 28 }}
+            title={`Exclude ${n}`}
+          >
+            <input
+              type="checkbox"
+              checked={checked}
+              onChange={() => {
+                setExcludedNumbers((prev) =>
+                  prev.includes(n) ? prev.filter((x) => x !== n) : [...prev, n]
+                );
+              }}
+            />
+            <span style={{ fontSize: 11, marginTop: 2 }}>{n}</span>
+          </label>
+        );
+      })}
+    </div>
+  </div>
+  {dgaGrid.length > 0 ? (
+
+
+    <DGAVisualizer
+      grid={dgaGrid}
+      diamonds={dgaDiamonds}
+      predictions={dgaPredictions}
+      drawLabels={dgaDrawLabels}
+      numberLabels={Array.from({ length: 45 }, (_, i) => String(i + 1))}
+      numberCounts={numberCounts}
+      minCount={minCount}
+      maxCount={maxCount}
+      highlights={highlights}
+      setHighlights={setHighlights}
+      controlsPosition="below"
+  focusNumber={focusNumber}
+    />
+  ) : (
+    <i>No grid data available.</i>
+  )}
+</details>
+<TracePanel lines={trace} onClear={() => setTrace([])} />
     </div>
   );
 };

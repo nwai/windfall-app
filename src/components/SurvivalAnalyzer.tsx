@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { Draw } from "../types";
 import {
   buildGPWFNumberWeights,
@@ -7,14 +7,15 @@ import {
   combinePerNumberWeights,
 } from "../lib/numberBiases";
 
-// Helper: for a given number, build draw-wise event log (1 if drawn, 0 if not, for each draw)
+/**
+ * Helper utilities (top-level) for survival analysis
+ */
 function buildEventLog(history: Draw[], number: number) {
-  return history.map(draw =>
-    (draw.main.includes(number) || draw.supp.includes(number)) ? 1 : 0
+  return history.map((draw) =>
+    draw.main.includes(number) || draw.supp.includes(number) ? 1 : 0
   );
 }
 
-// Compute time-to-event per number, and right-censoring if never drawn in window
 function buildSurvivalData(history: Draw[], number: number) {
   const events = buildEventLog(history, number);
   let times: number[] = [];
@@ -27,7 +28,6 @@ function buildSurvivalData(history: Draw[], number: number) {
       current = 0;
     }
   }
-  // If number not drawn in the window, treat as censored at window length
   if (current > 0) {
     times.push(current);
     censored = true;
@@ -35,8 +35,7 @@ function buildSurvivalData(history: Draw[], number: number) {
   return { times, censored };
 }
 
-// Kaplan-Meier estimator for a single number
-function kaplanMeier(times: number[], window: number) {
+function kaplanMeier(times: number[], _window: number) {
   let n = times.length;
   let surv = 1.0;
   let km: number[] = [1.0];
@@ -45,109 +44,166 @@ function kaplanMeier(times: number[], window: number) {
   for (let i = 0; i < sorted.length; ++i) {
     let t = sorted[i];
     if (t === last) continue;
+    // single-event decrement
     surv *= (n - 1) / n;
     km.push(surv);
     n--;
     last = t;
   }
-  // Probability of appearance in next draw is the first drop in survival curve
   return { curve: km, probNext: 1 - (km[1] ?? 1) };
 }
-
 export const SurvivalAnalyzer: React.FC<{
   history: Draw[];
   excludedNumbers: number[];
-  defaultWindow?: number;
   probabilityHeading?: string;
-  // New: external trend weights (Δ 14→30)
   trendWeights?: Record<number, number>;
+  externalWindowSize?: number;
+  enableSDE1Global?: boolean;
+  enableHC3Global?: boolean;
+  hideBiasToggles?: boolean;
+  forcedNumbers?: number[];
+  selectedCheckNumbers?: number[];
+  focusNumber?: number | null; // NEW
 }> = ({
   history,
   excludedNumbers,
-  defaultWindow = 20,
   probabilityHeading,
   trendWeights,
+  externalWindowSize,
+  enableSDE1Global,
+  enableHC3Global,
+  hideBiasToggles = true,
+  forcedNumbers = [],
+  selectedCheckNumbers = [],
+  focusNumber = null, // NEW
 }) => {
-  const [windowSize, setWindowSize] = useState<number>(defaultWindow);
-  const [customMode, setCustomMode] = useState<boolean>(false);
-  const [pendingWindow, setPendingWindow] = useState<number>(defaultWindow);
+  const windowDefault = externalWindowSize ?? 20;
+  const [windowSize, setWindowSize] = useState<number>(windowDefault);
   const [results, setResults] = useState<any[] | null>(null);
   const [isRunning, setIsRunning] = useState<boolean>(false);
 
-  // Bias toggles + gamma
+  // Bias controls (local)
   const [useTrendBias, setUseTrendBias] = useState<boolean>(true);
   const [useGPWF, setUseGPWF] = useState<boolean>(false);
   const [useHC3Bias, setUseHC3Bias] = useState<boolean>(true);
   const [useSDE1Bias, setUseSDE1Bias] = useState<boolean>(false);
   const [gamma, setGamma] = useState<number>(0.7);
 
-  // Sort control
+  // Optional custom trend window (derive alt weights)
+  const [useCustomTrendWindow, setUseCustomTrendWindow] = useState<boolean>(false);
+  const [trendFrom, setTrendFrom] = useState<number>(14);
+  const [trendTo, setTrendTo] = useState<number>(30);
+
   const [sortBy, setSortBy] = useState<"biased" | "base" | "number">("biased");
 
-  // Defensive: don't analyze if not enough draws
-  const canRun = windowSize > 2 && windowSize <= history.length;
-  const canCustomRun = pendingWindow > 2 && pendingWindow <= history.length;
+// Enforce valid [from, to]
+useEffect(() => {
+  if (trendFrom >= trendTo) {
+    setTrendTo(Math.min(history.length, trendFrom + 1));
+  }
+}, [trendFrom, trendTo, history.length]);
 
-  // Use only the N most recent draws
-  const recent = useMemo(
-    () => history.slice(-windowSize),
-    [history, windowSize]
-  );
+  // Keep window locked to external, if provided
+  useEffect(() => {
+    if (externalWindowSize && externalWindowSize !== windowSize) {
+      setWindowSize(externalWindowSize);
+    }
+  }, [externalWindowSize, windowSize]);
 
-  // Compute survival stats for all numbers 1–45
-  const computeStats = (recentDraws: Draw[]) => {
-    return Array.from({ length: 45 }, (_, i) => {
-      const n = i + 1;
-      if (excludedNumbers.includes(n))
-        return { number: n, probNext: 0, times: [], censored: true, lastSeen: null };
-      const { times, censored } = buildSurvivalData(recentDraws, n);
-      const { probNext } = kaplanMeier(times, recentDraws.length);
-      // Most recent draw where n appeared
-      let lastSeen = null;
-      for (let j = recentDraws.length - 1; j >= 0; --j) {
-        if (recentDraws[j].main.includes(n) || recentDraws[j].supp.includes(n)) {
-          lastSeen = recentDraws.length - j;
-          break;
-        }
-      }
-      return { number: n, probNext, times, censored, lastSeen };
-    });
-  };
+  const canRun = windowSize >= 2 && windowSize <= history.length;
+  const recent = useMemo(() => history.slice(-windowSize), [history, windowSize]);
 
-  // Initial and whenever windowSize changes (but not in custom mode)
-  React.useEffect(() => {
-    if (!canRun || customMode) return;
+  // Compute base stats per number
+  useEffect(() => {
+    if (!canRun) {
+      setResults(null);
+      return;
+    }
     setIsRunning(true);
     setTimeout(() => {
-      setResults(computeStats(recent));
+      const computed = Array.from({ length: 45 }, (_, i) => {
+        const n = i + 1;
+        if (excludedNumbers.includes(n)) {
+          return {
+            number: n,
+            probNext: 0,
+            lastSeen: null,
+          };
+        }
+        const { times } = buildSurvivalData(recent, n);
+        const { probNext } = kaplanMeier(times, recent.length);
+        let lastSeen: number | null = null;
+        for (let j = recent.length - 1; j >= 0; --j) {
+          if (recent[j].main.includes(n) || recent[j].supp.includes(n)) {
+            lastSeen = recent.length - j;
+            break;
+          }
+        }
+        return { number: n, probNext, lastSeen };
+      });
+      setResults(computed);
       setIsRunning(false);
     }, 0);
-    // eslint-disable-next-line
-  }, [windowSize, excludedNumbers, history, customMode]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [windowSize, excludedNumbers, history]);
 
-  // Build per-number bias maps
-  const gpwfWeights = useMemo(
-    () => buildGPWFNumberWeights(recent),
-    [recent]
-  );
-  const hc3Weights = useMemo(
-    () => buildHC3PenaltyWeights(history),
-    [history]
-  );
-  const sde1Weights = useMemo(
-    () => buildSDE1PenaltyWeights(history),
-    [history]
-  );
+  // Build bias maps
+  const gpwfWeights = useMemo(() => buildGPWFNumberWeights(recent), [recent]);
+  const hc3Weights = useMemo(() => buildHC3PenaltyWeights(history), [history]);
+  const sde1Weights = useMemo(() => buildSDE1PenaltyWeights(history), [history]);
+
+  // Optionally derive a custom trend weights slice
+  const customTrendWeights = useMemo(() => {
+    if (!useCustomTrendWindow) return undefined;
+    const to = Math.max(1, Math.min(trendTo, history.length));
+    const from = Math.max(0, Math.min(trendFrom, to - 1));
+    const hiSlice = history.slice(-to);
+    const loSlice = history.slice(-from);
+    const count = (arr: Draw[], n: number) =>
+      arr.reduce(
+        (acc, d) => acc + (d.main.includes(n) || d.supp.includes(n) ? 1 : 0),
+        0
+      );
+    const w: Record<number, number> = {};
+    for (let n = 1; n <= 45; n++) {
+      const v = count(hiSlice, n) - count(loSlice, n);
+      w[n] = Math.max(0, v + 1); // keep positive
+    }
+    return w;
+  }, [useCustomTrendWindow, trendFrom, trendTo, history]);
+
   const combinedBiasWeights = useMemo(() => {
+    const trend = useTrendBias
+      ? customTrendWeights ?? trendWeights ?? undefined
+      : undefined;
     return combinePerNumberWeights(
-      useTrendBias ? (trendWeights ?? undefined) : undefined,
+      trend,
       useGPWF ? gpwfWeights : undefined,
-      useHC3Bias ? hc3Weights : undefined,
-      useSDE1Bias ? sde1Weights : undefined
+      (enableHC3Global ?? false)
+        ? hc3Weights
+        : useHC3Bias
+        ? hc3Weights
+        : undefined,
+      (enableSDE1Global ?? false)
+        ? sde1Weights
+        : useSDE1Bias
+        ? sde1Weights
+        : undefined
     );
-  }, [useTrendBias, useGPWF, useHC3Bias, useSDE1Bias, trendWeights, gpwfWeights, hc3Weights, sde1Weights]);
+  }, [
+    useTrendBias,
+    useGPWF,
+    useHC3Bias,
+    useSDE1Bias,
+    trendWeights,
+    customTrendWeights,
+    gpwfWeights,
+    hc3Weights,
+    sde1Weights,
+    enableHC3Global,
+    enableSDE1Global,
+  ]);
 
-  // Enrich with biased probabilities and sort
   const enriched = useMemo(() => {
     if (!results) return [];
     return results.map((r) => {
@@ -159,81 +215,134 @@ export const SurvivalAnalyzer: React.FC<{
 
   const sortedStats = useMemo(() => {
     const arr = enriched.slice();
-    if (sortBy === "biased") arr.sort((a, b) => b.biasedProb - a.biasedProb || a.number - b.number);
-    else if (sortBy === "base") arr.sort((a, b) => b.baseProb - a.baseProb || a.number - b.number);
+    if (sortBy === "biased")
+      arr.sort((a, b) => b.biasedProb - a.biasedProb || a.number - b.number);
+    else if (sortBy === "base")
+      arr.sort((a, b) => b.baseProb - a.baseProb || a.number - b.number);
     else arr.sort((a, b) => a.number - b.number);
     return arr;
   }, [enriched, sortBy]);
 
-  const presetOptions = [5, 10, 15, 20, 30, 45].filter(n => n <= history.length);
-
-  const handleCustomRun = () => {
-    setIsRunning(true);
-    setWindowSize(pendingWindow);
-    setTimeout(() => {
-      setResults(computeStats(history.slice(-pendingWindow)));
-      setIsRunning(false);
-    }, 0);
-  };
-
-  // Prepare columns for 3-column display of all 45 numbers
-  const numCols = 3;
-  const rowsPerCol = 15;
-  const columns = Array.from({ length: numCols }, (_, colIdx) =>
-    sortedStats.slice(colIdx * rowsPerCol, (colIdx + 1) * rowsPerCol)
-  );
+  // Split into 3 columns
+  const columns = useMemo(() => {
+    const numCols = 3;
+    const rowsPerCol = Math.ceil(sortedStats.length / numCols) || 15;
+    return Array.from({ length: numCols }, (_, colIdx) =>
+      sortedStats.slice(colIdx * rowsPerCol, (colIdx + 1) * rowsPerCol)
+    );
+  }, [sortedStats]);
 
   return (
-    <section style={{
-      border: "2px solid #00bcd4",
-      borderRadius: 8,
-      padding: 24,
-      margin: "24px 0",
-      background: "#e0f7fa"
-    }}>
+    <section
+      style={{
+        border: "2px solid #00bcd4",
+        borderRadius: 8,
+        padding: 24,
+        margin: "24px 0",
+        background: "#e0f7fa",
+      }}
+    >
       <h3>Survival Analysis: Time-to-Event Probability</h3>
-      <div style={{ marginBottom: 10 }}>
-        <label>
-          <b>Draws to analyze:</b>{" "}
-          <select
-            value={customMode ? "custom" : windowSize}
-            onChange={e => {
-              if (e.target.value === "custom") {
-                setCustomMode(true);
-                setPendingWindow(windowSize);
-              } else {
-                setCustomMode(false);
-                setWindowSize(Number(e.target.value));
-              }
+
+      {/* Global badges + context */}
+      <div
+        style={{
+          marginBottom: 8,
+          display: "flex",
+          gap: 10,
+          flexWrap: "wrap",
+          alignItems: "center",
+        }}
+      >
+        {(enableSDE1Global ?? false) ? (
+          <span
+            style={{
+              background: "#ffe6cc",
+              color: "#a04c00",
+              padding: "2px 8px",
+              borderRadius: 4,
+              fontSize: 12,
+              fontWeight: 600,
             }}
-            style={{ fontSize: 15, marginRight: 10 }}
           >
-            {presetOptions.map(n =>
-              <option key={n} value={n}>{n} most recent</option>
-            )}
-            <option key="custom" value="custom">Custom…</option>
-          </select>
-          {customMode && (
-            <>
-              <input
-                type="number"
-                value={pendingWindow}
-                min={3}
-                max={history.length}
-                onChange={e => setPendingWindow(Number(e.target.value))}
-                style={{ width: 70, marginLeft: 8 }}
-                placeholder="Custom"
-              />
-              <button
-                style={{ marginLeft: 10, fontWeight: 600, background: "#00bcd4", color: "#fff", border: "none", borderRadius: 3, padding: "4px 10px", cursor: canCustomRun && !isRunning ? "pointer" : "not-allowed", opacity: canCustomRun && !isRunning ? 1 : 0.5 }}
-                disabled={!canCustomRun || isRunning}
-                onClick={handleCustomRun}
-              >
-                {isRunning ? "Running..." : "Run Survival Analysis"}
-              </button>
-            </>
+            SDE1 Active
+          </span>
+        ) : (
+          <span
+            style={{
+              background: "#f2f2f2",
+              color: "#555",
+              padding: "2px 8px",
+              borderRadius: 4,
+              fontSize: 12,
+              fontWeight: 600,
+            }}
+          >
+            SDE1 Off
+          </span>
+        )}
+        {(enableHC3Global ?? false) ? (
+          <span
+            style={{
+              background: "#e8f5e9",
+              color: "#2e7d32",
+              padding: "2px 8px",
+              borderRadius: 4,
+              fontSize: 12,
+              fontWeight: 600,
+            }}
+          >
+            HC3 Active
+          </span>
+        ) : (
+          <span
+            style={{
+              background: "#f2f2f2",
+              color: "#555",
+              padding: "2px 8px",
+              borderRadius: 4,
+              fontSize: 12,
+              fontWeight: 600,
+            }}
+          >
+            HC3 Off
+          </span>
+        )}
+
+        <span style={{ marginLeft: "auto", fontSize: 12 }}>
+          <b>Excluded:</b>{" "}
+          {excludedNumbers.length ? (
+            excludedNumbers.join(", ")
+          ) : (
+            <span style={{ color: "#888" }}>none</span>
           )}
-        </label>
+          {"   "}
+          <b>Forced:</b>{" "}
+          {forcedNumbers.length ? (
+            forcedNumbers.join(", ")
+          ) : (
+            <span style={{ color: "#888" }}>none</span>
+          )}
+          {"   "}
+          <b>Selected:</b>{" "}
+          {selectedCheckNumbers.length ? (
+            selectedCheckNumbers.join(", ")
+          ) : (
+            <span style={{ color: "#888" }}>none</span>
+          )}
+        </span>
+      </div>
+
+      {/* Locked window display */}
+      <div style={{ marginBottom: 10 }}>
+        <b>Draws to analyze:</b>{" "}
+        {externalWindowSize ? (
+          <span style={{ fontWeight: 600 }}>
+            {externalWindowSize} (locked by WFMQY)
+          </span>
+        ) : (
+          <span>{windowSize}</span>
+        )}
       </div>
 
       {/* Biases */}
@@ -258,35 +367,82 @@ export const SurvivalAnalyzer: React.FC<{
             onChange={(e) => setUseTrendBias(e.target.checked)}
             style={{ marginRight: 6 }}
           />
-          Trends (Δ 14→30)
+          Trend
         </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={useGPWF}
-            onChange={(e) => setUseGPWF(e.target.checked)}
-            style={{ marginRight: 6 }}
-          />
-          GPWF (recent freq)
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={useHC3Bias}
-            onChange={(e) => setUseHC3Bias(e.target.checked)}
-            style={{ marginRight: 6 }}
-          />
-          HC3 (last 2 draws)
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={useSDE1Bias}
-            onChange={(e) => setUseSDE1Bias(e.target.checked)}
-            style={{ marginRight: 6 }}
-          />
-          SDE1 (last-digit dupes)
-        </label>
+
+        <label title="Enable custom trend window (from..to draws)">
+  <input
+    type="checkbox"
+    checked={useCustomTrendWindow}
+    onChange={(e) => setUseCustomTrendWindow(e.target.checked)}
+    style={{ marginRight: 6 }}
+  />
+  Custom Window
+</label>
+<span style={{ opacity: useCustomTrendWindow ? 1 : 0.4, display: "inline-flex", gap: 6, alignItems: "center" }}>
+  <input
+    type="number"
+    min={1}
+    max={history.length}
+    value={trendFrom}
+    onChange={(e) => setTrendFrom(Number(e.target.value))}
+    style={{ width: 60 }}
+    title="From (older)"
+  />
+  →
+  <input
+    type="number"
+    min={Math.max(2, trendFrom + 1)}
+    max={history.length}
+    value={trendTo}
+    onChange={(e) => setTrendTo(Number(e.target.value))}
+    style={{ width: 60 }}
+    title="To (most recent)"
+  />
+  {/* Quick presets */}
+  <span style={{ display: "inline-flex", gap: 6 }}>
+    <button type="button" onClick={() => { setUseCustomTrendWindow(true); setTrendFrom(3); setTrendTo(11); }} style={{ fontSize: 12 }}>3→11</button>
+    <button type="button" onClick={() => { setUseCustomTrendWindow(true); setTrendFrom(6); setTrendTo(9); }} style={{ fontSize: 12 }}>6→9</button>
+    <button type="button" onClick={() => { setUseCustomTrendWindow(true); setTrendFrom(11); setTrendTo(13); }} style={{ fontSize: 12 }}>11→13</button>
+  </span>
+</span>
+
+        {!hideBiasToggles && (
+          <>
+            <label>
+              <input
+                type="checkbox"
+                checked={useGPWF}
+                onChange={(e) => setUseGPWF(e.target.checked)}
+                style={{ marginRight: 6 }}
+              />
+              GPWF
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={enableHC3Global ? true : useHC3Bias}
+                onChange={(e) => setUseHC3Bias(e.target.checked)}
+                style={{ marginRight: 6 }}
+                disabled={enableHC3Global}
+                title={enableHC3Global ? "Controlled by WFMQY" : ""}
+              />
+              HC3
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={enableSDE1Global ? true : useSDE1Bias}
+                onChange={(e) => setUseSDE1Bias(e.target.checked)}
+                style={{ marginRight: 6 }}
+                disabled={enableSDE1Global}
+                title={enableSDE1Global ? "Controlled by WFMQY" : ""}
+              />
+              SDE1
+            </label>
+          </>
+        )}
+
         <span style={{ marginLeft: 8 }}>
           <b>Gamma:</b>{" "}
           <input
@@ -297,12 +453,15 @@ export const SurvivalAnalyzer: React.FC<{
             value={gamma}
             onChange={(e) => setGamma(Number(e.target.value))}
             style={{ width: 70 }}
-            title="Exponent for bias strength: Biased = Base × weight^gamma"
           />
         </span>
         <span style={{ marginLeft: "auto" }}>
           <b>Sort by:</b>{" "}
-          <select value={sortBy} onChange={(e) => setSortBy(e.target.value as any)} style={{ fontSize: 14 }}>
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as any)}
+            style={{ fontSize: 14 }}
+          >
             <option value="biased">Biased Prob</option>
             <option value="base">Base Prob</option>
             <option value="number">Number</option>
@@ -310,15 +469,20 @@ export const SurvivalAnalyzer: React.FC<{
         </span>
       </div>
 
-      <div style={{ marginBottom: 8 }}>
-        <b>Excluded numbers:</b>{" "}
-        {excludedNumbers.length === 0 ? <span style={{ color: '#888' }}>none</span> :
-          excludedNumbers.join(", ")}
-      </div>
       {canRun && results ? (
         <div>
-          <h4>{probabilityHeading ?? "Probability of Appearance in Next Draw (Per Number):"}</h4>
-          <div style={{ display: "flex", gap: 28, marginTop: 18 }}>
+          <h4>
+            {probabilityHeading ??
+              "Probability of Appearance in Next Draw (Per Number):"}
+          </h4>
+          <div
+            style={{
+              display: "flex",
+              gap: 28,
+              marginTop: 18,
+              flexWrap: "wrap",
+            }}
+          >
             {columns.map((col, colIdx) => (
               <table
                 key={colIdx}
@@ -333,26 +497,53 @@ export const SurvivalAnalyzer: React.FC<{
                 <thead>
                   <tr>
                     <th style={{ textAlign: "left", padding: "2px 8px" }}>#</th>
-                    <th style={{ textAlign: "left", padding: "2px 8px" }}>Number</th>
-                    <th style={{ textAlign: "right", padding: "2px 8px" }}>Base</th>
-                    <th style={{ textAlign: "right", padding: "2px 8px" }}>Biased</th>
-                    <th style={{ textAlign: "right", padding: "2px 8px" }}>Last Seen</th>
+                    <th style={{ textAlign: "left", padding: "2px 8px" }}>
+                      Number
+                    </th>
+                    <th style={{ textAlign: "right", padding: "2px 8px" }}>
+                      Base
+                    </th>
+                    <th style={{ textAlign: "right", padding: "2px 8px" }}>
+                      Biased
+                    </th>
+                    <th style={{ textAlign: "right", padding: "2px 8px" }}>
+                      Last Seen
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {col.map((res: any, i: number) => (
-                    <tr key={res.number}>
-                      <td style={{ padding: "2px 8px", color: "#1976d2" }}>{colIdx * rowsPerCol + i + 1}</td>
+                    <tr
+  key={res.number}
+  style={res.number === focusNumber ? { background: "#FFF9C4" } : undefined}
+>
+                      <td style={{ padding: "2px 8px", color: "#1976d2" }}>
+                        {colIdx * Math.ceil(sortedStats.length / 3) + i + 1}
+                      </td>
                       <td style={{ padding: "2px 8px" }}>
                         <b>{res.number}</b>
                       </td>
-                      <td style={{ padding: "2px 8px", textAlign: "right" }}>
+                      <td
+                        style={{
+                          padding: "2px 8px",
+                          textAlign: "right",
+                        }}
+                      >
                         {(res.baseProb * 100).toFixed(2)}%
                       </td>
-                      <td style={{ padding: "2px 8px", textAlign: "right", color: "#00796b", fontWeight: 700 }}>
+                      <td
+                        style={{
+                          padding: "2px 8px",
+                          textAlign: "right",
+                          color: "#00796b",
+                          fontWeight: 700,
+                        }}
+                      >
                         {(res.biasedProb * 100).toFixed(2)}%
                       </td>
-                      <td style={{ padding: "2px 8px", textAlign: "right" }}>
+                      <td
+                        style={{ padding: "2px 8px", textAlign: "right" }}
+                      >
                         {res.lastSeen ? `${res.lastSeen} draws ago` : "Never"}
                       </td>
                     </tr>
@@ -362,7 +553,8 @@ export const SurvivalAnalyzer: React.FC<{
             ))}
           </div>
           <div style={{ fontSize: 12, color: "#888", marginTop: 8 }}>
-            Base = Kaplan–Meier probability. Biased = Base × weight^gamma using enabled per-number biases.
+            Base = Kaplan–Meier probability. Biased = Base × weight^gamma using
+            enabled per-number biases.
           </div>
         </div>
       ) : (
@@ -370,4 +562,4 @@ export const SurvivalAnalyzer: React.FC<{
       )}
     </section>
   );
-};
+}

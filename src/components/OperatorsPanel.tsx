@@ -2,59 +2,51 @@ import React from "react";
 import { OperatorSlider } from "./OperatorSlider";
 import { OperatorsPanelProps } from "../types";
 
-export function OperatorsPanel({
-  entropy,
-  setEntropy,
-  entropyEnabled,
-  setEntropyEnabled,
-  hamming,
-  setHamming,
-  hammingEnabled,
-  setHammingEnabled,
-  jaccard,
-  setJaccard,
-  jaccardEnabled,
-  setJaccardEnabled,
-  lambda,
-  setLambda,
-  minRecentMatches,
-  setMinRecentMatches,
-  recentMatchBias,
-  setRecentMatchBias,
-  previewStats,
-  gpwfEnabled,
-  setGPWFEnabled,
-  gpwf_window_size,
-  setGPWFWindowSize,
-  maxGPWFWindow,
-  gpwf_bias_factor,
-  setGPWFBiasFactor,
-  gpwf_floor,
-  setGPWFFloor,
-  gpwf_scale_multiplier,
-  setGPWFScaleMultiplier,
-  mcLayout,
-  setMcLayout,
-  mcColumns,
-  setMcColumns,
-}: OperatorsPanelProps) {
+export function OperatorsPanel(props: OperatorsPanelProps) {
+  const {
+    entropy, setEntropy, entropyEnabled, setEntropyEnabled,
+    hamming, setHamming, hammingEnabled, setHammingEnabled,
+    jaccard, setJaccard, jaccardEnabled, setJaccardEnabled,
+    lambda, setLambda,
+    minRecentMatches, setMinRecentMatches,
+    recentMatchBias, setRecentMatchBias,
+    previewStats,
+    gpwfEnabled, setGPWFEnabled,
+    gpwf_window_size, setGPWFWindowSize, maxGPWFWindow,
+    gpwf_bias_factor, setGPWFBiasFactor,
+    gpwf_floor, setGPWFFloor,
+    gpwf_scale_multiplier, setGPWFScaleMultiplier,
+    octagonal_top, setOctagonalTop,
+  } = props;
+
   return (
-    <section style={{
-      border: "1px solid #eee",
-      borderRadius: 8,
-      padding: 24,
-      margin: "24px 0",
-      background: "#fafcff"
-    }}>
-      <div style={{ display: "flex", gap: 30 }}>
-        {/* Column 1: Entropy, Hamming, Jaccard */}
-        <div style={{ flex: 1 }}>
-          <div style={{ marginBottom: 10 }}>
+    <section
+      style={{
+        border: "1px solid #eee",
+        borderRadius: 8,
+        padding: 24,
+        margin: "24px 0",
+        background: "#fafcff",
+    width: "100%",
+      }}
+    >
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(3, minmax(280px, 1fr))",
+          gap: 30,
+          paddingLeft: 8,
+          paddingRight: 8,
+        }}
+      >
+        {/* Column 1 */}
+        <div>
+          <div style={{ padding: 8, boxSizing: "border-box" }}>
             <label>
               <input
                 type="checkbox"
                 checked={entropyEnabled}
-                onChange={e => setEntropyEnabled(e.target.checked)}
+                onChange={(e) => setEntropyEnabled(e.target.checked)}
                 style={{ marginRight: 7 }}
               />
               <b>Entropy Threshold</b>
@@ -67,21 +59,22 @@ export function OperatorsPanel({
             step={0.01}
             value={entropy}
             onChange={setEntropy}
-            tooltip="Normalized Shannon entropy (0..1) over 8 spokes; higher = more evenly spread across the board."
+            tooltip="Normalized Shannon entropy (0..1). Higher = more even spread."
             marks={[
               { value: 0, label: "Clustered" },
               { value: 0.5, label: "Balanced" },
-              { value: 1, label: "Spread" }
+              { value: 1, label: "Spread" },
             ]}
             preview={`${previewStats.entropy}/100 candidates pass`}
             disabled={!entropyEnabled}
           />
-          <div style={{ marginBottom: 10 }}>
+
+          <div style={{ padding: 8, boxSizing: "border-box" }}>
             <label>
               <input
                 type="checkbox"
                 checked={hammingEnabled}
-                onChange={e => setHammingEnabled(e.target.checked)}
+                onChange={(e) => setHammingEnabled(e.target.checked)}
                 style={{ marginRight: 7 }}
               />
               <b>Hamming Distance</b>
@@ -94,21 +87,22 @@ export function OperatorsPanel({
             step={1}
             value={hamming}
             onChange={setHamming}
-            tooltip="Set-based distance from history: 6 − overlap with any past main draw. Higher values enforce novelty."
+            tooltip="6 − overlap with any past main draw (enforces novelty)."
             marks={[
               { value: 0, label: "Allow repeats" },
               { value: 3, label: "Balanced" },
-              { value: 6, label: "Very Novel" }
+              { value: 6, label: "Very Novel" },
             ]}
             preview={`${previewStats.hamming}/100 candidates pass`}
             disabled={!hammingEnabled}
           />
-          <div style={{ marginBottom: 10 }}>
+
+          <div style={{ padding: 8, boxSizing: "border-box" }}>
             <label>
               <input
                 type="checkbox"
                 checked={jaccardEnabled}
-                onChange={e => setJaccardEnabled(e.target.checked)}
+                onChange={(e) => setJaccardEnabled(e.target.checked)}
                 style={{ marginRight: 7 }}
               />
               <b>Jaccard Threshold</b>
@@ -121,18 +115,19 @@ export function OperatorsPanel({
             step={0.01}
             value={jaccard}
             onChange={setJaccard}
-            tooltip="Maximum allowed similarity (main-only) with any past draw. Lower = more unique."
+            tooltip="Max similarity (main-only) with any past draw."
             marks={[
               { value: 0, label: "Unique" },
               { value: 0.5, label: "Balanced" },
-              { value: 1, label: "Copycats" }
+              { value: 1, label: "Copycats" },
             ]}
             preview={`${previewStats.jaccard}/100 candidates pass`}
             disabled={!jaccardEnabled}
           />
         </div>
-        {/* Column 2 and 3 unchanged */}
-        <div style={{ flex: 1 }}>
+
+        {/* Column 2 */}
+        <div>
           <OperatorSlider
             label="Lambda (Recency Weight)"
             min={0.2}
@@ -140,11 +135,11 @@ export function OperatorsPanel({
             step={0.01}
             value={lambda}
             onChange={setLambda}
-            tooltip="Controls how much recent draws influence analytics. Right = only recent draws matter, Left = full history matters."
+            tooltip="Shift influence toward recent draws."
             marks={[
               { value: 0.2, label: "Oldest matter" },
               { value: 0.6, label: "Balanced" },
-              { value: 0.99, label: "Recent only" }
+              { value: 0.99, label: "Recent only" },
             ]}
             preview={null}
           />
@@ -155,13 +150,17 @@ export function OperatorsPanel({
             step={1}
             value={minRecentMatches}
             onChange={setMinRecentMatches}
-            tooltip="Minimum numbers in candidate that must match the most recent draw. 0 = no requirement."
+            tooltip="Require at least N matches with the most recent draw."
             marks={[
-              { value: 0, label: "No requirement" },
+              { value: 0, label: "None" },
               { value: 4, label: "4+" },
-              { value: 8, label: "All match" }
+              { value: 8, label: "All" },
             ]}
-            preview={minRecentMatches === 0 ? "No filter" : `≥${minRecentMatches} match recent`}
+            preview={
+              minRecentMatches === 0
+                ? "No filter"
+                : `≥${minRecentMatches} match recent`
+            }
           />
           <OperatorSlider
             label="Recent Match Bias"
@@ -170,22 +169,26 @@ export function OperatorsPanel({
             step={0.05}
             value={recentMatchBias}
             onChange={setRecentMatchBias}
-            tooltip="Bias toward candidates with more numbers matching the most recent draw. 0 = off, 1 = only candidates with all numbers matching will always pass."
+            tooltip="Bias acceptance probability toward recent-draw matches."
             marks={[
               { value: 0, label: "Off" },
-              { value: 0.5, label: "Medium" },
-              { value: 1, label: "Strong" }
+              { value: 0.5, label: "Mid" },
+              { value: 1, label: "Strong" },
             ]}
-            preview={recentMatchBias === 0 ? "No bias" : `Bias: ${recentMatchBias}`}
+            preview={
+              recentMatchBias === 0 ? "No bias" : `Bias: ${recentMatchBias}`
+            }
           />
         </div>
-        <div style={{ flex: 1 }}>
+
+        {/* Column 3 */}
+        <div>
           <div style={{ marginBottom: 10 }}>
             <label>
               <input
                 type="checkbox"
                 checked={gpwfEnabled}
-                onChange={e => setGPWFEnabled(e.target.checked)}
+                onChange={(e) => setGPWFEnabled(e.target.checked)}
                 style={{ marginRight: 7 }}
               />
               <b>GPWF (Weighted Frequency)</b>
@@ -198,7 +201,7 @@ export function OperatorsPanel({
             step={1}
             value={gpwf_window_size}
             onChange={setGPWFWindowSize}
-            tooltip={`How many recent draws GPWF considers. Up to ${maxGPWFWindow} (matches your current history).`}
+            tooltip={`Recent draws considered (≤ ${maxGPWFWindow}).`}
             preview={`${gpwf_window_size} draws`}
             disabled={!gpwfEnabled}
           />
@@ -209,7 +212,7 @@ export function OperatorsPanel({
             step={0.01}
             value={gpwf_bias_factor}
             onChange={setGPWFBiasFactor}
-            tooltip="Boosts the score for candidates frequent in recent draws. 0 = no bias, 1 = max bias."
+            tooltip="Strength of recent frequency weighting."
             preview={`Bias: ${gpwf_bias_factor}`}
             disabled={!gpwfEnabled}
           />
@@ -220,7 +223,7 @@ export function OperatorsPanel({
             step={0.01}
             value={gpwf_floor}
             onChange={setGPWFFloor}
-            tooltip="Minimum possible GPWF score for any candidate. Raises the baseline so no candidate is scored too low."
+            tooltip="Minimum baseline weight."
             preview={`Floor: ${gpwf_floor}`}
             disabled={!gpwfEnabled}
           />
@@ -231,79 +234,21 @@ export function OperatorsPanel({
             step={0.01}
             value={gpwf_scale_multiplier}
             onChange={setGPWFScaleMultiplier}
-            tooltip="How much frequency in recent draws influences GPWF. Higher = frequency matters more."
+            tooltip="Scales the effect of raw recent frequency."
             preview={`Scale: ${gpwf_scale_multiplier}`}
             disabled={!gpwfEnabled}
           />
-        </div>
-
-        {/* Global MC Layout controls (unchanged) */}
-        <div
-          style={{
-            marginTop: 12,
-            padding: "10px 12px",
-            background: "#fafafa",
-            border: "1px solid #eee",
-            borderRadius: 8,
-            display: "flex",
-            alignItems: "center",
-            gap: 14,
-            flexWrap: "wrap",
-          }}
-        >
-          <b>Global Monte Carlo Layout:</b>
-
-          <div style={{ display: "inline-flex", border: "1px solid #ccc", borderRadius: 6, overflow: "hidden" }}>
-            <button
-              type="button"
-              onClick={() => setMcLayout("grid")}
-              style={{
-                padding: "6px 10px",
-                background: mcLayout === "grid" ? "#ffd700" : "#fff",
-                border: "none",
-                cursor: "pointer",
-                fontWeight: mcLayout === "grid" ? 700 : 500,
-              }}
-              aria-pressed={mcLayout === "grid"}
-            >
-              Grid
-            </button>
-            <button
-              type="button"
-              onClick={() => setMcLayout("table")}
-              style={{
-                padding: "6px 10px",
-                background: mcLayout === "table" ? "#ffd700" : "#fff",
-                borderLeft: "1px solid #ccc",
-                borderRight: "none",
-                borderTop: "none",
-                borderBottom: "none",
-                cursor: "pointer",
-                fontWeight: mcLayout === "table" ? 700 : 500,
-              }}
-              aria-pressed={mcLayout === "table"}
-            >
-              Table
-            </button>
-          </div>
-
-          <label>
-            <b>Columns:</b>{" "}
-            <input
-              type="number"
-              min={1}
-              max={12}
-              value={mcColumns}
-              onChange={(e) =>
-                setMcColumns(Math.max(1, Math.min(12, Number(e.target.value) || 1)))
-              }
-              style={{ width: 70 }}
-            />
-          </label>
-
-          <span style={{ color: "#666", fontSize: 13 }}>
-            Tip: 12 columns + Grid is a compact, high-density view.
-          </span>
+          {/* NEW: OGA Top control */}
+          <OperatorSlider
+            label="OGA Top (Octagonal)"
+            min={1}
+            max={45}
+            step={1}
+            value={octagonal_top}
+            onChange={setOctagonalTop}
+            tooltip="Post-process: keep top-N by OGA (applied when OGA is enabled)."
+            preview={`Top: ${octagonal_top}`}
+          />
         </div>
       </div>
     </section>

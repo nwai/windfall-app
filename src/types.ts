@@ -1,34 +1,25 @@
 export type MonteCarloLayout = "grid" | "table";
 
-export type OperatorsPanelProps = {
+export interface OperatorsPanelProps {
   entropy: number;
   setEntropy: (v: number) => void;
-
+  entropyEnabled: boolean;
   setEntropyEnabled: (v: boolean) => void;
-
   hamming: number;
   setHamming: (v: number) => void;
-
+  hammingEnabled: boolean;
   setHammingEnabled: (v: boolean) => void;
-
   jaccard: number;
   setJaccard: (v: number) => void;
-
+  jaccardEnabled: boolean;
   setJaccardEnabled: (v: boolean) => void;
-
   lambda: number;
   setLambda: (v: number) => void;
-
   minRecentMatches: number;
   setMinRecentMatches: (v: number) => void;
   recentMatchBias: number;
   setRecentMatchBias: (v: number) => void;
-
-  previewStats: { hamming: number; entropy: number; jaccard: number };
-  entropyEnabled: boolean;
-  hammingEnabled: boolean;
-  jaccardEnabled: boolean;
-
+  previewStats: { entropy: number; hamming: number; jaccard: number };
   gpwfEnabled: boolean;
   setGPWFEnabled: (v: boolean) => void;
   gpwf_window_size: number;
@@ -40,13 +31,9 @@ export type OperatorsPanelProps = {
   setGPWFFloor: (v: number) => void;
   gpwf_scale_multiplier: number;
   setGPWFScaleMultiplier: (v: number) => void;
+}
 
-  // NEW: Monte Carlo layout controls
-  mcLayout: MonteCarloLayout;
-  setMcLayout: (v: MonteCarloLayout) => void;
-  mcColumns: number;
-  setMcColumns: (v: number) => void;
-};
+// (Keep the rest of your types below, if any)
 
 export type CandidateSet = {
   main: number[];
@@ -64,13 +51,6 @@ export type CandidateSet = {
   matchHistoryFrequency?: number;
 };
 
-export type Draw = {
-  main: number[];
-  supp: number[];
-  date: string;
-  // Simulated draw flag
-  isSimulated?: boolean;
-};
 
 export type Knobs = {
   enableSDE1: boolean;
@@ -95,3 +75,47 @@ export type Knobs = {
   hamming_relax: boolean;
   gpwf_targeted_mode: boolean;
 };
+
+export interface Draw {
+  main: number[];
+  supp: number[];
+  date: string;
+  isSimulated?: boolean;
+}
+
+export interface OperatorsPanelProps {
+  entropy: number;
+  setEntropy: (v: number) => void;
+  entropyEnabled: boolean;
+  setEntropyEnabled: (v: boolean) => void;
+  hamming: number;
+  setHamming: (v: number) => void;
+  hammingEnabled: boolean;
+  setHammingEnabled: (v: boolean) => void;
+  jaccard: number;
+  setJaccard: (v: number) => void;
+  jaccardEnabled: boolean;
+  setJaccardEnabled: (v: boolean) => void;
+  lambda: number;
+  setLambda: (v: number) => void;
+  minRecentMatches: number;
+  setMinRecentMatches: (v: number) => void;
+  recentMatchBias: number;
+  setRecentMatchBias: (v: number) => void;
+  previewStats: { entropy: number; hamming: number; jaccard: number };
+  gpwfEnabled: boolean;
+  setGPWFEnabled: (v: boolean) => void;
+  gpwf_window_size: number;
+  setGPWFWindowSize: (v: number) => void;
+  maxGPWFWindow: number;
+  gpwf_bias_factor: number;
+  setGPWFBiasFactor: (v: number) => void;
+  gpwf_floor: number;
+  setGPWFFloor: (v: number) => void;
+  gpwf_scale_multiplier: number;
+  setGPWFScaleMultiplier: (v: number) => void;
+
+  // NEW: OGA Top control (restored for Generate Candidates post-process)
+  octagonal_top: number;
+  setOctagonalTop: (v: number) => void;
+}

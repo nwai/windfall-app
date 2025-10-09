@@ -1,0 +1,1 @@
+export const DGA_CELL_SIZE = 20;

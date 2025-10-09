@@ -1,0 +1,1 @@
+export const panelComponentMap: Record<string, React.FC<any>> = {};
