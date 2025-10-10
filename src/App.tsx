@@ -1204,7 +1204,10 @@ setIsGenerating(false);
   hideBiasToggles={true}
   forcedNumbers={trendSelectedNumbers}
   selectedCheckNumbers={selectedNumbers}
-focusNumber={focusNumber}
+  focusNumber={focusNumber}
+  selectedRatios={selectedRatios}
+  allowedTrendRatios={allowedTrendRatios}
+  trendMap={trendMap}
 />
 
       {/* Operators + Lambda enable, GPWF, thresholds */}

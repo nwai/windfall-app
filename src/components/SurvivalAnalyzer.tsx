@@ -4,6 +4,8 @@ import {
   buildGPWFNumberWeights,
   buildHC3PenaltyWeights,
   buildSDE1PenaltyWeights,
+  buildOddEvenBiasWeights,
+  buildTrendRatioBiasWeights,
   combinePerNumberWeights,
 } from "../lib/numberBiases";
 
@@ -63,7 +65,10 @@ export const SurvivalAnalyzer: React.FC<{
   hideBiasToggles?: boolean;
   forcedNumbers?: number[];
   selectedCheckNumbers?: number[];
-  focusNumber?: number | null; // NEW
+  focusNumber?: number | null;
+  selectedRatios?: string[];
+  allowedTrendRatios?: string[];
+  trendMap?: Map<number, 'UP' | 'DOWN' | 'FLAT'>;
 }> = ({
   history,
   excludedNumbers,
@@ -75,7 +80,10 @@ export const SurvivalAnalyzer: React.FC<{
   hideBiasToggles = true,
   forcedNumbers = [],
   selectedCheckNumbers = [],
-  focusNumber = null, // NEW
+  focusNumber = null,
+  selectedRatios = [],
+  allowedTrendRatios = [],
+  trendMap,
 }) => {
   const windowDefault = externalWindowSize ?? 20;
   const [windowSize, setWindowSize] = useState<number>(windowDefault);
@@ -87,6 +95,8 @@ export const SurvivalAnalyzer: React.FC<{
   const [useGPWF, setUseGPWF] = useState<boolean>(false);
   const [useHC3Bias, setUseHC3Bias] = useState<boolean>(true);
   const [useSDE1Bias, setUseSDE1Bias] = useState<boolean>(false);
+  const [useOddEvenBias, setUseOddEvenBias] = useState<boolean>(false);
+  const [useTrendRatioBias, setUseTrendRatioBias] = useState<boolean>(false);
   const [gamma, setGamma] = useState<number>(0.7);
 
   // Optional custom trend window (derive alt weights)
@@ -151,6 +161,11 @@ useEffect(() => {
   const gpwfWeights = useMemo(() => buildGPWFNumberWeights(recent), [recent]);
   const hc3Weights = useMemo(() => buildHC3PenaltyWeights(history), [history]);
   const sde1Weights = useMemo(() => buildSDE1PenaltyWeights(history), [history]);
+  const oddEvenWeights = useMemo(() => buildOddEvenBiasWeights(selectedRatios), [selectedRatios]);
+  const trendRatioWeights = useMemo(() => 
+    trendMap ? buildTrendRatioBiasWeights(trendMap, allowedTrendRatios) : undefined,
+    [trendMap, allowedTrendRatios]
+  );
 
   // Optionally derive a custom trend weights slice
   const customTrendWeights = useMemo(() => {
@@ -188,18 +203,24 @@ useEffect(() => {
         ? sde1Weights
         : useSDE1Bias
         ? sde1Weights
-        : undefined
+        : undefined,
+      useOddEvenBias ? oddEvenWeights : undefined,
+      useTrendRatioBias ? trendRatioWeights : undefined
     );
   }, [
     useTrendBias,
     useGPWF,
     useHC3Bias,
     useSDE1Bias,
+    useOddEvenBias,
+    useTrendRatioBias,
     trendWeights,
     customTrendWeights,
     gpwfWeights,
     hc3Weights,
     sde1Weights,
+    oddEvenWeights,
+    trendRatioWeights,
     enableHC3Global,
     enableSDE1Global,
   ]);
@@ -406,6 +427,56 @@ useEffect(() => {
     <button type="button" onClick={() => { setUseCustomTrendWindow(true); setTrendFrom(11); setTrendTo(13); }} style={{ fontSize: 12 }}>11→13</button>
   </span>
 </span>
+
+        <label title="Enable Odd/Even ratio bias">
+          <input
+            type="checkbox"
+            checked={useOddEvenBias}
+            onChange={(e) => setUseOddEvenBias(e.target.checked)}
+            style={{ marginRight: 6 }}
+            disabled={!selectedRatios || selectedRatios.length === 0}
+          />
+          Odd/Even
+          {useOddEvenBias && selectedRatios && selectedRatios.length > 0 && (
+            <span
+              style={{
+                marginLeft: 6,
+                padding: "2px 6px",
+                background: "#ffe0b2",
+                borderRadius: 3,
+                fontSize: 11,
+                fontWeight: 600,
+              }}
+            >
+              target {selectedRatios[0]}
+            </span>
+          )}
+        </label>
+
+        <label title="Enable Trend Ratio bias">
+          <input
+            type="checkbox"
+            checked={useTrendRatioBias}
+            onChange={(e) => setUseTrendRatioBias(e.target.checked)}
+            style={{ marginRight: 6 }}
+            disabled={!allowedTrendRatios || allowedTrendRatios.length === 0 || !trendMap}
+          />
+          Trend ratio
+          {useTrendRatioBias && allowedTrendRatios && allowedTrendRatios.length > 0 && (
+            <span
+              style={{
+                marginLeft: 6,
+                padding: "2px 6px",
+                background: "#c8e6c9",
+                borderRadius: 3,
+                fontSize: 11,
+                fontWeight: 600,
+              }}
+            >
+              target U-D-F: {allowedTrendRatios[0]}
+            </span>
+          )}
+        </label>
 
         {!hideBiasToggles && (
           <>
