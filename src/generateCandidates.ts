@@ -112,21 +112,32 @@ export function generateCandidates(
     const lastAll = [...lastDraw.main, ...lastDraw.supp];
     const prevAll = [...prevDraw.main, ...prevDraw.supp];
     hc3Numbers = lastAll.filter(n => prevAll.includes(n));
+    traceSetter(t => [...t, `[TRACE] HC3 enabled: overlap with last two draws -> count=${hc3Numbers.length}${hc3Numbers.length > 0 ? ` [${hc3Numbers.join(", ")}]` : ""}`]);
   }
 
   // SDE1 filtering (primary pool & SDE1 exclusions)
   let mainPool = Array.from({ length: 45 }, (_, i) => i + 1);
   let sde1ExcludedNumbers: number[] = [];
   if (knobs.enableSDE1) {
-    const { pool, excludedNumbers: sdeExcl } = getSDE1FilteredPool(history);
+    const { pool, trace, excludedNumbers: sdeExcl } = getSDE1FilteredPool(history);
     mainPool = pool;
     sde1ExcludedNumbers = sdeExcl;
+    traceSetter(t => [...t, `[TRACE] ${trace}`]);
   }
 
   // Combine all exclusions (user + SDE1 + HC3)
   const fullExcludedNumbers = Array.from(
     new Set<number>([...excludedNumbers, ...sde1ExcludedNumbers, ...hc3Numbers])
   ).sort((a, b) => a - b);
+  
+  // Trace combined exclusions
+  const exclusionSources: string[] = [];
+  if (excludedNumbers.length > 0) exclusionSources.push(`User=${excludedNumbers.length}`);
+  if (sde1ExcludedNumbers.length > 0) exclusionSources.push(`SDE1=${sde1ExcludedNumbers.length}`);
+  if (hc3Numbers.length > 0) exclusionSources.push(`HC3=${hc3Numbers.length}`);
+  if (fullExcludedNumbers.length > 0) {
+    traceSetter(t => [...t, `[TRACE] Combined exclusions: ${exclusionSources.join(" + ")} -> total=${fullExcludedNumbers.length} [${fullExcludedNumbers.join(", ")}]`]);
+  }
 
   // Filter mainPool accordingly
   mainPool = mainPool.filter(n => !fullExcludedNumbers.includes(n));
