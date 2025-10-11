@@ -328,6 +328,7 @@ const [octagonalTop, setOctagonalTop] = useState<number>(defaultKnobs.octagonal_
   const [trendSelectedNumbers, setTrendSelectedNumbers] = useState<number[]>([]);
 const [focusNumber, setFocusNumber] = useState<number | null>(null);
 const [tempMetric, setTempMetric] = useState<"ema" | "recency" | "hybrid">("hybrid");
+const [showHeatmapLetters, setShowHeatmapLetters] = useState(false);
   const [repeatWindowSizeW, setRepeatWindowSizeW] = useState<number>(12);
 const [minFromRecentUnionM, setMinFromRecentUnionM] = useState<number>(0);
 const [userSelectedNumbers, setUserSelectedNumbers] = useState<number[]>([]);
@@ -1417,6 +1418,14 @@ focusNumber={focusNumber}
         <option value="recency">Recency only</option>
       </select>
     </label>
+    <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 4 }}>
+      <input
+        type="checkbox"
+        checked={showHeatmapLetters}
+        onChange={(e) => setShowHeatmapLetters(e.target.checked)}
+      />
+      Letters
+    </label>
   </div>
 <div style={{ width: "100%", marginTop: 8, marginBottom: 10 }}>
   {/* existing TemperatureHeatmap block */}
@@ -1440,6 +1449,7 @@ focusNumber={focusNumber}
   onHoverNumber={setFocusNumber}
   showLegendCounts={true}
   overlayNumbers={overlayNumbers} // <-- this is required for white dots
+  showBucketLetters={showHeatmapLetters}
 />
 </div>
 
