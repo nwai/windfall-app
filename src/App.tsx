@@ -1255,7 +1255,21 @@ setIsGenerating(false);
           </div>
         </div>
       </details>
-<TemperatureTransitionPanel history={filteredHistory} />
+
+<TemperatureTransitionPanel
+        history={filteredHistory}
+        alpha={0.25}
+        metric={tempMetric}                   // same as your heatmap
+        buckets={10}
+        bucketStops={[0.05, 0.12, 0.20, 0.30, 0.42, 0.55, 0.68, 0.82, 0.92]}
+        hybridWeight={0.6}
+        emaNormalize="per-number"
+        enforcePeaks={true}
+        trendLookback={4}                     // tune these to match your intuition
+        trendDelta={0.02}
+        trendReversal={true}
+      />
+
 {/* Monte Carlo temporarily disabled */}
 {/* // Monte Carlo (WFMQY window, unified exclusions)
 <MonteCarloPanel
