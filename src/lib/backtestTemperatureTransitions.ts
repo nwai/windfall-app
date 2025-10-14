@@ -1,18 +1,21 @@
 import { Draw } from "../types";
 import {
-  computeNumberTemperatures,
   buildTransitionMatrix,
   getTransitionProbability,
-  Temperature,
 } from "./temperatureTransitions";
+import {
+  computeTemperatureCategories,
+  Temperature,
+  TemperatureClassifierOptions,
+} from "./temperatureCategories";
 
 export interface BacktestWindowResult {
   windowStart: number;   // index into history
   windowEnd: number;     // inclusive index into history
   nextIndex: number;     // index of the evaluated next draw
   accuracy: number;      // (TP + TN) / total
-  precision: number;     // TP / (TP + FP)  (if no positive predictions => 0)
-  recall: number;        // TP / (TP + FN)  (if no actual positives => 0)
+  precision: number;     // TP / (TP + FP)
+  recall: number;        // TP / (TP + FN)
   threshold: number;
   positivesPredicted: number;
   positivesActual: number;
@@ -27,13 +30,15 @@ export interface BacktestSummary {
 
 /**
  * Backtest sliding windows of size windowSize across history.
- * For each window, compute transition matrix, then predict hits in the NEXT draw
- * using threshold on P(V | currentTemp).
+ * Uses computeTemperatureCategories with the same options you pass the heatmap/panel,
+ * builds a transition matrix for each window, and predicts hits in the next draw
+ * using a probability threshold on P(V | currentTemp).
  */
 export function backtestTemperatureTransitions(
   history: Draw[],
   windowSize: number,
-  threshold: number = 0.5
+  threshold: number = 0.5,
+  classifierOptions: TemperatureClassifierOptions = {}
 ): BacktestSummary {
   const windows: BacktestWindowResult[] = [];
   if (history.length <= windowSize) {
@@ -47,22 +52,22 @@ export function backtestTemperatureTransitions(
     const win = history.slice(start, start + windowSize);
     const nextDraw = history[nextIdx];
 
-    const temps = computeNumberTemperatures(win);
-    const matrix = buildTransitionMatrix(win, temps);
+    const cats = computeTemperatureCategories(win, classifierOptions);
+    const matrix = buildTransitionMatrix(win, cats);
 
-    // latest temp in the window for each number
-    const latestTemp: Record<number, Temperature> = {};
-    for (let n = 1; n <= 45; n++) {
-      const tArr = temps[n] || [];
-      latestTemp[n] = tArr[tArr.length - 1] ?? "other";
+    // latest category in the window for each number
+    const latestCat: Record<number, Temperature> = {};
+    for (let n = 1; n <= (classifierOptions.heightNumbers ?? 45); n++) {
+      const arr = cats[n] || [];
+      latestCat[n] = arr[arr.length - 1] ?? "other";
     }
 
     let TP = 0, FP = 0, TN = 0, FN = 0;
     let positivesPredicted = 0;
     let positivesActual = 0;
 
-    for (let n = 1; n <= 45; n++) {
-      const p = getTransitionProbability(matrix, n, latestTemp[n]);
+    for (let n = 1; n <= (classifierOptions.heightNumbers ?? 45); n++) {
+      const p = getTransitionProbability(matrix, n, latestCat[n]);
       const predictHit = p >= threshold;
       const actualHit = nextDraw.main.includes(n) || nextDraw.supp.includes(n);
 
