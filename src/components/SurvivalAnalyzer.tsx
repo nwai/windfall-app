@@ -87,7 +87,7 @@ export const SurvivalAnalyzer: React.FC<{
   const [useGPWF, setUseGPWF] = useState<boolean>(false);
   const [useHC3Bias, setUseHC3Bias] = useState<boolean>(true);
   const [useSDE1Bias, setUseSDE1Bias] = useState<boolean>(false);
-  const [gamma, setGamma] = useState<number>(0.7);
+  const [gamma, setGamma] = useState<number>(2);
 
   // Optional custom trend window (derive alt weights)
   const [useCustomTrendWindow, setUseCustomTrendWindow] = useState<boolean>(false);
@@ -447,8 +447,8 @@ useEffect(() => {
           <b>Gamma:</b>{" "}
           <input
             type="number"
-            min={0}
-            max={2}
+            min={-10}
+            max={100}
             step={0.1}
             value={gamma}
             onChange={(e) => setGamma(Number(e.target.value))}

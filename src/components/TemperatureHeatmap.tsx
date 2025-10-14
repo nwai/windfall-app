@@ -18,28 +18,36 @@ export interface TemperatureHeatmapProps {
   onHoverNumber?: (n: number | null) => void;
   showLegendCounts?: boolean;
 
-  hybridWeight?: number;                 // for hybrid
+  hybridWeight?: number; // for hybrid
   emaNormalize?: "global" | "per-number";
   enforcePeaks?: boolean;
 
   // Unified hover + overlay
-  showHoverProbability?: boolean;        // default true
-  overlayNumbers?: number[];             // rows (1..45) to mark with white dots near right edge
+  showHoverProbability?: boolean; // default true
+  overlayNumbers?: number[]; // rows (1..45) to mark with white dots near right edge
+
+  // Letter overlay
+  showBucketLetters?: boolean;
+  bucketLetters?: string[];
 }
 
-function toChronological(history: Draw[]) {
-  if (history.length <= 1) return history.slice();
-  const first = new Date(history[0].date).getTime();
-  const last = new Date(history[history.length - 1].date).getTime();
-  const newestFirst = history.length > 1 && first > last;
-  return newestFirst ? history.slice().reverse() : history.slice();
+// Helpers
+function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
+  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex.trim());
+  if (!m) return null;
+  return { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) };
+}
+function getContrastTextColor(bgHex: string): string {
+  const rgb = hexToRgb(bgHex);
+  if (!rgb) return "#000";
+  const yiq = (rgb.r * 299 + rgb.g * 587 + rgb.b * 114) / 1000;
+  return yiq >= 140 ? "#000" : "#fff";
 }
 
 const DEFAULT_BUCKET_LABELS = [
   "prehistoric","frozen","permafrost","cold","cool",
   "temperate","warm","hot","tropical","volcanic",
 ];
-
 const DEFAULT_BUCKET_COLORS = [
   "#0b2e6b","#0d47a1","#167bbf","#26c6da","#6dd5cb",
   "#b0e3a1","#ffd54f","#ffb300","#f57c00","#d32f2f",
@@ -58,20 +66,27 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
   bucketStops,
   onHoverNumber,
   showLegendCounts = true,
-
   hybridWeight = 0.5,
   emaNormalize = "global",
   enforcePeaks = true,
-
   showHoverProbability = true,
   overlayNumbers = [],
+  // Letter overlay
+  showBucketLetters = false,
+  bucketLetters,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [hoverN, setHoverN] = useState<number | null>(null);
   const [hoverPt, setHoverPt] = useState<{ x: number; y: number } | null>(null);
 
   // Chronological history and time length
-  const chrono = useMemo(() => toChronological(history), [history]);
+  const chrono = useMemo(() => {
+    if (history.length <= 1) return history.slice();
+    const first = new Date(history[0].date).getTime();
+    const last = new Date(history[history.length - 1].date).getTime();
+    const newestFirst = history.length > 1 && first > last;
+    return newestFirst ? history.slice().reverse() : history.slice();
+  }, [history]);
   const T = chrono.length;
 
   // Occurrence + EMA
@@ -163,6 +178,12 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
     return { stops, labels, colors };
   }, [bucketLabels, bucketStops, buckets]);
 
+  // --- Letters (overlay) ---
+  const letters = useMemo(() => {
+    if (bucketLetters && bucketLetters.length === buckets) return bucketLetters;
+    return labels.map(l => (l?.length ? l[0].toUpperCase() : "?"));
+  }, [bucketLetters, labels, buckets]);
+
   const bucketIndexFor = (v: number) => {
     for (let i = 0; i < stops.length; i++) if (v <= stops[i]) return i;
     return stops.length;
@@ -175,7 +196,7 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
     [heightNumbers, cellSize, gutter, showLegend]
   );
 
-  // Draw heatmap + overlay dots
+  // Draw heatmap + overlay dots + letters
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -184,18 +205,31 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    // Base
+    // Base background
     ctx.fillStyle = "#fff";
     ctx.fillRect(0, 0, widthPx, heightPx);
+
+    // Prepare font for overlay
+    if (showBucketLetters) {
+      ctx.font = `bold ${Math.max(9, Math.floor(cellSize * 0.5))}px monospace`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+    }
 
     for (let n = 0; n < heightNumbers; n++) {
       for (let t = 0; t < T; t++) {
         const v = valueSeries[n][t];
         const bIdx = bucketIndexFor(v);
-        ctx.fillStyle = colors[bIdx];
+        const color = colors[bIdx];
         const x = gutter + t * cellSize;
         const y = gutter + n * cellSize;
+        ctx.fillStyle = color;
         ctx.fillRect(x, y, cellSize, cellSize);
+        if (showBucketLetters) {
+          const letter = letters[bIdx] ?? "?";
+          ctx.fillStyle = getContrastTextColor(color);
+          ctx.fillText(letter, x + cellSize / 2, y + cellSize / 2);
+        }
       }
     }
 
@@ -222,7 +256,11 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
     ctx.fillStyle = "#444";
     ctx.font = "10px monospace";
     ctx.fillText("older → newer", gutter, gutter - 2);
-  }, [canvasRef, widthPx, heightPx, gutter, heightNumbers, T, cellSize, valueSeries, colors, stops, overlayNumbers]);
+  }, [
+    canvasRef, widthPx, heightPx, gutter, heightNumbers, T, cellSize,
+    valueSeries, colors, stops, overlayNumbers,
+    showBucketLetters, letters // NEW deps
+  ]);
 
   // Unified hover
   const onMouseMove: React.MouseEventHandler<HTMLCanvasElement> = (e) => {
