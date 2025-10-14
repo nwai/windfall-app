@@ -41,6 +41,7 @@ import { ParameterSearchPanel } from "./components/ParameterSearchPanel";
 import { BatesParameterSet } from "./lib/batesWeightsCore";
 import { WeightedTargetListPanel } from "./components/WeightedTargetListPanel";
  import { RankingWeightsPanel } from "./components/RankingWeightsPanel";
+ import { TemperatureTransitionPanel } from "./components/TemperatureTransitionPanel";
 
 const WINDOW_OPTIONS = [
   { key: "W", label: "Weekly (3 draws)", size: 3 },
@@ -293,6 +294,19 @@ const [selectedNumbers, setSelectedNumbers] = useState<number[]>([]);
   const [customDrawCount, setCustomDrawCount] = useState<number>(1);
   const [windowEnabled, setWindowEnabled] = useState<boolean>(true);
 
+
+
+const [drawWindowMode, setDrawWindowMode] = useState<"lastN" | "range">("lastN");
+  const [rangeFrom, setRangeFrom] = useState<number>(1);
+  const [rangeTo, setRangeTo] = useState<number>(history.length);
+// Keep range clamped when history changes
+  useEffect(() => {
+    if (!history.length) return;
+    setRangeFrom((v) => Math.max(1, Math.min(v, history.length)));
+    setRangeTo((v) => Math.max(rangeFrom, Math.min(v, history.length)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [history.length]);
+
   const [knobs, setKnobs] = useState<Knobs>(defaultKnobs);
   const [gpwf_window_size, setGPWFWindowSize] = useState<number>(defaultKnobs.gpwf_window_size);
   const [gpwf_bias_factor, setGPWFBiasFactor] = useState<number>(defaultKnobs.gpwf_bias_factor);
@@ -316,7 +330,6 @@ const [octagonalTop, setOctagonalTop] = useState<number>(defaultKnobs.octagonal_
   const [maxCount, setMaxCount] = useState<number>(0);
   const [minRecentMatches, setMinRecentMatches] = useState<number>(0);
   const [recentMatchBias, setRecentMatchBias] = useState<number>(0);
-
   const [highlightMsg, setHighlightMsg] = useState<string>("");
   const [highlights, setHighlights] = useState<any[]>([]);
   // User-only exclusions (SDE1/HC3 are added separately)
@@ -327,10 +340,12 @@ const [octagonalTop, setOctagonalTop] = useState<number>(defaultKnobs.octagonal_
   const [minOGAPercentile, setMinOGAPercentile] = useState<number>(0);
   const [trendSelectedNumbers, setTrendSelectedNumbers] = useState<number[]>([]);
 const [focusNumber, setFocusNumber] = useState<number | null>(null);
+  const [showHeatmapLetters, setShowHeatmapLetters] = useState(false);
 const [tempMetric, setTempMetric] = useState<"ema" | "recency" | "hybrid">("hybrid");
   const [repeatWindowSizeW, setRepeatWindowSizeW] = useState<number>(12);
 const [minFromRecentUnionM, setMinFromRecentUnionM] = useState<number>(0);
 const [userSelectedNumbers, setUserSelectedNumbers] = useState<number[]>([]);
+
 
 
   useEffect(() => {
@@ -352,15 +367,33 @@ const [userSelectedNumbers, setUserSelectedNumbers] = useState<number[]>([]);
     if (history.length > 0) setCustomDrawCount(history.length);
   }, [history]);
 
-  function getActiveWindowSize() {
+
+
+function getActiveWindowSize() {
     if (!windowEnabled) return history.length;
     if (windowMode === "Custom") return customDrawCount;
     const windowOption = WINDOW_OPTIONS.find((opt) => opt.key === windowMode);
     if (!windowOption || windowOption.size === null) return history.length;
     return Math.min(windowOption.size, history.length);
   }
-  const activeWindowSize = getActiveWindowSize();
-  const filteredHistory = history.slice(-activeWindowSize);
+
+  // Compute filteredHistory based on mode
+  const filteredHistory = useMemo<Draw[]>(() => {
+    if (!history.length) return [];
+    if (drawWindowMode === "lastN") {
+      const n = getActiveWindowSize();
+      return history.slice(-n);
+    } else {
+      const fromIdx = Math.max(1, Math.min(rangeFrom, history.length));
+      const toIdx = Math.max(fromIdx, Math.min(rangeTo, history.length));
+      return history.slice(fromIdx - 1, toIdx); // inclusive range (1-based UI)
+    }
+  }, [history, drawWindowMode, rangeFrom, rangeTo, windowEnabled, windowMode, customDrawCount]);
+
+  // Make activeWindowSize always defined
+  const activeWindowSize = useMemo(() => {
+    return filteredHistory.length;
+  }, [filteredHistory]);
 
 // Unified exclusions for panels (display only) — RESPECT global toggles
 const sde1Exclusions = knobs.enableSDE1
@@ -954,104 +987,162 @@ setIsGenerating(false);
       </details>
 
       {/* WFMQY + Unified Toggles + User Exclusions */}
-      <details open>
-        <summary>
-          <b>Windowed Draw Filtering (WFMQYH)</b>
-        </summary>
-        <div
-          style={{
-            marginBottom: 12,
-            border: "1px solid #eee",
-            padding: 14,
-            borderRadius: 7,
-            background: "#f4f9ff",
-            display: "flex",
-            flexWrap: "wrap",
-            gap: 16,
-            alignItems: "center",
-          }}
-        >
-          <label style={{ fontWeight: "bold", marginRight: 16 }}>
-            <input
-              type="checkbox"
-              checked={windowEnabled}
-              onChange={(e) => setWindowEnabled(e.target.checked)}
-              style={{ marginRight: 7 }}
-            />
-            Enable windowed filtering
-          </label>
-          <span>
-            {WINDOW_OPTIONS.map((opt) => (
-              <label key={opt.key} style={{ marginRight: 14 }}>
-                <input
-                  type="radio"
-                  name="windowMode"
-                  value={opt.key}
-                  checked={windowMode === opt.key}
-                  disabled={!windowEnabled}
-                  onChange={(e) => setWindowMode(e.target.value as any)}
-                />
-                {opt.label}
-              </label>
-            ))}
-          </span>
-          {windowMode === "Custom" && (
-            <input
-              type="number"
-              min={1}
-              max={history.length}
-              value={customDrawCount}
-              disabled={!windowEnabled}
-              onChange={(e) => setCustomDrawCount(Number(e.target.value))}
-              style={{ width: 70 }}
-              placeholder="Draw count"
-            />
-          )}
-
-          {/* Unified toggles */}
-          <span style={{ marginLeft: 12 }}>
-            <label style={{ marginRight: 12 }}>
-              <input
-                type="checkbox"
-                checked={knobs.enableSDE1}
-                onChange={(e) => setKnobs((prev) => ({ ...prev, enableSDE1: e.target.checked }))}
-                style={{ marginRight: 6 }}
-              />
-              SDE1
-            </label>
-            <label style={{ marginRight: 12 }}>
-              <input
-                type="checkbox"
-                checked={knobs.enableHC3}
-                onChange={(e) => setKnobs((prev) => ({ ...prev, enableHC3: e.target.checked }))}
-                style={{ marginRight: 6 }}
-              />
-              HC3
-            </label>
-            <label>
-              <input
-                type="checkbox"
-                checked={knobs.enableOGA}
-                onChange={(e) => setKnobs((prev) => ({ ...prev, enableOGA: e.target.checked }))}
-                style={{ marginRight: 6 }}
-              />
-              OGA
-            </label>
-  <label style={{ marginLeft: 16 }}>
-    <input
-      type="checkbox"
-      checked={traceVerbose}
-      onChange={(e) => setTraceVerbose(e.target.checked)}
-      style={{ marginRight: 6 }}
-    />
-    Trace Verbose
-  </label>
-          </span>
-        </div>
+     <details open>
+       <summary>
+         <b>Windowed Draw Filtering (WFMQYH)</b>
+       </summary>
+       <div
+         style={{
+           marginBottom: 12,
+           border: "1px solid #eee",
+           padding: 14,
+           borderRadius: 7,
+           background: "#f4f9ff",
+           display: "flex",
+           flexWrap: "wrap",
+           gap: 16,
+           alignItems: "center",
+         }}
+       >
+         {/* --- NEW MODE TOGGLE --- */}
+         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+           <label>
+             <input
+               type="radio"
+               checked={drawWindowMode === "lastN"}
+               onChange={() => setDrawWindowMode("lastN")}
+             />
+             Last N draws
+           </label>
+           <label>
+             <input
+               type="radio"
+               checked={drawWindowMode === "range"}
+               onChange={() => setDrawWindowMode("range")}
+             />
+             Range (x to y)
+           </label>
+           {drawWindowMode === "range" && (
+             <>
+               <span>From</span>
+               <input
+                 type="number"
+                 min={1}
+                 max={history.length}
+                 value={rangeFrom}
+                 onChange={e => setRangeFrom(Number(e.target.value))}
+                 style={{ width: 60 }}
+               />
+               <span>to</span>
+               <input
+                 type="number"
+                 min={1}
+                 max={history.length}
+                 value={rangeTo}
+                 onChange={e => setRangeTo(Number(e.target.value))}
+                 style={{ width: 60 }}
+               />
+               <span>(inclusive)</span>
+             </>
+           )}
+         </div>
+         {/* --- EXISTING WFMQY UI, ONLY ENABLED IF LAST N DRAWS --- */}
+         {drawWindowMode === "lastN" && (
+           <>
+             <label style={{ fontWeight: "bold", marginRight: 16 }}>
+               <input
+                 type="checkbox"
+                 checked={windowEnabled}
+                 onChange={(e) => setWindowEnabled(e.target.checked)}
+                 style={{ marginRight: 7 }}
+               />
+               Enable windowed filtering
+             </label>
+             <span>
+               {WINDOW_OPTIONS.map((opt) => (
+                 <label key={opt.key} style={{ marginRight: 14 }}>
+                   <input
+                     type="radio"
+                     name="windowMode"
+                     value={opt.key}
+                     checked={windowMode === opt.key}
+                     disabled={!windowEnabled}
+                     onChange={(e) => setWindowMode(e.target.value as any)}
+                   />
+                   {opt.label}
+                 </label>
+               ))}
+             </span>
+             {windowMode === "Custom" && (
+               <input
+                 type="number"
+                 min={1}
+                 max={history.length}
+                 value={customDrawCount}
+                 disabled={!windowEnabled}
+                 onChange={(e) => setCustomDrawCount(Number(e.target.value))}
+                 style={{ width: 70 }}
+                 placeholder="Draw count"
+               />
+             )}
+           </>
+         )}
+         {/* --- CURRENT WINDOW/RANGE DISPLAY --- */}
+         <div style={{ marginBottom: 8, fontSize: 15, color: "#1976d2" }}>
+           {drawWindowMode === "lastN"
+             ? <>Using last <b>{filteredHistory.length}</b> draws ({history.length - filteredHistory.length + 1} to {history.length})</>
+             : <>Using draws <b>{rangeFrom}</b> to <b>{rangeTo}</b> ({filteredHistory.length} draws)</>
+           }
+         </div>
+         {/* Unified toggles */}
+         <span style={{ marginLeft: 12 }}>
+           <label style={{ marginRight: 12 }}>
+             <input
+               type="checkbox"
+               checked={knobs.enableSDE1}
+               onChange={(e) => setKnobs((prev) => ({ ...prev, enableSDE1: e.target.checked }))}
+               style={{ marginRight: 6 }}
+             />
+             SDE1
+           </label>
+           <label style={{ marginRight: 12 }}>
+             <input
+               type="checkbox"
+               checked={knobs.enableHC3}
+               onChange={(e) => setKnobs((prev) => ({ ...prev, enableHC3: e.target.checked }))}
+               style={{ marginRight: 6 }}
+             />
+             HC3
+           </label>
+           <label>
+             <input
+               type="checkbox"
+               checked={knobs.enableOGA}
+               onChange={(e) => setKnobs((prev) => ({ ...prev, enableOGA: e.target.checked }))}
+               style={{ marginRight: 6 }}
+             />
+             OGA
+           </label>
+           <label style={{ marginLeft: 16 }}>
+             <input
+               type="checkbox"
+               checked={traceVerbose}
+               onChange={(e) => setTraceVerbose(e.target.checked)}
+               style={{ marginRight: 6 }}
+             />
+             Trace Verbose
+           </label>
+         </span>
+       </div>
 
         {/* Status badges */}
         <div style={{ marginBottom: 8, fontSize: 15, color: "#1976d2", display: "flex", gap: 12, flexWrap: "wrap" }}>
-          <span>Using last <b>{activeWindowSize}</b> draws</span>
+<span>
+          {drawWindowMode === "lastN"
+            ? <>Using last <b>{activeWindowSize}</b> draws</>
+            : <>Using draws <b>{rangeFrom}</b> to <b>{rangeTo}</b> ({activeWindowSize} draws)</>
+          }
+        </span>
           <span>
             {knobs.enableSDE1 ? (
               <span style={{ background: "#ffe6cc", color: "#a04c00", padding: "1px 6px", borderRadius: 4 }}>SDE1 Active</span>
@@ -1164,7 +1255,7 @@ setIsGenerating(false);
           </div>
         </div>
       </details>
-
+<TemperatureTransitionPanel history={filteredHistory} />
 {/* Monte Carlo temporarily disabled */}
 {/* // Monte Carlo (WFMQY window, unified exclusions)
 <MonteCarloPanel
@@ -1417,6 +1508,16 @@ focusNumber={focusNumber}
         <option value="recency">Recency only</option>
       </select>
     </label>
+    <label style={{ fontSize: 13, marginLeft: 12 }}>
+      Letters:
+      <input
+        type="checkbox"
+        checked={showHeatmapLetters}
+        onChange={e => setShowHeatmapLetters(e.target.checked)}
+        style={{ marginLeft: 6 }}
+        title="Overlay a letter code on each cell (V, T, …)"
+      />
+    </label>
   </div>
 <div style={{ width: "100%", marginTop: 8, marginBottom: 10 }}>
   {/* existing TemperatureHeatmap block */}
@@ -1439,7 +1540,9 @@ focusNumber={focusNumber}
   enforcePeaks={true}
   onHoverNumber={setFocusNumber}
   showLegendCounts={true}
-  overlayNumbers={overlayNumbers} // <-- this is required for white dots
+  overlayNumbers={overlayNumbers}
+  showBucketLetters={showHeatmapLetters}
+  bucketLetters={["pR","F","pF","<C","C>","tT","W","H","tR","V"]}
 />
 </div>
 
