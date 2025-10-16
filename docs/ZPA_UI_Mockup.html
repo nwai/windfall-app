@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GroupPatternPanel (ZPA) - UI Mockup</title>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      padding: 2rem;
+      background: #f5f5f5;
+    }
+    .panel {
+      background: white;
+      padding: 1rem;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    h2 {
+      margin-top: 0;
+      color: #333;
+    }
+    h3 {
+      color: #555;
+      margin-top: 2rem;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.9rem;
+      margin-bottom: 2rem;
+    }
+    thead {
+      background: #f0f0f0;
+    }
+    th {
+      padding: 0.75rem;
+      text-align: left;
+      font-weight: bold;
+      border-bottom: 2px solid #333;
+      cursor: help;
+    }
+    td {
+      padding: 0.5rem 0.75rem;
+      border-bottom: 1px solid #ddd;
+    }
+    .mono {
+      font-family: monospace;
+    }
+    .center {
+      text-align: center;
+    }
+    .arrow {
+      font-size: 1.5rem;
+      font-weight: bold;
+    }
+    .up { color: #28a745; }
+    .down { color: #dc3545; }
+    .flat { color: #6c757d; }
+    .heatmap {
+      display: grid;
+      grid-template-columns: repeat(9, 1fr);
+      gap: 0.5rem;
+      margin-bottom: 2rem;
+    }
+    .zone {
+      padding: 0.5rem;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      text-align: center;
+    }
+    .zone-title {
+      font-weight: bold;
+      margin-bottom: 0.25rem;
+    }
+    .zone-range {
+      font-size: 0.85rem;
+    }
+    .zone-arrow {
+      font-size: 1.2rem;
+      margin-top: 0.25rem;
+    }
+    .zone-up {
+      background: rgba(40, 167, 69, 0.3);
+    }
+    .zone-down {
+      background: rgba(220, 53, 69, 0.3);
+    }
+    .zone-flat {
+      background: rgba(108, 117, 125, 0.1);
+    }
+    .explanation {
+      padding: 1rem;
+      background: #f9f9f9;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 0.95rem;
+      line-height: 1.5;
+    }
+    .tooltip-demo {
+      position: relative;
+      display: inline-block;
+      border-bottom: 1px dotted #666;
+      cursor: help;
+    }
+  </style>
+</head>
+<body>
+  <div class="panel">
+    <h2>Zone Pattern Analysis (ZPA)</h2>
+    
+    <!-- Top Patterns Table -->
+    <div>
+      <h3>Top Zone Patterns (Mains)</h3>
+      <table>
+        <thead>
+          <tr>
+            <th title="Zones hit in this pattern (0-indexed)">Pattern</th>
+            <th title="Number of draws where this exact 9-zone pattern occurred">Count ⓘ</th>
+            <th title="Coefficient of determination - how well the trend line fits the data (0-1)">R² ⓘ</th>
+            <th title="Statistical significance of the trend (lower = more significant)">p-value ⓘ</th>
+            <th title="Trend direction: ↑ increasing, ↓ decreasing, → flat/stable">Trend ⓘ</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="mono" title="Zones: Zone 1 (1-5), Zone 3 (11-15), Zone 5 (21-25), Zone 7 (31-35), Zone 8 (36-40)">0-2-4-6-7</td>
+            <td class="center" title="This pattern appeared in 12 out of 100 draws (12.0%)">12</td>
+            <td class="center" title="R² = 0.856: Strong fit">0.856</td>
+            <td class="center" title="p-value = 0.003: Highly significant">0.003</td>
+            <td class="center arrow up" title="Significant trend (p<0.1): increasing">↑</td>
+          </tr>
+          <tr>
+            <td class="mono" title="Zones: Zone 2 (6-10), Zone 4 (16-20), Zone 6 (26-30), Zone 8 (36-40)">1-3-5-7</td>
+            <td class="center" title="This pattern appeared in 10 out of 100 draws (10.0%)">10</td>
+            <td class="center" title="R² = 0.423: Moderate fit">0.423</td>
+            <td class="center" title="p-value = 0.087: Marginally significant">0.087</td>
+            <td class="center arrow up" title="Significant trend (p<0.1): increasing">↑</td>
+          </tr>
+          <tr>
+            <td class="mono" title="Zones: Zone 1 (1-5), Zone 2 (6-10), Zone 4 (16-20), Zone 5 (21-25), Zone 7 (31-35)">0-1-3-4-6</td>
+            <td class="center" title="This pattern appeared in 9 out of 100 draws (9.0%)">9</td>
+            <td class="center" title="R² = 0.182: Weak fit">0.182</td>
+            <td class="center" title="p-value = 0.254: Not significant">0.254</td>
+            <td class="center arrow flat" title="Flat: no significant trend (p=0.254, slope=0.0008)">→</td>
+          </tr>
+          <tr>
+            <td class="mono" title="Zones: Zone 3 (11-15), Zone 5 (21-25), Zone 6 (26-30), Zone 8 (36-40), Zone 9 (41-45)">2-4-5-7-8</td>
+            <td class="center" title="This pattern appeared in 8 out of 100 draws (8.0%)">8</td>
+            <td class="center" title="R² = 0.721: Strong fit">0.721</td>
+            <td class="center" title="p-value = 0.012: Highly significant">0.012</td>
+            <td class="center arrow down" title="Significant trend (p<0.1): decreasing">↓</td>
+          </tr>
+          <tr>
+            <td class="mono" title="Zones: Zone 1 (1-5), Zone 4 (16-20), Zone 6 (26-30), Zone 7 (31-35)">0-3-5-6</td>
+            <td class="center" title="This pattern appeared in 7 out of 100 draws (7.0%)">7</td>
+            <td class="center" title="R² = 0.315: Moderate fit">0.315</td>
+            <td class="center" title="p-value = 0.145: Not significant">0.145</td>
+            <td class="center arrow flat" title="Flat: no significant trend (p=0.145, slope=-0.0012)">→</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    
+    <!-- Zone Membership Heatmap -->
+    <div>
+      <h3>Zone Membership Heatmap</h3>
+      <div class="heatmap">
+        <div class="zone zone-down" title="Zone 1 (1-5): slope=-0.0083, p=0.000, direction=down">
+          <div class="zone-title">Zone 1</div>
+          <div class="zone-range">1-5</div>
+          <div class="zone-arrow">↓</div>
+        </div>
+        <div class="zone zone-down" title="Zone 2 (6-10): slope=-0.0066, p=0.000, direction=down">
+          <div class="zone-title">Zone 2</div>
+          <div class="zone-range">6-10</div>
+          <div class="zone-arrow">↓</div>
+        </div>
+        <div class="zone zone-down" title="Zone 3 (11-15): slope=-0.0093, p=0.000, direction=down">
+          <div class="zone-title">Zone 3</div>
+          <div class="zone-range">11-15</div>
+          <div class="zone-arrow">↓</div>
+        </div>
+        <div class="zone zone-flat" title="Zone 4 (16-20): slope=-0.0026, p=0.113, direction=flat">
+          <div class="zone-title">Zone 4</div>
+          <div class="zone-range">16-20</div>
+          <div class="zone-arrow">→</div>
+        </div>
+        <div class="zone zone-flat" title="Zone 5 (21-25): slope=0.0011, p=0.528, direction=flat">
+          <div class="zone-title">Zone 5</div>
+          <div class="zone-range">21-25</div>
+          <div class="zone-arrow">→</div>
+        </div>
+        <div class="zone zone-flat" title="Zone 6 (26-30): slope=0.0006, p=0.710, direction=flat">
+          <div class="zone-title">Zone 6</div>
+          <div class="zone-range">26-30</div>
+          <div class="zone-arrow">→</div>
+        </div>
+        <div class="zone zone-up" title="Zone 7 (31-35): slope=0.0102, p=0.000, direction=up">
+          <div class="zone-title">Zone 7</div>
+          <div class="zone-range">31-35</div>
+          <div class="zone-arrow">↑</div>
+        </div>
+        <div class="zone zone-up" title="Zone 8 (36-40): slope=0.0104, p=0.000, direction=up">
+          <div class="zone-title">Zone 8</div>
+          <div class="zone-range">36-40</div>
+          <div class="zone-arrow">↑</div>
+        </div>
+        <div class="zone zone-up" title="Zone 9 (41-45): slope=0.0075, p=0.000, direction=up">
+          <div class="zone-title">Zone 9</div>
+          <div class="zone-range">41-45</div>
+          <div class="zone-arrow">↑</div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Explanatory Text -->
+    <div class="explanation">
+      Analyzed 100 draws. Trending up: zones 7, 8, 9. Trending down: zones 1, 2, 3. 
+      Sum(mains) slope: 0.0009, p-value: 0.1234.
+    </div>
+  </div>
+  
+  <div style="margin-top: 2rem; text-align: center; color: #666; font-size: 0.9rem;">
+    <p>This is a static mockup of the GroupPatternPanel component.</p>
+    <p>Hover over elements with ⓘ or dotted underlines to see tooltips.</p>
+    <p>The actual React component includes interactive features and real-time data.</p>
+  </div>
+</body>
+</html>
