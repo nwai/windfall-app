@@ -42,6 +42,7 @@ import { BatesParameterSet } from "./lib/batesWeightsCore";
 import { WeightedTargetListPanel } from "./components/WeightedTargetListPanel";
  import { RankingWeightsPanel } from "./components/RankingWeightsPanel";
  import { TemperatureTransitionPanel } from "./components/TemperatureTransitionPanel";
+import { GroupPatternPanel } from "./components/GroupPatternPanel";
 
 const WINDOW_OPTIONS = [
   { key: "W", label: "Weekly (3 draws)", size: 3 },
@@ -1294,6 +1295,8 @@ setIsGenerating(false);
   drawsConsidered={trendRatioDrawsConsidered}
   windowDraws={activeWindowSize}
 />
+
+<GroupPatternPanel draws={filteredHistory} maxPatterns={15} />
 
 
 
