@@ -27,11 +27,12 @@ export function ToastContainer({
   duration = 1600 
 }: ToastContainerProps) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const counterRef = React.useRef(0);
 
   useEffect(() => {
     // Subscribe to toast events
     const unsubscribe = subscribeToast((message: string) => {
-      const id = Date.now();
+      const id = Date.now() + counterRef.current++;
       
       // Add toast with visible=false initially
       setToasts(prev => [...prev, { id, message, visible: false }]);
