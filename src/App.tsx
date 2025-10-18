@@ -44,6 +44,9 @@ import { WeightedTargetListPanel } from "./components/WeightedTargetListPanel";
  import { TemperatureTransitionPanel } from "./components/TemperatureTransitionPanel";
 import { GroupPatternPanel } from "./components/GroupPatternPanel";
 import { ToastContainer } from "./components/ToastContainer";
+import { PatternStatsPanel } from "./components/candidates/PatternStatsPanel";
+import { NumberFrequencyPanel } from "./components/candidates/NumberFrequencyPanel";
+import { TargetSetQuickStatsPanel } from "./components/candidates/TargetSetQuickStatsPanel";
 
 const WINDOW_OPTIONS = [
   { key: "W", label: "Weekly (3 draws)", size: 3 },
@@ -1301,6 +1304,15 @@ setIsGenerating(false);
 />
 
 <GroupPatternPanel draws={filteredHistory} maxPatterns={15} />
+
+<PatternStatsPanel draws={filteredHistory} numBins={10} />
+
+<NumberFrequencyPanel draws={filteredHistory} />
+
+<TargetSetQuickStatsPanel
+  forcedNumbers={trendSelectedNumbers}
+  selectedNumbers={userSelectedNumbers}
+/>
 
 
 
