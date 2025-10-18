@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { searchForParameterMatch } from "../lib/parameterSearch";
 import { BatesParameterSet } from "../lib/batesWeightsCore";
+import { showToast } from "../lib/toastBus";
 
 interface ParameterSearchPanelProps {
   userSelectedNumbers: number[];
@@ -72,6 +73,7 @@ export const ParameterSearchPanel: React.FC<ParameterSearchPanelProps> = ({
 
   function adopt(p: BatesParameterSet) {
     onAdoptParameters?.(p);
+    showToast('Parameters adopted to Bates panel');
   }
 
   function adoptBest() {

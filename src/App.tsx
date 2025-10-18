@@ -43,6 +43,7 @@ import { WeightedTargetListPanel } from "./components/WeightedTargetListPanel";
  import { RankingWeightsPanel } from "./components/RankingWeightsPanel";
  import { TemperatureTransitionPanel } from "./components/TemperatureTransitionPanel";
 import { GroupPatternPanel } from "./components/GroupPatternPanel";
+import { ToastContainer } from "./components/ToastContainer";
 
 const WINDOW_OPTIONS = [
   { key: "W", label: "Weekly (3 draws)", size: 3 },
@@ -885,6 +886,9 @@ setIsGenerating(false);
 
   return (
     <div style={{ fontFamily: "monospace", padding: 20, maxWidth: 1700 }}>
+      {/* Global Toast Notification Container */}
+      <ToastContainer position="top-right" duration={1600} />
+      
       <h2>
         🇦🇺 Weekday Windfall – Maximum Validated Set Generator{" "}
         <span style={{ fontSize: 16, color: "#666" }}>TypeScript Demo</span>

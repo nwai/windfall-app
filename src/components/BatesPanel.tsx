@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { computeBatesWeights, BatesParameterSet } from "../lib/batesWeightsCore";
 import { weightedSampleWithoutReplacement } from "../lib/weightedSample";
 import { assessBatesGuardrails } from "../lib/batesGuardrails";
+import { showToast } from "../lib/toastBus";
 
 interface BatesPanelProps {
   excludedNumbers: number[];
@@ -89,6 +90,7 @@ export const BatesPanel: React.FC<BatesPanelProps> = ({
     const supp = [...forcedSupp, ...pickedSupp].slice(0, 2).sort((a, b) => a - b);
     setLastCandidate({ main, supp });
     onGenerate?.({ main, supp, weights: weightsRes.finalWeights });
+    showToast('Bates candidate generated');
   }
 
   const fmtProb = (p?: number) =>

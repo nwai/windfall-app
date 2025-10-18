@@ -9,6 +9,7 @@
 
 import React, { useMemo } from 'react';
 import { Draw } from '../types';
+import { showToast } from '../lib/toastBus';
 import {
   countZonePatterns,
   analyzeZoneTrends,
@@ -111,9 +112,61 @@ export function GroupPatternPanel({ draws, maxPatterns = 10 }: GroupPatternPanel
     return text;
   }, [draws.length, zoneTrends, sumMainsTrend]);
   
+  // Handler for copying JSON to clipboard
+  const handleCopyJSON = () => {
+    const data = {
+      drawCount: draws.length,
+      topPatterns: topPatterns.map((pattern, idx) => ({
+        pattern: pattern.key,
+        count: pattern.count,
+        rSquared: patternRegressions[idx].rSquared,
+        pValue: patternRegressions[idx].pValue,
+        trend: directions[idx],
+      })),
+      zoneTrends: zoneTrends.map((trend, idx) => ({
+        zone: idx + 1,
+        range: `${ZONE_RANGES[idx][0]}-${ZONE_RANGES[idx][1]}`,
+        slope: trend.slope,
+        pValue: trend.pValue,
+        direction: trend.direction,
+      })),
+      sumMainsTrend: {
+        slope: sumMainsTrend.slope,
+        pValue: sumMainsTrend.pValue,
+      },
+    };
+    
+    const jsonString = JSON.stringify(data, null, 2);
+    navigator.clipboard.writeText(jsonString)
+      .then(() => {
+        showToast('Zone analysis copied to clipboard');
+      })
+      .catch(() => {
+        showToast('Failed to copy to clipboard');
+      });
+  };
+  
   return (
     <div style={{ padding: '1rem', fontFamily: 'system-ui, sans-serif' }}>
-      <h2>Zone Pattern Analysis (ZPA)</h2>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+        <h2 style={{ margin: 0 }}>Zone Pattern Analysis (ZPA)</h2>
+        <button
+          onClick={handleCopyJSON}
+          style={{
+            padding: '8px 16px',
+            backgroundColor: '#1976d2',
+            color: 'white',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: 'pointer',
+            fontSize: '14px',
+            fontWeight: 'bold',
+          }}
+          title="Copy zone analysis as JSON to clipboard"
+        >
+          Copy JSON
+        </button>
+      </div>
       
       {/* Top Patterns Table */}
       <div style={{ marginBottom: '2rem' }}>
