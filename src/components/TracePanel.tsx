@@ -1,4 +1,5 @@
 import React from "react";
+import { showToast } from "../lib/toastBus";
 
 export const TracePanel: React.FC<{
   lines: string[];
@@ -8,7 +9,9 @@ export const TracePanel: React.FC<{
     if (!lines.length) return;
     const text = lines.join("\n");
     if (navigator?.clipboard) {
-      navigator.clipboard.writeText(text).catch(() => {});
+      navigator.clipboard.writeText(text)
+        .then(() => showToast('Trace copied to clipboard'))
+        .catch(() => showToast('Failed to copy trace'));
     }
   };
   return (
