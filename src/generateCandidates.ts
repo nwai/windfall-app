@@ -129,7 +129,7 @@ export function generateCandidates(
   const fullExcludedNumbers = Array.from(
     new Set<number>([...excludedNumbers, ...sde1ExcludedNumbers, ...hc3Numbers])
   ).sort((a, b) => a - b);
-  
+
   // Trace combined exclusions
   const exclusionSources: string[] = [];
   if (excludedNumbers.length > 0) exclusionSources.push(`User=${excludedNumbers.length}`);
@@ -213,11 +213,12 @@ export function generateCandidates(
       if (ratio === "0:8" || ratio === "8:0") { stats.tricky++; continue; }
     }
 
-    // Repeat-mode union minimum hits
-    if (recentUnion && minFromRecentUnionM > 0) {
-      const hits = nums8.filter(n => recentUnion.has(n)).length;
-      if (hits < minFromRecentUnionM) { stats.repeatUnion++; continue; }
-    }
+ // Repeat-mode union minimum hits
+ if (recentUnion && minFromRecentUnionM > 0) {
+   const ru = recentUnion; // narrowed to Set<number>
+   const hits = nums8.filter(n => ru.has(n)).length;
+   if (hits < minFromRecentUnionM) { stats.repeatUnion++; continue; }
+ }
 
     // Recent match constraints
     if (lastDrawSet) {
