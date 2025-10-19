@@ -1,6 +1,6 @@
 import { Draw } from "../types";
 
-interface TempSignalOptions {
+export interface TempSignalOptions {
   alpha?: number;
   hybridWeight?: number;           // weight on EMA in hybrid
   emaNormalize?: "global" | "per-number";

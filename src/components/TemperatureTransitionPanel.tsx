@@ -7,6 +7,7 @@ import {
 } from "../lib/backtestTemperatureTransitions";
 import { computeTemperatureCategories, Temperature, TemperatureClassifierOptions } from "../lib/temperatureCategories";
 import { sweepWindows, WindowSweepMode, SweepMetric } from "../lib/ttpWindowSweep";
+import { getSavedZoneWeights, WeightsByNumber } from "../lib/zpaStorage";
 
 export interface TemperatureTransitionPanelProps {
   history: Draw[];
@@ -70,11 +71,12 @@ export const TemperatureTransitionPanel: React.FC<TemperatureTransitionPanelProp
   const [autoSuggestion, setAutoSuggestion] = useState<{ window: number; metric: SweepMetric; value: number } | null>(null);
   const [autoBusy, setAutoBusy] = useState(false);
 
-  // Slice the history for the live model table (always honor small windows; clamp at least 1)
-  const windowed = useMemo(
-    () => history.slice(-Math.max(1, Math.min(windowSize, history.length))),
-    [history, windowSize]
-  );
+const [applyZoneWeights, setApplyZoneWeights] = useState<boolean>(false);
+  const [zoneGamma, setZoneGamma] = useState<number>(0.5);
+
+  const savedZoneWeights: WeightsByNumber | null = useMemo(() => {
+    try { return getSavedZoneWeights(); } catch { return null; }
+  }, []);
 
   const classifierOptions: TemperatureClassifierOptions = useMemo(
     () => ({
@@ -93,14 +95,15 @@ export const TemperatureTransitionPanel: React.FC<TemperatureTransitionPanelProp
     [alpha, metric, hybridWeight, emaNormalize, enforcePeaks, buckets, bucketStops, trendLookback, trendDelta, trendReversal]
   );
 
+  // Slice the history for the live model table (always honor small windows; clamp at least 1)
+  const windowed = useMemo(
+    () => history.slice(-Math.max(1, Math.min(windowSize, history.length))),
+    [history, windowSize]
+  );
+
   const categories = useMemo(
     () => computeTemperatureCategories(windowed, classifierOptions),
     [windowed, classifierOptions]
-  );
-
-  const matrix = useMemo(
-    () => buildTransitionMatrix(windowed, categories),
-    [windowed, categories]
   );
 
   const latestTemps = useMemo(
@@ -108,15 +111,29 @@ export const TemperatureTransitionPanel: React.FC<TemperatureTransitionPanelProp
     [categories]
   );
 
-  // Build per-number probabilities
+  const matrix = useMemo(
+    () => buildTransitionMatrix(windowed, categories),
+    [windowed, categories]
+  );
+  // when building per-number probabilities:
   const probs = useMemo(() => {
-    return Array.from({ length: 45 }, (_, i) => {
+    const rows = Array.from({ length: 45 }, (_, i) => {
       const n = i + 1;
       const t = latestTemps[n] ?? "other";
-      const p = getTransitionProbability(matrix, n, t);
+      let p = getTransitionProbability(matrix, n, t);
+
+      if (applyZoneWeights && savedZoneWeights) {
+        const w = savedZoneWeights[n] ?? 1;
+        // soft bias
+        p = p * Math.pow(w, zoneGamma);
+      }
+
       return { n, temp: t, p };
     }).sort((a, b) => b.p - a.p || a.n - b.n);
-  }, [matrix, latestTemps]);
+    return rows;
+  }, [matrix, latestTemps, applyZoneWeights, savedZoneWeights, zoneGamma]);
+
+
 
   // Selection set based on mode
   const selectedSet = useMemo(() => {
@@ -197,7 +214,14 @@ export const TemperatureTransitionPanel: React.FC<TemperatureTransitionPanelProp
             style={{ width: 80 }}
           />
         </label>
-
+<div style={{ display: "inline-flex", gap: 12, alignItems: "center", padding: "4px 8px", background: "#eef5ff", borderRadius: 6 }}>
+          <label title="Apply Zone Weights (from ZPA) as a soft bias to probabilities">
+            <input type="checkbox" checked={applyZoneWeights} onChange={(e) => setApplyZoneWeights(e.target.checked)} /> Apply zone weights
+          </label>
+          <label title="Strength of the zone bias (exponent on the weights)">
+            γ: <input type="number" min={0} max={1} step={0.05} value={zoneGamma} onChange={(e) => setZoneGamma(Number(e.target.value))} style={{ width: 70 }} />
+          </label>
+        </div>
         <div style={{ display: "inline-flex", gap: 12, alignItems: "center", padding: "4px 8px", background: "#eef5ff", borderRadius: 6 }}>
           <label>
             <input

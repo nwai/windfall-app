@@ -44,9 +44,11 @@ import { WeightedTargetListPanel } from "./components/WeightedTargetListPanel";
  import { TemperatureTransitionPanel } from "./components/TemperatureTransitionPanel";
 import { GroupPatternPanel } from "./components/GroupPatternPanel";
 import { ToastContainer } from "./components/ToastContainer";
-import { PatternStatsPanel } from "./components/candidates/PatternStatsPanel";
 import { NumberFrequencyPanel } from "./components/candidates/NumberFrequencyPanel";
 import { TargetSetQuickStatsPanel } from "./components/candidates/TargetSetQuickStatsPanel";
+import { applyZoneWeightBiasToScores } from "./lib/zoneWeightBias";
+import { getSavedZoneWeights } from "./lib/zpaStorage";
+import type { TempSignalOptions } from "./lib/temperatureSignal";
 
 const WINDOW_OPTIONS = [
   { key: "W", label: "Weekly (3 draws)", size: 3 },
@@ -350,7 +352,9 @@ const [tempMetric, setTempMetric] = useState<"ema" | "recency" | "hybrid">("hybr
   const [repeatWindowSizeW, setRepeatWindowSizeW] = useState<number>(12);
 const [minFromRecentUnionM, setMinFromRecentUnionM] = useState<number>(0);
 const [userSelectedNumbers, setUserSelectedNumbers] = useState<number[]>([]);
-
+// Zone bias UI state (for applying ZPA weights to candidate or prediction scores)
+const [applyZoneBias, setApplyZoneBias] = useState<boolean>(false);
+const [zoneGamma, setZoneGamma] = useState<number>(0.5);
 
 
   useEffect(() => {
@@ -381,6 +385,7 @@ function getActiveWindowSize() {
     if (!windowOption || windowOption.size === null) return history.length;
     return Math.min(windowOption.size, history.length);
   }
+
 
   // Compute filteredHistory based on mode
   const filteredHistory = useMemo<Draw[]>(() => {
@@ -786,6 +791,9 @@ setRatioSummary(result.ratioSummary);
 setQuotaWarning(result.quotaWarning);
 setSelectedCandidateIdx(0);
 
+// Status label for trace
+const zoneBiasStatus = applyZoneBias ? `on (γ=${zoneGamma})` : "off";
+
 if (traceVerbose) {
   const stateLines = [
     `[TRACE] Window: ${activeWindowSize} draws`,
@@ -795,6 +803,7 @@ if (traceVerbose) {
     `[TRACE] Jaccard: ${jaccardEnabled ? `on (<=${jaccardThresholdEff})` : "off"}`,
     `[TRACE] GPWF: ${gpwfEnabled ? `on (win=${gpwf_window_size}, bias=${gpwf_bias_factor}, floor=${gpwf_floor}, scale=${gpwf_scale_multiplier})` : "off"}`,
     `[TRACE] Lambda: ${lambdaEnabled ? lambda : "off"}`,
+    `[TRACE] ZoneBias (candidates): ${zoneBiasStatus}`,
     `[TRACE] MinRecentMatches: ${minRecentMatches}, RecentMatchBias: ${recentMatchBias}`,
     `[TRACE] Ratios selected: ${selectedRatios.length ? selectedRatios.join(", ") : "none"}${useTrickyRule ? " (Tricky Rule)" : ""}`,
     `[TRACE] User excluded: [${excludedNumbers.join(", ")}]`,
@@ -891,7 +900,7 @@ setIsGenerating(false);
     <div style={{ fontFamily: "monospace", padding: 20, maxWidth: 1700 }}>
       {/* Global Toast Notification Container */}
       <ToastContainer position="top-right" duration={1600} />
-      
+
       <h2>
         🇦🇺 Weekday Windfall – Maximum Validated Set Generator{" "}
         <span style={{ fontSize: 16, color: "#666" }}>TypeScript Demo</span>
@@ -992,6 +1001,28 @@ setIsGenerating(false);
         <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>
           Ratios apply to all 8 numbers. Only ratios observed in selected window are shown.
         </div>
+
+        <div style={{ display: "inline-flex", gap: 12, alignItems: "center", padding: "4px 8px", background: "#eef5ff", borderRadius: 6 }}>
+          <label title="Apply Zone Weights (from Zone Pattern Analysis) to candidate scoring">
+            <input
+              type="checkbox"
+              checked={applyZoneBias}
+              onChange={(e) => setApplyZoneBias(e.target.checked)}
+            /> Apply zone weights
+          </label>
+          <label title="Strength of the zone bias (exponent on weights). 0=no effect, 1=full">
+            γ: <input
+              type="number"
+              min={0}
+              max={1}
+              step={0.05}
+              value={zoneGamma}
+              onChange={(e) => setZoneGamma(Number(e.target.value))}
+              style={{ width: 70 }}
+            />
+          </label>
+        </div>
+
       </details>
 
       {/* WFMQY + Unified Toggles + User Exclusions */}
@@ -1303,9 +1334,7 @@ setIsGenerating(false);
   windowDraws={activeWindowSize}
 />
 
-<GroupPatternPanel draws={filteredHistory} maxPatterns={15} />
-
-<PatternStatsPanel draws={filteredHistory} numBins={10} />
+<GroupPatternPanel history={filteredHistory} />
 
 <NumberFrequencyPanel draws={filteredHistory} />
 
