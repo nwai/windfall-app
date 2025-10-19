@@ -1303,7 +1303,7 @@ setIsGenerating(false);
   windowDraws={activeWindowSize}
 />
 
-<GroupPatternPanel draws={filteredHistory} maxPatterns={15} />
+<GroupPatternPanel draws={filteredHistory} />
 
 <PatternStatsPanel draws={filteredHistory} numBins={10} />
 
