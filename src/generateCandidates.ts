@@ -222,7 +222,8 @@ export function generateCandidates(
 
     // Repeat-mode union minimum hits
     if (recentUnion && minFromRecentUnionM > 0) {
-      const hits = nums8.filter(n => recentUnion.has(n)).length;
+      const unionSet = recentUnion; // TypeScript narrowing helper
+      const hits = nums8.filter(n => unionSet.has(n)).length;
       if (hits < minFromRecentUnionM) { stats.repeatUnion++; continue; }
     }
 
