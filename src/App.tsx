@@ -47,6 +47,7 @@ import { ToastContainer } from "./components/ToastContainer";
 import { PatternStatsPanel } from "./components/candidates/PatternStatsPanel";
 import { NumberFrequencyPanel } from "./components/candidates/NumberFrequencyPanel";
 import { TargetSetQuickStatsPanel } from "./components/candidates/TargetSetQuickStatsPanel";
+import { WindowStatsPanel } from "./components/candidates/WindowStatsPanel";
 
 const WINDOW_OPTIONS = [
   { key: "W", label: "Weekly (3 draws)", size: 3 },
@@ -1321,6 +1322,17 @@ setIsGenerating(false);
 <GroupPatternPanel draws={filteredHistory} maxPatterns={15} />
 
 <PatternStatsPanel draws={filteredHistory} numBins={10} />
+
+<WindowStatsPanel
+  sumFilterEnabled={sumFilterEnabled}
+  setSumFilterEnabled={setSumFilterEnabled}
+  sumMin={sumMin}
+  setSumMin={setSumMin}
+  sumMax={sumMax}
+  setSumMax={setSumMax}
+  sumIncludeSupp={sumIncludeSupp}
+  setSumIncludeSupp={setSumIncludeSupp}
+/>
 
 <NumberFrequencyPanel draws={filteredHistory} />
 
