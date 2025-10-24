@@ -1,0 +1,181 @@
+{
+  "id": "p_7tcfcssmg8qmgzr6iy4",
+  "name": "10.14",
+  "version": 1,
+  "createdAt": "2025-10-20T23:14:57.772Z",
+  "updatedAt": "2025-10-20T23:14:57.772Z",
+  "state": {
+    "drawWindowMode": "lastN",
+    "rangeFrom": 1,
+    "rangeTo": 1,
+    "windowEnabled": true,
+    "windowMode": "H",
+    "customDrawCount": 222,
+    "knobs": {
+      "enableSDE1": false,
+      "enableHC3": false,
+      "enableOGA": true,
+      "enableGPWF": true,
+      "enableEntropy": true,
+      "enableHamming": true,
+      "enableJaccard": true,
+      "F": 0.03,
+      "M": 0.8,
+      "Q": 0.04,
+      "Y": 0.01,
+      "Historical_Weight": 0.05,
+      "gpwf_window_size": 27,
+      "gpwf_bias_factor": 0.05,
+      "gpwf_floor": 0.5,
+      "gpwf_scale_multiplier": 0.7,
+      "lambda": 0.85,
+      "octagonal_top": 9,
+      "exact_set_override": false,
+      "hamming_relax": false,
+      "gpwf_targeted_mode": false
+    },
+    "entropyEnabled": true,
+    "entropyThreshold": 1,
+    "hammingEnabled": true,
+    "hammingThreshold": 3,
+    "jaccardEnabled": true,
+    "jaccardThreshold": 0.5,
+    "lambdaEnabled": false,
+    "lambda": 0.85,
+    "gpwfEnabled": false,
+    "gpwf_window_size": 27,
+    "gpwf_bias_factor": 0.05,
+    "gpwf_floor": 0.5,
+    "gpwf_scale_multiplier": 0.7,
+    "selectedRatios": [
+      "4:4",
+      "3:5",
+      "5:3",
+      "6:2",
+      "2:6",
+      "7:1",
+      "1:7",
+      "8:0"
+    ],
+    "useTrickyRule": false,
+    "excludedNumbers": [
+      9,
+      19,
+      4,
+      38,
+      1,
+      2,
+      6,
+      16,
+      21,
+      25,
+      26,
+      27,
+      28,
+      29,
+      32,
+      33,
+      34,
+      35,
+      39,
+      42,
+      44
+    ],
+    "trendLookback": 4,
+    "trendThreshold": 0.02,
+    "allowedTrendRatios": [
+      "7-0-1",
+      "6-0-2",
+      "8-0-0"
+    ],
+    "trendSelectedNumbers": [],
+    "rankingWeights": {
+      "oga": 0.7,
+      "sel": 0.2,
+      "recent": 0.1
+    },
+    "weightedTargets": {},
+    "applyZoneBias": false,
+    "zoneGamma": 0.5,
+    "zpa": {
+      "selectedZones": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "normalizeMode": "all",
+      "groups": [
+        [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        [
+          6,
+          7,
+          8,
+          9,
+          10
+        ],
+        [
+          11,
+          12,
+          13,
+          14,
+          15
+        ],
+        [
+          16,
+          17,
+          18,
+          19,
+          20
+        ],
+        [
+          21,
+          22,
+          23,
+          24,
+          25
+        ],
+        [
+          26,
+          27,
+          28,
+          29,
+          30
+        ],
+        [
+          31,
+          32,
+          33,
+          34,
+          35
+        ],
+        [
+          36,
+          37,
+          38,
+          39,
+          40
+        ],
+        [
+          41,
+          42,
+          43,
+          44,
+          45
+        ]
+      ]
+    },
+    "ttp": {}
+  }
+}
