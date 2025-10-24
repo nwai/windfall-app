@@ -40,13 +40,53 @@ import { UserSelectedNumbersPanel } from "./components/UserSelectedNumbersPanel"
 import { ParameterSearchPanel } from "./components/ParameterSearchPanel";
 import { BatesParameterSet } from "./lib/batesWeightsCore";
 import { WeightedTargetListPanel } from "./components/WeightedTargetListPanel";
- import { RankingWeightsPanel } from "./components/RankingWeightsPanel";
- import { TemperatureTransitionPanel } from "./components/TemperatureTransitionPanel";
+import  { RankingWeightsPanel } from "./components/RankingWeightsPanel";
+import  { TemperatureTransitionPanel } from "./components/TemperatureTransitionPanel";
 import { GroupPatternPanel } from "./components/GroupPatternPanel";
 import { ToastContainer } from "./components/ToastContainer";
 import { PatternStatsPanel } from "./components/candidates/PatternStatsPanel";
 import { NumberFrequencyPanel } from "./components/candidates/NumberFrequencyPanel";
 import { TargetSetQuickStatsPanel } from "./components/candidates/TargetSetQuickStatsPanel";
+import type { ZoneGroups } from "./lib/groupPatterns";
+import { applyZoneWeightBiasToScores } from "./lib/zoneWeightBias";
+import { getSavedZoneWeights } from "./lib/zpaStorage";
+import { WindowStatsPanel } from "./components/WindowStatsPanel";
+import { ZPASettingsProvider, useZPASettings } from "./context/ZPASettingsContext";
+import { showToast } from "./lib/toastBus";
+import { GlobalZoneWeighting } from "./components/GlobalZoneWeighting";
+
+import {
+  AppPresetSnapshot,
+  listPresets,
+  saveNewPreset,
+  updatePreset,
+  deletePreset as deletePresetLS,
+  exportPresetJSON,
+  importPresetJSON,
+  getPreset,
+  type AppPreset,
+} from "./lib/presets";
+import {
+  getSavedGroups,
+  setSavedGroups,
+  getSavedSelectedZones,
+  setSavedSelectedZones,
+  getSavedNormalizeMode,
+  setSavedNormalizeMode,
+} from "./lib/zpaStorage";
+
+// Optional: custom groups example
+const custom: ZoneGroups = [
+  [1,2,3,4,5],
+  [6,7,8,9,10],
+  [11,12,13,14,15],
+  [16,17,18,19,20],
+  [21,22,23,24,25],
+  [26,27,28,29,30],
+  [31,32,33,34,35],
+  [36,37,38,39,40],
+  [41,42,43,44,45],
+];
 
 const WINDOW_OPTIONS = [
   { key: "W", label: "Weekly (3 draws)", size: 3 },
@@ -267,9 +307,12 @@ const UserExclusionsStrip: React.FC<{
 
 
 
-const App: React.FC = () => {
+function AppInner() {
 
-
+const [sumFilterEnabled, setSumFilterEnabled] = useState<boolean>(false);
+const [sumMin, setSumMin] = useState<number>(0);
+const [sumMax, setSumMax] = useState<number>(999);
+const [sumIncludeSupp, setSumIncludeSupp] = useState<boolean>(true);
 const [rankingWeights, setRankingWeights] = useState({ oga: 0.7, sel: 0.2, recent: 0.1 });
 const [weightedTargets, setWeightedTargets] = useState<Record<number, number>>({});
 const [batesParams, setBatesParams] = useState<Partial<BatesParameterSet>>({});
@@ -299,6 +342,7 @@ const [selectedNumbers, setSelectedNumbers] = useState<number[]>([]);
   const [customDrawCount, setCustomDrawCount] = useState<number>(1);
   const [windowEnabled, setWindowEnabled] = useState<boolean>(true);
 
+const [applyZoneBias, setApplyZoneBias] = useState<boolean>(false); // default OFF
 
 
 const [drawWindowMode, setDrawWindowMode] = useState<"lastN" | "range">("lastN");
@@ -350,6 +394,12 @@ const [tempMetric, setTempMetric] = useState<"ema" | "recency" | "hybrid">("hybr
   const [repeatWindowSizeW, setRepeatWindowSizeW] = useState<number>(12);
 const [minFromRecentUnionM, setMinFromRecentUnionM] = useState<number>(0);
 const [userSelectedNumbers, setUserSelectedNumbers] = useState<number[]>([]);
+const [presets, setPresets] = useState<AppPreset[]>(() => listPresets());
+const [selectedPresetId, setSelectedPresetId] = useState<string>("");
+const [newPresetName, setNewPresetName] = useState<string>("");
+const [zpaReloadKey, setZpaReloadKey] = useState<number>(0); // force ZPA remount on load
+// Global ZPA zone weighting (single source of truth)
+const { zoneWeightingEnabled, zoneGamma, setZoneWeightingEnabled, setZoneGamma } = useZPASettings();
 
 
 
@@ -372,7 +422,196 @@ const [userSelectedNumbers, setUserSelectedNumbers] = useState<number[]>([]);
     if (history.length > 0) setCustomDrawCount(history.length);
   }, [history]);
 
+// Helper: apply sum constraint to a candidate
+  function withinSumRange(candidate: CandidateSet): boolean {
+    if (!sumFilterEnabled) return true;
+    const nums = sumIncludeSupp ? [...candidate.main, ...candidate.supp] : candidate.main;
+    const s = nums.reduce((a, b) => a + b, 0);
+    return s >= sumMin && s <= sumMax;
+  }
 
+// Build a snapshot of current state (v1)
+  function buildSnapshot(): AppPresetSnapshot {
+    // Read ZPA persisted settings (panels read these on mount)
+    const zpaSelected = getSavedSelectedZones() ?? Array(9).fill(true);
+    const zpaNorm = getSavedNormalizeMode() ?? "all";
+    const zpaGroups = getSavedGroups() ?? [
+      [1,2,3,4,5],[6,7,8,9,10],[11,12,13,14,15],
+      [16,17,18,19,20],[21,22,23,24,25],
+      [26,27,28,29,30],[31,32,33,34,35],
+      [36,37,38,39,40],[41,42,43,44,45]
+    ];
+
+    return {
+      drawWindowMode,
+      rangeFrom,
+      rangeTo,
+      windowEnabled,
+      windowMode,
+      customDrawCount,
+
+      knobs: { ...knobs },
+      entropyEnabled,
+      entropyThreshold,
+      hammingEnabled,
+      hammingThreshold,
+      jaccardEnabled,
+      jaccardThreshold,
+
+      lambdaEnabled,
+      lambda,
+
+      gpwfEnabled,
+      gpwf_window_size,
+      gpwf_bias_factor,
+      gpwf_floor,
+      gpwf_scale_multiplier,
+
+      selectedRatios: [...selectedRatios],
+      useTrickyRule,
+
+      excludedNumbers: [...excludedNumbers],
+
+      trendLookback,
+      trendThreshold,
+      allowedTrendRatios: [...allowedTrendRatios],
+      trendSelectedNumbers: [...trendSelectedNumbers],
+
+      rankingWeights: { ...rankingWeights },
+      weightedTargets: { ...weightedTargets },
+
+      applyZoneBias,
+      zoneGamma,
+
+      zpa: {
+        selectedZones: [...zpaSelected],
+        normalizeMode: zpaNorm,
+        groups: zpaGroups,
+      },
+
+      ttp: {
+        // reserved for future if TemperatureTransitionPanel persists to localStorage
+        // applyZoneWeights: ..., gamma: ..., metric: ...,
+      },
+    };
+  }
+
+  // Apply a snapshot back to App + ZPA storages
+  function applySnapshot(s: AppPresetSnapshot) {
+    // Window / range
+    setDrawWindowMode(s.drawWindowMode);
+    setRangeFrom(s.rangeFrom);
+    setRangeTo(s.rangeTo);
+    setWindowEnabled(s.windowEnabled);
+    setWindowMode(s.windowMode as any);
+    setCustomDrawCount(s.customDrawCount);
+
+    // Knobs and thresholds
+    setKnobs(prev => ({ ...prev, ...s.knobs }));
+    setEntropyEnabled(s.entropyEnabled);
+    setEntropyThreshold(s.entropyThreshold);
+    setHammingEnabled(s.hammingEnabled);
+    setHammingThreshold(s.hammingThreshold);
+    setJaccardEnabled(s.jaccardEnabled);
+    setJaccardThreshold(s.jaccardThreshold);
+
+    // Lambda
+    setLambdaEnabled(s.lambdaEnabled);
+    setLambda(s.lambda);
+
+    // GPWF
+    setGPWFEnabled(s.gpwfEnabled);
+    setGPWFWindowSize(s.gpwf_window_size);
+    setGPWFBiasFactor(s.gpwf_bias_factor);
+    setGPWFFloor(s.gpwf_floor);
+    setGPWFScaleMultiplier(s.gpwf_scale_multiplier);
+
+    // Ratios / exclusions
+    setSelectedRatios(s.selectedRatios);
+    setUseTrickyRule(s.useTrickyRule);
+    setExcludedNumbers(s.excludedNumbers);
+
+    // Trend
+    setTrendLookback(s.trendLookback);
+    setTrendThreshold(s.trendThreshold);
+    setAllowedTrendRatios(s.allowedTrendRatios);
+    setTrendSelectedNumbers(s.trendSelectedNumbers);
+
+    // Ranking/targets
+    setRankingWeights(s.rankingWeights);
+    setWeightedTargets(s.weightedTargets);
+
+    // Candidate zone bias
+    setApplyZoneBias(s.applyZoneBias);
+    setZoneGamma(s.zoneGamma);
+
+    // ZPA storages: write, then force remount so panel re-reads on mount
+    try {
+      if (s.zpa?.groups) setSavedGroups(s.zpa.groups);
+      if (s.zpa?.selectedZones) setSavedSelectedZones(s.zpa.selectedZones);
+      if (s.zpa?.normalizeMode) setSavedNormalizeMode(s.zpa.normalizeMode);
+      setZpaReloadKey(k => k + 1);
+    } catch {}
+
+    // TTP: reserved — if/when panel persists to storage, set keys here similarly and remount it with a key
+  }
+
+  // Preset actions
+  function doSaveNewPreset() {
+    const name = newPresetName.trim() || `Preset ${presets.length + 1}`;
+    const snap = buildSnapshot();
+    const created = saveNewPreset(name, snap);
+    setPresets(listPresets());
+    setSelectedPresetId(created.id);
+    setNewPresetName("");
+  }
+
+  function doUpdatePreset() {
+    if (!selectedPresetId) return;
+    const snap = buildSnapshot();
+    updatePreset(selectedPresetId, snap);
+    setPresets(listPresets());
+  }
+
+  function doLoadPreset() {
+    if (!selectedPresetId) return;
+    const p = getPreset(selectedPresetId);
+    if (!p) return;
+    applySnapshot(p.state);
+  }
+
+  function doDeletePreset() {
+    if (!selectedPresetId) return;
+    deletePresetLS(selectedPresetId);
+    setPresets(listPresets());
+    setSelectedPresetId("");
+  }
+
+  async function doExportPreset() {
+    if (!selectedPresetId) return;
+    const json = exportPresetJSON(selectedPresetId);
+    if (!json) return;
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "windfall-preset.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function doImportPreset(file: File) {
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const text = String(evt.target?.result || "");
+      const imported = importPresetJSON(text);
+      if (imported) {
+        setPresets(listPresets());
+        setSelectedPresetId(imported.id);
+      }
+    };
+    reader.readAsText(file);
+  }
 
 function getActiveWindowSize() {
     if (!windowEnabled) return history.length;
@@ -381,6 +620,11 @@ function getActiveWindowSize() {
     if (!windowOption || windowOption.size === null) return history.length;
     return Math.min(windowOption.size, history.length);
   }
+
+  // Read weights once (or whenever you want to refresh). This is from ZPA “Copy JSON”.
+  const savedZoneWeights = useMemo(() => {
+    try { return getSavedZoneWeights(); } catch { return null; }
+  }, []);
 
   // Compute filteredHistory based on mode
   const filteredHistory = useMemo<Draw[]>(() => {
@@ -422,6 +666,7 @@ const allExclusions = Array.from(
     setRatioOptions(computeOddEvenRatios(filteredHistory));
     setSelectedRatios((ratios) => ratios.filter((r) => ratioOptions.some((opt) => opt.ratio === r)));
   }, [filteredHistory]);
+
 
 
   // Row simulation
@@ -607,6 +852,28 @@ const trendRatioDrawsConsidered = useMemo(
     [activeWindowSize, trendLookback]
   );
 
+// Soft candidate-level zone bias using geometric mean of per-number weights^gamma
+  function computeCandidateZoneBias(
+    nums: number[],
+    weightsByNumber: Record<number, number> | null | undefined,
+    gamma: number
+  ): number {
+    if (!weightsByNumber) return 1;
+    const g = Math.max(0, Math.min(1, gamma));
+    if (g === 0) return 1;
+
+    let logSum = 0;
+    let count = 0;
+    for (const n of nums) {
+      const w = Math.max(0.000001, weightsByNumber[n] ?? 1.0); // guard tiny
+      logSum += g * Math.log(w);
+      count++;
+    }
+    if (count === 0) return 1;
+    // geometric mean of w^g over the candidate’s numbers
+    return Math.exp(logSum / count);
+  }
+
 // HELPER: enrichment & resort (place above component return, after computeOGA utilities are available)
   function recomputeCompositeRanking(base: CandidateSet[]): CandidateSet[] {
     if (!base.length) return base;
@@ -632,26 +899,37 @@ const trendRatioDrawsConsidered = useMemo(
         const recentHits = recentSet ? nums.filter(n => recentSet.has(n)).length : 0;
         const ogaNorm = Math.max(0, Math.min(1, ogaPercentile / 100));
         const finalComposite = wOGA * ogaNorm + wSel * (selHits / 8) + wRecent * (recentHits / 8);
-        return {
-          ...c,
-          ogaScore,
-          ogaPercentile,
-          selHits,
-          recentHits,
-          finalComposite
-        };
-      })
-      .sort((a: any, b: any) => {
-        if (b.finalComposite !== a.finalComposite) return b.finalComposite - a.finalComposite;
-        const diff = Math.abs(b.finalComposite - a.finalComposite);
-        if (diff < EPS) {
-          if (b.selHits !== a.selHits) return b.selHits - a.selHits;
-          if (b.recentHits !== a.recentHits) return b.recentHits - a.recentHits;
-          return b.ogaPercentile - a.ogaPercentile;
+
+              // Apply optional zone bias as a soft multiplier (default OFF)
+              const zBias = applyZoneBias
+                ? computeCandidateZoneBias(nums, savedZoneWeights || null, zoneGamma)
+                : 1;
+
+              const finalCompositeAdj = finalComposite * zBias;
+
+              return {
+                ...c,
+                ogaScore,
+                ogaPercentile,
+                selHits,
+                recentHits,
+                finalComposite,
+                finalCompositeAdj,
+                zoneBias: zBias,
+              };
+            })
+            .sort((a: any, b: any) => {
+              if (b.finalCompositeAdj !== a.finalCompositeAdj) return b.finalCompositeAdj - a.finalCompositeAdj;
+              const diff = Math.abs(b.finalCompositeAdj - a.finalCompositeAdj);
+              if (diff < EPS) {
+                if (b.selHits !== a.selHits) return b.selHits - a.selHits;
+                if (b.recentHits !== a.recentHits) return b.recentHits - a.recentHits;
+                // prefer higher OGA percentile as a final tie-break
+                return b.ogaPercentile - a.ogaPercentile;
+              }
+              return 0;
+            });
         }
-        return 0;
-      });
-  }
 
   /* ========== TREND / TEMPERATURE BLOCK (END) ========== */
 
@@ -685,6 +963,43 @@ const conditionalProb = useMemo(
     () => buildTrendWeights(shortTrends, { method: "exp", beta: 3.0 }),
     [shortTrends]
   );
+
+  // --- wherever you compute base per-number scores for candidate generation ---
+   // Base scores for numbers 1..45 (pick a signal you prefer)
+   // Priority: conditionalProb (if present) -> temperatureSignal -> zeros
+   const baseScores: Record<number, number> = useMemo(() => {
+     const src =
+       (Array.isArray(conditionalProb) && conditionalProb.length === 45 ? conditionalProb :
+        Array.isArray(temperatureSignal) && temperatureSignal.length === 45 ? temperatureSignal :
+        Array(45).fill(0)) as number[];
+
+     const map: Record<number, number> = {};
+     for (let n = 1; n <= 45; n++) map[n] = src[n - 1] ?? 0;
+     return map;
+   }, [conditionalProb, temperatureSignal]);
+
+   // Apply zone bias conditionally just before ranking/selection
+   const finalScores: Record<number, number> = useMemo(() => {
+     if (!applyZoneBias) return baseScores;
+     return applyZoneWeightBiasToScores(baseScores, savedZoneWeights, zoneGamma);
+   }, [applyZoneBias, baseScores, savedZoneWeights, zoneGamma]);
+
+   // Apply zone bias conditionally just before ranking/selection
+   const zoneBiasedScores: Record<number, number> = useMemo(() => {
+     if (!applyZoneBias) return baseScores;
+     // If you’re already importing getSavedZoneWeights and applyZoneWeightBiasToScores:
+     const saved = getSavedZoneWeights();
+     return applyZoneWeightBiasToScores(baseScores, saved, zoneGamma);
+   }, [applyZoneBias, baseScores, zoneGamma]);
+
+   // Use `zoneBiasedScores` wherever you previously used the placeholder result
+
+   // Use finalScores (not baseScores) for downstream ranking/selection
+   const rankedNumbers = useMemo(() => {
+     return Object.entries(finalScores)
+       .map(([n, s]) => ({ n: Number(n), s }))
+       .sort((a, b) => b.s - a.s || a.n - b.n);
+   }, [finalScores]);
 
   function getMatchCount(candidate: CandidateSet, selected: number[]): number {
     const set = new Set([...candidate.main, ...candidate.supp]);
@@ -746,14 +1061,14 @@ const handleGenerate = () => {
     lambda: lambdaEnabled ? lambda : 0.0, // already neutralized when off
   };
 
-  // Optional: if you implemented Trace Verbose
-  const traceDispatch: React.Dispatch<React.SetStateAction<string[]>> =
-    traceVerbose ? setTrace : (((_updater: React.SetStateAction<string[]>) => {}) as any);
+  // FIX: define a typed no-op and use it instead of a typed inline arrow in a ternary
+  const noopTrace: React.Dispatch<React.SetStateAction<string[]>> = () => {};
+  const traceDispatch = traceVerbose ? setTrace : noopTrace;
 
   const result = generateCandidates(
     numCandidates,
     filteredHistory,
-    effectiveKnobsForGen,   // <-- use EFFECTIVE flags/values
+    effectiveKnobsForGen,
     traceDispatch,
     excludedNumbers,
     selectedRatios,
@@ -761,71 +1076,84 @@ const handleGenerate = () => {
     minOGAPercentile,
     pastOGAScores as any,
     trendSelectedNumbers,
-    // pass EFFECTIVE thresholds
+    // thresholds
     entropyThresholdEff,
     hammingThresholdEff,
     jaccardThresholdEff,
-    // lambda is already in effectiveKnobsForGen.lambda (but if generateCandidates also takes this explicitly, keep sending it)
+    // lambda
     lambdaEnabled ? lambda : 0.0,
+    // ratioOptions
     ratioOptions,
+    // recent constraints
     minRecentMatches,
-    recentMatchBias
+    recentMatchBias,
+    // repeat/union
+    repeatWindowSizeW,
+    minFromRecentUnionM,
+    // trend ratio
+    undefined,
+    undefined,
+    // NEW: sum filter
+    { enabled: sumFilterEnabled, min: sumMin, max: sumMax, includeSupp: sumIncludeSupp }
   );
 
   let processedCandidates = [...result.candidates];
-console.log('[DEBUG] excludedNumbers state before generate:', excludedNumbers);
-  // ... your existing post-processing/sorting for matchesRecent, etc.
 
-// UPDATE inside handleGenerate, right before setCandidates(processedCandidates):
+  // Enrich and rank
   processedCandidates = recomputeCompositeRanking(processedCandidates);
 
+  // Optional: still ok to post-filter by sum (harmless if already enforced)
+  if (sumFilterEnabled) {
+    processedCandidates = processedCandidates.filter(withinSumRange);
+  }
 
+  setCandidates(processedCandidates);
+  setRatioSummary(result.ratioSummary);
+  setQuotaWarning(result.quotaWarning);
+  setSelectedCandidateIdx(0);
 
-setCandidates(processedCandidates);
-setRatioSummary(result.ratioSummary);
-setQuotaWarning(result.quotaWarning);
-setSelectedCandidateIdx(0);
+  if (traceVerbose) {
+    const stateLines = [
+      `[TRACE] Window: ${activeWindowSize} draws`,
+      `[TRACE] OGA: ${knobs.enableOGA ? "on" : "off"}`,
+      `[TRACE] Entropy: ${entropyEnabled ? `on (>=${entropyThresholdEff})` : "off"}`,
+      `[TRACE] Hamming: ${hammingEnabled ? `on (>=${hammingThresholdEff})` : "off"}`,
+      `[TRACE] Jaccard: ${jaccardEnabled ? `on (<=${jaccardThresholdEff})` : "off"}`,
+      `[TRACE] GPWF: ${gpwfEnabled ? `on (win=${gpwf_window_size}, bias=${gpwf_bias_factor}, floor=${gpwf_floor}, scale=${gpwf_scale_multiplier})` : "off"}`,
+      `[TRACE] Lambda: ${lambdaEnabled ? lambda : "off"}`,
+      `[TRACE] ZoneBias (candidates): ${applyZoneBias ? `on (γ=${zoneGamma})` : "off"}`,
+      `[TRACE] MinRecentMatches: ${minRecentMatches}, RecentMatchBias: ${recentMatchBias}`,
+      `[TRACE] Ratios selected: ${selectedRatios.length ? selectedRatios.join(", ") : "none"}${useTrickyRule ? " (Tricky Rule)" : ""}`,
+      `[TRACE] Sum filter: ${sumFilterEnabled ? `${sumIncludeSupp ? "main+supp" : "main-only"} in [${sumMin}, ${sumMax}]` : "off"}`,
+      `[TRACE] User excluded: [${excludedNumbers.join(", ")}]`,
+      `[TRACE] Forced inclusion: [${trendSelectedNumbers.join(", ")}]`,
+    ];
 
-if (traceVerbose) {
-  const stateLines = [
-    `[TRACE] Window: ${activeWindowSize} draws`,
-    `[TRACE] OGA: ${knobs.enableOGA ? "on" : "off"}`,
-    `[TRACE] Entropy: ${entropyEnabled ? `on (>=${entropyThresholdEff})` : "off"}`,
-    `[TRACE] Hamming: ${hammingEnabled ? `on (>=${hammingThresholdEff})` : "off"}`,
-    `[TRACE] Jaccard: ${jaccardEnabled ? `on (<=${jaccardThresholdEff})` : "off"}`,
-    `[TRACE] GPWF: ${gpwfEnabled ? `on (win=${gpwf_window_size}, bias=${gpwf_bias_factor}, floor=${gpwf_floor}, scale=${gpwf_scale_multiplier})` : "off"}`,
-    `[TRACE] Lambda: ${lambdaEnabled ? lambda : "off"}`,
-    `[TRACE] MinRecentMatches: ${minRecentMatches}, RecentMatchBias: ${recentMatchBias}`,
-    `[TRACE] Ratios selected: ${selectedRatios.length ? selectedRatios.join(", ") : "none"}${useTrickyRule ? " (Tricky Rule)" : ""}`,
-    `[TRACE] User excluded: [${excludedNumbers.join(", ")}]`,
-    `[TRACE] Forced inclusion: [${trendSelectedNumbers.join(", ")}]`,
-  ];
+    const s = result.rejectionStats;
+    const rejSummary = `[TRACE] Rejections: Entropy=${s.entropy}, Hamming=${s.hamming}, Jaccard=${s.jaccard}, OddEven=${s.oddEven}, Tricky=${s.tricky}, MinRecent=${s.minRecent}, RecentBias=${s.recentBias}, RepeatUnion=${s.repeatUnion}, TrendRatio=${s.trendRatio}, SumRange=${(s as any).sumRange ?? 0} | Attempts=${s.totalAttempts}, Accepted=${s.accepted}`;
 
-  const s = result.rejectionStats;
-  const rejSummary = `[TRACE] Rejections: Entropy=${s.entropy}, Hamming=${s.hamming}, Jaccard=${s.jaccard}, OddEven=${s.oddEven}, Tricky=${s.tricky}, MinRecent=${s.minRecent}, RecentBias=${s.recentBias} | Attempts=${s.totalAttempts}, Accepted=${s.accepted}`;
+    setTrace((t) => [
+      ...t,
+      ...stateLines,
+      rejSummary,
+      traceFormat(
+        filteredHistory,
+        effectiveKnobsForGen,
+        processedCandidates,
+        {
+          enableOGA: knobs.enableOGA,
+          entropyEnabled,
+          hammingEnabled,
+          jaccardEnabled,
+          gpwfEnabled,
+          lambdaEnabled,
+        }
+      ),
+    ]);
+  }
 
-  setTrace((t) => [
-    ...t,
-    ...stateLines,
-    rejSummary,
-    traceFormat(
-      filteredHistory,
-      effectiveKnobsForGen,
-      processedCandidates,
-      {
-        enableOGA: knobs.enableOGA,
-        entropyEnabled,
-        hammingEnabled,
-        jaccardEnabled,
-        gpwfEnabled,
-        lambdaEnabled,
-      }
-    ),
-  ]);
-}
-
-setIsGenerating(false);
-};
+  setIsGenerating(false);
+}; // END handleGenerate
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -891,7 +1219,7 @@ setIsGenerating(false);
     <div style={{ fontFamily: "monospace", padding: 20, maxWidth: 1700 }}>
       {/* Global Toast Notification Container */}
       <ToastContainer position="top-right" duration={1600} />
-      
+
       <h2>
         🇦🇺 Weekday Windfall – Maximum Validated Set Generator{" "}
         <span style={{ fontSize: 16, color: "#666" }}>TypeScript Demo</span>
@@ -1102,6 +1430,28 @@ setIsGenerating(false);
              : <>Using draws <b>{rangeFrom}</b> to <b>{rangeTo}</b> ({filteredHistory.length} draws)</>
            }
          </div>
+         {/* NOTE: Zone-weight UI here can be removed if you’re adopting a global control; keeping as-is per v184 */}
+        {/* ---  <div style={{ display: "inline-flex", gap: 12, alignItems: "center", padding: "4px 8px", background: "#eef5ff", borderRadius: 6 }}>
+           <label title="Apply Zone Weights (from Zone Pattern Analysis) to candidate scoring">
+             <input
+               type="checkbox"
+               checked={applyZoneBias}
+               onChange={(e) => setApplyZoneBias(e.target.checked)}
+             /> Apply zone weights
+           </label>
+           <label title="Strength of the zone bias (exponent on weights). 0=no effect, 1=full">
+             γ: <input
+               type="number"
+               min={0}
+               max={1}
+               step={0.05}
+               value={zoneGamma}
+               onChange={(e) => setZoneGamma(Number(e.target.value))}
+               style={{ width: 70 }}
+             />
+           </label>
+         </div> --- */}
+
          {/* Unified toggles */}
          <span style={{ marginLeft: 12 }}>
            <label style={{ marginRight: 12 }}>
@@ -1303,12 +1653,55 @@ setIsGenerating(false);
   windowDraws={activeWindowSize}
 />
 
-<GroupPatternPanel draws={filteredHistory} maxPatterns={15} />
+<GroupPatternPanel key={zpaReloadKey} history={filteredHistory} groups={custom} />
+<GlobalZoneWeighting />
 
-<PatternStatsPanel draws={filteredHistory} numBins={10} />
+{/* Pattern Stats: collapsed with short legend/help */}
+<details style={{ marginTop: 10 }}>
+  <summary style={{ cursor: "pointer" }}>
+    <b>Pattern Stats</b> <span style={{ fontWeight: 400, color: "#666" }}>(collapsed)</span>
+  </summary>
+  <div style={{ overflowX: "auto", fontSize: 12, marginTop: 8, background: "#fff", border: "1px solid #eee", borderRadius: 6, padding: 8 }}>
+    <PatternStatsPanel draws={filteredHistory} numBins={10} />
+    <div style={{ fontSize: 12, color: "#555", marginTop: 8, lineHeight: 1.6 }}>
+      <b>How to read Pattern Stats</b>
+      <ul style={{ margin: "6px 0 0 16px" }}>
+        <li>Shows distributions of observed patterns over the selected window.</li>
+        <li>Use this to spot dominant bins and outliers; combine with your filters to either align with or avoid dominant patterns.</li>
+        <li>Adjust the window above to see how patterns shift over different spans.</li>
+      </ul>
+    </div>
+  </div>
+</details>
 
-<NumberFrequencyPanel draws={filteredHistory} />
-
+{/* Number Frequency: compact and collapsed, with “Last drawn (ago)” column inside the panel */}
+<details style={{ marginTop: 10 }}>
+  <summary style={{ cursor: "pointer" }}>
+    <b>Number Frequency</b> <span style={{ fontWeight: 400, color: "#666" }}>(compact, collapsed)</span>
+  </summary>
+  <div style={{ overflowX: "auto", fontSize: 12, marginTop: 8 }}>
+    <NumberFrequencyPanel draws={filteredHistory} />
+  </div>
+</details>
+<details style={{ marginTop: 10 }}>
+  <summary style={{ cursor: "pointer" }}>
+    <b>Window Stats (Low/Mid/High, Even/Odd, Sum)</b> <span style={{ fontWeight: 400, color: "#666" }}>(WFMQY)</span>
+  </summary>
+  <div style={{ marginTop: 8 }}>
+    <WindowStatsPanel
+      draws={filteredHistory}
+      sumMin={sumMin}
+      sumMax={sumMax}
+      includeSupp={sumIncludeSupp}
+      onSumFilterChange={({ min, max, includeSupp }) => {
+        setSumMin(min);
+        setSumMax(max);
+        setSumIncludeSupp(includeSupp);
+        setSumFilterEnabled(true);
+      }}
+    />
+  </div>
+</details>
 <TargetSetQuickStatsPanel
   forcedNumbers={trendSelectedNumbers}
   selectedNumbers={userSelectedNumbers}
@@ -1328,7 +1721,7 @@ setIsGenerating(false);
   hideBiasToggles={true}
   forcedNumbers={trendSelectedNumbers}
   selectedCheckNumbers={selectedNumbers}
-focusNumber={focusNumber}
+  focusNumber={focusNumber}
 />
 
       {/* Operators + Lambda enable, GPWF, thresholds */}
@@ -1383,6 +1776,54 @@ focusNumber={focusNumber}
   octagonal_top={octagonalTop}
   setOctagonalTop={setOctagonalTop}
 />
+        </details>
+
+{/* Presets bar */}
+        <details open style={{ marginTop: 10, marginBottom: 10 }}>
+          <summary><b>State Presets</b> <span style={{ fontWeight: 400, fontSize: 12, color: "#555" }}>Save and recall all current options</span></summary>
+          <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", background: "#f7fafe", border: "1px solid #e3f2fd", padding: 10, borderRadius: 6, marginTop: 8 }}>
+            <label>
+              Preset:
+              <select
+                value={selectedPresetId}
+                onChange={(e) => setSelectedPresetId(e.target.value)}
+                style={{ marginLeft: 6, minWidth: 220 }}
+              >
+                <option value="">— select —</option>
+                {presets.map(p => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </label>
+            <button onClick={doLoadPreset} disabled={!selectedPresetId}>Load</button>
+            <button onClick={doUpdatePreset} disabled={!selectedPresetId}>Update from current</button>
+            <button onClick={doDeletePreset} disabled={!selectedPresetId}>Delete</button>
+            <button onClick={doExportPreset} disabled={!selectedPresetId}>Export</button>
+            <span style={{ marginLeft: 12 }}>
+              <label>
+                New name:
+                <input
+                  type="text"
+                  value={newPresetName}
+                  onChange={(e) => setNewPresetName(e.target.value)}
+                  placeholder="e.g., Quarter+ZPA-G7"
+                  style={{ marginLeft: 6, width: 200 }}
+                />
+              </label>
+              <button onClick={doSaveNewPreset} style={{ marginLeft: 8 }}>Save Current</button>
+            </span>
+            <span style={{ marginLeft: "auto" }}>
+              <label style={{ marginRight: 6 }}>
+                Import:
+                <input
+                  type="file"
+                  accept=".json,application/json"
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) doImportPreset(f); e.currentTarget.value = ""; }}
+                  style={{ marginLeft: 6 }}
+                />
+              </label>
+            </span>
+          </div>
         </details>
 
   {/* Trend Filter UI */}
@@ -1645,4 +2086,10 @@ focusNumber={focusNumber}
   );
 };
 
-export default App;
+export default function App() {
+  return (
+    <ZPASettingsProvider>
+      <AppInner />
+    </ZPASettingsProvider>
+  );
+}
