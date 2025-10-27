@@ -31,7 +31,7 @@ export function OGAHistogram({
     .filter((i) => i !== -1);
 
   // Candidate bin
-  let candidateBin = undefined;
+  let candidateBin: number | undefined = undefined;
   if (candidateOGA !== undefined) {
     candidateBin = Math.min(
       binCount - 1,

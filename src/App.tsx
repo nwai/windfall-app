@@ -47,6 +47,7 @@ import { ToastContainer } from "./components/ToastContainer";
 import { PatternStatsPanel } from "./components/candidates/PatternStatsPanel";
 import { NumberFrequencyPanel } from "./components/candidates/NumberFrequencyPanel";
 import { TargetSetQuickStatsPanel } from "./components/candidates/TargetSetQuickStatsPanel";
+import { WindowStatsPanel } from "./components/candidates/WindowStatsPanel";
 
 const WINDOW_OPTIONS = [
   { key: "W", label: "Weekly (3 draws)", size: 3 },
@@ -475,6 +476,11 @@ useEffect(() => {
   const [trendLookback, setTrendLookback] = useState(4);
   const [trendThreshold, setTrendThreshold] = useState(0.02);
   const [allowedTrendRatios, setAllowedTrendRatios] = useState<string[]>([]);
+  // Sum filter state
+  const [sumFilterEnabled, setSumFilterEnabled] = useState<boolean>(false);
+  const [sumMin, setSumMin] = useState<number>(0);
+  const [sumMax, setSumMax] = useState<number>(9999);
+  const [sumIncludeSupp, setSumIncludeSupp] = useState<boolean>(true);
   const toggleTrendRatio = (tag: string) => {
     setAllowedTrendRatios(prev => prev.includes(tag) ? prev.filter(x => x !== tag) : [...prev, tag]);
   };
@@ -769,7 +775,12 @@ const handleGenerate = () => {
     lambdaEnabled ? lambda : 0.0,
     ratioOptions,
     minRecentMatches,
-    recentMatchBias
+    recentMatchBias,
+    repeatWindowSizeW,
+    minFromRecentUnionM,
+    trendMap,
+    allowedTrendRatios,
+    { enabled: sumFilterEnabled, min: sumMin, max: sumMax, includeSupp: sumIncludeSupp }
   );
 
   let processedCandidates = [...result.candidates];
@@ -787,6 +798,10 @@ setQuotaWarning(result.quotaWarning);
 setSelectedCandidateIdx(0);
 
 if (traceVerbose) {
+  const sumFilterDesc = sumFilterEnabled
+    ? `Sum filter: ${sumIncludeSupp ? "main+supp" : "main-only"} in [${sumMin},${sumMax}]`
+    : "Sum filter: off";
+  
   const stateLines = [
     `[TRACE] Window: ${activeWindowSize} draws`,
     `[TRACE] OGA: ${knobs.enableOGA ? "on" : "off"}`,
@@ -799,10 +814,11 @@ if (traceVerbose) {
     `[TRACE] Ratios selected: ${selectedRatios.length ? selectedRatios.join(", ") : "none"}${useTrickyRule ? " (Tricky Rule)" : ""}`,
     `[TRACE] User excluded: [${excludedNumbers.join(", ")}]`,
     `[TRACE] Forced inclusion: [${trendSelectedNumbers.join(", ")}]`,
+    `[TRACE] ${sumFilterDesc}`,
   ];
 
   const s = result.rejectionStats;
-  const rejSummary = `[TRACE] Rejections: Entropy=${s.entropy}, Hamming=${s.hamming}, Jaccard=${s.jaccard}, OddEven=${s.oddEven}, Tricky=${s.tricky}, MinRecent=${s.minRecent}, RecentBias=${s.recentBias} | Attempts=${s.totalAttempts}, Accepted=${s.accepted}`;
+  const rejSummary = `[TRACE] Rejections: Entropy=${s.entropy}, Hamming=${s.hamming}, Jaccard=${s.jaccard}, OddEven=${s.oddEven}, Tricky=${s.tricky}, MinRecent=${s.minRecent}, RecentBias=${s.recentBias}, SumRange=${s.sumRange} | Attempts=${s.totalAttempts}, Accepted=${s.accepted}`;
 
   setTrace((t) => [
     ...t,
@@ -1306,6 +1322,17 @@ setIsGenerating(false);
 <GroupPatternPanel draws={filteredHistory} maxPatterns={15} />
 
 <PatternStatsPanel draws={filteredHistory} numBins={10} />
+
+<WindowStatsPanel
+  sumFilterEnabled={sumFilterEnabled}
+  setSumFilterEnabled={setSumFilterEnabled}
+  sumMin={sumMin}
+  setSumMin={setSumMin}
+  sumMax={sumMax}
+  setSumMax={setSumMax}
+  sumIncludeSupp={sumIncludeSupp}
+  setSumIncludeSupp={setSumIncludeSupp}
+/>
 
 <NumberFrequencyPanel draws={filteredHistory} />
 

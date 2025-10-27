@@ -21,6 +21,7 @@ export interface GenerateCandidatesResult {
     repeatUnion: number;
     trendRatio: number;
     exclusions: number;
+    sumRange: number;
     totalAttempts: number;
     accepted: number;
   };
@@ -52,8 +53,12 @@ export function generateCandidates(
   repeatWindowSizeW: number = 0,
   minFromRecentUnionM: number = 0,
   trendMap?: Map<number, TrendClass>,
-  allowedTrendRatios?: string[]
+  allowedTrendRatios?: string[],
+  sumFilter?: { enabled: boolean; min: number; max: number; includeSupp: boolean }
 ): GenerateCandidatesResult {
+
+  // Set default sumFilter values
+  const sumFilterConfig = sumFilter ?? { enabled: false, min: 0, max: 9999, includeSupp: true };
 
   if (DEBUG) {
     console.log('[generateCandidates] args snapshot', {
@@ -67,7 +72,8 @@ export function generateCandidates(
       repeatWindowSizeW,
       minFromRecentUnionM,
       hasTrendMap: !!trendMap,
-      allowedTrendRatios
+      allowedTrendRatios,
+      sumFilter: sumFilterConfig
     });
   }
 
@@ -85,6 +91,7 @@ export function generateCandidates(
     repeatUnion: 0,
     trendRatio: 0,
     exclusions: 0,
+    sumRange: 0,
     totalAttempts: 0,
     accepted: 0
   };
@@ -215,7 +222,8 @@ export function generateCandidates(
 
     // Repeat-mode union minimum hits
     if (recentUnion && minFromRecentUnionM > 0) {
-      const hits = nums8.filter(n => recentUnion.has(n)).length;
+      const unionSet = recentUnion; // TypeScript narrowing helper
+      const hits = nums8.filter(n => unionSet.has(n)).length;
       if (hits < minFromRecentUnionM) { stats.repeatUnion++; continue; }
     }
 
@@ -243,6 +251,17 @@ export function generateCandidates(
       const tag = `${u}-${d}-${f}`;
       if (!allowedTrendRatios.includes(tag)) {
         stats.trendRatio++; continue;
+      }
+    }
+
+    // Sum range filter
+    if (sumFilterConfig.enabled) {
+      const candidateSum = sumFilterConfig.includeSupp
+        ? main.reduce((a, b) => a + b, 0) + supp.reduce((a, b) => a + b, 0)
+        : main.reduce((a, b) => a + b, 0);
+      if (candidateSum < sumFilterConfig.min || candidateSum > sumFilterConfig.max) {
+        stats.sumRange++;
+        continue;
       }
     }
 
