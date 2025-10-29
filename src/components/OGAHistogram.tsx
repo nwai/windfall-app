@@ -30,14 +30,12 @@ export function OGAHistogram({
     .map((count, i) => (count === maxCount ? i : -1))
     .filter((i) => i !== -1);
 
-  // Candidate bin
-  let candidateBin = undefined;
-  if (candidateOGA !== undefined) {
-    candidateBin = Math.min(
-      binCount - 1,
-      Math.floor((candidateOGA - min) / binWidth)
-    );
-  }
+ // Candidate bin
+ let candidateBin: number | undefined;
+ if (candidateOGA !== undefined) {
+   const idx = Math.floor((candidateOGA - min) / binWidth);
+   candidateBin = Math.min(binCount - 1, Math.max(0, idx));
+ }
 
   // Prepare data for Nivo (no booleans!)
   const data = bins.map((count, i) => {

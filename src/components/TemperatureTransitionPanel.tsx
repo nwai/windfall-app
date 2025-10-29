@@ -7,6 +7,8 @@ import {
 } from "../lib/backtestTemperatureTransitions";
 import { computeTemperatureCategories, Temperature, TemperatureClassifierOptions } from "../lib/temperatureCategories";
 import { sweepWindows, WindowSweepMode, SweepMetric } from "../lib/ttpWindowSweep";
+import { getSavedZoneWeights, WeightsByNumber } from "../lib/zpaStorage";
+import { useZPASettings } from "../context/ZPASettingsContext";
 
 export interface TemperatureTransitionPanelProps {
   history: Draw[];
@@ -70,6 +72,14 @@ export const TemperatureTransitionPanel: React.FC<TemperatureTransitionPanelProp
   const [autoSuggestion, setAutoSuggestion] = useState<{ window: number; metric: SweepMetric; value: number } | null>(null);
   const [autoBusy, setAutoBusy] = useState(false);
 
+  // Global Zone Weighting (single source of truth)
+  const { zoneWeightingEnabled, zoneGamma } = useZPASettings();
+
+  // Load saved per-number weights (from ZPA panel) once
+  const savedZoneWeights: WeightsByNumber | null = useMemo(() => {
+    try { return getSavedZoneWeights(); } catch { return null; }
+  }, []);
+
   // Slice the history for the live model table (always honor small windows; clamp at least 1)
   const windowed = useMemo(
     () => history.slice(-Math.max(1, Math.min(windowSize, history.length))),
@@ -110,13 +120,21 @@ export const TemperatureTransitionPanel: React.FC<TemperatureTransitionPanelProp
 
   // Build per-number probabilities
   const probs = useMemo(() => {
-    return Array.from({ length: 45 }, (_, i) => {
+    const rows = Array.from({ length: 45 }, (_, i) => {
       const n = i + 1;
       const t = latestTemps[n] ?? "other";
-      const p = getTransitionProbability(matrix, n, t);
+      let p = getTransitionProbability(matrix, n, t);
+
+      // Apply global ZPA bias if enabled
+      if (zoneWeightingEnabled && savedZoneWeights) {
+        const w = savedZoneWeights[n] ?? 1;
+        p = p * Math.pow(w, zoneGamma);
+      }
+
       return { n, temp: t, p };
     }).sort((a, b) => b.p - a.p || a.n - b.n);
-  }, [matrix, latestTemps]);
+    return rows;
+  }, [matrix, latestTemps, zoneWeightingEnabled, savedZoneWeights, zoneGamma]);
 
   // Selection set based on mode
   const selectedSet = useMemo(() => {
@@ -330,8 +348,7 @@ export const TemperatureTransitionPanel: React.FC<TemperatureTransitionPanelProp
                   {labelMode === "dates" && <div style={{ color: "#666" }}>{idxLabel}</div>}
                   <div>acc {fmtPct(w.accuracy)}, prec {fmtPct(w.precision)}, rec {fmtPct(w.recall)}, F1 {fmtPct(w.f1)}</div>
                   <div>
-                    pred pos {w.positivesPredicted}, actual pos {w.positivesActual}
-                    {mode === "threshold" ? `, thr ${predThreshold}` : `, K ${topK}`}
+                    {mode === "threshold" ? `thr ${predThreshold}` : `K ${topK}`}
                   </div>
                 </div>
               );

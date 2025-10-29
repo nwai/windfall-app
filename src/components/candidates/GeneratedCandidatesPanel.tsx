@@ -149,6 +149,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
           {isGenerating ? "Generating…" : "Generate"}
         </button>
         {quotaWarning && <span style={{ color: "#d32f2f", fontSize: 12 }}>{quotaWarning}</span>}
+
       </header>
 
       <LegendBar />

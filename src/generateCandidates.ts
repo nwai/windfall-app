@@ -20,6 +20,7 @@ export interface GenerateCandidatesResult {
     recentBias: number;
     repeatUnion: number;
     trendRatio: number;
+    sumRange: number;        // NEW
     exclusions: number;
     totalAttempts: number;
     accepted: number;
@@ -52,7 +53,9 @@ export function generateCandidates(
   repeatWindowSizeW: number = 0,
   minFromRecentUnionM: number = 0,
   trendMap?: Map<number, TrendClass>,
-  allowedTrendRatios?: string[]
+  allowedTrendRatios?: string[],
+  // NEW: optional sum filter
+  sumFilter?: { enabled?: boolean; min?: number; max?: number; includeSupp?: boolean }
 ): GenerateCandidatesResult {
 
   if (DEBUG) {
@@ -67,7 +70,8 @@ export function generateCandidates(
       repeatWindowSizeW,
       minFromRecentUnionM,
       hasTrendMap: !!trendMap,
-      allowedTrendRatios
+      allowedTrendRatios,
+      sumFilter
     });
   }
 
@@ -84,6 +88,7 @@ export function generateCandidates(
     recentBias: 0,
     repeatUnion: 0,
     trendRatio: 0,
+    sumRange: 0,      // NEW
     exclusions: 0,
     totalAttempts: 0,
     accepted: 0
@@ -91,6 +96,15 @@ export function generateCandidates(
 
   const ratioSummary: any = {};  // placeholder in case you aggregate ratios later
   const warnings: string[] = [];
+
+  // Configure sum filter defaults (keeps backwards compatibility when not provided)
+  const sumCfg = {
+    enabled: false,
+    min: 0,
+    max: 9999,
+    includeSupp: true,
+    ...(sumFilter || {})
+  };
 
   // Build repeat-mode union (for minFromRecentUnionM)
   let recentUnion: Set<number> | null = null;
@@ -129,7 +143,7 @@ export function generateCandidates(
   const fullExcludedNumbers = Array.from(
     new Set<number>([...excludedNumbers, ...sde1ExcludedNumbers, ...hc3Numbers])
   ).sort((a, b) => a - b);
-  
+
   // Trace combined exclusions
   const exclusionSources: string[] = [];
   if (excludedNumbers.length > 0) exclusionSources.push(`User=${excludedNumbers.length}`);
@@ -199,6 +213,16 @@ export function generateCandidates(
       continue;
     }
 
+    // NEW: Sum range constraint (before other filters)
+    if (sumCfg.enabled) {
+      const arr = sumCfg.includeSupp ? nums8 : main;
+      const total = arr.reduce((a, b) => a + b, 0);
+      if (total < sumCfg.min || total > sumCfg.max) {
+        stats.sumRange++;
+        continue;
+      }
+    }
+
     // Odd/Even ratio filter
     if (selectedOddEvenRatios.length > 0) {
       const odd = nums8.filter(n => n % 2 === 1).length;
@@ -213,9 +237,11 @@ export function generateCandidates(
       if (ratio === "0:8" || ratio === "8:0") { stats.tricky++; continue; }
     }
 
-    // Repeat-mode union minimum hits
+// Repeat-mode union minimum hits
     if (recentUnion && minFromRecentUnionM > 0) {
-      const hits = nums8.filter(n => recentUnion.has(n)).length;
+      const ru = recentUnion; // Set<number> (non-null inside this block)
+      let hits = 0;
+      for (const n of nums8) if (ru.has(n)) hits++;
       if (hits < minFromRecentUnionM) { stats.repeatUnion++; continue; }
     }
 

@@ -6,6 +6,8 @@ import {
   buildSDE1PenaltyWeights,
   combinePerNumberWeights,
 } from "../lib/numberBiases";
+import { useZPASettings } from "../context/ZPASettingsContext";
+import { getSavedZoneWeights, WeightsByNumber } from "../lib/zpaStorage";
 
 /**
  * Helper utilities (top-level) for survival analysis
@@ -52,6 +54,7 @@ function kaplanMeier(times: number[], _window: number) {
   }
   return { curve: km, probNext: 1 - (km[1] ?? 1) };
 }
+
 export const SurvivalAnalyzer: React.FC<{
   history: Draw[];
   excludedNumbers: number[];
@@ -63,7 +66,7 @@ export const SurvivalAnalyzer: React.FC<{
   hideBiasToggles?: boolean;
   forcedNumbers?: number[];
   selectedCheckNumbers?: number[];
-  focusNumber?: number | null; // NEW
+  focusNumber?: number | null; // highlight number in table
 }> = ({
   history,
   excludedNumbers,
@@ -75,7 +78,7 @@ export const SurvivalAnalyzer: React.FC<{
   hideBiasToggles = true,
   forcedNumbers = [],
   selectedCheckNumbers = [],
-  focusNumber = null, // NEW
+  focusNumber = null,
 }) => {
   const windowDefault = externalWindowSize ?? 20;
   const [windowSize, setWindowSize] = useState<number>(windowDefault);
@@ -96,12 +99,18 @@ export const SurvivalAnalyzer: React.FC<{
 
   const [sortBy, setSortBy] = useState<"biased" | "base" | "number">("biased");
 
-// Enforce valid [from, to]
-useEffect(() => {
-  if (trendFrom >= trendTo) {
-    setTrendTo(Math.min(history.length, trendFrom + 1));
-  }
-}, [trendFrom, trendTo, history.length]);
+  // Global zone weighting (single source) + saved per-number weights
+  const { zoneWeightingEnabled, zoneGamma } = useZPASettings();
+  const savedZoneWeights: WeightsByNumber | null = useMemo(() => {
+    try { return getSavedZoneWeights(); } catch { return null; }
+  }, []);
+
+  // Enforce valid [from, to]
+  useEffect(() => {
+    if (trendFrom >= trendTo) {
+      setTrendTo(Math.min(history.length, trendFrom + 1));
+    }
+  }, [trendFrom, trendTo, history.length]);
 
   // Keep window locked to external, if provided
   useEffect(() => {
@@ -204,14 +213,18 @@ useEffect(() => {
     enableSDE1Global,
   ]);
 
+  // Build final rows with biases + global ZPA weighting (no placeholders)
   const enriched = useMemo(() => {
     if (!results) return [];
     return results.map((r) => {
-      const w = combinedBiasWeights[r.number] ?? 1;
-      const biased = r.probNext * Math.pow(w, gamma);
+      const biasW = combinedBiasWeights[r.number] ?? 1;
+      const zpaW = zoneWeightingEnabled && savedZoneWeights ? (savedZoneWeights[r.number] ?? 1) : 1;
+      const biased = r.probNext
+        * Math.pow(biasW, gamma)      // local biases exponent
+        * Math.pow(zpaW, zoneGamma);  // global zone weighting exponent
       return { ...r, biasedProb: biased, baseProb: r.probNext };
     });
-  }, [results, combinedBiasWeights, gamma]);
+  }, [results, combinedBiasWeights, gamma, zoneWeightingEnabled, zoneGamma, savedZoneWeights]);
 
   const sortedStats = useMemo(() => {
     const arr = enriched.slice();
@@ -371,41 +384,41 @@ useEffect(() => {
         </label>
 
         <label title="Enable custom trend window (from..to draws)">
-  <input
-    type="checkbox"
-    checked={useCustomTrendWindow}
-    onChange={(e) => setUseCustomTrendWindow(e.target.checked)}
-    style={{ marginRight: 6 }}
-  />
-  Custom Window
-</label>
-<span style={{ opacity: useCustomTrendWindow ? 1 : 0.4, display: "inline-flex", gap: 6, alignItems: "center" }}>
-  <input
-    type="number"
-    min={1}
-    max={history.length}
-    value={trendFrom}
-    onChange={(e) => setTrendFrom(Number(e.target.value))}
-    style={{ width: 60 }}
-    title="From (older)"
-  />
-  →
-  <input
-    type="number"
-    min={Math.max(2, trendFrom + 1)}
-    max={history.length}
-    value={trendTo}
-    onChange={(e) => setTrendTo(Number(e.target.value))}
-    style={{ width: 60 }}
-    title="To (most recent)"
-  />
-  {/* Quick presets */}
-  <span style={{ display: "inline-flex", gap: 6 }}>
-    <button type="button" onClick={() => { setUseCustomTrendWindow(true); setTrendFrom(3); setTrendTo(11); }} style={{ fontSize: 12 }}>3→11</button>
-    <button type="button" onClick={() => { setUseCustomTrendWindow(true); setTrendFrom(6); setTrendTo(9); }} style={{ fontSize: 12 }}>6→9</button>
-    <button type="button" onClick={() => { setUseCustomTrendWindow(true); setTrendFrom(11); setTrendTo(13); }} style={{ fontSize: 12 }}>11→13</button>
-  </span>
-</span>
+          <input
+            type="checkbox"
+            checked={useCustomTrendWindow}
+            onChange={(e) => setUseCustomTrendWindow(e.target.checked)}
+            style={{ marginRight: 6 }}
+          />
+          Custom Window
+        </label>
+        <span style={{ opacity: useCustomTrendWindow ? 1 : 0.4, display: "inline-flex", gap: 6, alignItems: "center" }}>
+          <input
+            type="number"
+            min={1}
+            max={history.length}
+            value={trendFrom}
+            onChange={(e) => setTrendFrom(Number(e.target.value))}
+            style={{ width: 60 }}
+            title="From (older)"
+          />
+          →
+          <input
+            type="number"
+            min={Math.max(2, trendFrom + 1)}
+            max={history.length}
+            value={trendTo}
+            onChange={(e) => setTrendTo(Number(e.target.value))}
+            style={{ width: 60 }}
+            title="To (most recent)"
+          />
+          {/* Quick presets */}
+          <span style={{ display: "inline-flex", gap: 6 }}>
+            <button type="button" onClick={() => { setUseCustomTrendWindow(true); setTrendFrom(3); setTrendTo(11); }} style={{ fontSize: 12 }}>3→11</button>
+            <button type="button" onClick={() => { setUseCustomTrendWindow(true); setTrendFrom(6); setTrendTo(9); }} style={{ fontSize: 12 }}>6→9</button>
+            <button type="button" onClick={() => { setUseCustomTrendWindow(true); setTrendFrom(11); setTrendTo(13); }} style={{ fontSize: 12 }}>11→13</button>
+          </span>
+        </span>
 
         {!hideBiasToggles && (
           <>
@@ -475,6 +488,12 @@ useEffect(() => {
             {probabilityHeading ??
               "Probability of Appearance in Next Draw (Per Number):"}
           </h4>
+
+          {/* Small hint showing global zone weighting status */}
+          <div style={{ fontSize: 12, color: "#555", marginBottom: 6 }}>
+            Using global zone weighting: {zoneWeightingEnabled ? `On (γ=${zoneGamma})` : "Off"}
+          </div>
+
           <div
             style={{
               display: "flex",
@@ -514,21 +533,16 @@ useEffect(() => {
                 <tbody>
                   {col.map((res: any, i: number) => (
                     <tr
-  key={res.number}
-  style={res.number === focusNumber ? { background: "#FFF9C4" } : undefined}
->
+                      key={res.number}
+                      style={res.number === focusNumber ? { background: "#FFF9C4" } : undefined}
+                    >
                       <td style={{ padding: "2px 8px", color: "#1976d2" }}>
-                        {colIdx * Math.ceil(sortedStats.length / 3) + i + 1}
+                        {colIdx * Math.ceil(enriched.length / 3) + i + 1}
                       </td>
                       <td style={{ padding: "2px 8px" }}>
                         <b>{res.number}</b>
                       </td>
-                      <td
-                        style={{
-                          padding: "2px 8px",
-                          textAlign: "right",
-                        }}
-                      >
+                      <td style={{ padding: "2px 8px", textAlign: "right" }}>
                         {(res.baseProb * 100).toFixed(2)}%
                       </td>
                       <td
@@ -541,9 +555,7 @@ useEffect(() => {
                       >
                         {(res.biasedProb * 100).toFixed(2)}%
                       </td>
-                      <td
-                        style={{ padding: "2px 8px", textAlign: "right" }}
-                      >
+                      <td style={{ padding: "2px 8px", textAlign: "right" }}>
                         {res.lastSeen ? `${res.lastSeen} draws ago` : "Never"}
                       </td>
                     </tr>
@@ -553,8 +565,7 @@ useEffect(() => {
             ))}
           </div>
           <div style={{ fontSize: 12, color: "#888", marginTop: 8 }}>
-            Base = Kaplan–Meier probability. Biased = Base × weight^gamma using
-            enabled per-number biases.
+            Base = Kaplan–Meier probability. Biased = Base × (combined bias)^γ × (ZPA weight)^γ.
           </div>
         </div>
       ) : (

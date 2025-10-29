@@ -1,25 +1,15 @@
-# Temperature Transition Predictions (TTP)
+## Temperature Transition Predictions (TTP)
 
-TTP estimates P(V | Temp) for each number from a transition matrix built over a historical window and predicts next-draw hits using:
-
-- Threshold mode: mark numbers with P ≥ threshold
+TTP computes P(V | Temp) for each number from a transition matrix built on the last N draws and predicts with either:
+- Threshold mode: predict “hit” when P ≥ threshold
 - Top‑K mode: select the K highest probabilities
 
-Backtest metrics per window:
-- acc (accuracy): (TP + TN) / 45
-- prec (precision): TP / (TP + FP)
-- rec (recall): TP / (TP + FN)
+Backtest metrics:
+- acc (accuracy): (TP+TN)/45 per window
+- prec (precision): TP/(TP+FP)
+- rec (recall): TP/(TP+FN)
 - F1: 2·(prec·rec)/(prec+rec)
 
-UI tips:
-- Toggle “Indices” vs “Dates” to switch labels on backtest cards.
-- “Show last N windows” controls how many backtest windows you see.
-- “Auto window (beta)” sweeps candidate window sizes (e.g., 3,5,7,9,12,15,20,25,30,40,50) and sets the best by mean F1 for the current mode (Top‑K or Threshold).
+Backtest cards show either index ranges or actual draw dates (toggle in panel). The “Show last N windows” control adjusts how many of the most recent backtest windows are displayed.
 
-Choosing a window:
-- Fixed window: pick N so P(V|Temp) is stable but responsive.
-- Auto window (beta): use the button; it maximizes recent mean F1.
-- Soft window idea (future): exponential decay (half‑life) instead of a hard cut.
-- Minimum evidence: ensure each temperature has enough samples in-window for reliable estimates.
-
-For Weekday Windfall (≈8 hits per draw), Top‑K with K=8 is a natural fit. Tune the historical window (or use Auto) to stabilize P(V|Temp) without overfitting.
+Tip: For lotteries with ~8 actual hits per draw (6 main + 2 supp), Top‑K with K=8 is a natural fit. Tune the historical window to stabilize P(V|Temp); or use the Auto Window sweep utility (beta) to suggest a window based on recent backtest meanF1.

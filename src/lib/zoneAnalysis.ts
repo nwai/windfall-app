@@ -1,6 +1,6 @@
 /**
  * Zone Pattern Analysis utilities
- * 
+ *
  * Divides numbers 1-45 into 9 zones and analyzes patterns and trends.
  */
 
@@ -73,16 +73,33 @@ export interface ZonePatternCount {
   pattern: boolean[];
   key: string;
   count: number;
-  drawIndices: number[]; // Indices of draws with this pattern
+  drawIndices: number[];
+}
+
+export interface AnalyzeZoneTrendsOptions {
+  significanceThreshold?: number;
+  minMagnitudeThreshold?: number;
+  dynamicFactor?: number;
+  // NEW: only use the most recent W draws when computing trends
+  trendWindow?: number; // e.g., 180; if undefined, use all draws
+}
+
+export interface ZoneTrend {
+  zoneIdx: number;
+  slope: number;
+  intercept: number;
+  rSquared: number;
+  pValue: number;
+  direction: 'up' | 'down' | 'flat';
 }
 
 export function countZonePatterns(draws: Draw[]): ZonePatternCount[] {
   const patternMap = new Map<string, ZonePatternCount>();
-  
+
   draws.forEach((draw, idx) => {
     const pattern = drawToZonePattern(draw);
     const key = zonePatternToKey(pattern);
-    
+
     if (patternMap.has(key)) {
       const existing = patternMap.get(key)!;
       existing.count++;
@@ -96,7 +113,7 @@ export function countZonePatterns(draws: Draw[]): ZonePatternCount[] {
       });
     }
   });
-  
+
   return Array.from(patternMap.values()).sort((a, b) => b.count - a.count);
 }
 
@@ -119,11 +136,11 @@ export function linearRegression(x: number[], y: number[]): LinearRegressionResu
   if (n === 0 || x.length !== y.length) {
     return { slope: 0, intercept: 0, rSquared: 0, pValue: 1 };
   }
-  
+
   // Calculate means
   const meanX = x.reduce((a, b) => a + b, 0) / n;
   const meanY = y.reduce((a, b) => a + b, 0) / n;
-  
+
   // Calculate slope and intercept
   let numerator = 0;
   let denominator = 0;
@@ -131,10 +148,10 @@ export function linearRegression(x: number[], y: number[]): LinearRegressionResu
     numerator += (x[i] - meanX) * (y[i] - meanY);
     denominator += (x[i] - meanX) * (x[i] - meanX);
   }
-  
+
   const slope = denominator === 0 ? 0 : numerator / denominator;
   const intercept = meanY - slope * meanX;
-  
+
   // Calculate R²
   let ssRes = 0; // Residual sum of squares
   let ssTot = 0; // Total sum of squares
@@ -143,19 +160,20 @@ export function linearRegression(x: number[], y: number[]): LinearRegressionResu
     ssRes += (y[i] - predicted) ** 2;
     ssTot += (y[i] - meanY) ** 2;
   }
-  
+
   const rSquared = ssTot === 0 ? 0 : 1 - ssRes / ssTot;
-  
+
   // Calculate p-value (simplified t-test)
-  // Standard error of slope
-  const seSlope = Math.sqrt(ssRes / (n - 2) / denominator);
-  const tStat = slope / seSlope;
-  
+  // Guard against division by zero
+  const safeDen = Math.max(1e-12, denominator);
+  const safeDf = Math.max(1, n - 2);
+  const seSlope = Math.sqrt(ssRes / safeDf / safeDen);
+  const tStat = seSlope === 0 ? 0 : slope / seSlope;
+
   // Two-tailed p-value approximation using t-distribution
-  // For simplicity, use a rough approximation
   const df = n - 2;
   const pValue = df > 0 ? 2 * (1 - tCDF(Math.abs(tStat), df)) : 1;
-  
+
   return { slope, intercept, rSquared, pValue };
 }
 
@@ -167,7 +185,7 @@ function tCDF(t: number, df: number): number {
   if (df > 30) {
     return normalCDF(t);
   }
-  
+
   // For small df, use a rough approximation
   const x = df / (df + t * t);
   const prob = 1 - 0.5 * incompleteBeta(x, df / 2, 0.5);
@@ -187,17 +205,17 @@ function normalCDF(x: number): number {
 function erf(x: number): number {
   const sign = x >= 0 ? 1 : -1;
   x = Math.abs(x);
-  
+
   const a1 = 0.254829592;
   const a2 = -0.284496736;
   const a3 = 1.421413741;
   const a4 = -1.453152027;
   const a5 = 1.061405429;
   const p = 0.3275911;
-  
+
   const t = 1 / (1 + p * x);
   const y = 1 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-x * x);
-  
+
   return sign * y;
 }
 
@@ -207,11 +225,11 @@ function erf(x: number): number {
 function incompleteBeta(x: number, a: number, b: number): number {
   if (x <= 0) return 0;
   if (x >= 1) return 1;
-  
+
   // Use continued fraction approximation
   const lnBeta = logGamma(a) + logGamma(b) - logGamma(a + b);
-  const front = Math.exp(Math.log(x) * a + Math.log(1 - x) * b - lnBeta) / a;
-  
+  const front = Math.exp(Math.log(Math.max(x, 1e-12)) * a + Math.log(Math.max(1 - x, 1e-12)) * b - lnBeta) / Math.max(a, 1e-12);
+
   let f = 1, c = 1, d = 0;
   for (let i = 0; i <= 100; i++) {
     const m = i / 2;
@@ -223,20 +241,20 @@ function incompleteBeta(x: number, a: number, b: number): number {
     } else {
       numerator = -((a + m) * (a + b + m) * x) / ((a + 2 * m) * (a + 2 * m + 1));
     }
-    
+
     d = 1 + numerator * d;
     if (Math.abs(d) < 1e-30) d = 1e-30;
     d = 1 / d;
-    
+
     c = 1 + numerator / c;
     if (Math.abs(c) < 1e-30) c = 1e-30;
-    
+
     const cd = c * d;
     f *= cd;
-    
+
     if (Math.abs(cd - 1) < 1e-8) break;
   }
-  
+
   return front * f;
 }
 
@@ -245,7 +263,7 @@ function incompleteBeta(x: number, a: number, b: number): number {
  */
 function logGamma(x: number): number {
   if (x <= 0) return Infinity;
-  
+
   const cof = [
     76.18009172947146,
     -86.50532032941677,
@@ -254,16 +272,16 @@ function logGamma(x: number): number {
     0.1208650973866179e-2,
     -0.5395239384953e-5,
   ];
-  
+
   let y = x;
   let tmp = x + 5.5;
   tmp -= (x + 0.5) * Math.log(tmp);
   let ser = 1.000000000190015;
-  
+
   for (let j = 0; j < 6; j++) {
     ser += cof[j] / ++y;
   }
-  
+
   return -tmp + Math.log(2.5066282746310005 * ser / x);
 }
 
@@ -271,23 +289,6 @@ function logGamma(x: number): number {
  * Analyze zone frequency trends over time
  * Returns per-zone regression statistics
  */
-export interface ZoneTrend {
-  zoneIdx: number;
-  slope: number;
-  intercept: number;
-  rSquared: number;
-  pValue: number;
-  direction: 'up' | 'down' | 'flat';
-}
-
-export interface AnalyzeZoneTrendsOptions {
-  // If p-value < significanceThreshold, use slope sign for direction
-  significanceThreshold?: number;
-  // Otherwise, use magnitude threshold: max(minThreshold, dynamicFactor / sqrt(n))
-  minMagnitudeThreshold?: number;
-  dynamicFactor?: number;
-}
-
 export function analyzeZoneTrends(
   draws: Draw[],
   options: AnalyzeZoneTrendsOptions = {}
@@ -297,27 +298,27 @@ export function analyzeZoneTrends(
     minMagnitudeThreshold = 0.01,
     dynamicFactor = 0.06,
   } = options;
-  
+
   const n = draws.length;
   const trends: ZoneTrend[] = [];
-  
+
   // For each zone, track frequency over time
   for (let zoneIdx = 0; zoneIdx < 9; zoneIdx++) {
     const frequencies: number[] = [];
     const timePoints: number[] = [];
-    
+
     draws.forEach((draw, idx) => {
       const pattern = drawToZonePattern(draw);
       frequencies.push(pattern[zoneIdx] ? 1 : 0);
       timePoints.push(idx);
     });
-    
+
     // Perform linear regression
     const regression = linearRegression(timePoints, frequencies);
-    
+
     // Determine direction based on adaptive logic
     let direction: 'up' | 'down' | 'flat' = 'flat';
-    
+
     if (regression.pValue < significanceThreshold) {
       // Significant trend - use slope sign
       if (regression.slope > 0) direction = 'up';
@@ -330,7 +331,7 @@ export function analyzeZoneTrends(
         else if (regression.slope < 0) direction = 'down';
       }
     }
-    
+
     trends.push({
       zoneIdx,
       slope: regression.slope,
@@ -340,7 +341,7 @@ export function analyzeZoneTrends(
       direction,
     });
   }
-  
+
   return trends;
 }
 
@@ -350,15 +351,15 @@ export function analyzeZoneTrends(
  */
 export function calculateSumMainsTrend(zoneTrends: ZoneTrend[]): LinearRegressionResult {
   // Average the slopes and R² values
-  const avgSlope = zoneTrends.reduce((sum, t) => sum + t.slope, 0) / zoneTrends.length;
-  const avgRSquared = zoneTrends.reduce((sum, t) => sum + t.rSquared, 0) / zoneTrends.length;
-  
+  const avgSlope = zoneTrends.reduce((sum, t) => sum + t.slope, 0) / (zoneTrends.length || 1);
+  const avgRSquared = zoneTrends.reduce((sum, t) => sum + t.rSquared, 0) / (zoneTrends.length || 1);
+
   // For p-value, use Fisher's method to combine
   const chi2 = -2 * zoneTrends.reduce((sum, t) => sum + Math.log(Math.max(t.pValue, 1e-10)), 0);
   // Approximate p-value from chi-squared distribution
   const df = 2 * zoneTrends.length;
   const pValue = 1 - chi2CDF(chi2, df);
-  
+
   return {
     slope: avgSlope,
     intercept: 0, // Not meaningful for aggregated trend
@@ -373,7 +374,7 @@ export function calculateSumMainsTrend(zoneTrends: ZoneTrend[]): LinearRegressio
 function chi2CDF(x: number, df: number): number {
   if (x <= 0) return 0;
   if (df <= 0) return 1;
-  
+
   // Use gamma CDF
   return incompleteBeta(x / (x + df), df / 2, 0.5);
 }
