@@ -46,9 +46,10 @@ npm run verify        # Run both typecheck and lint
 ### Running the Application
 ```bash
 npm start             # Start development server on http://localhost:3000
-npm test              # Run tests in interactive watch mode
 npm run build         # Build for production
 ```
+
+**Note**: This project uses Create React App defaults but doesn't have explicit npm scripts for testing configured yet.
 
 ## Coding Standards
 
@@ -123,10 +124,8 @@ npm run build         # Build for production
 - Mock external dependencies appropriately
 
 ### Running Tests
-```bash
-npm test              # Interactive watch mode (all tests)
-npm test -- <file>    # Run specific test file
-```
+
+Test files exist in the codebase (e.g., `*.test.ts`, `*.test.tsx`), but there are currently no npm scripts configured for running tests. Individual test files can be run directly with a test runner like Jest if needed.
 
 ## Common Patterns
 
