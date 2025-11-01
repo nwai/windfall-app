@@ -61,7 +61,7 @@ npm run build         # Build for production
 
 ### React
 - Use **functional components** with hooks (no class components)
-- Use `React.FC` type for components when children are involved
+- Explicitly type component props, including `children` when needed
 - Use `useMemo` and `useCallback` for performance optimization in complex components
 - Keep components focused and single-purpose
 - Extract complex logic into custom hooks or utility functions
@@ -124,8 +124,8 @@ npm run build         # Build for production
 
 ### Running Tests
 ```bash
-npm test              # Interactive watch mode
-npx tsx <file>.test.ts # Run specific test file
+npm test              # Interactive watch mode (all tests)
+npm test -- <file>    # Run specific test file
 ```
 
 ## Common Patterns
@@ -149,7 +149,7 @@ interface MyComponentProps {
   onUpdate: (value: number) => void;
 }
 
-export const MyComponent: React.FC<MyComponentProps> = ({ data, onUpdate }) => {
+export const MyComponent = ({ data, onUpdate }: MyComponentProps) => {
   // Hooks first
   const [state, setState] = useState(0);
   
