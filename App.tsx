@@ -22,7 +22,7 @@ import { GeneratedCandidatesPanel } from "./components/candidates/GeneratedCandi
 import { buildTrendWeights } from "./lib/trendBias";
 import { OGAHistogram } from "./components/OGAHistogram";
 import { DGA_CELL_SIZE } from "./constants/ui";
-import { TemperatureHeatmap } from "./components/TemperatureHeatmap";
+import { TemperatureHeatmapWithExclusions } from "./components/TemperatureHeatmapWithExclusions";
 import { TracePanel } from "./components/TracePanel";
 import { MonteCarloPanel } from "./components/candidates/MonteCarloPanel";
 import { SurvivalAnalyzer } from "./components/SurvivalAnalyzer";
@@ -54,6 +54,12 @@ import { WindowStatsPanel } from "./components/WindowStatsPanel";
 import { ZPASettingsProvider, useZPASettings } from "./context/ZPASettingsContext";
 import { showToast } from "./lib/toastBus";
 import { GlobalZoneWeighting } from "./components/GlobalZoneWeighting";
+import { DroughtBacktestPanel } from "./components/DroughtBacktestPanel";
+ import { diagnoseNumberPosition } from "./debug/droughtCheck";
+ import { DroughtDebugPanel } from "./components/DroughtDebugPanel";
+ import { getSavedGroups, setSavedGroups, getSavedSelectedZones, setSavedSelectedZones, getSavedNormalizeMode, setSavedNormalizeMode } from "./lib/zpaStorage";
+ import { ZoneSchemeSelector } from "./components/ZoneSchemeSelector";
+ import ErrorBoundary from "./components/ErrorBoundary";
 
 import {
   AppPresetSnapshot,
@@ -66,14 +72,6 @@ import {
   getPreset,
   type AppPreset,
 } from "./lib/presets";
-import {
-  getSavedGroups,
-  setSavedGroups,
-  getSavedSelectedZones,
-  setSavedSelectedZones,
-  getSavedNormalizeMode,
-  setSavedNormalizeMode,
-} from "./lib/zpaStorage";
 
 // Optional: custom groups example
 const custom: ZoneGroups = [
@@ -314,6 +312,7 @@ const [sumMin, setSumMin] = useState<number>(0);
 const [sumMax, setSumMax] = useState<number>(999);
 const [sumIncludeSupp, setSumIncludeSupp] = useState<boolean>(true);
 const [rankingWeights, setRankingWeights] = useState({ oga: 0.7, sel: 0.2, recent: 0.1 });
+const [prioritySorting, setPrioritySorting] = useState<boolean>(true); // true = selHits->recent->OGA, false = weighted composite
 const [weightedTargets, setWeightedTargets] = useState<Record<number, number>>({});
 const [batesParams, setBatesParams] = useState<Partial<BatesParameterSet>>({});
 const [probOverlay, setProbOverlay] = useState<{
@@ -471,6 +470,7 @@ const { zoneWeightingEnabled, zoneGamma, setZoneWeightingEnabled, setZoneGamma }
       useTrickyRule,
 
       excludedNumbers: [...excludedNumbers],
+      userSelectedNumbers: [...userSelectedNumbers], // NEW
 
       trendLookback,
       trendThreshold,
@@ -489,72 +489,104 @@ const { zoneWeightingEnabled, zoneGamma, setZoneWeightingEnabled, setZoneGamma }
         groups: zpaGroups,
       },
 
+      // Window Stats — NEW
+      windowStats: {
+        enabled: sumFilterEnabled,
+        sumMin,
+        sumMax,
+        includeSupp: sumIncludeSupp,
+      },
+
+      // Survival — NEW
+      survival: {
+        focusNumber,
+      },
+
+      // Manual Simulation — NEW
+      manualSimulation: {
+        manualSimSelected: [...manualSimSelected],
+      },
+
       ttp: {
-        // reserved for future if TemperatureTransitionPanel persists to localStorage
-        // applyZoneWeights: ..., gamma: ..., metric: ...,
+        // reserved for future if TemperatureTransitionPanel persists to storage
       },
     };
   }
 
-  // Apply a snapshot back to App + ZPA storages
-  function applySnapshot(s: AppPresetSnapshot) {
-    // Window / range
-    setDrawWindowMode(s.drawWindowMode);
-    setRangeFrom(s.rangeFrom);
-    setRangeTo(s.rangeTo);
-    setWindowEnabled(s.windowEnabled);
-    setWindowMode(s.windowMode as any);
-    setCustomDrawCount(s.customDrawCount);
+ // Apply a snapshot back to App + ZPA storages
+ function applySnapshot(s: AppPresetSnapshot) {
+   // Window / range
+   setDrawWindowMode(s.drawWindowMode);
+   setRangeFrom(s.rangeFrom);
+   setRangeTo(s.rangeTo);
+   setWindowEnabled(s.windowEnabled);
+   setWindowMode(s.windowMode as any);
+   setCustomDrawCount(s.customDrawCount);
 
-    // Knobs and thresholds
-    setKnobs(prev => ({ ...prev, ...s.knobs }));
-    setEntropyEnabled(s.entropyEnabled);
-    setEntropyThreshold(s.entropyThreshold);
-    setHammingEnabled(s.hammingEnabled);
-    setHammingThreshold(s.hammingThreshold);
-    setJaccardEnabled(s.jaccardEnabled);
-    setJaccardThreshold(s.jaccardThreshold);
+   // Knobs and thresholds
+   setKnobs(prev => ({ ...prev, ...s.knobs }));
+   setEntropyEnabled(s.entropyEnabled);
+   setEntropyThreshold(s.entropyThreshold);
+   setHammingEnabled(s.hammingEnabled);
+   setHammingThreshold(s.hammingThreshold);
+   setJaccardEnabled(s.jaccardEnabled);
+   setJaccardThreshold(s.jaccardThreshold);
 
-    // Lambda
-    setLambdaEnabled(s.lambdaEnabled);
-    setLambda(s.lambda);
+   // Lambda
+   setLambdaEnabled(s.lambdaEnabled);
+   setLambda(s.lambda);
 
-    // GPWF
-    setGPWFEnabled(s.gpwfEnabled);
-    setGPWFWindowSize(s.gpwf_window_size);
-    setGPWFBiasFactor(s.gpwf_bias_factor);
-    setGPWFFloor(s.gpwf_floor);
-    setGPWFScaleMultiplier(s.gpwf_scale_multiplier);
+   // GPWF
+   setGPWFEnabled(s.gpwfEnabled);
+   setGPWFWindowSize(s.gpwf_window_size);
+   setGPWFBiasFactor(s.gpwf_bias_factor);
+   setGPWFFloor(s.gpwf_floor);
+   setGPWFScaleMultiplier(s.gpwf_scale_multiplier);
 
-    // Ratios / exclusions
-    setSelectedRatios(s.selectedRatios);
-    setUseTrickyRule(s.useTrickyRule);
-    setExcludedNumbers(s.excludedNumbers);
+   // Ratios / exclusions
+   setSelectedRatios(s.selectedRatios);
+   setUseTrickyRule(s.useTrickyRule);
+   setExcludedNumbers(s.excludedNumbers);
 
-    // Trend
-    setTrendLookback(s.trendLookback);
-    setTrendThreshold(s.trendThreshold);
-    setAllowedTrendRatios(s.allowedTrendRatios);
-    setTrendSelectedNumbers(s.trendSelectedNumbers);
+   // User-selected numbers — NEW
+   setUserSelectedNumbers(s.userSelectedNumbers ?? []);
 
-    // Ranking/targets
-    setRankingWeights(s.rankingWeights);
-    setWeightedTargets(s.weightedTargets);
+   // Trend
+   setTrendLookback(s.trendLookback);
+   setTrendThreshold(s.trendThreshold);
+   setAllowedTrendRatios(s.allowedTrendRatios);
+   setTrendSelectedNumbers(s.trendSelectedNumbers);
 
-    // Candidate zone bias
-    setApplyZoneBias(s.applyZoneBias);
-    setZoneGamma(s.zoneGamma);
+   // Ranking/targets
+   setRankingWeights(s.rankingWeights);
+   setWeightedTargets(s.weightedTargets);
 
-    // ZPA storages: write, then force remount so panel re-reads on mount
-    try {
-      if (s.zpa?.groups) setSavedGroups(s.zpa.groups);
-      if (s.zpa?.selectedZones) setSavedSelectedZones(s.zpa.selectedZones);
-      if (s.zpa?.normalizeMode) setSavedNormalizeMode(s.zpa.normalizeMode);
-      setZpaReloadKey(k => k + 1);
-    } catch {}
+   // Candidate zone bias
+   setApplyZoneBias(s.applyZoneBias);
+   setZoneGamma(s.zoneGamma);
 
-    // TTP: reserved — if/when panel persists to storage, set keys here similarly and remount it with a key
-  }
+   // ZPA storages
+   try {
+     if (s.zpa?.groups) setSavedGroups(s.zpa.groups);
+     if (s.zpa?.selectedZones) setSavedSelectedZones(s.zpa.selectedZones);
+     if (s.zpa?.normalizeMode) setSavedNormalizeMode(s.zpa.normalizeMode);
+     setZpaReloadKey(k => k + 1);
+   } catch {}
+
+   // Window Stats — NEW
+   setSumFilterEnabled(!!s.windowStats?.enabled);
+   setSumMin(s.windowStats?.sumMin ?? 0);
+   setSumMax(s.windowStats?.sumMax ?? 999);
+   setSumIncludeSupp(s.windowStats?.includeSupp ?? true);
+
+   // Survival — NEW
+   setFocusNumber((s.survival?.focusNumber ?? null) as number | null);
+
+   // Manual Simulation — NEW
+   setManualSimSelected(s.manualSimulation?.manualSimSelected ?? []);
+
+   // TTP: reserved
+ }
 
   // Preset actions
   function doSaveNewPreset() {
@@ -625,6 +657,22 @@ function getActiveWindowSize() {
   const savedZoneWeights = useMemo(() => {
     try { return getSavedZoneWeights(); } catch { return null; }
   }, []);
+
+const currentZpaGroups = useMemo<ZoneGroups>(() => {
+    try {
+      const g = getSavedGroups(); // now normalized & guaranteed valid
+      return g as ZoneGroups;
+    } catch {
+      return [
+        [1,2,3,4,5],[6,7,8,9,10],[11,12,13,14,15],
+        [16,17,18,19,20],[21,22,23,24,25],[26,27,28,29,30],
+        [31,32,33,34,35],[36,37,38,39,40],[41,42,43,44,45],
+      ];
+    }
+  }, [zpaReloadKey]);
+
+  const zpaZoneCount = currentZpaGroups.length;
+  const zpaSchemeLabel = `${zpaZoneCount}×${currentZpaGroups[0]?.length ?? "?"}`;
 
   // Compute filteredHistory based on mode
   const filteredHistory = useMemo<Draw[]>(() => {
@@ -875,61 +923,82 @@ const trendRatioDrawsConsidered = useMemo(
   }
 
 // HELPER: enrichment & resort (place above component return, after computeOGA utilities are available)
-  function recomputeCompositeRanking(base: CandidateSet[]): CandidateSet[] {
-    if (!base.length) return base;
-    const recentDraw = filteredHistory[filteredHistory.length - 1];
-    const recentSet = recentDraw ? new Set([...recentDraw.main, ...recentDraw.supp]) : null;
-    const selectedSet = new Set(userSelectedNumbers);
+function recomputeCompositeRanking(base: CandidateSet[]): CandidateSet[] {
+  if (!base.length) return base;
+  const recentDraw = filteredHistory[filteredHistory.length - 1];
+  const recentSet = recentDraw ? new Set([...recentDraw.main, ...recentDraw.supp]) : null;
+  const selectedSet = new Set(userSelectedNumbers);
 
-    // Normalize weights
-    const sum = rankingWeights.oga + rankingWeights.sel + rankingWeights.recent || 1;
-    const wOGA = rankingWeights.oga / sum;
-    const wSel = rankingWeights.sel / sum;
-    const wRecent = rankingWeights.recent / sum;
-    const EPS = 0.003;
+  // Normalize weights (rankingWeights: { oga, sel, recent })
+  const sumWeights = (rankingWeights.oga + rankingWeights.sel + rankingWeights.recent) || 1;
+  const wOGA = rankingWeights.oga / sumWeights;
+  const wSel = rankingWeights.sel / sumWeights;
+  const wRecent = rankingWeights.recent / sumWeights;
 
-    // Pre-calc past OGA distribution
-    return base
-      .map((c: any) => {
-        const nums = [...c.main, ...c.supp];
-        // OGA score / percentile may already exist; recompute defensively if missing
-        const ogaScore = c.ogaScore ?? computeOGA(nums, filteredHistory);
-        const ogaPercentile = c.ogaPercentile ?? getOGAPercentile(ogaScore, pastOGAScores);
-        const selHits = nums.filter(n => selectedSet.has(n)).length;
-        const recentHits = recentSet ? nums.filter(n => recentSet.has(n)).length : 0;
-        const ogaNorm = Math.max(0, Math.min(1, ogaPercentile / 100));
-        const finalComposite = wOGA * ogaNorm + wSel * (selHits / 8) + wRecent * (recentHits / 8);
+  return base
+    .map((c: any) => {
+      const nums = [...c.main, ...c.supp];
 
-              // Apply optional zone bias as a soft multiplier (default OFF)
-              const zBias = applyZoneBias
-                ? computeCandidateZoneBias(nums, savedZoneWeights || null, zoneGamma)
-                : 1;
+      // Defensive OGA values
+      const ogaScore = c.ogaScore ?? computeOGA(nums, filteredHistory);
+      const ogaPercentile = c.ogaPercentile ?? getOGAPercentile(ogaScore, pastOGAScores);
 
-              const finalCompositeAdj = finalComposite * zBias;
+      const selHits = nums.filter((n) => selectedSet.has(n)).length;        // 0..8
+      const recentHits = recentSet ? nums.filter((n) => recentSet.has(n)).length : 0; // 0..8
 
-              return {
-                ...c,
-                ogaScore,
-                ogaPercentile,
-                selHits,
-                recentHits,
-                finalComposite,
-                finalCompositeAdj,
-                zoneBias: zBias,
-              };
-            })
-            .sort((a: any, b: any) => {
-              if (b.finalCompositeAdj !== a.finalCompositeAdj) return b.finalCompositeAdj - a.finalCompositeAdj;
-              const diff = Math.abs(b.finalCompositeAdj - a.finalCompositeAdj);
-              if (diff < EPS) {
-                if (b.selHits !== a.selHits) return b.selHits - a.selHits;
-                if (b.recentHits !== a.recentHits) return b.recentHits - a.recentHits;
-                // prefer higher OGA percentile as a final tie-break
-                return b.ogaPercentile - a.ogaPercentile;
-              }
-              return 0;
-            });
-        }
+      // Normalized components for weighted mode: each in [0..1]
+      const selComp = selHits / 8;
+      const recentComp = recentHits / 8;
+      const ogaComp = Math.max(0, Math.min(1, (ogaPercentile ?? 0) / 100));
+
+      // Weighted composite (used in weighted mode and as final tie-break)
+      const weightedScore = wOGA * ogaComp + wSel * selComp + wRecent * recentComp;
+
+      // Optional zone bias multiplier
+      const zBias = applyZoneBias
+        ? computeCandidateZoneBias(nums, savedZoneWeights || null, zoneGamma)
+        : 1;
+
+      const finalCompositeAdj = weightedScore * zBias;
+
+      return {
+        ...c,
+        ogaScore,
+        ogaPercentile,
+        selHits,
+        recentHits,
+        selComp,
+        recentComp,
+        ogaComp,
+        weightedScore,
+        finalCompositeAdj,
+        zoneBias: zBias,
+      };
+    })
+    .sort((a: any, b: any) => {
+      if (prioritySorting) {
+        // Strict lexicographic priority
+        if (b.selHits !== a.selHits) return b.selHits - a.selHits;
+        if (b.recentHits !== a.recentHits) return b.recentHits - a.recentHits;
+        const aOGA = (a.ogaPercentile ?? 0);
+        const bOGA = (b.ogaPercentile ?? 0);
+        if (bOGA !== aOGA) return bOGA - aOGA;
+        // fallback to zone-biased weighted composite
+        if (b.finalCompositeAdj !== a.finalCompositeAdj) return b.finalCompositeAdj - a.finalCompositeAdj;
+        return 0;
+      } else {
+        // Weighted scoring mode (rankingWeights control ordering)
+        if (b.weightedScore !== a.weightedScore) return b.weightedScore - a.weightedScore;
+        // tie-break: more selHits, then recentHits, then OGA percentile
+        if (b.selHits !== a.selHits) return b.selHits - a.selHits;
+        if (b.recentHits !== a.recentHits) return b.recentHits - a.recentHits;
+        const aOGA = (a.ogaPercentile ?? 0);
+        const bOGA = (b.ogaPercentile ?? 0);
+        if (bOGA !== aOGA) return bOGA - aOGA;
+        return 0;
+      }
+    });
+}
 
   /* ========== TREND / TEMPERATURE BLOCK (END) ========== */
 
@@ -1107,7 +1176,7 @@ const handleGenerate = () => {
     processedCandidates = processedCandidates.filter(withinSumRange);
   }
 
-  setCandidates(processedCandidates);
+setCandidates(processedCandidates.slice(0, numCandidates));
   setRatioSummary(result.ratioSummary);
   setQuotaWarning(result.quotaWarning);
   setSelectedCandidateIdx(0);
@@ -1653,8 +1722,58 @@ const handleGenerate = () => {
   windowDraws={activeWindowSize}
 />
 
-<GroupPatternPanel key={zpaReloadKey} history={filteredHistory} groups={custom} />
-<GlobalZoneWeighting />
+<div style={{ marginTop: 10 }}>
+  <ZoneSchemeSelector onApplied={() => setZpaReloadKey(k => k + 1)} />
+</div>
+
+{/*
+LEGACY GUARD — keep for quick rollback if needed:
+<ErrorBoundary name="ZPA Panels">
+  {zpaZoneCount === 9 ? (
+    <>
+      <GroupPatternPanel
+        key={zpaReloadKey}
+        history={filteredHistory}
+        groups={currentZpaGroups}
+      />
+      <GlobalZoneWeighting />
+    </>
+  ) : (
+    <div
+      style={{
+        border: "1px dashed #ccc",
+        padding: 10,
+        borderRadius: 6,
+        background: "#fffef7",
+        color: "#444",
+        marginTop: 6,
+      }}
+    >
+      <div style={{ fontWeight: 700, marginBottom: 6 }}>
+        ZPA scheme “{zpaSchemeLabel}” detected
+      </div>
+      <div style={{ fontSize: 13, lineHeight: 1.5 }}>
+        GroupPatternPanel currently only supports 9 zones (9×5). It’s been
+        temporarily disabled to avoid a crash. You can:
+        <ul style={{ margin: "6px 0 0 18px" }}>
+          <li>Switch back to 9×5 in the selector above, or</li>
+          <li>Proceed with other features while we patch GroupPatternPanel for {zpaZoneCount} zones.</li>
+        </ul>
+      </div>
+    </div>
+  )}
+</ErrorBoundary>
+*/}
+
+<ErrorBoundary name="ZPA Panels">
+  <GroupPatternPanel
+    key={zpaReloadKey}
+    history={filteredHistory}
+    groups={currentZpaGroups}
+  />
+  <GlobalZoneWeighting />
+</ErrorBoundary>
+
 
 {/* Pattern Stats: collapsed with short legend/help */}
 <details style={{ marginTop: 10 }}>
@@ -1680,7 +1799,7 @@ const handleGenerate = () => {
     <b>Number Frequency</b> <span style={{ fontWeight: 400, color: "#666" }}>(compact, collapsed)</span>
   </summary>
   <div style={{ overflowX: "auto", fontSize: 12, marginTop: 8 }}>
-    <NumberFrequencyPanel draws={filteredHistory} />
+    <NumberFrequencyPanel draws={filteredHistory} excludedNumbers={excludedNumbers} setExcludedNumbers={setExcludedNumbers} />
   </div>
 </details>
 <details style={{ marginTop: 10 }}>
@@ -1931,6 +2050,20 @@ const handleGenerate = () => {
 
 <RankingWeightsPanel weights={rankingWeights} setWeights={setRankingWeights} />
 
+<label style={{ marginLeft: 12, display: "inline-flex", alignItems: "center", gap: 8 }}>
+  <input
+    type="checkbox"
+    checked={prioritySorting}
+    onChange={(e) => setPrioritySorting(e.target.checked)}
+    style={{ width: 16, height: 16 }}
+  />
+  <span style={{ color: "#c62828", fontWeight: 800, fontSize: 13 }}>
+    Strict priority
+  </span>  <span style={{ color: "#666", fontWeight: 800, fontSize: 10 }}>
+   (Sel → Recent → OGA)
+  </span>
+</label>
+
         <GeneratedCandidatesPanel
           onGenerate={handleGenerate}
           candidates={candidates}
@@ -1996,28 +2129,102 @@ const handleGenerate = () => {
 <div style={{ width: "100%", marginTop: 8, marginBottom: 10 }}>
   {/* existing TemperatureHeatmap block */}
   <DroughtHazardPanel history={filteredHistory} top={12} title="Most likely to break a drought next draw" />
-</div>
+  <div style={{ marginTop: 10 }}>
+    <DroughtBacktestPanel history={history} />
+<div style={{ marginTop: 6, display: "flex", gap: 8, alignItems: "center" }}>
+      <button
+        onClick={async () => {
+          const num = 38;
+          const r = diagnoseNumberPosition(history, num, 12, "both", false, 0.5);
+          if (!r) { alert("No result"); return; }
+          const payload = JSON.stringify(r, null, 2);
+          try {
+            await navigator.clipboard.writeText(payload);
+            console.log("diagnoseNumberPosition result:", r);
+            alert(`Diagnostic for #${num} copied to clipboard (also logged to console).`);
+          } catch (err) {
+            // Fallback: open the JSON in a new tab so you can copy it manually
+            console.error("Clipboard write failed", err);
+            const w = window.open();
+            if (w) {
+              w.document.title = `diagnose-#${num}`;
+              w.document.body.style.whiteSpace = "pre";
+              w.document.body.style.fontFamily = "monospace";
+              w.document.body.textContent = payload;
+            }
+            alert("Unable to copy automatically — opened result in a new window/tab for manual copy.");
+          }
+        }}
+      >
+        Copy debug #38
+      </button>
 
-<TemperatureHeatmap
-  history={filteredHistory}
-  alpha={0.25}
-  cellSize={DGA_CELL_SIZE}
-  metric={tempMetric}
-  buckets={10}
-  bucketStops={[0.05, 0.12, 0.20, 0.30, 0.42, 0.55, 0.68, 0.82, 0.92]}
-  bucketLabels={[
-    "prehistoric","frozen","permafrost","cold","cool",
-    "temperate","warm","hot","tropical","volcanic"
-  ]}
-  hybridWeight={0.6}
-  emaNormalize="per-number"
-  enforcePeaks={true}
-  onHoverNumber={setFocusNumber}
-  showLegendCounts={true}
-  overlayNumbers={overlayNumbers}
-  showBucketLetters={showHeatmapLetters}
-  bucketLetters={["pR","F","pF","<C","C>","tT","W","H","tR","V"]}
-/>
+      <button
+        onClick={async () => {
+          const input = prompt("Number to diagnose (1..45)?", "38");
+          if (!input) return;
+          const n = Number(input);
+          if (!Number.isInteger(n) || n < 1 || n > 45) { alert("Invalid number"); return; }
+          const r = diagnoseNumberPosition(history, n, 12, "both", false, 0.5);
+          if (!r) { alert("No result"); return; }
+          const payload = JSON.stringify(r, null, 2);
+          try {
+            await navigator.clipboard.writeText(payload);
+            console.log("diagnoseNumberPosition result:", r);
+            alert(`Diagnostic for #${n} copied to clipboard (also logged to console).`);
+          } catch (err) {
+            console.error("Clipboard write failed", err);
+            const w = window.open();
+            if (w) {
+              w.document.title = `diagnose-#${n}`;
+              w.document.body.style.whiteSpace = "pre";
+              w.document.body.style.fontFamily = "monospace";
+              w.document.body.textContent = payload;
+            }
+            alert("Unable to copy automatically — opened result in a new window/tab for manual copy.");
+          }
+        }}
+      >
+        Diagnose & copy...
+      </button>
+    </div>
+  </div>
+</div>
+<DroughtHazardPanel history={filteredHistory} top={12} title="Most likely to break a drought next draw" />
+<details style={{ marginTop: 10 }}>
+  <summary style={{ cursor: "pointer" }}>
+    <b>Drought debug</b> <span style={{ color: "#666", fontSize: 12, marginLeft: 6 }}>(hazard vs temp vs DGA)</span>
+  </summary>
+  <div style={{ marginTop: 8 }}>
+   <DroughtDebugPanel history={filteredHistory} defaultOpen={false} />
+  </div>
+</details>
+<div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+  <TemperatureHeatmapWithExclusions
+    history={filteredHistory}
+    alpha={0.25}
+    cellSize={DGA_CELL_SIZE}  // matches DGA cell sizing
+    metric={tempMetric}
+    buckets={10}
+    bucketStops={[0.05, 0.12, 0.20, 0.30, 0.42, 0.55, 0.68, 0.82, 0.92]}
+    bucketLabels={[
+      "prehistoric","frozen","permafrost","cold","cool",
+      "temperate","warm","hot","tropical","volcanic"
+    ]}
+    hybridWeight={0.6}
+    emaNormalize="per-number"
+    enforcePeaks={true}
+    onHoverNumber={setFocusNumber}
+    showLegendCounts={true}
+    overlayNumbers={overlayNumbers}
+    showBucketLetters={showHeatmapLetters}
+    bucketLetters={["pR","F","pF","<C","C>","tT","W","H","tR","V"]}
+
+    excludedNumbers={excludedNumbers}
+    setExcludedNumbers={setExcludedNumbers}
+    focusNumber={focusNumber}
+  />
+</div>
 </div>
 
   {highlightMsg && (
@@ -2043,7 +2250,7 @@ const handleGenerate = () => {
           <label
             key={`ux2-${n}`}
             style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", minWidth: 28 }}
-            title={`Exclude ${n}`}
+ title={`Exclude ${n}`}
           >
             <input
               type="checkbox"
