@@ -10,6 +10,7 @@ export interface AppPreset {
   version: PresetVersion;
   createdAt: string;
   updatedAt: string;
+  // Put your snapshot here
   state: AppPresetSnapshot;
 }
 
@@ -46,10 +47,8 @@ export interface AppPresetSnapshot {
   selectedRatios: string[];
   useTrickyRule: boolean;
 
-  // User and system exclusions (Number Frequency)
+  // User and system exclusions
   excludedNumbers: number[];
-  // Also persist user-selected numbers (used by various panels)
-  userSelectedNumbers: number[];
 
   // Trend settings
   trendLookback: number;
@@ -70,30 +69,13 @@ export interface AppPresetSnapshot {
     selectedZones: boolean[];   // 9 length
     normalizeMode: "all" | "selected";
     groups: number[][];
+    // Optional: when added to storage (future extensibility)
     weightMode?: "boostUp" | "boostDown";
     strength?: number;
     pMin?: number;
   };
 
-  // Window Stats (sum filter)
-  windowStats: {
-    enabled: boolean;
-    sumMin: number;
-    sumMax: number;
-    includeSupp: boolean;
-  };
-
-  // Survival Analysis
-  survival?: {
-    focusNumber: number | null;
-  };
-
-  // Manual Simulation
-  manualSimulation?: {
-    manualSimSelected: number[];
-  };
-
-  // Temperature Transition Panel (reserved)
+  // TTP (Temperature Transition Panel) (optional, best-effort keys for future use)
   ttp?: {
     applyZoneWeights?: boolean;
     gamma?: number;
@@ -104,6 +86,7 @@ export interface AppPresetSnapshot {
 const KEY = "app:presets:v1";
 
 function uid(): UUID {
+  // Simple unique ID
   return "p_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
@@ -170,6 +153,7 @@ export function importPresetJSON(json: string): AppPreset | null {
   try {
     const p = JSON.parse(json) as AppPreset;
     if (!p || !p.state || !p.name) return null;
+    // Save as new copy with a new id/timestamps/version
     const now = new Date().toISOString();
     const imported: AppPreset = {
       id: uid(),
