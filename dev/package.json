@@ -1,5 +1,0 @@
-{
-  "scripts": {
-    "dev:test:drought": "ts-node --compiler-options '{\"module\":\"CommonJS\",\"esModuleInterop\":true,\"moduleResolution\":\"node\"}' src/dev/testDroughtAndBuckets.ts"
-  }
-}
