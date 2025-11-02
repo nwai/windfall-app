@@ -1,6 +1,0 @@
-{
-  "editor.default_syntax" : "typoscript",
-  "workspace.name" : "windfall-app",
-  "workspace.preview_root" : ".",
-  "workspace.preview_server_allow_external" : true
-}
