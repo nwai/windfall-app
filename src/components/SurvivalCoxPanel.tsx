@@ -48,12 +48,13 @@ export const SurvivalCoxPanel: React.FC<SurvivalCoxPanelProps> = ({
 
       // Simple risk score based on features
       // Lower frequency and longer time since last = higher hazard
+      const BASELINE_HAZARD_RATIO = 0.5;
       const freqScore = features.freqTotal / history.length;
       const recencyScore = Math.exp(-features.timeSinceLast / 20);
       
       // Hazard ratio (relative to baseline)
       // Higher value = higher risk of "event" (not appearing)
-      const hazardRatio = (1 - freqScore) * (1 - recencyScore) + 0.5;
+      const hazardRatio = (1 - freqScore) * (1 - recencyScore) + BASELINE_HAZARD_RATIO;
       
       // Survival probability (inverse of hazard)
       const survivalProbability = Math.exp(-hazardRatio);

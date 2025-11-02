@@ -13,6 +13,7 @@ import {
   normalizeFeatures,
   ChurnFeatures,
 } from "../lib/churnFeatures";
+import { showToast } from "../lib/toastBus";
 
 interface ReturnPredictorProps {
   history: Draw[];
@@ -103,7 +104,7 @@ export const ReturnPredictorComponent: React.FC<ReturnPredictorProps> = ({
         const churnedDataset = dataset.filter(d => d.features.hasChurned);
         
         if (churnedDataset.length < 50) {
-          alert("Not enough churned numbers in history to train return model");
+          showToast("Not enough churned numbers in history to train return model", "warning");
           setIsTraining(false);
           return;
         }
@@ -145,7 +146,7 @@ export const ReturnPredictorComponent: React.FC<ReturnPredictorProps> = ({
 
       } catch (error) {
         console.error("Training error:", error);
-        alert("Error training return model: " + error);
+        showToast("Error training return model: " + error, "error");
       } finally {
         setIsTraining(false);
       }

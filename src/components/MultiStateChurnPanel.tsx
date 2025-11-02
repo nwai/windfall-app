@@ -107,6 +107,11 @@ export const MultiStateChurnPanel: React.FC<MultiStateChurnPanelProps> = ({
     return results;
   }, [history, numbers, churnThreshold]);
 
+  // State sorting order constants
+  const STATE_ORDER_ACTIVE = 0;
+  const STATE_ORDER_RETURNED = 1;
+  const STATE_ORDER_CHURNED = 2;
+
   const filteredAndSorted = useMemo(() => {
     let filtered = stateAnalysis;
     
@@ -118,7 +123,11 @@ export const MultiStateChurnPanel: React.FC<MultiStateChurnPanelProps> = ({
     // Apply sort
     const sorted = [...filtered];
     if (sortBy === "state") {
-      const stateOrder = { active: 0, returned: 1, churned: 2 };
+      const stateOrder = { 
+        active: STATE_ORDER_ACTIVE, 
+        returned: STATE_ORDER_RETURNED, 
+        churned: STATE_ORDER_CHURNED 
+      };
       sorted.sort((a, b) => stateOrder[a.currentState] - stateOrder[b.currentState] || a.number - b.number);
     } else if (sortBy === "churns") {
       sorted.sort((a, b) => b.timesChurned - a.timesChurned || a.number - b.number);

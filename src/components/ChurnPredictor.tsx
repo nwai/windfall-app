@@ -14,6 +14,7 @@ import {
   normalizeFeatures,
   ChurnFeatures,
 } from "../lib/churnFeatures";
+import { showToast } from "../lib/toastBus";
 
 interface ChurnPredictorProps {
   history: Draw[];
@@ -103,7 +104,7 @@ export const ChurnPredictor: React.FC<ChurnPredictorProps> = ({
         const dataset = buildChurnDataset(history, numbers, churnThreshold);
         
         if (dataset.length === 0) {
-          alert("Not enough data to train model");
+          showToast("Not enough data to train churn model", "error");
           setIsTraining(false);
           return;
         }
@@ -149,7 +150,7 @@ export const ChurnPredictor: React.FC<ChurnPredictorProps> = ({
 
       } catch (error) {
         console.error("Training error:", error);
-        alert("Error training model: " + error);
+        showToast("Error training churn model: " + error, "error");
       } finally {
         setIsTraining(false);
       }

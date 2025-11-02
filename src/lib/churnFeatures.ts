@@ -208,7 +208,12 @@ export function trainTestSplit<T>(
   data: T[],
   testRatio: number = 0.2
 ): { train: T[]; test: T[] } {
-  const shuffled = [...data].sort(() => Math.random() - 0.5);
+  // Fisher-Yates shuffle for proper randomization
+  const shuffled = [...data];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
   const splitIdx = Math.floor(data.length * (1 - testRatio));
   return {
     train: shuffled.slice(0, splitIdx),
@@ -250,7 +255,10 @@ function calculateTrendSlope(
   const sumXY = data.reduce((s, d) => s + d.x * d.y, 0);
   const sumX2 = data.reduce((s, d) => s + d.x * d.x, 0);
   
-  const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+  const denominator = n * sumX2 - sumX * sumX;
+  if (denominator === 0) return 0; // All x values are the same
+  
+  const slope = (n * sumXY - sumX * sumY) / denominator;
   return isNaN(slope) ? 0 : slope;
 }
 

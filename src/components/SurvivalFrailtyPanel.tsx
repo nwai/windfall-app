@@ -75,7 +75,7 @@ export const SurvivalFrailtyPanel: React.FC<SurvivalFrailtyPanelProps> = ({
 
       // Frailty estimate (simplified)
       // Numbers that appear more consistently (lower variance) have lower frailty
-      const frailty = expectedRate > 0
+      const frailty = expectedRate > 0 && avgInterEventTime > 0
         ? 1 + (observedVariance / (avgInterEventTime * avgInterEventTime) - 1) * theta
         : 1;
 
