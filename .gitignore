@@ -8,7 +8,8 @@
 # testing
 /coverage
 
-# production
+# production (Vite)
+/dist
 /build
 
 # misc
@@ -18,6 +19,33 @@
 .env.test.local
 .env.production.local
 
+# logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
+
+# editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Jupyter notebooks
+*.ipynb
+.ipynb_checkpoints/
+
+# Data files (move to data/ directory if needed)
+*.csv
+*.json.bak
+
+# Plot files
+*.pdf
+*.svg
+*.png
+!public/*.png
+!public/*.svg

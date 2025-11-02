@@ -1,46 +1,87 @@
-# Getting Started with Create React App
+# Windfall App
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+A React + TypeScript lottery analysis application built with Vite.
+
+## Getting Started
+
+### Prerequisites
+
+- Node.js (v18 or higher recommended)
+- npm
+
+### Installation
+
+```bash
+npm install
+```
 
 ## Available Scripts
 
-In the project directory, you can run:
+### `npm run dev`
 
-### `npm start`
+Runs the app in development mode with hot module replacement.\
+Open [http://localhost:5173](http://localhost:5173) to view it in the browser.
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in the browser.
-
-The page will reload if you make edits.\
-You will also see any lint errors in the console.
-
-### `npm test`
-
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+The page will reload automatically when you make edits.
 
 ### `npm run build`
 
-Builds the app for production to the `build` folder.\
+Builds the app for production to the `dist` folder.\
 It correctly bundles React in production mode and optimizes the build for the best performance.
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+The build is minified and the filenames include hashes for cache busting.
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+### `npm run preview`
 
-### `npm run eject`
+Previews the production build locally.\
+Run this after `npm run build` to test the production build before deployment.
 
-**Note: this is a one-way operation. Once you `eject`, you can’t go back!**
+### `npm run typecheck`
 
-If you aren’t satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+Runs TypeScript type checking without emitting files.\
+Useful for verifying type correctness before committing.
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you’re on your own.
+### `npm run lint`
 
-You don’t have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn’t feel obligated to use this feature. However we understand that this tool wouldn’t be useful if you couldn’t customize it when you are ready for it.
+Runs ESLint on the source code to check for code quality issues.
+
+### `npm run lint:fix`
+
+Runs ESLint and automatically fixes fixable issues.
+
+### `npm run verify`
+
+Runs both type checking and linting.\
+Use this before committing to ensure code quality.
+
+## Project Structure
+
+```
+windfall-app/
+├── src/                    # Application source code
+│   ├── components/         # React components
+│   ├── lib/               # Utility libraries and helpers
+│   ├── utils/             # Utility functions
+│   ├── types/             # TypeScript type definitions
+│   ├── context/           # React context providers
+│   ├── constants/         # Application constants
+│   ├── App.tsx            # Main application component
+│   └── main.tsx           # Application entry point
+├── index.html             # HTML template
+├── vite.config.ts         # Vite configuration
+├── tsconfig.json          # TypeScript configuration
+└── package.json           # Project dependencies and scripts
+```
+
+## Technology Stack
+
+- **React 18** - UI library
+- **TypeScript** - Type safety
+- **Vite** - Build tool and dev server
+- **Nivo** - Data visualization charts
 
 ## Learn More
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
-
-To learn React, check out the [React documentation](https://reactjs.org/).
+- [Vite Documentation](https://vitejs.dev/)
+- [React Documentation](https://react.dev/)
+- [TypeScript Documentation](https://www.typescriptlang.org/)
