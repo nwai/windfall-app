@@ -28,8 +28,8 @@ This is a React + TypeScript application for lottery number analysis and candida
 
 ## Technology Stack
 
-- **React** (18.x) with TypeScript
-- **Create React App** - Build tooling
+- **React** (19.x) with TypeScript
+- **Create React App** - Build tooling (based on project structure)
 - **ESLint** - Code linting
 - **TypeScript** (strict mode enabled)
 
@@ -44,12 +44,15 @@ npm run verify        # Run both typecheck and lint
 ```
 
 ### Running the Application
-```bash
-npm start             # Start development server on http://localhost:3000
-npm run build         # Build for production
-```
 
-**Note**: This project uses Create React App defaults but doesn't have explicit npm scripts for testing configured yet.
+**Note**: The package.json file currently only contains linting and type-checking scripts. This appears to be a Create React App project based on the structure, but the standard CRA scripts (start, build, test) are not explicitly defined in package.json. If you need to add these, use standard Create React App commands:
+
+```bash
+# Standard CRA commands (may need to be added to package.json):
+npm start             # Start development server
+npm run build         # Build for production
+npm test              # Run tests
+```
 
 ## Coding Standards
 
