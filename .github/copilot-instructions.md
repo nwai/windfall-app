@@ -28,7 +28,7 @@ This is a React + TypeScript application for lottery number analysis and candida
 
 ## Technology Stack
 
-- **React** (19.x) with TypeScript
+- **React 19** with TypeScript
 - **Create React App** - Build tooling (based on project structure)
 - **ESLint** - Code linting
 - **TypeScript** (strict mode enabled)
@@ -45,13 +45,12 @@ npm run verify        # Run both typecheck and lint
 
 ### Running the Application
 
-**Note**: The package.json file currently only contains linting and type-checking scripts. This appears to be a Create React App project based on the structure, but the standard CRA scripts (start, build, test) are not explicitly defined in package.json. If you need to add these, use standard Create React App commands:
+**Note**: The package.json file appears to be incomplete - it currently only contains linting and type-checking scripts. This is a Create React App project (evident from the structure, `public/` folder, and `react-scripts` dependency), but the standard CRA scripts are not defined in the package.json. The standard scripts should be:
 
 ```bash
-# Standard CRA commands (may need to be added to package.json):
-npm start             # Start development server
-npm run build         # Build for production
-npm test              # Run tests
+npm start             # Start development server (script missing from package.json)
+npm run build         # Build for production (script missing from package.json)
+npm test              # Run tests (script missing from package.json)
 ```
 
 ## Coding Standards
@@ -117,8 +116,8 @@ npm test              # Run tests
 
 ### Test Organization
 - Place test files next to the code they test
-- Use descriptive test names: `it('should calculate zone trends correctly')`
-- Group related tests with `describe` blocks
+- Some existing test files use custom testing approaches (e.g., `parseCSVorJSON.test.ts`)
+- If adding new tests, consider using standard testing frameworks like Jest with descriptive test names
 
 ### Test Coverage
 - Test public APIs and exported functions
@@ -146,6 +145,8 @@ const { value, setValue } = useContext(MyContext);
 
 ### Component Structure
 ```typescript
+import { useState, useMemo, useCallback } from 'react';
+
 interface MyComponentProps {
   data: SomeType[];
   onUpdate: (value: number) => void;
