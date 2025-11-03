@@ -49,3 +49,5 @@ pnpm-debug.log*
 *.png
 !public/*.png
 !public/*.svg
+windfall_history_lottolyzer.csv
+tsconfig.tsbuildinfo
