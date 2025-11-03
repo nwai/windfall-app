@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { Draw } from "../types";
 import {
   buildGPWFNumberWeights,
@@ -67,6 +67,11 @@ export const SurvivalAnalyzer: React.FC<{
   forcedNumbers?: number[];
   selectedCheckNumbers?: number[];
   focusNumber?: number | null; // highlight number in table
+  highlightColor?: string;
+  onStats?: (rows: { number: number; baseProb: number; biasedProb: number }[]) => void;
+  selectable?: boolean;                      // default true: allow clicking rows to toggle highlight
+  initialSelected?: number[];               // initial selection set (do not pass a new array each render)
+  onSelectionChange?: (nums: number[]) => void; // callback on selection changes
 }> = ({
   history,
   excludedNumbers,
@@ -79,6 +84,12 @@ export const SurvivalAnalyzer: React.FC<{
   forcedNumbers = [],
   selectedCheckNumbers = [],
   focusNumber = null,
+  // IMPORTANT: do NOT default to [] here (would create a new array each render)
+  highlightColor = "#3BD759",
+  onStats,
+  selectable = true,
+  initialSelected,
+  onSelectionChange,
 }) => {
   const windowDefault = externalWindowSize ?? 20;
   const [windowSize, setWindowSize] = useState<number>(windowDefault);
@@ -98,6 +109,36 @@ export const SurvivalAnalyzer: React.FC<{
   const [trendTo, setTrendTo] = useState<number>(30);
 
   const [sortBy, setSortBy] = useState<"biased" | "base" | "number">("biased");
+  // NEW: row selection state (sticky across parameter changes)
+  // Initialize once from initialSelected (or empty)
+  const [selectedNums, setSelectedNums] = useState<Set<number>>(
+    () => new Set(initialSelected ?? [])
+  );
+
+  // Only resync if parent provides a new initialSelected (and not undefined)
+  const prevInitKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (initialSelected === undefined) return;
+    const key = JSON.stringify([...initialSelected].sort((a, b) => a - b));
+    if (prevInitKeyRef.current === key) return;
+    prevInitKeyRef.current = key;
+    setSelectedNums(new Set(initialSelected));
+  }, [initialSelected]);
+
+  const toggleSelected = (n: number) => {
+    if (!selectable) return;
+    setSelectedNums((prev) => {
+      const next = new Set(prev);
+      if (next.has(n)) next.delete(n);
+      else next.add(n);
+      onSelectionChange?.(Array.from(next).sort((a, b) => a - b));
+      return next;
+    });
+  };
+  const clearSelection = () => {
+    setSelectedNums(new Set());
+    onSelectionChange?.([]);
+  };
 
   // Global zone weighting (single source) + saved per-number weights
   const { zoneWeightingEnabled, zoneGamma } = useZPASettings();
@@ -225,6 +266,18 @@ export const SurvivalAnalyzer: React.FC<{
       return { ...r, biasedProb: biased, baseProb: r.probNext };
     });
   }, [results, combinedBiasWeights, gamma, zoneWeightingEnabled, zoneGamma, savedZoneWeights]);
+
+  useEffect(() => {
+    if (!enriched?.length) return;
+    onStats?.(
+      enriched.map((r: any) => ({
+        number: r.number,
+        baseProb: r.baseProb,
+        biasedProb: r.biasedProb,
+      }))
+    );
+  }, [enriched, onStats]);
+
 
   const sortedStats = useMemo(() => {
     const arr = enriched.slice();
@@ -482,6 +535,27 @@ export const SurvivalAnalyzer: React.FC<{
         </span>
       </div>
 
+      {/* NEW: selection strip */}
+      {selectable && (
+        <div style={{ margin: "6px 0 10px 0", fontSize: 13, display: "flex", alignItems: "center", gap: 10 }}>
+          <b>Selection:</b>
+          {selectedNums.size ? (
+            <span>{Array.from(selectedNums).sort((a,b)=>a-b).join(", ")}</span>
+          ) : (
+            <span style={{ color: "#777" }}>none</span>
+          )}
+          <button
+            type="button"
+            onClick={clearSelection}
+            disabled={!selectedNums.size}
+            style={{ marginLeft: 8 }}
+            title="Clear highlighted rows"
+          >
+            Clear
+          </button>
+        </div>
+      )}
+
       {canRun && results ? (
         <div>
           <h4>
@@ -531,37 +605,59 @@ export const SurvivalAnalyzer: React.FC<{
                   </tr>
                 </thead>
                 <tbody>
-                  {col.map((res: any, i: number) => (
-                    <tr
-                      key={res.number}
-                      style={res.number === focusNumber ? { background: "#FFF9C4" } : undefined}
-                    >
-                      <td style={{ padding: "2px 8px", color: "#1976d2" }}>
-                        {colIdx * Math.ceil(enriched.length / 3) + i + 1}
-                      </td>
-                      <td style={{ padding: "2px 8px" }}>
-                        <b>{res.number}</b>
-                      </td>
-                      <td style={{ padding: "2px 8px", textAlign: "right" }}>
-                        {(res.baseProb * 100).toFixed(2)}%
-                      </td>
-                      <td
-                        style={{
-                          padding: "2px 8px",
-                          textAlign: "right",
-                          color: "#00796b",
-                          fontWeight: 700,
-                        }}
-                      >
-                        {(res.biasedProb * 100).toFixed(2)}%
-                      </td>
-                      <td style={{ padding: "2px 8px", textAlign: "right" }}>
-                        {res.lastSeen ? `${res.lastSeen} draws ago` : "Never"}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                 {col.map((res: any, i: number) => {
+                       const isSelected = selectedNums.has(res.number);
+                       const isFocused = res.number === focusNumber;
+                       const rowIdx = colIdx * Math.ceil(enriched.length / 3) + i + 1;
+
+                       const rowStyle: React.CSSProperties = {
+                         cursor: selectable ? "pointer" : "default",
+                       };
+                       if (isSelected) {
+                         // bright green background when selected
+                         rowStyle.background = "#00ff77";
+                       }
+                       if (isFocused) {
+                         // keep your existing focus highlight; combine with selection
+                         rowStyle.background = isSelected ? "#e6efc2" : "#FFF9C4";
+                         rowStyle.outline = "2px solid #fbc02d";
+                         rowStyle.outlineOffset = "-2px";
+                       }
+
+                       return (
+                         <tr
+                           key={res.number}
+                           style={rowStyle}
+                           onClick={() => toggleSelected(res.number)}
+                           title={selectable ? "Click to toggle highlight for this number" : undefined}
+                         >
+                           <td style={{ padding: "2px 8px", color: "#1976d2" }}>
+                             {rowIdx}
+                           </td>
+                           <td style={{ padding: "2px 8px" }}>
+                             <b>{res.number}</b>
+                           </td>
+                           <td style={{ padding: "2px 8px", textAlign: "right" }}>
+                             {(res.baseProb * 100).toFixed(2)}%
+                           </td>
+                           <td
+                             style={{
+                               padding: "2px 8px",
+                               textAlign: "right",
+                               color: "#00796b",
+                               fontWeight: 700,
+                             }}
+                           >
+                             {(res.biasedProb * 100).toFixed(2)}%
+                           </td>
+                           <td style={{ padding: "2px 8px", textAlign: "right" }}>
+                             {res.lastSeen ? `${res.lastSeen} draws ago` : "Never"}
+                           </td>
+                         </tr>
+                       );
+                     })}
+                   </tbody>
+                 </table>
             ))}
           </div>
           <div style={{ fontSize: 12, color: "#888", marginTop: 8 }}>
