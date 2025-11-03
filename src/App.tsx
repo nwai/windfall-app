@@ -26,6 +26,12 @@ import { TemperatureHeatmap } from "./components/TemperatureHeatmap";
 import { TracePanel } from "./components/TracePanel";
 import { MonteCarloPanel } from "./components/candidates/MonteCarloPanel";
 import { SurvivalAnalyzer } from "./components/SurvivalAnalyzer";
+import { ChurnPredictor } from "./components/ChurnPredictor";
+import { ReturnPredictorComponent } from "./components/ReturnPredictor";
+import { MultiStateChurnPanel } from "./components/MultiStateChurnPanel";
+import { SurvivalCoxPanel } from "./components/SurvivalCoxPanel";
+import { SurvivalFrailtyPanel } from "./components/SurvivalFrailtyPanel";
+import { ConsensusPanel } from "./components/ConsensusPanel";
 import { DroughtHazardPanel } from "./components/DroughtHazardPanel";
 import { BatesPanel } from "./components/BatesPanel";
 import { computeTemperatureSignal } from "./lib/temperatureSignal";
@@ -1781,6 +1787,50 @@ const handleGenerate = () => {
   selectedCheckNumbers={selectedNumbers}
   focusNumber={focusNumber}
 />
+
+{/* Advanced Survival Analysis and Churn/Return Prediction Models */}
+<details open style={{ marginBottom: 16 }}>
+  <summary>
+    <b>Advanced Survival Analysis &amp; Churn/Return Prediction Models</b>
+  </summary>
+  <div style={{ marginTop: 12 }}>
+    {/* Phase 1: ML-based Churn & Return Predictors */}
+    <ChurnPredictor 
+      history={filteredHistory}
+      excludedNumbers={allExclusions}
+      churnThreshold={15}
+    />
+    
+    <ReturnPredictorComponent 
+      history={filteredHistory}
+      excludedNumbers={allExclusions}
+      churnThreshold={15}
+    />
+    
+    <MultiStateChurnPanel 
+      history={filteredHistory}
+      excludedNumbers={allExclusions}
+      churnThreshold={15}
+    />
+    
+    {/* Phase 2: Classic Survival Models */}
+    <SurvivalCoxPanel 
+      history={filteredHistory}
+      excludedNumbers={allExclusions}
+    />
+    
+    <SurvivalFrailtyPanel 
+      history={filteredHistory}
+      excludedNumbers={allExclusions}
+    />
+    
+    {/* Phase 3: Consensus Panel */}
+    <ConsensusPanel 
+      history={filteredHistory}
+      excludedNumbers={allExclusions}
+    />
+  </div>
+</details>
 
       {/* Operators + Lambda enable, GPWF, thresholds */}
       <div style={{ padding: 32, fontFamily: "sans-serif" }}>
