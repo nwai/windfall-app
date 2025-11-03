@@ -62,6 +62,9 @@ import { showToast } from "./lib/toastBus";
 import { GlobalZoneWeighting } from "./components/GlobalZoneWeighting";
 import DrawHistoryManager from "./components/DrawHistoryManager";
 import { DrawRow } from "./lib/drawHistory";
+import { buildChurnDataset } from "./lib/churnFeatures";
+import { ReturnPredictor } from "./components/ReturnPredictor";
+
 
 import {
   AppPresetSnapshot,
@@ -137,7 +140,8 @@ const defaultKnobs: Knobs = {
   gpwf_targeted_mode: false,
 };
 
-
+// Count draws safely (works even if filteredHistory is temporarily undefined)
+const totalDraws = filteredHistory?.length ?? 0;
 
 // Utilities (unchanged)
 function strictValidateDraws(draws: Draw[]): Draw[] {
@@ -317,6 +321,7 @@ const UserExclusionsStrip: React.FC<{
 
 function AppInner() {
 
+
 const [sumFilterEnabled, setSumFilterEnabled] = useState<boolean>(false);
 const [sumMin, setSumMin] = useState<number>(0);
 const [sumMax, setSumMax] = useState<number>(999);
@@ -408,6 +413,11 @@ const [newPresetName, setNewPresetName] = useState<string>("");
 const [zpaReloadKey, setZpaReloadKey] = useState<number>(0); // force ZPA remount on load
 // Global ZPA zone weighting (single source of truth)
 const { zoneWeightingEnabled, zoneGamma, setZoneWeightingEnabled, setZoneGamma } = useZPASettings();
+
+const [survivalOut, setSurvivalOut] = useState<{ number: number; baseProb?: number; biasedProb?: number }[] | undefined>(undefined);
+const [churnOut, setChurnOut] = useState<{ number: number; pChurn: number }[] | undefined>(undefined);
+const [returnOut, setReturnOut] = useState<{ number: number; pReturn: number }[] | undefined>(undefined);
+
 
 
 
@@ -1225,6 +1235,11 @@ const handleGenerate = () => {
 
   const maxGPWFWindow = filteredHistory.length > 0 ? filteredHistory.length : 45;
 
+const churnDataset = useMemo(
+    () => (filteredHistory ? buildChurnDataset(filteredHistory, { churnWindowK: 12, returnHorizon: 6 }) : []),
+    [filteredHistory]
+  );
+
 // Convert "M/D/YY" or "YYYY-MM-DD" to a Date for sorting ascending (oldest -> newest)
   function parseCsvDateToEpoch(s: string): number {
     if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
@@ -1786,7 +1801,17 @@ const handleGenerate = () => {
   forcedNumbers={trendSelectedNumbers}
   selectedCheckNumbers={selectedNumbers}
   focusNumber={focusNumber}
-/>
+  highlightColor="#3BD759"
+  onStats={(rows: any[]) =>
+    setSurvivalOut(
+      rows.map((r: any) => ({
+        number: r.number,
+        baseProb: r.baseProb,
+        biasedProb: r.biasedProb,
+      }))
+            )
+          }
+        />
 
 {/* Advanced Survival Analysis and Churn/Return Prediction Models */}
 <details open style={{ marginBottom: 16 }}>
@@ -1795,39 +1820,47 @@ const handleGenerate = () => {
   </summary>
   <div style={{ marginTop: 12 }}>
     {/* Phase 1: ML-based Churn & Return Predictors */}
-    <ChurnPredictor 
+// Churn predictor (min draws = 36)
+    <ChurnPredictor
+      dataset={churnDataset}
+      totalDraws={totalDraws}
+      minDraws={36}
+      modelType="rf" // or "rf" if scikitjs is available
+      onPredictions={setChurnOut}
+    />
+
+    // Return predictor (min draws = 36)
+    <ReturnPredictor
+      dataset={churnDataset}
+      totalDraws={totalDraws}
+      minDraws={36}
+      modelType="rf" // or "rf"
+      onPredictions={setReturnOut}
+    />
+
+    <MultiStateChurnPanel
       history={filteredHistory}
       excludedNumbers={allExclusions}
       churnThreshold={15}
     />
-    
-    <ReturnPredictorComponent 
-      history={filteredHistory}
-      excludedNumbers={allExclusions}
-      churnThreshold={15}
-    />
-    
-    <MultiStateChurnPanel 
-      history={filteredHistory}
-      excludedNumbers={allExclusions}
-      churnThreshold={15}
-    />
-    
+
     {/* Phase 2: Classic Survival Models */}
-    <SurvivalCoxPanel 
+    <SurvivalCoxPanel
       history={filteredHistory}
       excludedNumbers={allExclusions}
     />
-    
-    <SurvivalFrailtyPanel 
+
+    <SurvivalFrailtyPanel
       history={filteredHistory}
       excludedNumbers={allExclusions}
     />
-    
+
     {/* Phase 3: Consensus Panel */}
-    <ConsensusPanel 
-      history={filteredHistory}
-      excludedNumbers={allExclusions}
+// Consensus combines the three signals
+    <ConsensusPanel
+      survival={survivalOut}
+      churn={churnOut}
+      reactivate={returnOut}
     />
   </div>
 </details>
