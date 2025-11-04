@@ -34,33 +34,18 @@ export const SurvivalCoxPanel: React.FC<SurvivalCoxPanelProps> = ({
     [excludedNumbers]
   );
 
-  /**
-   * Simplified Cox PH approximation
-   * Real implementation would use partial likelihood estimation
-   * This uses a heuristic based on frequency and recency
-   */
   const calculateCoxModel = () => {
-    const currentIdx = history.length - 1;
     const newResults: CoxResult[] = [];
 
-for (const num of numbers) {
-    const features = extractFeaturesForNumber(history, num, { churnThreshold: 12 });
-
-
-      // Simple risk score based on features
-      // Lower frequency and longer time since last = higher hazard
+    for (const num of numbers) {
+      const features = extractFeaturesForNumber(history, num, { churnThreshold: 12 });
       const BASELINE_HAZARD_RATIO = 0.5;
-      const freqScore = features.freqTotal / history.length;
+      const freqTotal = (features as any).freqTotal ?? 0;
+      const freqScore = history.length ? (freqTotal / history.length) : 0;
       const recencyScore = Math.exp(-features.timeSinceLast / 20);
 
-      // Hazard ratio (relative to baseline)
-      // Higher value = higher risk of "event" (not appearing)
       const hazardRatio = (1 - freqScore) * (1 - recencyScore) + BASELINE_HAZARD_RATIO;
-
-      // Survival probability (inverse of hazard)
       const survivalProbability = Math.exp(-hazardRatio);
-
-      // Risk score for ranking
       const riskScore = hazardRatio * (1 + features.timeSinceLast / 100);
 
       newResults.push({
@@ -95,7 +80,6 @@ for (const num of numbers) {
         use Pyodide + Python lifelines library.
       </p>
 
-      {/* Model Info */}
       <div style={{ marginBottom: "1rem", padding: "1rem", background: "#e3f2fd", borderRadius: "4px", fontSize: "0.85rem" }}>
         <strong>About Cox PH Model:</strong>
         <ul style={{ marginTop: "0.5rem", marginBottom: 0, paddingLeft: "1.5rem" }}>
@@ -106,7 +90,6 @@ for (const num of numbers) {
         </ul>
       </div>
 
-      {/* Calculate Button */}
       <div style={{ marginBottom: "1rem" }}>
         <button
           onClick={calculateCoxModel}
@@ -130,7 +113,6 @@ for (const num of numbers) {
         )}
       </div>
 
-      {/* Results Table */}
       {isCalculated && results.length > 0 && (
         <>
           <div style={{ marginBottom: "1rem" }}>
@@ -197,7 +179,6 @@ for (const num of numbers) {
             </table>
           </div>
 
-          {/* Summary */}
           <div style={{ marginTop: "1rem", padding: "1rem", background: "#f8f9fa", borderRadius: "4px" }}>
             <strong>Summary:</strong>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "0.5rem", marginTop: "0.5rem", fontSize: "0.9rem" }}>
