@@ -281,44 +281,95 @@ const UserExclusionsStrip: React.FC<{
   setExcludedNumbers: (updater: (prev: number[]) => number[]) => void;
   title?: string;
   orientation?: "horizontal" | "vertical";
-}> = ({ excludedNumbers, setExcludedNumbers, title, orientation = "horizontal" }) => (
-  <div style={{ marginTop: 4 }}>
-    {title && <b>{title}</b>}
-    <div
+  cellSize?: number; // match TemperatureHeatmap cell size for row alignment
+  labelPosition?: "left" | "right" | "bottom"; // label position relative to checkbox for vertical layout
+}> = ({
+  excludedNumbers,
+  setExcludedNumbers,
+  title,
+  orientation = "horizontal",
+  cellSize = 16,
+  labelPosition = "right",
+}) => {
+  const isVertical = orientation === "vertical";
+  const numberLabel = (n: number) => (
+    <span
       style={{
-        display: "flex",
-        flexDirection: orientation === "vertical" ? "column" : "row",
-        gap: 4,
-        overflowX: orientation === "horizontal" ? "auto" : "visible",
-        overflowY: orientation === "vertical" ? "auto" : "visible",
-        whiteSpace: "nowrap",
-        paddingTop: 2,
-        paddingBottom: 4,
-        borderTop: orientation === "horizontal" ? "1px dashed #ddd" : undefined,
-        borderLeft: orientation === "vertical" ? "1px dashed #ddd" : undefined,
-        marginTop: title ? 1 : 0,
-        // Removed hard maxHeight for vertical to avoid truncation
-        // maxHeight: orientation === "vertical" ? 220 : undefined
+        fontSize: 11,
+        lineHeight: 1,
+        margin: isVertical ? "0 6px" : "0 0 0 6px",
+        minWidth: 14,
+        textAlign: "center",
       }}
     >
-      {Array.from({ length: 45 }, (_, i) => i + 1).map((n) => {
-        const checked = excludedNumbers.includes(n);
-        return (
-          <label key={n} style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", minWidth: 28 }} title={`Exclude ${n}`}>
-            <input
-              type="checkbox"
-              checked={checked}
-              onChange={() => {
-                setExcludedNumbers((prev) => (prev.includes(n) ? prev.filter((x) => x !== n) : [...prev, n]));
-              }}
-            />
-            <span style={{ fontSize: 10, marginTop: 0 }}>{n}</span>
-          </label>
-        );
-      })}
+      {n}
+    </span>
+  );
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      {title && <b>{title}</b>}
+      <div
+        style={{
+          display: "flex",
+          flexDirection: isVertical ? "column" : "row",
+          gap: isVertical ? 0 : 8,
+          overflowX: !isVertical ? "auto" : "visible",
+          overflowY: isVertical ? "visible" : "hidden",
+          paddingTop: 6,
+          paddingBottom: 4,
+          borderTop: !isVertical ? "1px dashed #ddd" : undefined,
+          borderLeft: isVertical ? "1px dashed #ddd" : undefined,
+          marginTop: title ? 6 : 0,
+        }}
+      >
+        {Array.from({ length: 45 }, (_, i) => i + 1).map((n) => {
+          const checked = excludedNumbers.includes(n);
+          const rowStyle: React.CSSProperties = isVertical
+            ? {
+                display: "flex",
+                alignItems: "center",
+                height: cellSize, // aligns each row with a heatmap cell
+                padding: "0 6px",
+              }
+            : {
+                display: "inline-flex",
+                alignItems: "center",
+                minWidth: 28,
+                padding: "0 2px",
+              };
+
+          return (
+            <div key={n} style={rowStyle} title={`Exclude ${n}`}>
+              {isVertical && labelPosition === "left" && numberLabel(n)}
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={() => {
+                  setExcludedNumbers((prev) =>
+                    prev.includes(n) ? prev.filter((x) => x !== n) : [...prev, n]
+                  );
+                }}
+                style={{
+                  margin: isVertical
+                    ? labelPosition === "left"
+                      ? "0 0 0 0"
+                      : "0 6px 0 0"
+                    : 0,
+                }}
+              />
+              {isVertical
+                ? labelPosition === "right"
+                  ? numberLabel(n)
+                  : null
+                : numberLabel(n)}
+            </div>
+          );
+        })}
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 
 
@@ -2161,37 +2212,44 @@ const churnDataset = useMemo(
             <DroughtHazardPanel history={filteredHistory} top={8} title="Most likely to break a drought next draw" />
           </div>
 
-          {/* Heatmap and vertical user exclusions side-by-side */}
-          <div style={{ width: "100%", display: "flex", alignItems: "flex-start", gap:10 }}>
-            <div style={{ flex: "1 1 auto" }}>
-              <TemperatureHeatmap
-                history={filteredHistory}
-                alpha={0.25}
-                cellSize={DGA_CELL_SIZE}
-                metric={tempMetric}
-                buckets={10}
-                bucketStops={[0.05, 0.12, 0.20, 0.30, 0.42, 0.55, 0.68, 0.82, 0.92]}
-                bucketLabels={[
-                  "prehistoric","frozen","permafrost","cold","cool",
-                  "temperate","warm","hot","tropical","volcanic"
-                ]}
-                hybridWeight={0.6}
-                emaNormalize="per-number"
-                enforcePeaks={true}
-                onHoverNumber={setFocusNumber}
-                showLegendCounts={true}
-                overlayNumbers={overlayNumbers}
-                showBucketLetters={showHeatmapLetters}
-                bucketLetters={["pR","F","pF","<C","C>","tT","W","H","tR","V"]}
-              />
+{/* Heatmap and vertical user exclusions side-by-side */}
+          <div style={{ width: "100%", display: "flex", alignItems: "flex-start", gap: 16 }}>
+            {/* Left: horizontally scrollable heatmap container */}
+            <div style={{ flex: "1 1 auto", overflowX: "auto" }}>
+              {/* inline-block ensures the inner width defines the scrollable content */}
+              <div style={{ display: "inline-block" }}>
+                <TemperatureHeatmap
+                  history={filteredHistory}
+                  alpha={0.25}
+                  cellSize={DGA_CELL_SIZE}
+                  metric={tempMetric}
+                  buckets={10}
+                  bucketStops={[0.05, 0.12, 0.20, 0.30, 0.42, 0.55, 0.68, 0.82, 0.92]}
+                  bucketLabels={[
+                    "prehistoric","frozen","permafrost","cold","cool",
+                    "temperate","warm","hot","tropical","volcanic"
+                  ]}
+                  hybridWeight={0.6}
+                  emaNormalize="per-number"
+                  enforcePeaks={true}
+                  onHoverNumber={setFocusNumber}
+                  showLegendCounts={true}
+                  overlayNumbers={overlayNumbers}
+                  showBucketLetters={showHeatmapLetters}
+                  bucketLetters={["pR","F","pF","<C","C>","tT","W","H","tR","V"]}
+                />
+              </div>
             </div>
 
-            <div style={{ flex:"0 0 auto", maxHeight: "inherit", alignItems: "flex-start", overflowY: "auto" }}>
+            {/* Right: vertical user exclusions strip aligned with heatmap rows */}
+            <div style={{ flex: "0 0 auto" }}>
               <UserExclusionsStrip
-              title="Selector"
+                title="User Exclusions"
                 excludedNumbers={excludedNumbers}
                 setExcludedNumbers={setExcludedNumbers}
                 orientation="vertical"
+                cellSize={DGA_CELL_SIZE}   // critical for 1:1 row alignment
+                labelPosition="right"      // number label on the side, not below
               />
             </div>
           </div>
