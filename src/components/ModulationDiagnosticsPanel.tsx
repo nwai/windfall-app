@@ -33,84 +33,98 @@ export const ModulationDiagnosticsPanel: React.FC<ModulationDiagnosticsPanelProp
   hideSnapshotIfEmpty = false
 }) => {
 
-  const rows = diagnostics?.rows || [];
-
-  // Merge defaults + provided (partial) params
-  const mergedParams: BatesParameterSet = {
-    ...defaultBatesParams,
-    ...(currentBatesParams || {})
-  };
-
-  // Decide whether to show snapshot
-  const providedKeys = currentBatesParams ? Object.keys(currentBatesParams) : [];
-  const showSnapshot = !hideSnapshotIfEmpty || providedKeys.length > 0;
-
   const fmt = (v: unknown, digits = 2) =>
     typeof v === "number" && isFinite(v) ? v.toFixed(digits) : "–";
+
+  const hasData = diagnostics !== null;
 
   return (
     <section style={panel}>
       <h3 style={{ marginTop: 0, marginBottom: 8 }}>{title}</h3>
 
-      {showSnapshot && (
-        <div style={snapshotBox}>
-          <b>Current Bates Params:</b>{" "}
-          k={fmt(mergedParams.k)} | mix={fmt(mergedParams.mixWeight)} | dual={mergedParams.dualTri ? "yes" : "no"} | triMode={fmt(mergedParams.triMode)}
-          {mergedParams.dualTri && (
-            <>
-              {" "}
-              triMode2={fmt(mergedParams.triMode2)} wA={fmt(mergedParams.dualTriWeightA)}
-            </>
-          )}{" "}
-          βHot={fmt(mergedParams.betaHot)} βCold={fmt(mergedParams.betaCold)} βG=
-          {fmt(mergedParams.betaGlobal)} γCond={fmt(mergedParams.gammaConditional)} hotQ={fmt(mergedParams.hotQuantile)} coldQ={fmt(mergedParams.coldQuantile)}
-        </div>
-      )}
-
-      {!rows.length && (
+      {!hasData && (
         <div style={{ fontSize: 12, color: "#666" }}>
           No diagnostics yet. Generate or adjust parameters to populate this panel.
         </div>
       )}
 
-      {rows.length > 0 && (
-        <div style={{ overflowX: "auto" }}>
-          <table style={table}>
-            <thead>
-              <tr style={{ background: "#fafafa" }}>
-                <th style={th}>#</th>
-                <th style={th}>Final w%</th>
-                <th style={th}>Base w%</th>
-                <th style={th}>Tri Portion%</th>
-                <th style={th}>Bates Portion%</th>
-                <th style={th}>Hot?</th>
-                <th style={th}>Cold?</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map(r => (
-                <tr key={r.number}>
-                  <td style={td}>{r.number}</td>
-                  <td style={td}>{(r.final * 100).toFixed(2)}</td>
-                  <td style={td}>{(r.baseConvex * 100).toFixed(2)}</td>
-                  <td style={td}>{(r.triPortion * 100).toFixed(2)}</td>
-                  <td style={td}>{(r.batesPortion * 100).toFixed(2)}</td>
-                  <td style={td}>{r.isHot ? "Y" : ""}</td>
-                  <td style={td}>{r.isCold ? "Y" : ""}</td>
-                </tr>
+      {hasData && (
+        <>
+          {/* Summary */}
+          {diagnostics.summary && (
+            <div style={summaryBox}>
+              <b>Summary:</b> {diagnostics.summary}
+            </div>
+          )}
+
+          {/* Guardrails */}
+          {diagnostics.guardrails && diagnostics.guardrails.warnings.length > 0 && (
+            <div
+              style={{
+                ...guardBox,
+                borderColor: diagnostics.guardrails.severity === "risk" ? "#c62828" : 
+                            diagnostics.guardrails.severity === "warn" ? "#e0a100" : "#2196f3",
+                background: diagnostics.guardrails.severity === "risk" ? "#fdecea" :
+                           diagnostics.guardrails.severity === "warn" ? "#fff8e1" : "#e3f2fd",
+                color: diagnostics.guardrails.severity === "risk" ? "#8b1d1d" :
+                      diagnostics.guardrails.severity === "warn" ? "#795c00" : "#1565c0"
+              }}
+            >
+              <b>Guardrails ({diagnostics.guardrails.severity}):</b>
+              {diagnostics.guardrails.warnings.map((w, i) => (
+                <div key={i} style={{ marginLeft: 8, marginTop: 2 }}>• {w}</div>
               ))}
-            </tbody>
-          </table>
-          <div style={legend}>
-            <span>Final w% = post modulation</span>
-            <span>Tri/Bates Portion% = pre-modulation convex parts</span>
-          </div>
-        </div>
-      )}
-      {diagnostics?.generatedAt && (
-        <div style={updatedStamp}>
-          Updated: {diagnostics.generatedAt}
-        </div>
+            </div>
+          )}
+
+          {/* Weight Statistics */}
+          {diagnostics.weights && (
+            <div style={statsBox}>
+              <div style={statsRow}>
+                <b>Weight Statistics:</b>
+              </div>
+              <div style={statsRow}>
+                <span>Min: {fmt(diagnostics.weights.min, 4)}</span>
+                <span>Max: {fmt(diagnostics.weights.max, 4)}</span>
+                <span>Mean: {fmt(diagnostics.weights.mean, 4)}</span>
+                <span>Std: {fmt(diagnostics.weights.std, 4)}</span>
+              </div>
+              
+              {/* Top N weights */}
+              {diagnostics.weights.top && diagnostics.weights.top.length > 0 && (
+                <div style={{ marginTop: 8 }}>
+                  <b>Top 10 Numbers by Weight:</b>
+                  <div style={{ overflowX: "auto", marginTop: 4 }}>
+                    <table style={table}>
+                      <thead>
+                        <tr style={{ background: "#fafafa" }}>
+                          <th style={th}>Number</th>
+                          <th style={th}>Weight</th>
+                          <th style={th}>Weight %</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {diagnostics.weights.top.map((item, i) => (
+                          <tr key={i}>
+                            <td style={td}>{item.n}</td>
+                            <td style={td}>{fmt(item.w, 4)}</td>
+                            <td style={td}>{fmt(item.w * 100, 2)}%</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {diagnostics.updatedAt && (
+            <div style={updatedStamp}>
+              Updated: {new Date(diagnostics.updatedAt).toLocaleString()}
+            </div>
+          )}
+        </>
       )}
     </section>
   );
@@ -124,43 +138,66 @@ const panel: React.CSSProperties = {
   background: "#fff",
   marginTop: 18
 };
-const snapshotBox: React.CSSProperties = {
+
+const summaryBox: React.CSSProperties = {
   fontSize: 11,
-  marginBottom: 8,
+  marginBottom: 10,
   background: "#f8fafc",
-  padding: "6px 8px",
+  padding: "8px 10px",
   borderRadius: 6,
   border: "1px solid #e2e8f0",
-  lineHeight: 1.4
+  lineHeight: 1.5
 };
+
+const guardBox: React.CSSProperties = {
+  marginBottom: 10,
+  padding: "8px 10px",
+  borderRadius: 6,
+  border: "1px solid",
+  fontSize: 11,
+  lineHeight: 1.5
+};
+
+const statsBox: React.CSSProperties = {
+  fontSize: 12,
+  marginBottom: 10,
+  background: "#fafafa",
+  padding: "10px",
+  borderRadius: 6,
+  border: "1px solid #e2e8f0"
+};
+
+const statsRow: React.CSSProperties = {
+  display: "flex",
+  gap: 16,
+  flexWrap: "wrap",
+  marginBottom: 4
+};
+
 const table: React.CSSProperties = {
   borderCollapse: "collapse",
   width: "100%",
-  fontSize: 12
+  fontSize: 11
 };
+
 const th: React.CSSProperties = {
-  padding: "4px 6px",
+  padding: "4px 8px",
   borderBottom: "1px solid #ddd",
   textAlign: "center",
   fontWeight: 600,
   whiteSpace: "nowrap"
 };
+
 const td: React.CSSProperties = {
-  padding: "4px 6px",
+  padding: "4px 8px",
   borderBottom: "1px solid #eee",
   textAlign: "center",
   fontVariantNumeric: "tabular-nums"
 };
-const legend: React.CSSProperties = {
-  fontSize: 10,
-  marginTop: 6,
-  display: "flex",
-  gap: 18,
-  flexWrap: "wrap",
-  color: "#555"
-};
+
 const updatedStamp: React.CSSProperties = {
   fontSize: 10,
-  marginTop: 6,
-  color: "#666"
+  marginTop: 8,
+  color: "#666",
+  fontStyle: "italic"
 };

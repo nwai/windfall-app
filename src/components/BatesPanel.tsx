@@ -3,14 +3,15 @@ import { computeBatesWeights, BatesParameterSet } from "../lib/batesWeightsCore"
 import { weightedSampleWithoutReplacement } from "../lib/weightedSample";
 import { assessBatesGuardrails } from "../lib/batesGuardrails";
 import { showToast } from "../lib/toastBus";
+import { computeBatesDiagnostics, BatesDiagnostics } from "../lib/batesDiagnostics";
 
 interface BatesPanelProps {
   excludedNumbers: number[];
   forcedNumbers: number[];
-  recentSignal?: number[];
-  conditionalProb?: number[];
+  recentSignal?: number[] | null;
+  conditionalProb?: number[] | null;
   onGenerate?: (c: { main: number[]; supp: number[]; weights: number[] }) => void;
-  onParamsChange?: (p: BatesParameterSet) => void;
+  onParamsChange?: (p: Partial<BatesParameterSet>) => void;
   controlledParams?: Partial<BatesParameterSet>;
 
   probabilityOverlay?: {
@@ -19,6 +20,8 @@ interface BatesPanelProps {
     targetRaw: number;
     targetWeighted: number;
   } | null;
+  
+  onDiagnostics?: (d: BatesDiagnostics) => void;
 }
 
 const defaults: BatesParameterSet = {
@@ -45,7 +48,8 @@ export const BatesPanel: React.FC<BatesPanelProps> = ({
   onGenerate,
   onParamsChange,
   controlledParams,
-  probabilityOverlay
+  probabilityOverlay,
+  onDiagnostics
 }) => {
   const [params, setParams] = useState<BatesParameterSet>(defaults);
   const [lastCandidate, setLastCandidate] = useState<{ main: number[]; supp: number[] } | null>(null);
@@ -69,6 +73,18 @@ export const BatesPanel: React.FC<BatesPanelProps> = ({
     () => computeBatesWeights(params, { recentSignal, conditionalProb }),
     [params, recentSignal, conditionalProb]
   );
+
+  // Emit diagnostics when params or signals change
+  useEffect(() => {
+    if (onDiagnostics) {
+      const diagnostics = computeBatesDiagnostics(
+        params,
+        weightsRes.finalWeights,
+        { recentSignal, conditionalProb }
+      );
+      onDiagnostics(diagnostics);
+    }
+  }, [params, weightsRes.finalWeights, recentSignal, conditionalProb, onDiagnostics]);
 
   const guardrail = assessBatesGuardrails(params);
 
