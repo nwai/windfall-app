@@ -2019,6 +2019,7 @@ const handleGenerate = () => {
           controlledParams={batesParams}
           onParamsChange={p => setBatesParams(p)}
           probabilityOverlay={probOverlay}
+          onDiagnostics={(d) => setBatesDiagnostics(d)}
         />
 
 <WeightedTargetListPanel
