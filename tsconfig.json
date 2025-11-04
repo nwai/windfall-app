@@ -1,22 +1,21 @@
 {
   "compilerOptions": {
+    // keep your existing options, then add/tweak these:
     "target": "ES2020",
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "jsx": "react-jsx",
-    "moduleResolution": "Bundler",
-    "resolveJsonModule": true,
-    "isolatedModules": true,
     "esModuleInterop": true,
-    "noEmit": true,
-    "strict": true,
+    "allowSyntheticDefaultImports": true,
+    "moduleResolution": "Bundler",
     "skipLibCheck": true,
-    "allowJs": false,
-    "forceConsistentCasingInFileNames": true,
-    "baseUrl": ".",
-    "paths": {
-      "@/*": ["src/*"]
-    }
+    "strict": true,
+    "types": ["vite/client"]
   },
-  "include": ["src", "vite.config.ts"]
+  "exclude": [
+    "node_modules",
+    "dist",
+    "coverage",
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx"
+  ]
 }

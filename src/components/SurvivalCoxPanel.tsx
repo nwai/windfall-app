@@ -1,6 +1,6 @@
 /**
  * SurvivalCoxPanel Component
- * 
+ *
  * Implements Cox Proportional Hazards model (simplified JS approximation)
  * For full implementation, would use Pyodide + Python lifelines
  */
@@ -43,22 +43,23 @@ export const SurvivalCoxPanel: React.FC<SurvivalCoxPanelProps> = ({
     const currentIdx = history.length - 1;
     const newResults: CoxResult[] = [];
 
-    for (const num of numbers) {
-      const features = extractFeaturesForNumber(history, num, currentIdx);
+for (const num of numbers) {
+    const features = extractFeaturesForNumber(history, num, { churnThreshold: 12 });
+
 
       // Simple risk score based on features
       // Lower frequency and longer time since last = higher hazard
       const BASELINE_HAZARD_RATIO = 0.5;
       const freqScore = features.freqTotal / history.length;
       const recencyScore = Math.exp(-features.timeSinceLast / 20);
-      
+
       // Hazard ratio (relative to baseline)
       // Higher value = higher risk of "event" (not appearing)
       const hazardRatio = (1 - freqScore) * (1 - recencyScore) + BASELINE_HAZARD_RATIO;
-      
+
       // Survival probability (inverse of hazard)
       const survivalProbability = Math.exp(-hazardRatio);
-      
+
       // Risk score for ranking
       const riskScore = hazardRatio * (1 + features.timeSinceLast / 100);
 
@@ -87,7 +88,7 @@ export const SurvivalCoxPanel: React.FC<SurvivalCoxPanelProps> = ({
   return (
     <section style={{ padding: "1rem", background: "#fff", borderRadius: "8px", marginBottom: "1rem" }}>
       <h2 style={{ marginTop: 0 }}>📊 Cox Proportional Hazards Model</h2>
-      
+
       <p style={{ color: "#666", fontSize: "0.9rem" }}>
         Semi-parametric survival model that estimates the hazard (risk) of a number not appearing.
         <strong> Note:</strong> This is a simplified JS approximation. For full Cox PH with covariates,
@@ -121,7 +122,7 @@ export const SurvivalCoxPanel: React.FC<SurvivalCoxPanelProps> = ({
         >
           {isCalculated ? "✓ Recalculate" : "Calculate Cox Model"}
         </button>
-        
+
         {history.length < 50 && (
           <span style={{ marginLeft: "1rem", color: "#dc3545", fontSize: "0.9rem" }}>
             Need at least 50 draws
@@ -159,9 +160,9 @@ export const SurvivalCoxPanel: React.FC<SurvivalCoxPanelProps> = ({
               </thead>
               <tbody>
                 {sortedResults.map((result) => {
-                  const riskLevel = result.hazardRatio > 1.2 ? "High" : 
+                  const riskLevel = result.hazardRatio > 1.2 ? "High" :
                                    result.hazardRatio > 0.8 ? "Medium" : "Low";
-                  const riskColor = result.hazardRatio > 1.2 ? "#dc3545" : 
+                  const riskColor = result.hazardRatio > 1.2 ? "#dc3545" :
                                    result.hazardRatio > 0.8 ? "#ffc107" : "#28a745";
 
                   return (
@@ -179,10 +180,10 @@ export const SurvivalCoxPanel: React.FC<SurvivalCoxPanelProps> = ({
                         {result.riskScore.toFixed(3)}
                       </td>
                       <td style={{ padding: "0.5rem", textAlign: "center" }}>
-                        <span style={{ 
-                          padding: "0.25rem 0.5rem", 
-                          background: riskColor, 
-                          color: "white", 
+                        <span style={{
+                          padding: "0.25rem 0.5rem",
+                          background: riskColor,
+                          color: "white",
                           borderRadius: "4px",
                           fontSize: "0.75rem",
                         }}>

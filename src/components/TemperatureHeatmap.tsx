@@ -57,7 +57,7 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
   history,
   alpha = 0.2,
   cellSize = DGA_CELL_SIZE,
-  gutter = 8,
+  gutter = 15,
   showLegend = true,
   heightNumbers = 45,
   metric = "hybrid",
@@ -192,7 +192,7 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
   // Canvas size
   const widthPx = useMemo(() => T * cellSize + gutter * 2, [T, cellSize, gutter]);
   const heightPx = useMemo(
-    () => heightNumbers * cellSize + gutter * 2 + (showLegend ? 44 : 0),
+    () => heightNumbers * cellSize + gutter * 2 + (showLegend ? 8 : 0),
     [heightNumbers, cellSize, gutter, showLegend]
   );
 
@@ -254,7 +254,7 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
 
     // Axis label
     ctx.fillStyle = "#444";
-    ctx.font = "10px monospace";
+    ctx.font = "14px monospace";
     ctx.fillText("older → newer", gutter, gutter - 2);
   }, [
     canvasRef, widthPx, heightPx, gutter, heightNumbers, T, cellSize,
