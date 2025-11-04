@@ -1,166 +1,130 @@
 import React from "react";
-import { BatesDiagnostics } from "../lib/batesDiagnostics";
-import { BatesParameterSet } from "../lib/batesWeightsCore";
+import type { BatesDiagnostics } from "../lib/batesDiagnostics";
+import type { BatesParameterSet } from "../lib/batesWeightsCore";
 
-/* Keep one canonical default here (should mirror BatesPanel default) */
-const defaultBatesParams: BatesParameterSet = {
-  k: 3,
-  dualTri: false,
-  triMode: 0.5,
-  triMode2: 0.2,
-  dualTriWeightA: 0.5,
-  mixWeight: 0.5,
-  betaHot: 0,
-  betaCold: 0,
-  betaGlobal: 0,
-  gammaConditional: 0,
-  hotQuantile: 0.7,
-  coldQuantile: 0.3,
-  highlightHotCold: true
-};
-
-interface ModulationDiagnosticsPanelProps {
+export const ModulationDiagnosticsPanel: React.FC<{
   diagnostics: BatesDiagnostics | null;
-  currentBatesParams?: Partial<BatesParameterSet>; // accept partial safely
-  title?: string;
-  hideSnapshotIfEmpty?: boolean; // optional behavior toggle
-}
-
-export const ModulationDiagnosticsPanel: React.FC<ModulationDiagnosticsPanelProps> = ({
-  diagnostics,
-  currentBatesParams,
-  title = "Modulation Diagnostics",
-  hideSnapshotIfEmpty = false
-}) => {
-
-  const rows = diagnostics?.rows || [];
-
-  // Merge defaults + provided (partial) params
-  const mergedParams: BatesParameterSet = {
-    ...defaultBatesParams,
-    ...(currentBatesParams || {})
-  };
-
-  // Decide whether to show snapshot
-  const providedKeys = currentBatesParams ? Object.keys(currentBatesParams) : [];
-  const showSnapshot = !hideSnapshotIfEmpty || providedKeys.length > 0;
-
-  const fmt = (v: unknown, digits = 2) =>
-    typeof v === "number" && isFinite(v) ? v.toFixed(digits) : "–";
-
+  currentBatesParams?: Partial<BatesParameterSet>;
+}> = ({ diagnostics, currentBatesParams }) => {
   return (
     <section style={panel}>
-      <h3 style={{ marginTop: 0, marginBottom: 8 }}>{title}</h3>
+      <h4 style={{ marginTop: 0 }}>Modulation Diagnostics</h4>
 
-      {showSnapshot && (
-        <div style={snapshotBox}>
-          <b>Current Bates Params:</b>{" "}
-          k={fmt(mergedParams.k)} | mix={fmt(mergedParams.mixWeight)} | dual={mergedParams.dualTri ? "yes" : "no"} | triMode={fmt(mergedParams.triMode)}
-          {mergedParams.dualTri && (
-            <>
-              {" "}
-              triMode2={fmt(mergedParams.triMode2)} wA={fmt(mergedParams.dualTriWeightA)}
-            </>
-          )}{" "}
-          βHot={fmt(mergedParams.betaHot)} βCold={fmt(mergedParams.betaCold)} βG=
-          {fmt(mergedParams.betaGlobal)} γCond={fmt(mergedParams.gammaConditional)} hotQ={fmt(mergedParams.hotQuantile)} coldQ={fmt(mergedParams.coldQuantile)}
-        </div>
-      )}
-
-      {!rows.length && (
+      {!diagnostics ? (
         <div style={{ fontSize: 12, color: "#666" }}>
-          No diagnostics yet. Generate or adjust parameters to populate this panel.
+          {currentBatesParams ? (
+            <>Current Bates Params: {summarize(currentBatesParams)}</>
+          ) : (
+            <>No diagnostics yet. Generate or adjust parameters to populate this panel.</>
+          )}
         </div>
-      )}
-
-      {rows.length > 0 && (
-        <div style={{ overflowX: "auto" }}>
-          <table style={table}>
-            <thead>
-              <tr style={{ background: "#fafafa" }}>
-                <th style={th}>#</th>
-                <th style={th}>Final w%</th>
-                <th style={th}>Base w%</th>
-                <th style={th}>Tri Portion%</th>
-                <th style={th}>Bates Portion%</th>
-                <th style={th}>Hot?</th>
-                <th style={th}>Cold?</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map(r => (
-                <tr key={r.number}>
-                  <td style={td}>{r.number}</td>
-                  <td style={td}>{(r.final * 100).toFixed(2)}</td>
-                  <td style={td}>{(r.baseConvex * 100).toFixed(2)}</td>
-                  <td style={td}>{(r.triPortion * 100).toFixed(2)}</td>
-                  <td style={td}>{(r.batesPortion * 100).toFixed(2)}</td>
-                  <td style={td}>{r.isHot ? "Y" : ""}</td>
-                  <td style={td}>{r.isCold ? "Y" : ""}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <div style={legend}>
-            <span>Final w% = post modulation</span>
-            <span>Tri/Bates Portion% = pre-modulation convex parts</span>
+      ) : (
+        <>
+          <div style={{ fontSize: 12, color: "#333", marginBottom: 8 }}>
+            <b>Summary:</b> {diagnostics.summary}{" "}
+            <span style={{ color: "#888" }}>
+              (updated {new Date(diagnostics.updatedAt).toLocaleString()})
+            </span>
           </div>
-        </div>
-      )}
-      {diagnostics?.generatedAt && (
-        <div style={updatedStamp}>
-          Updated: {diagnostics.generatedAt}
-        </div>
+
+          {diagnostics.guardrails && diagnostics.guardrails.warnings.length > 0 && (
+            <div
+              style={{
+                ...callout,
+                borderColor:
+                  diagnostics.guardrails.severity === "risk"
+                    ? "#c62828"
+                    : diagnostics.guardrails.severity === "warn"
+                    ? "#e0a100"
+                    : "#90caf9",
+                background:
+                  diagnostics.guardrails.severity === "risk"
+                    ? "#fdecea"
+                    : diagnostics.guardrails.severity === "warn"
+                    ? "#fff8e1"
+                    : "#eef6ff",
+                color:
+                  diagnostics.guardrails.severity === "risk"
+                    ? "#8b1d1d"
+                    : diagnostics.guardrails.severity === "warn"
+                    ? "#795c00"
+                    : "#0d47a1",
+              }}
+            >
+              <b>Guardrails ({diagnostics.guardrails.severity}):</b>{" "}
+              {diagnostics.guardrails.warnings.map((w, i) => (
+                <span key={i} style={{ marginLeft: 6 }}>
+                  • {w}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {diagnostics.weights && (
+            <div style={{ fontSize: 12 }}>
+              <div style={{ marginBottom: 6 }}>
+                <b>Weight stats:</b> min {fmt(diagnostics.weights.min)}, max{" "}
+                {fmt(diagnostics.weights.max)}, mean {fmt(diagnostics.weights.mean)}, std{" "}
+                {fmt(diagnostics.weights.std)}
+              </div>
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ borderCollapse: "collapse", minWidth: 420 }}>
+                  <thead>
+                    <tr>
+                      <th style={thCell}>#</th>
+                      <th style={thCell}>Weight</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(diagnostics.weights.top ?? []).map((t) => (
+                      <tr key={t.n}>
+                        <td style={tdCell}>{t.n}</td>
+                        <td style={tdCell}>{fmt(t.w)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </>
       )}
     </section>
   );
 };
 
-/* Styles */
+function summarize(p: Partial<BatesParameterSet>) {
+  const parts: string[] = [];
+  if (p.k != null) parts.push(`k=${p.k}`);
+  if ((p as any).mixWeight != null) parts.push(`mix=${(p as any).mixWeight}`);
+  if ((p as any).triMode != null) parts.push(`mode=${(p as any).triMode}`);
+  return parts.join(" | ");
+}
+function fmt(x: number) {
+  return Number.isFinite(x) ? x.toFixed(3) : "–";
+}
+
 const panel: React.CSSProperties = {
   border: "1px solid #eee",
   borderRadius: 8,
-  padding: 16,
+  padding: 12,
+  marginTop: 10,
   background: "#fff",
-  marginTop: 18
 };
-const snapshotBox: React.CSSProperties = {
-  fontSize: 11,
-  marginBottom: 8,
-  background: "#f8fafc",
-  padding: "6px 8px",
+const callout: React.CSSProperties = {
+  padding: "6px 10px",
+  border: "1px solid",
   borderRadius: 6,
-  border: "1px solid #e2e8f0",
-  lineHeight: 1.4
+  fontSize: 12,
+  marginBottom: 10,
 };
-const table: React.CSSProperties = {
-  borderCollapse: "collapse",
-  width: "100%",
-  fontSize: 12
-};
-const th: React.CSSProperties = {
-  padding: "4px 6px",
+const thCell: React.CSSProperties = {
+  textAlign: "left",
+  padding: "4px 8px",
   borderBottom: "1px solid #ddd",
-  textAlign: "center",
-  fontWeight: 600,
-  whiteSpace: "nowrap"
+  background: "#fafafa",
 };
-const td: React.CSSProperties = {
-  padding: "4px 6px",
-  borderBottom: "1px solid #eee",
-  textAlign: "center",
-  fontVariantNumeric: "tabular-nums"
-};
-const legend: React.CSSProperties = {
-  fontSize: 10,
-  marginTop: 6,
-  display: "flex",
-  gap: 18,
-  flexWrap: "wrap",
-  color: "#555"
-};
-const updatedStamp: React.CSSProperties = {
-  fontSize: 10,
-  marginTop: 6,
-  color: "#666"
+const tdCell: React.CSSProperties = {
+  padding: "4px 8px",
+  borderBottom: "1px solid #f0f0f0",
 };
