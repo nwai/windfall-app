@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    // ...your existing options...
+  },
+  "exclude": [
+    "node_modules",
+    "dist",
+    "coverage",
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx"
+  ]
+}

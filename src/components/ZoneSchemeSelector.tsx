@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { getSavedGroups, setSavedGroups, getSavedSelectedZones, setSavedSelectedZones, resetZPA, DEFAULT_GROUPS } from "../lib/zpaStorage";
+import { getSavedGroups, setSavedGroups, getSavedSelectedZones, setSavedSelectedZones } from "../lib/zpaStorage";
 
 // Helper to build contiguous groups that cover 1..45 exactly
 function buildContiguousGroups(zones: number, size: number): number[][] {
@@ -50,16 +50,19 @@ export function ZoneSchemeSelector({ onApplied }: { onApplied?: () => void }) {
   const apply = () => {
     const conf = SCHEMES[selected];
     const groups = buildContiguousGroups(conf.zones, conf.size);
-    setSavedGroups(groups); // auto-resizes selectedZones internally
-    // Optional: force all zones ON after scheme change
+    setSavedGroups(groups);
     setSavedSelectedZones(Array(groups.length).fill(true));
-    if (onApplied) onApplied();
+    onApplied?.();
   };
 
   const reset = () => {
-    resetZPA();
+    // Reset to default 9×5
+    const conf = SCHEMES["9x5"];
+    const groups = buildContiguousGroups(conf.zones, conf.size);
+    setSavedGroups(groups);
+    setSavedSelectedZones(Array(groups.length).fill(true));
     setSelected("9x5");
-    if (onApplied) onApplied();
+    onApplied?.();
   };
 
   const currentText = inferSchemeLabel(saved);
