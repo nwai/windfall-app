@@ -1,1 +1,1 @@
-export const DGA_CELL_SIZE = 20;
+export const DGA_CELL_SIZE = 23;

@@ -1,6 +1,6 @@
 /**
  * SurvivalCoxPanel Component
- * 
+ *
  * Implements Cox Proportional Hazards model (simplified JS approximation)
  * For full implementation, would use Pyodide + Python lifelines
  */
@@ -34,32 +34,18 @@ export const SurvivalCoxPanel: React.FC<SurvivalCoxPanelProps> = ({
     [excludedNumbers]
   );
 
-  /**
-   * Simplified Cox PH approximation
-   * Real implementation would use partial likelihood estimation
-   * This uses a heuristic based on frequency and recency
-   */
   const calculateCoxModel = () => {
-    const currentIdx = history.length - 1;
     const newResults: CoxResult[] = [];
 
     for (const num of numbers) {
-      const features = extractFeaturesForNumber(history, num, currentIdx);
-
-      // Simple risk score based on features
-      // Lower frequency and longer time since last = higher hazard
+      const features = extractFeaturesForNumber(history, num, { churnThreshold: 12 });
       const BASELINE_HAZARD_RATIO = 0.5;
-      const freqScore = features.freqTotal / history.length;
+      const freqTotal = (features as any).freqTotal ?? 0;
+      const freqScore = history.length ? (freqTotal / history.length) : 0;
       const recencyScore = Math.exp(-features.timeSinceLast / 20);
-      
-      // Hazard ratio (relative to baseline)
-      // Higher value = higher risk of "event" (not appearing)
+
       const hazardRatio = (1 - freqScore) * (1 - recencyScore) + BASELINE_HAZARD_RATIO;
-      
-      // Survival probability (inverse of hazard)
       const survivalProbability = Math.exp(-hazardRatio);
-      
-      // Risk score for ranking
       const riskScore = hazardRatio * (1 + features.timeSinceLast / 100);
 
       newResults.push({
@@ -87,14 +73,13 @@ export const SurvivalCoxPanel: React.FC<SurvivalCoxPanelProps> = ({
   return (
     <section style={{ padding: "1rem", background: "#fff", borderRadius: "8px", marginBottom: "1rem" }}>
       <h2 style={{ marginTop: 0 }}>📊 Cox Proportional Hazards Model</h2>
-      
+
       <p style={{ color: "#666", fontSize: "0.9rem" }}>
         Semi-parametric survival model that estimates the hazard (risk) of a number not appearing.
         <strong> Note:</strong> This is a simplified JS approximation. For full Cox PH with covariates,
         use Pyodide + Python lifelines library.
       </p>
 
-      {/* Model Info */}
       <div style={{ marginBottom: "1rem", padding: "1rem", background: "#e3f2fd", borderRadius: "4px", fontSize: "0.85rem" }}>
         <strong>About Cox PH Model:</strong>
         <ul style={{ marginTop: "0.5rem", marginBottom: 0, paddingLeft: "1.5rem" }}>
@@ -105,7 +90,6 @@ export const SurvivalCoxPanel: React.FC<SurvivalCoxPanelProps> = ({
         </ul>
       </div>
 
-      {/* Calculate Button */}
       <div style={{ marginBottom: "1rem" }}>
         <button
           onClick={calculateCoxModel}
@@ -121,7 +105,7 @@ export const SurvivalCoxPanel: React.FC<SurvivalCoxPanelProps> = ({
         >
           {isCalculated ? "✓ Recalculate" : "Calculate Cox Model"}
         </button>
-        
+
         {history.length < 50 && (
           <span style={{ marginLeft: "1rem", color: "#dc3545", fontSize: "0.9rem" }}>
             Need at least 50 draws
@@ -129,7 +113,6 @@ export const SurvivalCoxPanel: React.FC<SurvivalCoxPanelProps> = ({
         )}
       </div>
 
-      {/* Results Table */}
       {isCalculated && results.length > 0 && (
         <>
           <div style={{ marginBottom: "1rem" }}>
@@ -159,9 +142,9 @@ export const SurvivalCoxPanel: React.FC<SurvivalCoxPanelProps> = ({
               </thead>
               <tbody>
                 {sortedResults.map((result) => {
-                  const riskLevel = result.hazardRatio > 1.2 ? "High" : 
+                  const riskLevel = result.hazardRatio > 1.2 ? "High" :
                                    result.hazardRatio > 0.8 ? "Medium" : "Low";
-                  const riskColor = result.hazardRatio > 1.2 ? "#dc3545" : 
+                  const riskColor = result.hazardRatio > 1.2 ? "#dc3545" :
                                    result.hazardRatio > 0.8 ? "#ffc107" : "#28a745";
 
                   return (
@@ -179,10 +162,10 @@ export const SurvivalCoxPanel: React.FC<SurvivalCoxPanelProps> = ({
                         {result.riskScore.toFixed(3)}
                       </td>
                       <td style={{ padding: "0.5rem", textAlign: "center" }}>
-                        <span style={{ 
-                          padding: "0.25rem 0.5rem", 
-                          background: riskColor, 
-                          color: "white", 
+                        <span style={{
+                          padding: "0.25rem 0.5rem",
+                          background: riskColor,
+                          color: "white",
                           borderRadius: "4px",
                           fontSize: "0.75rem",
                         }}>
@@ -196,7 +179,6 @@ export const SurvivalCoxPanel: React.FC<SurvivalCoxPanelProps> = ({
             </table>
           </div>
 
-          {/* Summary */}
           <div style={{ marginTop: "1rem", padding: "1rem", background: "#f8f9fa", borderRadius: "4px" }}>
             <strong>Summary:</strong>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "0.5rem", marginTop: "0.5rem", fontSize: "0.9rem" }}>

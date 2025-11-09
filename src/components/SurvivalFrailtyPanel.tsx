@@ -1,6 +1,6 @@
 /**
  * SurvivalFrailtyPanel Component
- * 
+ *
  * Implements frailty model for recurrent events (repeated appearances/disappearances)
  * Uses gamma frailty approximation
  */
@@ -22,10 +22,12 @@ interface FrailtyResult {
   nextEventProb: number;
 }
 
-export const SurvivalFrailtyPanel: React.FC<SurvivalFrailtyPanelProps> = ({
-  history,
-  excludedNumbers = [],
-}) => {
+// add prop exclusionsSlot?: React.ReactNode and render it in the toolbar area:
+export const SurvivalFrailtyPanel: React.FC<{
+  history: Draw[];
+  excludedNumbers: number[];
+  exclusionsSlot?: React.ReactNode;
+}> = ({ history, excludedNumbers, exclusionsSlot }) => {
   const [isCalculated, setIsCalculated] = useState(false);
   const [results, setResults] = useState<FrailtyResult[]>([]);
   const [sortBy, setSortBy] = useState<"frailty" | "number">("frailty");
@@ -53,7 +55,7 @@ export const SurvivalFrailtyPanel: React.FC<SurvivalFrailtyPanelProps> = ({
       });
 
       const eventCount = events.length;
-      
+
       // Calculate inter-event times
       const interEventTimes: number[] = [];
       for (let i = 1; i < events.length; i++) {
@@ -118,9 +120,20 @@ export const SurvivalFrailtyPanel: React.FC<SurvivalFrailtyPanelProps> = ({
   };
 
   return (
-    <section style={{ padding: "1rem", background: "#fff", borderRadius: "8px", marginBottom: "1rem" }}>
-      <h2 style={{ marginTop: 0 }}>🎲 Frailty Model (Recurrent Events)</h2>
-      
+  <section style={{ border: "1px solid #ccc", borderRadius: 8, padding: 12, marginTop: 10 }}>
+    <h4>Frailty / Recurrent Events (WIP)</h4>
+    <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+      <button /* onClick={...} */>Recalculate</button>
+      {exclusionsSlot && <div style={{ flex: "1 1 100%", marginTop: 6 }}>{exclusionsSlot}</div>}
+      <span style={{ marginLeft: "auto" }}>
+        Sort by:
+        <select style={{ marginLeft: 6 }}>
+          <option value="number">Number</option>
+          <option value="hazard">Hazard</option>
+        </select>
+      </span>
+    </div>
+
       <p style={{ color: "#666", fontSize: "0.9rem" }}>
         Models repeated appearances/disappearances using gamma frailty to capture unobserved heterogeneity.
         Numbers with higher frailty have more variable appearance patterns.
@@ -172,7 +185,7 @@ export const SurvivalFrailtyPanel: React.FC<SurvivalFrailtyPanelProps> = ({
         >
           {isCalculated ? "✓ Recalculate" : "Calculate Frailty Model"}
         </button>
-        
+
         {history.length < 50 && (
           <span style={{ marginLeft: "1rem", color: "#dc3545", fontSize: "0.9rem" }}>
             Need at least 50 draws
@@ -211,7 +224,7 @@ export const SurvivalFrailtyPanel: React.FC<SurvivalFrailtyPanelProps> = ({
               </thead>
               <tbody>
                 {sortedResults.map((result) => {
-                  const frailtyColor = result.frailty > 1.5 ? "#dc3545" : 
+                  const frailtyColor = result.frailty > 1.5 ? "#dc3545" :
                                       result.frailty > 1.0 ? "#ffc107" : "#28a745";
 
                   return (

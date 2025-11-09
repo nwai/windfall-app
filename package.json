@@ -20,16 +20,17 @@
     "@nivo/core": "^0.85.0",
     "@tensorflow/tfjs": "^4.17.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "scikitjs": "^1.24.0"
   },
   "devDependencies": {
     "@types/react": "^18.3.5",
     "@types/react-dom": "^18.3.0",
-    "@vitejs/plugin-react": "^4.3.4",
     "@typescript-eslint/eslint-plugin": "^8.0.1",
     "@typescript-eslint/parser": "^8.0.1",
+    "@vitejs/plugin-react": "^4.3.4",
     "eslint": "^8.57.0",
     "typescript": "^5.6.3",
-    "vite": "^5.4.10"
+    "vite": "^7.1.12"
   }
 }

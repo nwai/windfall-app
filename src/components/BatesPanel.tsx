@@ -1,24 +1,25 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { computeBatesWeights, BatesParameterSet } from "../lib/batesWeightsCore";
+import { computeBatesWeights, type BatesParameterSet } from "../lib/batesWeightsCore";
 import { weightedSampleWithoutReplacement } from "../lib/weightedSample";
 import { assessBatesGuardrails } from "../lib/batesGuardrails";
 import { showToast } from "../lib/toastBus";
+import { computeBatesDiagnostics, type BatesDiagnostics } from "../lib/batesDiagnostics";
 
 interface BatesPanelProps {
   excludedNumbers: number[];
   forcedNumbers: number[];
-  recentSignal?: number[];
-  conditionalProb?: number[];
+  recentSignal?: number[] | null;
+  conditionalProb?: number[] | null;
   onGenerate?: (c: { main: number[]; supp: number[]; weights: number[] }) => void;
-  onParamsChange?: (p: BatesParameterSet) => void;
+  onParamsChange?: (p: Partial<BatesParameterSet>) => void;
   controlledParams?: Partial<BatesParameterSet>;
-
   probabilityOverlay?: {
     pAtLeastRaw: number;
     pAtLeastWeighted: number;
     targetRaw: number;
     targetWeighted: number;
   } | null;
+  onDiagnostics?: (d: BatesDiagnostics) => void;
 }
 
 const defaults: BatesParameterSet = {
@@ -34,7 +35,7 @@ const defaults: BatesParameterSet = {
   gammaConditional: 0,
   hotQuantile: 0.7,
   coldQuantile: 0.3,
-  highlightHotCold: true
+  highlightHotCold: true,
 };
 
 export const BatesPanel: React.FC<BatesPanelProps> = ({
@@ -45,12 +46,12 @@ export const BatesPanel: React.FC<BatesPanelProps> = ({
   onGenerate,
   onParamsChange,
   controlledParams,
-  probabilityOverlay
+  probabilityOverlay,
+  onDiagnostics,
 }) => {
   const [params, setParams] = useState<BatesParameterSet>(defaults);
   const [lastCandidate, setLastCandidate] = useState<{ main: number[]; supp: number[] } | null>(null);
 
-  // Sync from outside
   useEffect(() => {
     if (controlledParams) {
       setParams(prev => ({ ...prev, ...controlledParams }));
@@ -66,7 +67,11 @@ export const BatesPanel: React.FC<BatesPanelProps> = ({
   }
 
   const weightsRes = useMemo(
-    () => computeBatesWeights(params, { recentSignal, conditionalProb }),
+    () =>
+      computeBatesWeights(params, {
+        recentSignal: recentSignal ?? undefined,
+        conditionalProb: conditionalProb ?? undefined,
+      }),
     [params, recentSignal, conditionalProb]
   );
 
@@ -75,26 +80,41 @@ export const BatesPanel: React.FC<BatesPanelProps> = ({
   function handleGenerate() {
     const forcedMain = forcedNumbers.slice(0, 6);
     const forcedSupp = forcedNumbers.slice(6, 8);
-    const pool = Array.from({ length: 45 }, (_, i) => i + 1)
-      .filter(n => !excludedNumbers.includes(n) && !forcedNumbers.includes(n));
-    const poolWeights = pool.map(n => weightsRes.finalWeights[n - 1]);
+
+    const pool = Array.from({ length: 45 }, (_, i) => i + 1).filter(
+      (n) => !excludedNumbers.includes(n) && !forcedNumbers.includes(n)
+    );
+    const poolWeights = pool.map((n) => weightsRes.finalWeights[n - 1]);
 
     const needMain = Math.max(0, 6 - forcedMain.length);
     const pickedMain = weightedSampleWithoutReplacement(pool, poolWeights, needMain);
-    const remaining = pool.filter(n => !pickedMain.includes(n));
-    const remainingWeights = remaining.map(n => weightsRes.finalWeights[n - 1]);
+
+    const remaining = pool.filter((n) => !pickedMain.includes(n));
+    const remainingWeights = remaining.map((n) => weightsRes.finalWeights[n - 1]);
+
     const needSupp = Math.max(0, 2 - forcedSupp.length);
     const pickedSupp = weightedSampleWithoutReplacement(remaining, remainingWeights, needSupp);
 
     const main = [...forcedMain, ...pickedMain].slice(0, 6).sort((a, b) => a - b);
     const supp = [...forcedSupp, ...pickedSupp].slice(0, 2).sort((a, b) => a - b);
+
     setLastCandidate({ main, supp });
     onGenerate?.({ main, supp, weights: weightsRes.finalWeights });
-    showToast('Bates candidate generated');
+    showToast("Bates candidate generated");
   }
 
-  const fmtProb = (p?: number) =>
-    p === undefined ? "–" : (p * 100).toFixed(2) + "%";
+  useEffect(() => {
+    if (!onDiagnostics) return;
+    try {
+      const diag = computeBatesDiagnostics(params, weightsRes.finalWeights, {
+        recentSignal: recentSignal ?? null,
+        conditionalProb: conditionalProb ?? null,
+      });
+      onDiagnostics(diag);
+    } catch {}
+  }, [params, weightsRes.finalWeights, recentSignal, conditionalProb, onDiagnostics]);
+
+  const fmtProb = (p?: number) => (p == null ? "–" : (p * 100).toFixed(2) + "%");
 
   return (
     <section style={panel}>
@@ -103,8 +123,7 @@ export const BatesPanel: React.FC<BatesPanelProps> = ({
         {probabilityOverlay && (
           <div style={probBox} title="Estimated probability from last parameter search">
             <b>P(≥{probabilityOverlay.targetRaw} raw):</b> {fmtProb(probabilityOverlay.pAtLeastRaw)} |{" "}
-            <b>P(≥weighted {probabilityOverlay.targetWeighted.toFixed(2)}):</b>{" "}
-            {fmtProb(probabilityOverlay.pAtLeastWeighted)}
+            <b>P(≥weighted {probabilityOverlay.targetWeighted.toFixed(2)}):</b> {fmtProb(probabilityOverlay.pAtLeastWeighted)}
           </div>
         )}
       </div>
@@ -114,11 +133,8 @@ export const BatesPanel: React.FC<BatesPanelProps> = ({
           style={{
             ...guardBox,
             borderColor: guardrail.severity === "risk" ? "#c62828" : "#e0a100",
-            background:
-              guardrail.severity === "risk"
-                ? "#fdecea"
-                : "#fff8e1",
-            color: guardrail.severity === "risk" ? "#8b1d1d" : "#795c00"
+            background: guardrail.severity === "risk" ? "#fdecea" : "#fff8e1",
+            color: guardrail.severity === "risk" ? "#8b1d1d" : "#795c00",
           }}
         >
           <b>{guardrail.severity === "risk" ? "Parameter Risk:" : "Guardrails:"}</b>{" "}
@@ -131,78 +147,89 @@ export const BatesPanel: React.FC<BatesPanelProps> = ({
       )}
 
       <div style={row}>
-        <label>k
-          <input type="number" value={params.k} min={1} max={60}
-            onChange={e => update("k", Math.max(1, Number(e.target.value) || 1))}
-            style={inp} />
+        <label>
+          k
+          <input
+            type="number"
+            value={params.k}
+            min={1}
+            max={60}
+            onChange={(e) => update("k", Math.max(1, Number(e.target.value) || 1))}
+            style={inp}
+          />
         </label>
         <label>
           <input
             type="checkbox"
             checked={params.dualTri}
-            onChange={e => update("dualTri", e.target.checked)}
+            onChange={(e) => update("dualTri", e.target.checked)}
             style={{ marginRight: 4 }}
           />
           Dual Tri
         </label>
         {!params.dualTri && (
-          <label>Mode
+          <label>
+            Mode
             <input
               type="number"
               step={0.01}
               min={0}
               max={1}
               value={params.triMode}
-              onChange={e => update("triMode", clamp(0, 1, Number(e.target.value)))}
+              onChange={(e) => update("triMode", clamp(0, 1, Number(e.target.value)))}
               style={inp}
             />
           </label>
         )}
         {params.dualTri && (
           <>
-            <label>Mode A
+            <label>
+              Mode A
               <input
                 type="number"
                 step={0.01}
                 min={0}
                 max={1}
                 value={params.triMode}
-                onChange={e => update("triMode", clamp(0, 1, Number(e.target.value)))}
+                onChange={(e) => update("triMode", clamp(0, 1, Number(e.target.value)))}
                 style={inp}
               />
             </label>
-            <label>Mode B
+            <label>
+              Mode B
               <input
                 type="number"
                 step={0.01}
                 min={0}
                 max={1}
                 value={params.triMode2}
-                onChange={e => update("triMode2", clamp(0, 1, Number(e.target.value)))}
+                onChange={(e) => update("triMode2", clamp(0, 1, Number(e.target.value)))}
                 style={inp}
               />
             </label>
-            <label>wA
+            <label>
+              wA
               <input
                 type="number"
                 step={0.05}
                 min={0}
                 max={1}
                 value={params.dualTriWeightA}
-                onChange={e => update("dualTriWeightA", clamp(0, 1, Number(e.target.value)))}
+                onChange={(e) => update("dualTriWeightA", clamp(0, 1, Number(e.target.value)))}
                 style={inp}
               />
             </label>
           </>
         )}
-        <label>Mix
+        <label>
+          Mix
           <input
             type="number"
             step={0.05}
             min={0}
             max={1}
             value={params.mixWeight}
-            onChange={e => update("mixWeight", clamp(0, 1, Number(e.target.value)))}
+            onChange={(e) => update("mixWeight", clamp(0, 1, Number(e.target.value)))}
             style={inp}
           />
         </label>
@@ -212,69 +239,75 @@ export const BatesPanel: React.FC<BatesPanelProps> = ({
       </div>
 
       <div style={row}>
-        <label>βHot
+        <label>
+          βHot
           <input
             type="number"
             step={0.05}
             min={0}
             max={3}
             value={params.betaHot}
-            onChange={e => update("betaHot", clamp(0, 3, Number(e.target.value)))}
+            onChange={(e) => update("betaHot", clamp(0, 3, Number(e.target.value)))}
             style={inp}
           />
         </label>
-        <label>βCold
+        <label>
+          βCold
           <input
             type="number"
             step={0.05}
             min={0}
             max={3}
             value={params.betaCold}
-            onChange={e => update("betaCold", clamp(0, 3, Number(e.target.value)))}
+            onChange={(e) => update("betaCold", clamp(0, 3, Number(e.target.value)))}
             style={inp}
           />
         </label>
-        <label>βGlobal
+        <label>
+          βGlobal
           <input
             type="number"
             step={0.05}
             min={0}
             max={2}
             value={params.betaGlobal}
-            onChange={e => update("betaGlobal", clamp(0, 2, Number(e.target.value)))}
+            onChange={(e) => update("betaGlobal", clamp(0, 2, Number(e.target.value)))}
             style={inp}
           />
         </label>
-        <label>γCond
+        <label>
+          γCond
           <input
             type="number"
             step={0.05}
             min={0}
             max={3}
             value={params.gammaConditional}
-            onChange={e => update("gammaConditional", clamp(0, 3, Number(e.target.value)))}
+            onChange={(e) => update("gammaConditional", clamp(0, 3, Number(e.target.value)))}
             style={inp}
           />
         </label>
-        <label>Hot q
+        <label>
+          Hot q
           <input
             type="number"
             step={0.01}
             min={0.5}
             max={0.95}
             value={params.hotQuantile}
-            onChange={e => update("hotQuantile", clamp(0.5, 0.95, Number(e.target.value)))}
+            onChange={(e) => update("hotQuantile", clamp(0.5, 0.95, Number(e.target.value)))}
             style={inp}
           />
         </label>
-        <label>Cold q
+        <label>
+          Cold q
           <input
             type="number"
             step={0.01}
             min={0.05}
             max={0.5}
             value={params.coldQuantile}
-            onChange={e => update("coldQuantile", clamp(0.05, 0.5, Number(e.target.value)))}
+            onChange={(e) => update("coldQuantile", clamp(0.05, 0.5, Number(e.target.value)))}
             style={inp}
           />
         </label>
@@ -282,7 +315,7 @@ export const BatesPanel: React.FC<BatesPanelProps> = ({
           <input
             type="checkbox"
             checked={params.highlightHotCold}
-            onChange={e => update("highlightHotCold", e.target.checked)}
+            onChange={(e) => update("highlightHotCold", e.target.checked)}
             style={{ marginRight: 4 }}
           />
           Hot/Cold
@@ -307,7 +340,7 @@ const panel: React.CSSProperties = {
   borderRadius: 8,
   padding: 16,
   background: "#fff",
-  marginTop: 18
+  marginTop: 18,
 };
 const row: React.CSSProperties = {
   display: "flex",
@@ -315,7 +348,7 @@ const row: React.CSSProperties = {
   gap: 16,
   alignItems: "flex-end",
   marginBottom: 10,
-  fontSize: 13
+  fontSize: 13,
 };
 const inp: React.CSSProperties = { marginLeft: 6, width: 70 };
 const genBtn: React.CSSProperties = {
@@ -325,7 +358,7 @@ const genBtn: React.CSSProperties = {
   border: "none",
   borderRadius: 4,
   fontWeight: 600,
-  cursor: "pointer"
+  cursor: "pointer",
 };
 const probBox: React.CSSProperties = {
   background: "#eef6ff",
@@ -333,7 +366,7 @@ const probBox: React.CSSProperties = {
   padding: "6px 10px",
   borderRadius: 6,
   fontSize: 11,
-  lineHeight: 1.3
+  lineHeight: 1.3,
 };
 const guardBox: React.CSSProperties = {
   marginBottom: 10,
@@ -341,5 +374,5 @@ const guardBox: React.CSSProperties = {
   borderRadius: 6,
   border: "1px solid",
   fontSize: 11,
-  lineHeight: 1.4
+  lineHeight: 1.4,
 };
