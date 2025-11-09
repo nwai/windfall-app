@@ -287,6 +287,7 @@ interface UserExclusionsStripProps {
   showClearButton?: boolean;
 }
 
+// Adjusted UserExclusionsStrip for exact row alignment
 type Orientation = "horizontal" | "vertical";
 type LabelPosition = "bottom" | "right";
 
@@ -297,7 +298,7 @@ interface UserExclusionsStripProps {
   orientation?: Orientation;      // horizontal (default) or vertical
   labelPosition?: LabelPosition;  // bottom (stacked) or right
   showClearButton?: boolean;
-  cellSize?: number;              // optional: pixel size to align with heatmap rows (used in vertical mode)
+  cellSize?: number;              // for vertical alignment with heatmap rows
 }
 
 const UserExclusionsStrip: React.FC<UserExclusionsStripProps> = ({
@@ -322,16 +323,14 @@ const UserExclusionsStrip: React.FC<UserExclusionsStripProps> = ({
           marginTop: title ? 6 : 0,
         }
       : {
-          display: "flex",
-          flexDirection: "column",
-          gap: 4,
-          paddingTop: 6,
-          paddingBottom: 4,
-          borderTop: "1px dashed #ddd",
-          marginTop: title ? 6 : 0,
-        };
+        display: "flex",
+        flexDirection: "column",
+        gap: 0,
+        paddingTop: 7,
+        paddingBottom: 0,
+        marginTop: cellSize ? 2 : 0,
+      };
 
-  // Base label styles
   const labelStyleColumnBase: React.CSSProperties = {
     display: "inline-flex",
     flexDirection: "column",
@@ -345,48 +344,40 @@ const UserExclusionsStrip: React.FC<UserExclusionsStripProps> = ({
     minWidth: 28,
   };
 
-  // If vertical + cellSize provided, apply consistent height for alignment
+  // For vertical alignment: exact cell height + centered content
   const sizeStyles: React.CSSProperties =
     orientation === "vertical" && cellSize
-      ? { height: cellSize, justifyContent: "center" }
+      ? { height: cellSize, lineHeight: `${cellSize}px`, justifyContent: "center" }
       : {};
 
   return (
     <div style={{ marginTop: 8 }}>
+      {/* For vertical alignment, prefer no title here; render title outside if needed */}
       {title && <b>{title}</b>}
       <div style={containerStyle}>
         {Array.from({ length: 45 }, (_, i) => i + 1).map((n) => {
           const checked = excludedNumbers.includes(n);
-
           const handleToggle = () => {
             setExcludedNumbers((prev) =>
               prev.includes(n) ? prev.filter((x) => x !== n) : [...prev, n]
             );
           };
 
-            if (labelPosition === "bottom") {
-              return (
-                <label
-                  key={n}
-                  style={{ ...labelStyleColumnBase, ...sizeStyles }}
-                  title={`Exclude ${n}`}
-                >
-                  <input type="checkbox" checked={checked} onChange={handleToggle} />
-                  <span style={{ fontSize: 11, marginTop: 2 }}>{n}</span>
-                </label>
-              );
-            } else {
-              return (
-                <label
-                  key={n}
-                  style={{ ...labelStyleRowBase, ...sizeStyles }}
-                  title={`Exclude ${n}`}
-                >
-                  <input type="checkbox" checked={checked} onChange={handleToggle} />
-                  <span style={{ fontSize: 11 }}>{n}</span>
-                </label>
-              );
-            }
+          if (labelPosition === "bottom") {
+            return (
+              <label key={n} style={{ ...labelStyleColumnBase, ...sizeStyles }} title={`Exclude ${n}`}>
+                <input type="checkbox" checked={checked} onChange={handleToggle} style={{ margin: 0 }} />
+                <span style={{ fontSize: 11, marginTop: 2, lineHeight: "normal" }}>{n}</span>
+              </label>
+            );
+          } else {
+            return (
+              <label key={n} style={{ ...labelStyleRowBase, ...sizeStyles }} title={`Exclude ${n}`}>
+                <input type="checkbox" checked={checked} onChange={handleToggle} style={{ margin: 0 }} />
+                <span style={{ fontSize: 11, lineHeight: "normal" }}>{n}</span>
+              </label>
+            );
+          }
         })}
 
         {showClearButton && (
@@ -2339,7 +2330,7 @@ const churnDataset = useMemo(
               {/* Vertical User Exclusions aligned with cellSize */}
               <div style={{ flex: "0 0 auto" }}>
                 <UserExclusionsStrip
-                  title="User Exclusions"
+
                   excludedNumbers={excludedNumbers}
                   setExcludedNumbers={setExcludedNumbers}
                   orientation="vertical"
