@@ -2261,11 +2261,10 @@ const churnDataset = useMemo(
 </div>
       </div>
 
-      {/* DGA */}
-
-<details open style={{ marginTop: 18 }}>
+{/* DGA */}
+      <details open style={{ marginTop: 18 }}>
         <summary>
-          <b>Diamond Grid Analysis (DGA) </b>
+          <b>Diamond Grid Analysis (DGA)</b>
         </summary>
 
         {/* Controls row above the heatmap */}
@@ -2297,63 +2296,26 @@ const churnDataset = useMemo(
             </label>
           </div>
 
-          {/* Drought hazard is above the heatmap and not part of the flex row */}
+          {/* Drought hazard panel above legend */}
           <div style={{ width: "100%", marginBottom: 8 }}>
             <DroughtHazardPanel history={filteredHistory} top={8} title="Most likely to break a drought next draw" />
           </div>
 
-{/* Heatmap and vertical user exclusions side-by-side */}
-{/* Static legend/info bar for the heatmap */}
-<div style={{ width: "100%", marginTop: 8, marginBottom: 6 }}>
-  <HeatmapLegendBar
-    labels={bucketLabels}
-    counts={legendCounts}
-    total={legendTotal}
-    colors={bucketColors}
-    // sticky={true} // optional; not needed if the heatmap itself scrolls inside the inner div
-  />
-</div>
+          {/* Static legend/info bar for the heatmap (outside horizontal scroll) */}
+          <div style={{ width: "100%", marginTop: 8, marginBottom: 6 }}>
+            <HeatmapLegendBar
+              labels={bucketLabels}
+              counts={legendCounts}
+              total={legendTotal}
+              colors={bucketColors}
+            />
+          </div>
 
-{/* Heatmap + scroll container below (unchanged) */}
-<div style={{ width: "100%", display: "flex", alignItems: "flex-start", gap: 16 }}>
-  <div style={{ flex: "1 1 auto", overflowX: "auto" }}>
-    <div style={{ display: "inline-block" }}>
-      <TemperatureHeatmap
-        history={filteredHistory}
-        alpha={0.25}
-        cellSize={DGA_CELL_SIZE}
-        metric={tempMetric}
-        buckets={10}
-        bucketStops={bucketStops}
-        bucketLabels={bucketLabels}
-        hybridWeight={0.6}
-        emaNormalize="per-number"
-        enforcePeaks={true}
-        onHoverNumber={setFocusNumber}
-        showLegendCounts={false} // legend now rendered externally
-        overlayNumbers={overlayNumbers}
-        showBucketLetters={showHeatmapLetters}
-        bucketLetters={["pR","F","pF","<C","C>","tT","W","H","tR","V"]}
-      />
-    </div>
-  </div>
-
-  {/* Right: vertical user exclusions aligned to rows (unchanged) */}
-  <div style={{ flex: "0 0 auto" }}>
-    <UserExclusionsStrip
-      title="User Exclusions"
-      excludedNumbers={excludedNumbers}
-      setExcludedNumbers={setExcludedNumbers}
-      orientation="vertical"
-      labelPosition="right"
-      cellSize={DGA_CELL_SIZE}
-    />
-  </div>
-</div>
-          <div style={{ width: "100%", display: "flex", alignItems: "flex-start", gap: 16 }}>
-            {/* Left: horizontally scrollable heatmap container */}
-            <div style={{ flex: "1 1 auto", overflowX: "auto" }}>
-              {/* inline-block ensures the inner width defines the scrollable content */}
+          {/* Single horizontally scrollable region:
+              Heatmap + vertical exclusions inside to keep them aligned & scrolling together */}
+          <div style={{ width: "100%", overflowX: "auto" }}>
+            <div style={{ display: "inline-flex", alignItems: "flex-start", gap: 12 }}>
+              {/* Heatmap */}
               <div style={{ display: "inline-block" }}>
                 <TemperatureHeatmap
                   history={filteredHistory}
@@ -2361,70 +2323,67 @@ const churnDataset = useMemo(
                   cellSize={DGA_CELL_SIZE}
                   metric={tempMetric}
                   buckets={10}
-                  bucketStops={[0.05, 0.12, 0.20, 0.30, 0.42, 0.55, 0.68, 0.82, 0.92]}
-                  bucketLabels={[
-                    "prehistoric","frozen","permafrost","cold","cool",
-                    "temperate","warm","hot","tropical","volcanic"
-                  ]}
+                  bucketStops={bucketStops}
+                  bucketLabels={bucketLabels}
                   hybridWeight={0.6}
                   emaNormalize="per-number"
                   enforcePeaks={true}
                   onHoverNumber={setFocusNumber}
-                  showLegendCounts={true}
+                  showLegendCounts={false}  // legend handled separately
                   overlayNumbers={overlayNumbers}
                   showBucketLetters={showHeatmapLetters}
                   bucketLetters={["pR","F","pF","<C","C>","tT","W","H","tR","V"]}
                 />
               </div>
-            </div>
 
-            {/* Right: vertical user exclusions strip aligned with heatmap rows */}
-            <div style={{ flex: "0 0 auto" }}>
-              <UserExclusionsStrip
-                title="User Exclusions"
-                excludedNumbers={excludedNumbers}
-                setExcludedNumbers={setExcludedNumbers}
-                orientation="vertical"
-                cellSize={DGA_CELL_SIZE}   // critical for 1:1 row alignment
-                labelPosition="right"      // number label on the side, not below
-              />
+              {/* Vertical User Exclusions aligned with cellSize */}
+              <div style={{ flex: "0 0 auto" }}>
+                <UserExclusionsStrip
+                  title="User Exclusions"
+                  excludedNumbers={excludedNumbers}
+                  setExcludedNumbers={setExcludedNumbers}
+                  orientation="vertical"
+                  labelPosition="right"
+                  cellSize={DGA_CELL_SIZE}
+                />
+              </div>
             </div>
           </div>
-        </div>
 
-        {highlightMsg && (
-          <div style={{ color: "#c00", marginBottom: 12 }}>{highlightMsg}</div>
-        )}
+          {highlightMsg && (
+            <div style={{ color: "#c00", marginTop: 10, marginBottom: 12 }}>{highlightMsg}</div>
+          )}
 
-        {/* Quick-access user exclusions (horizontal) */}
-       <UserExclusionsStrip
-         title="User Exclusions (quick access)"
-         excludedNumbers={excludedNumbers}
-         setExcludedNumbers={setExcludedNumbers}
-         orientation="horizontal"
-         labelPosition="bottom"
-         showClearButton={true}
-       />
-
-        {/* DGA visualizer */}
-        {dgaGrid.length > 0 ? (
-          <DGAVisualizer
-            grid={dgaGrid}
-            diamonds={dgaDiamonds}
-            predictions={dgaPredictions}
-            drawLabels={dgaDrawLabels}
-            numberLabels={Array.from({ length: 45 }, (_, i) => String(i + 1))}
-            numberCounts={numberCounts}
-            minCount={minCount}
-            maxCount={maxCount}
-            highlights={highlights}
-            setHighlights={setHighlights}
-            controlsPosition="below"
-            focusNumber={focusNumber}
+          {/* Quick-access user exclusions (horizontal) */}
+          <UserExclusionsStrip
+            title="User Exclusions (quick access)"
+            excludedNumbers={excludedNumbers}
+            setExcludedNumbers={setExcludedNumbers}
+            orientation="horizontal"
+            labelPosition="bottom"
+            showClearButton={true}
           />
-        ) : (
-          <i>No grid data available.</i>
-        )}
+
+          {/* DGA visualizer (unchanged) */}
+          {dgaGrid.length > 0 ? (
+            <DGAVisualizer
+              grid={dgaGrid}
+              diamonds={dgaDiamonds}
+              predictions={dgaPredictions}
+              drawLabels={dgaDrawLabels}
+              numberLabels={Array.from({ length: 45 }, (_, i) => String(i + 1))}
+              numberCounts={numberCounts}
+              minCount={minCount}
+              maxCount={maxCount}
+              highlights={highlights}
+              setHighlights={setHighlights}
+              controlsPosition="below"
+              focusNumber={focusNumber}
+            />
+          ) : (
+            <i>No grid data available.</i>
+          )}
+        </div>
       </details>
 <TracePanel lines={trace} onClear={() => setTrace([])} />
     </div>
