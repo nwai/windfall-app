@@ -276,96 +276,137 @@ function traceFormat(
   return [...header, ...perCandidate, "[TRACE END]"].join("\n");
 }
 
-const UserExclusionsStrip: React.FC<{
+
+
+interface UserExclusionsStripProps {
   excludedNumbers: number[];
   setExcludedNumbers: (updater: (prev: number[]) => number[]) => void;
   title?: string;
-  orientation?: "horizontal" | "vertical";
-  cellSize?: number; // match TemperatureHeatmap cell size for row alignment
-  labelPosition?: "left" | "right" | "bottom"; // label position relative to checkbox for vertical layout
-}> = ({
+  orientation?: Orientation;      // horizontal (default) or vertical
+  labelPosition?: LabelPosition;  // bottom (stacked) or right
+  showClearButton?: boolean;
+}
+
+type Orientation = "horizontal" | "vertical";
+type LabelPosition = "bottom" | "right";
+
+interface UserExclusionsStripProps {
+  excludedNumbers: number[];
+  setExcludedNumbers: (updater: (prev: number[]) => number[]) => void;
+  title?: string;
+  orientation?: Orientation;      // horizontal (default) or vertical
+  labelPosition?: LabelPosition;  // bottom (stacked) or right
+  showClearButton?: boolean;
+  cellSize?: number;              // optional: pixel size to align with heatmap rows (used in vertical mode)
+}
+
+const UserExclusionsStrip: React.FC<UserExclusionsStripProps> = ({
   excludedNumbers,
   setExcludedNumbers,
   title,
   orientation = "horizontal",
-  cellSize = 16,
-  labelPosition = "right",
+  labelPosition = "bottom",
+  showClearButton = false,
+  cellSize,
 }) => {
-  const isVertical = orientation === "vertical";
-  const numberLabel = (n: number) => (
-    <span
-      style={{
-        fontSize: 11,
-        lineHeight: 1,
-        margin: isVertical ? "0 6px" : "0 0 0 6px",
-        minWidth: 14,
-        textAlign: "center",
-      }}
-    >
-      {n}
-    </span>
-  );
+  const containerStyle: React.CSSProperties =
+    orientation === "horizontal"
+      ? {
+          display: "flex",
+          gap: 8,
+          overflowX: "auto",
+          whiteSpace: "nowrap",
+          paddingTop: 6,
+          paddingBottom: 4,
+          borderTop: "1px dashed #ddd",
+          marginTop: title ? 6 : 0,
+        }
+      : {
+          display: "flex",
+          flexDirection: "column",
+          gap: 4,
+          paddingTop: 6,
+          paddingBottom: 4,
+          borderTop: "1px dashed #ddd",
+          marginTop: title ? 6 : 0,
+        };
+
+  // Base label styles
+  const labelStyleColumnBase: React.CSSProperties = {
+    display: "inline-flex",
+    flexDirection: "column",
+    alignItems: "center",
+    minWidth: 28,
+  };
+  const labelStyleRowBase: React.CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    minWidth: 28,
+  };
+
+  // If vertical + cellSize provided, apply consistent height for alignment
+  const sizeStyles: React.CSSProperties =
+    orientation === "vertical" && cellSize
+      ? { height: cellSize, justifyContent: "center" }
+      : {};
 
   return (
     <div style={{ marginTop: 8 }}>
       {title && <b>{title}</b>}
-      <div
-        style={{
-          display: "flex",
-          flexDirection: isVertical ? "column" : "row",
-          gap: isVertical ? 0 : 8,
-          overflowX: !isVertical ? "auto" : "visible",
-          overflowY: isVertical ? "visible" : "hidden",
-          paddingTop: 6,
-          paddingBottom: 4,
-          borderTop: !isVertical ? "1px dashed #ddd" : undefined,
-          borderLeft: isVertical ? "1px dashed #ddd" : undefined,
-          marginTop: title ? 6 : 0,
-        }}
-      >
+      <div style={containerStyle}>
         {Array.from({ length: 45 }, (_, i) => i + 1).map((n) => {
           const checked = excludedNumbers.includes(n);
-          const rowStyle: React.CSSProperties = isVertical
-            ? {
-                display: "flex",
-                alignItems: "center",
-                height: cellSize, // aligns each row with a heatmap cell
-                padding: "0 6px",
-              }
-            : {
-                display: "inline-flex",
-                alignItems: "center",
-                minWidth: 28,
-                padding: "0 2px",
-              };
 
-          return (
-            <div key={n} style={rowStyle} title={`Exclude ${n}`}>
-              {isVertical && labelPosition === "left" && numberLabel(n)}
-              <input
-                type="checkbox"
-                checked={checked}
-                onChange={() => {
-                  setExcludedNumbers((prev) =>
-                    prev.includes(n) ? prev.filter((x) => x !== n) : [...prev, n]
-                  );
-                }}
-                style={{
-                  margin: isVertical
-                    ? labelPosition === "left"
-                      ? "0 0 0 0"
-                      : "0 6px 0 0"
-                    : 0,
-                }}
-              />
-              {isVertical
-                ? labelPosition === "right"
-                  ? numberLabel(n)
-                  : null
-                : numberLabel(n)}
-            </div>
-          );
+          const handleToggle = () => {
+            setExcludedNumbers((prev) =>
+              prev.includes(n) ? prev.filter((x) => x !== n) : [...prev, n]
+            );
+          };
+
+            if (labelPosition === "bottom") {
+              return (
+                <label
+                  key={n}
+                  style={{ ...labelStyleColumnBase, ...sizeStyles }}
+                  title={`Exclude ${n}`}
+                >
+                  <input type="checkbox" checked={checked} onChange={handleToggle} />
+                  <span style={{ fontSize: 11, marginTop: 2 }}>{n}</span>
+                </label>
+              );
+            } else {
+              return (
+                <label
+                  key={n}
+                  style={{ ...labelStyleRowBase, ...sizeStyles }}
+                  title={`Exclude ${n}`}
+                >
+                  <input type="checkbox" checked={checked} onChange={handleToggle} />
+                  <span style={{ fontSize: 11 }}>{n}</span>
+                </label>
+              );
+            }
         })}
+
+        {showClearButton && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              marginLeft: orientation === "horizontal" ? 8 : 0,
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => setExcludedNumbers(() => [])}
+              title="Clear user exclusions"
+              style={{ padding: "4px 8px", fontSize: 12, marginLeft: 8 }}
+            >
+              Clear
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1898,6 +1939,9 @@ const churnDataset = useMemo(
       title="User Exclusions"
       excludedNumbers={excludedNumbers}
       setExcludedNumbers={setExcludedNumbers}
+      orientation="horizontal"
+      labelPosition="bottom"
+      showClearButton={true}
     />
 
     <MultiStateChurnPanel
@@ -1920,6 +1964,9 @@ const churnDataset = useMemo(
           title="User Exclusions"
           excludedNumbers={excludedNumbers}
           setExcludedNumbers={setExcludedNumbers}
+          orientation="horizontal"
+          labelPosition="bottom"
+          showClearButton={true}
         />
       }
     />
@@ -2260,43 +2307,14 @@ const churnDataset = useMemo(
         )}
 
         {/* Quick-access user exclusions (horizontal) */}
-        <div style={{ marginTop: 12 }}>
-          <b>User Exclusions (quick access):</b>
-          <div
-            style={{
-              display: "flex",
-              gap: 2,
-              overflowX: "auto",
-              whiteSpace: "nowrap",
-              paddingTop: 2,
-              paddingBottom: 4,
-              borderTop: "1px dashed #ddd",
-              marginTop: 4
-            }}
-          >
-            {Array.from({ length: 45 }, (_, i) => i + 1).map((n) => {
-              const checked = excludedNumbers.includes(n);
-              return (
-                <label
-                  key={`ux2-${n}`}
-                  style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", minWidth: 28 }}
-                  title={`Exclude ${n}`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => {
-                      setExcludedNumbers((prev) =>
-                        prev.includes(n) ? prev.filter((x) => x !== n) : [...prev, n]
-                      );
-                    }}
-                  />
-                  <span style={{ fontSize: 10, marginTop: 1 }}>{n}</span>
-                </label>
-              );
-            })}
-          </div>
-        </div>
+       <UserExclusionsStrip
+         title="User Exclusions (quick access)"
+         excludedNumbers={excludedNumbers}
+         setExcludedNumbers={setExcludedNumbers}
+         orientation="horizontal"
+         labelPosition="bottom"
+         showClearButton={true}
+       />
 
         {/* DGA visualizer */}
         {dgaGrid.length > 0 ? (
