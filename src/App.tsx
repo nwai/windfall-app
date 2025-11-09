@@ -63,7 +63,7 @@ import { GlobalZoneWeighting } from "./components/GlobalZoneWeighting";
 import DrawHistoryManager from "./components/DrawHistoryManager";
 import { DrawRow } from "./lib/drawHistory";
 import { buildChurnDataset } from "./lib/churnFeatures";
-
+import { HeatmapLegendBar } from "./components/HeatmapLegendBar";
 
 import {
   AppPresetSnapshot,
@@ -1047,6 +1047,49 @@ const trendRatioDrawsConsidered = useMemo(
         }
 
   /* ========== TREND / TEMPERATURE BLOCK (END) ========== */
+
+// Same stops/labels you already pass to TemperatureHeatmap
+  const bucketStops = [0.05, 0.12, 0.20, 0.30, 0.42, 0.55, 0.68, 0.82, 0.92];
+  const bucketLabels = [
+    "prehistoric","frozen","permafrost","cold","cool",
+    "temperate","warm","hot","tropical","volcanic"
+  ];
+  // Optional colors for chips (align to your heatmap palette if needed)
+  const bucketColors = [
+    "#0b1020","#1b2733","#244963","#2c75a0","#3ca0c7",
+    "#66c2a5","#a6d854","#fdd835","#fb8c00","#e53935"
+  ];
+
+  // Bucket index helper: returns 0..9 (10 buckets)
+  function bucketIndex(v: number): number {
+    for (let i = 0; i < bucketStops.length; i++) {
+      if (v < bucketStops[i]) return i;
+    }
+    return bucketStops.length;
+  }
+
+  // Legend counts derived from your trendValueSeries (hybrid/EMA+recency per-number time series)
+  const [legendCounts, setLegendCounts] = useState<number[]>(() => Array(bucketLabels.length).fill(0));
+  const [legendTotal, setLegendTotal] = useState<number>(0);
+
+  useEffect(() => {
+    // Flatten all values currently in the visible window
+    const values: number[] = [];
+    for (let n = 0; n < trendValueSeries.length; n++) {
+      const series = trendValueSeries[n] || [];
+      for (let t = 0; t < series.length; t++) {
+        const v = series[t];
+        // Guard expected range
+        if (typeof v === "number" && isFinite(v) && v >= 0 && v <= 1) {
+          values.push(v);
+        }
+      }
+    }
+    const counts = Array(bucketLabels.length).fill(0);
+    for (const v of values) counts[bucketIndex(v)]++;
+    setLegendCounts(counts);
+    setLegendTotal(values.length);
+  }, [trendValueSeries]); // updates whenever the window/series updates
 
   // Active candidate index (row selection)
   const [selectedCandidateIdx, setSelectedCandidateIdx] = useState<number>(-1);
@@ -2260,6 +2303,53 @@ const churnDataset = useMemo(
           </div>
 
 {/* Heatmap and vertical user exclusions side-by-side */}
+{/* Static legend/info bar for the heatmap */}
+<div style={{ width: "100%", marginTop: 8, marginBottom: 6 }}>
+  <HeatmapLegendBar
+    labels={bucketLabels}
+    counts={legendCounts}
+    total={legendTotal}
+    colors={bucketColors}
+    // sticky={true} // optional; not needed if the heatmap itself scrolls inside the inner div
+  />
+</div>
+
+{/* Heatmap + scroll container below (unchanged) */}
+<div style={{ width: "100%", display: "flex", alignItems: "flex-start", gap: 16 }}>
+  <div style={{ flex: "1 1 auto", overflowX: "auto" }}>
+    <div style={{ display: "inline-block" }}>
+      <TemperatureHeatmap
+        history={filteredHistory}
+        alpha={0.25}
+        cellSize={DGA_CELL_SIZE}
+        metric={tempMetric}
+        buckets={10}
+        bucketStops={bucketStops}
+        bucketLabels={bucketLabels}
+        hybridWeight={0.6}
+        emaNormalize="per-number"
+        enforcePeaks={true}
+        onHoverNumber={setFocusNumber}
+        showLegendCounts={false} // legend now rendered externally
+        overlayNumbers={overlayNumbers}
+        showBucketLetters={showHeatmapLetters}
+        bucketLetters={["pR","F","pF","<C","C>","tT","W","H","tR","V"]}
+      />
+    </div>
+  </div>
+
+  {/* Right: vertical user exclusions aligned to rows (unchanged) */}
+  <div style={{ flex: "0 0 auto" }}>
+    <UserExclusionsStrip
+      title="User Exclusions"
+      excludedNumbers={excludedNumbers}
+      setExcludedNumbers={setExcludedNumbers}
+      orientation="vertical"
+      labelPosition="right"
+      cellSize={DGA_CELL_SIZE}
+    />
+  </div>
+</div>
           <div style={{ width: "100%", display: "flex", alignItems: "flex-start", gap: 16 }}>
             {/* Left: horizontally scrollable heatmap container */}
             <div style={{ flex: "1 1 auto", overflowX: "auto" }}>
