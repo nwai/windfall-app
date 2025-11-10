@@ -1,0 +1,136 @@
+diff --git a/src/components/SurvivalAnalyzer.tsx b/src/components/SurvivalAnalyzer.tsx
+--- a/src/components/SurvivalAnalyzer.tsx
++++ b/src/components/SurvivalAnalyzer.tsx
+@@ -1,5 +1,5 @@
+-import React, { useState, useMemo, useEffect, useRef } from "react";
++import React, { useState, useMemo, useEffect, useRef } from "react";
+ import { Draw } from "../types";
+ import {
+   buildGPWFNumberWeights,
+   buildHC3PenaltyWeights,
+   buildSDE1PenaltyWeights,
+@@ -92,10 +92,12 @@ export const SurvivalAnalyzer: React.FC<{
+   const [useHC3Bias, setUseHC3Bias] = useState<boolean>(true);
+   const [useSDE1Bias, setUseSDE1Bias] = useState<boolean>(false);
+   const [gamma, setGamma] = useState<number>(2);
+ 
+   // Optional custom trend window (derive alt weights)
+   const [useCustomTrendWindow, setUseCustomTrendWindow] = useState<boolean>(false);
+   const [trendFrom, setTrendFrom] = useState<number>(14);
+   const [trendTo, setTrendTo] = useState<number>(30);
++  // Trend comparison mode: raw difference (default) or ratio
++  const [trendMode, setTrendMode] = useState<"diff" | "ratio">("diff");
+ 
+   const [sortBy, setSortBy] = useState<"biased" | "base" | "number">("biased");
+ 
+@@ -160,22 +162,43 @@ export const SurvivalAnalyzer: React.FC<{
+   const gpwfWeights = useMemo(() => buildGPWFNumberWeights(recent), [recent]);
+   const hc3Weights = useMemo(() => buildHC3PenaltyWeights(history), [history]);
+   const sde1Weights = useMemo(() => buildSDE1PenaltyWeights(history), [history]);
+ 
+   // Optionally derive a custom trend weights slice
+   const customTrendWeights = useMemo(() => {
+     if (!useCustomTrendWindow) return undefined;
+     const to = Math.max(1, Math.min(trendTo, history.length));
+     const from = Math.max(0, Math.min(trendFrom, to - 1));
+     const hiSlice = history.slice(-to);   // last 'to' draws
+     const loSlice = history.slice(-from); // last 'from' draws (most recent core)
+     const count = (arr: Draw[], n: number) =>
+       arr.reduce(
+         (acc, d) => acc + (d.main.includes(n) || d.supp.includes(n) ? 1 : 0),
+         0
+       );
+     const w: Record<number, number> = {};
+     for (let n = 1; n <= 45; n++) {
+-      const v = count(hiSlice, n) - count(loSlice, n);
+-      w[n] = Math.max(0, v + 1); // keep positive
++      const older = count(hiSlice, n) - count(loSlice, n); // hits in older band inside last 'to'
++      const recent = count(loSlice, n);                    // hits in most recent 'from'
++      if (trendMode === "ratio") {
++        // Laplace-smoothed ratio to avoid zero division and keep continuous signal
++        const ratio = (older + 1) / (recent + 1);
++        w[n] = ratio;
++      } else {
++        // Raw difference (+1, clamped)
++        const v = older;
++        w[n] = Math.max(0, v + 1);
++      }
+     }
+     return w;
+-  }, [useCustomTrendWindow, trendFrom, trendTo, history]);
++  }, [useCustomTrendWindow, trendFrom, trendTo, trendMode, history]);
++
++  // Quick Examples / reference indices (1-based for UI)
++  const qeReference = useMemo(() => {
++    const L = history.length;
++    const to = Math.max(1, Math.min(trendTo, L));
++    const from = Math.max(1, Math.min(trendFrom, to - 1));
++    const recentFromIdx = Math.max(1, L - from + 1);
++    const recentToIdx = L;
++    const olderFromIdx = Math.max(1, L - to + 1);
++    const olderToIdx = Math.max(0, L - from);
++    const olderSize = Math.max(0, to - from);
++    return { L, to, from, recentFromIdx, recentToIdx, olderFromIdx, olderToIdx, olderSize };
++  }, [history.length, trendFrom, trendTo]);
+ 
+   // Combine weights into a single Number -> weight map
+   const combinedBias = useMemo(() => {
+@@ -372,6 +395,21 @@ export const SurvivalAnalyzer: React.FC<{
+             <button type="button" onClick={() => { setUseCustomTrendWindow(true); setTrendFrom(11); setTrendTo(13); }} style={{ fontSize: 12 }}>11→13</button>
+           </span>
+         </span>
++        {/* Mode buttons: Raw Diff vs Ratios */}
++        <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
++          <button
++            type="button"
++            onClick={() => { setUseTrendBias(true); setUseCustomTrendWindow(true); setTrendMode("diff"); }}
++            style={{ fontSize: 12, padding: "4px 8px", border: trendMode === "diff" ? "1px solid #1976d2" : "1px solid #bbb", background: trendMode === "diff" ? "#1976d2" : "#fff", color: trendMode === "diff" ? "#fff" : "#222", borderRadius: 4 }}
++            title="Use raw difference: (older - recent) + 1 (clamped ≥ 1)"
++          >Run Raw Diff</button>
++          <button
++            type="button"
++            onClick={() => { setUseTrendBias(true); setUseCustomTrendWindow(true); setTrendMode("ratio"); }}
++            style={{ fontSize: 12, padding: "4px 8px", border: trendMode === "ratio" ? "1px solid #1976d2" : "1px solid #bbb", background: trendMode === "ratio" ? "#1976d2" : "#fff", color: trendMode === "ratio" ? "#fff" : "#222", borderRadius: 4 }}
++            title="Use ratios: (older+1)/(recent+1)"
++          >Run Ratios</button>
++        </span>
+ 
+         {!hideBiasToggles && (
+           <>
+@@ -564,7 +602,45 @@ export const SurvivalAnalyzer: React.FC<{
+               </table>
+             ))}
+           </div>
++          {/* Custom Window Reference panel */}
++          <div
++            style={{
++              marginTop: 12,
++              border: "1px solid #e0f2f1",
++              background: "#f5fffe",
++              borderRadius: 6,
++              padding: 10,
++              fontSize: 13,
++              lineHeight: 1.5,
++            }}
++          >
++            <div style={{ fontWeight: 700, marginBottom: 6 }}>Custom Window Reference</div>
++            <div>History: <b>{qeReference.L}</b> draws</div>
++            <div>Total lookback (to): last <b>{qeReference.to}</b> draws → <b>{qeReference.olderFromIdx}</b>–<b>{qeReference.L}</b></div>
++            <div>Recent core (from): last <b>{qeReference.from}</b> draws → <b>{qeReference.recentFromIdx}</b>–<b>{qeReference.recentToIdx}</b></div>
++            <div>Older band (to − from = <b>{qeReference.olderSize}</b>): <b>{qeReference.olderFromIdx}</b>–<b>{qeReference.olderToIdx}</b></div>
++            <div style={{ marginTop: 6, color: "#555" }}>
++              Mode: {trendMode === "ratio"
++                ? "Ratios (older+1)/(recent+1) >1 older-heavy, <1 recent-heavy."
++                : "Raw diff (older − recent) + 1 (≥1)."}
++            </div>
++          </div>
+           <div style={{ fontSize: 12, color: "#888", marginTop: 8 }}>
+             Base = Kaplan–Meier probability. Biased = Base × (combined bias)^γ × (ZPA weight)^γ.
+           </div>
+         </div>
+       ) : (
++        <div style={{ color: "#c00" }}>Not enough draws to run analysis.</div>
++      )}
++    </section>
++  );
++}

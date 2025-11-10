@@ -1,0 +1,123 @@
+diff --git a/src/components/SurvivalAnalyzer.tsx b/src/components/SurvivalAnalyzer.tsx
+--- a/src/components/SurvivalAnalyzer.tsx
++++ b/src/components/SurvivalAnalyzer.tsx
+@@ -250,6 +250,29 @@ export const SurvivalAnalyzer: React.FC<{
+     return Array.from({ length: numCols }, (_, colIdx) =>
+       sortedStats.slice(colIdx * rowsPerCol, (colIdx + 1) * rowsPerCol)
+     );
+   }, [sortedStats]);
+ 
++  // Quick Examples panel data (static (from,to) list, dynamic index mapping)
++  const quickExamples = useMemo(() => {
++    const L = history.length;
++    const pairs: [number, number][] = [
++      [10, 40],
++      [27, 56],
++      [3, 12],
++    ];
++    return pairs.map(([fromRaw, toRaw]) => {
++      // Clamp to available history
++      const to = Math.min(toRaw, L);
++      const from = Math.min(fromRaw, Math.max(1, to - 1));
++      const olderSize = Math.max(0, to - from);
++      const olderFromIdx = Math.max(1, L - to + 1);
++      const olderToIdx = Math.max(0, L - from);
++      const recentFromIdx = Math.max(1, L - from + 1);
++      const recentToIdx = L;
++      return {
++        from: fromRaw,
++        to: toRaw,
++        olderSize,
++        olderRange: L >= toRaw ? `${olderFromIdx}–${olderToIdx}` : "n/a",
++        recentRange: L >= toRaw ? `${recentFromIdx}–${recentToIdx}` : "n/a",
++        label: `${fromRaw}–${toRaw}`,
++        meaning: `Compare earlier ${olderSize} vs recent ${from}`,
++      };
++    });
++  }, [history.length]);
++
+   /**
+    * Optimizer state & logic
+    */
+@@ -650,13 +673,46 @@ export const SurvivalAnalyzer: React.FC<{
+           {/* Result columns */}
+           <div
+             style={{
+               display: "flex",
+               gap: 28,
+-              marginTop: 18,
+-              flexWrap: "wrap",
++              marginTop: 18,
++              flexWrap: "wrap",
+             }}
+           >
+             {columns.map((col, colIdx) => (
+               <table
+                 key={colIdx}
+                 style={{
+                   borderCollapse: "collapse",
+                   fontSize: 15,
+                   minWidth: 260,
+                   background: "#fff",
+                   border: "1px solid #b2ebf2",
+                 }}
+               >
+@@ -714,6 +770,54 @@ export const SurvivalAnalyzer: React.FC<{
+                 </tbody>
+               </table>
+             ))}
++
++            {/* Quick Examples Reference Panel */}
++            <div
++              style={{
++                display: "flex",
++                flexDirection: "column",
++                gap: 8,
++                minWidth: 320,
++                background: "#ffffff",
++                border: "1px solid #c5e9f2",
++                borderRadius: 6,
++                padding: 10,
++                fontSize: 13,
++              }}
++            >
++              <div style={{ fontWeight: 700 }}>Quick Examples (Custom Window)</div>
++              <div style={{ fontSize: 12, color: "#555" }}>
++                History length: {history.length} draws.
++                Mapping shows which draw indices each (from,to) pair refers to
++                (older band vs recent core) using current total history.
++              </div>
++              <table
++                style={{
++                  borderCollapse: "collapse",
++                  fontSize: 12,
++                  width: "100%",
++                }}
++              >
++                <thead>
++                  <tr style={{ background: "#e9f7fb" }}>
++                    <th style={{ textAlign: "left", padding: "4px 6px" }}>(from,to)</th>
++                    <th style={{ textAlign: "left", padding: "4px 6px" }}>Meaning</th>
++                    <th style={{ textAlign: "right", padding: "4px 6px" }}>Older size</th>
++                    <th style={{ textAlign: "center", padding: "4px 6px" }}>Older band draws</th>
++                    <th style={{ textAlign: "center", padding: "4px 6px" }}>Recent draws</th>
++                  </tr>
++                </thead>
++                <tbody>
++                  {quickExamples.map(ex => (
++                    <tr key={ex.label}>
++                      <td style={{ padding: "3px 6px", fontWeight: 600 }}>{ex.label}</td>
++                      <td style={{ padding: "3px 6px" }}>{ex.meaning}</td>
++                      <td style={{ padding: "3px 6px", textAlign: "right" }}>{ex.olderSize}</td>
++                      <td style={{ padding: "3px 6px", textAlign: "center" }}>{ex.olderRange}</td>
++                      <td style={{ padding: "3px 6px", textAlign: "center" }}>{ex.recentRange}</td>
++                    </tr>
++                  ))}
++                </tbody>
++              </table>
++            </div>
+           </div>
+ 
+           {/* Custom Window Reference panel */}
+           {useTrendBias && useCustomTrendWindow && (
+             <div

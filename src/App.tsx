@@ -65,6 +65,7 @@ import { DrawRow } from "./lib/drawHistory";
 import { buildChurnDataset } from "./lib/churnFeatures";
 import { HeatmapLegendBar } from "./components/HeatmapLegendBar";
 
+
 import {
   AppPresetSnapshot,
   listPresets,
@@ -84,6 +85,9 @@ import {
   getSavedNormalizeMode,
   setSavedNormalizeMode,
 } from "./lib/zpaStorage";
+
+import type { WindowPattern } from "./components/WindowStatsPanel";
+
 
 // Optional: custom groups example
 const custom: ZoneGroups = [
@@ -498,6 +502,13 @@ const [selectedPresetId, setSelectedPresetId] = useState<string>("");
 const [newPresetName, setNewPresetName] = useState<string>("");
 const [zpaReloadKey, setZpaReloadKey] = useState<number>(0); // force ZPA remount on load
 // Global ZPA zone weighting (single source of truth)
+
+
+// Moved here from top-level:
+const [selectedWindowPatterns, setSelectedWindowPatterns] = useState<WindowPattern[]>([]);
+const [patternConstraintMode, setPatternConstraintMode] = useState<'boost' | 'restrict'>('boost');
+const [patternBoostFactor, setPatternBoostFactor] = useState<number>(0.15);
+const [patternSumTolerance, setPatternSumTolerance] = useState<number>(0);
 const { zoneWeightingEnabled, zoneGamma, setZoneWeightingEnabled, setZoneGamma } = useZPASettings();
 
 const [survivalOut, setSurvivalOut] = useState<{ number: number; baseProb?: number; biasedProb?: number }[] | undefined>(undefined);
@@ -1011,7 +1022,17 @@ const trendRatioDrawsConsidered = useMemo(
                 ? computeCandidateZoneBias(nums, savedZoneWeights || null, zoneGamma)
                 : 1;
 
-              const finalCompositeAdj = finalComposite * zBias;
+              let finalCompositeAdj = finalComposite * zBias;
+
+              // Pattern soft-boost (if enabled): multiply by (1 + matches * factor), capped
+if (patternConstraintMode === 'boost' && patternBoostFactor > 0) {
+                const pmRaw = (c as any).patternMatches;
+                const matches = typeof pmRaw === 'number' && pmRaw > 0 ? pmRaw : 0;
+                if (matches) {
+                  const capped = Math.min(matches, 5); // cap influence
+                  finalCompositeAdj *= (1 + capped * patternBoostFactor);
+                }
+              }
 
               return {
                 ...c,
@@ -1243,8 +1264,14 @@ const handleGenerate = () => {
     undefined,
     undefined,
     // NEW: sum filter
-    { enabled: sumFilterEnabled, min: sumMin, max: sumMax, includeSupp: sumIncludeSupp }
-  );
+ { enabled: sumFilterEnabled, min: sumMin, max: sumMax, includeSupp: sumIncludeSupp },
+   {
+     constraints: selectedWindowPatterns,
+     mode: patternConstraintMode,
+     boostFactor: patternBoostFactor,
+     sumTolerance: patternSumTolerance,
+   }
+ );
 
   let processedCandidates = [...result.candidates];
 
@@ -1276,6 +1303,7 @@ const handleGenerate = () => {
       `[TRACE] Sum filter: ${sumFilterEnabled ? `${sumIncludeSupp ? "main+supp" : "main-only"} in [${sumMin}, ${sumMax}]` : "off"}`,
       `[TRACE] User excluded: [${excludedNumbers.join(", ")}]`,
       `[TRACE] Forced inclusion: [${trendSelectedNumbers.join(", ")}]`,
+      `[TRACE] Patterns: mode=${patternConstraintMode}, selected=${selectedWindowPatterns.length}, boost=${patternBoostFactor}, sumTol=±${patternSumTolerance}`,
     ];
 
     const s = result.rejectionStats;
@@ -1922,20 +1950,81 @@ const churnDataset = useMemo(
     <b>Window Stats (Low/Mid/High, Even/Odd, Sum)</b> <span style={{ fontWeight: 400, color: "#666" }}>(WFMQY)</span>
   </summary>
   <div style={{ marginTop: 8 }}>
-    <WindowStatsPanel
-      draws={filteredHistory}
-      sumMin={sumMin}
-      sumMax={sumMax}
-      includeSupp={sumIncludeSupp}
-      onSumFilterChange={({ min, max, includeSupp }) => {
-        setSumMin(min);
-        setSumMax(max);
-        setSumIncludeSupp(includeSupp);
-        setSumFilterEnabled(true);
-      }}
-    />
+<WindowStatsPanel
+    draws={filteredHistory}
+    sumMin={sumMin}
+    sumMax={sumMax}
+    includeSupp={sumIncludeSupp}
+    onSumFilterChange={({ min, max, includeSupp }) => {
+      setSumMin(min);
+      setSumMax(max);
+      setSumIncludeSupp(includeSupp);
+      setSumFilterEnabled(true);
+    }}
+    patternsSelected={selectedWindowPatterns}
+    constraintMode={patternConstraintMode}
+    patternBoostFactor={patternBoostFactor}
+    sumTolerance={patternSumTolerance}
+    onTogglePattern={(p) => {
+      setSelectedWindowPatterns(prev => {
+        const exists = prev.some(x => (
+          x.low === p.low && x.high === p.high &&
+          x.even === p.even && x.odd === p.odd && x.sum === p.sum
+        ));
+        return exists
+          ? prev.filter(x => !(
+              x.low === p.low && x.high === p.high &&
+              x.even === p.even && x.odd === p.odd && x.sum === p.sum
+            ))
+          : [...prev, p];
+      });
+    }}
+  />
   </div>
 </details>
+
+<div style={{ marginTop: 6, fontSize: 12, display: "flex", flexWrap: "wrap", gap: 16 }}>
+  <label>
+    Pattern mode:
+    <select
+      value={patternConstraintMode}
+      onChange={e => setPatternConstraintMode(e.target.value as any)}
+      style={{ marginLeft: 6 }}
+    >
+      <option value="boost">Boost (soft)</option>
+      <option value="restrict">Restrict (hard)</option>
+    </select>
+  </label>
+  {patternConstraintMode === 'boost' && (
+    <label>
+      Boost factor:
+      <input
+        type="number"
+        step={0.05}
+        min={0}
+        max={2}
+        value={patternBoostFactor}
+        onChange={e => setPatternBoostFactor(Number(e.target.value))}
+        style={{ width: 70, marginLeft: 6 }}
+      />
+    </label>
+  )}
+  {patternConstraintMode === 'restrict' && (
+    <label title="Sum exact match tolerance when enforcing patterns">
+      Sum tolerance ±
+      <input
+        type="number"
+        min={0}
+        max={20}
+        value={patternSumTolerance}
+        onChange={e => setPatternSumTolerance(Number(e.target.value))}
+        style={{ width: 60, marginLeft: 4 }}
+      />
+    </label>
+  )}
+  <span>Selected patterns: {selectedWindowPatterns.length}</span>
+</div>
+
 <TargetSetQuickStatsPanel
   forcedNumbers={trendSelectedNumbers}
   selectedNumbers={userSelectedNumbers}
