@@ -9,9 +9,9 @@ import {
 import { useZPASettings } from "../context/ZPASettingsContext";
 import { getSavedZoneWeights, WeightsByNumber } from "../lib/zpaStorage";
 
-/**
- * Helper utilities (top-level) for survival analysis
- */
+/* ------------------------------------------------------------------ */
+/* Helper utilities                                                   */
+/* ------------------------------------------------------------------ */
 function buildEventLog(history: Draw[], number: number) {
   return history.map((draw) =>
     draw.main.includes(number) || draw.supp.includes(number) ? 1 : 0
@@ -46,7 +46,6 @@ function kaplanMeier(times: number[], _window: number) {
   for (let i = 0; i < sorted.length; ++i) {
     let t = sorted[i];
     if (t === last) continue;
-    // single-event decrement
     surv *= (n - 1) / n;
     km.push(surv);
     n--;
@@ -90,29 +89,32 @@ export const SurvivalAnalyzer: React.FC<{
   initialSelected,
   onSelectionChange,
 }) => {
+  /* ------------------------------------------------------------------ */
+  /* Core local state                                                   */
+  /* ------------------------------------------------------------------ */
   const windowDefault = externalWindowSize ?? 20;
   const [windowSize, setWindowSize] = useState<number>(windowDefault);
   const [results, setResults] = useState<any[] | null>(null);
   const [isRunning, setIsRunning] = useState<boolean>(false);
 
-  // Bias controls (local)
+  // Local bias toggles
   const [useTrendBias, setUseTrendBias] = useState<boolean>(true);
   const [useGPWF, setUseGPWF] = useState<boolean>(false);
   const [useHC3Bias, setUseHC3Bias] = useState<boolean>(true);
   const [useSDE1Bias, setUseSDE1Bias] = useState<boolean>(false);
   const [gamma, setGamma] = useState<number>(2);
 
-  // Optional custom trend window
+  // Custom trend window
   const [useCustomTrendWindow, setUseCustomTrendWindow] = useState<boolean>(false);
   const [trendFrom, setTrendFrom] = useState<number>(14);
   const [trendTo, setTrendTo] = useState<number>(30);
 
-  // NEW: Trend comparison mode (raw diff vs ratio)
+  // Raw diff vs ratio mode
   const [trendMode, setTrendMode] = useState<"diff" | "ratio">("diff");
 
   const [sortBy, setSortBy] = useState<"biased" | "base" | "number">("biased");
 
-  // Row selection state (sticky)
+  // Selection state
   const [selectedNums, setSelectedNums] = useState<Set<number>>(
     () => new Set(initialSelected ?? [])
   );
@@ -140,20 +142,23 @@ export const SurvivalAnalyzer: React.FC<{
     onSelectionChange?.([]);
   };
 
-  // Global zone weighting
+  /* ------------------------------------------------------------------ */
+  /* Zone weighting                                                     */
+  /* ------------------------------------------------------------------ */
   const { zoneWeightingEnabled, zoneGamma } = useZPASettings();
   const savedZoneWeights: WeightsByNumber | null = useMemo(() => {
     try { return getSavedZoneWeights(); } catch { return null; }
   }, []);
 
-  // Enforce valid [from, to]
+  /* ------------------------------------------------------------------ */
+  /* Window & base computations                                         */
+  /* ------------------------------------------------------------------ */
   useEffect(() => {
     if (trendFrom >= trendTo) {
       setTrendTo(Math.min(history.length, trendFrom + 1));
     }
   }, [trendFrom, trendTo, history.length]);
 
-  // Keep window locked to external
   useEffect(() => {
     if (externalWindowSize && externalWindowSize !== windowSize) {
       setWindowSize(externalWindowSize);
@@ -163,7 +168,7 @@ export const SurvivalAnalyzer: React.FC<{
   const canRun = windowSize >= 2 && windowSize <= history.length;
   const recent = useMemo(() => history.slice(-windowSize), [history, windowSize]);
 
-  // Compute base stats per number
+  // Base probabilities
   useEffect(() => {
     if (!canRun) {
       setResults(null);
@@ -193,34 +198,34 @@ export const SurvivalAnalyzer: React.FC<{
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [windowSize, excludedNumbers, history]);
 
-  // Bias maps
+  // Bias components
   const gpwfWeights = useMemo(() => buildGPWFNumberWeights(recent), [recent]);
   const hc3Weights = useMemo(() => buildHC3PenaltyWeights(history), [history]);
   const sde1Weights = useMemo(() => buildSDE1PenaltyWeights(history), [history]);
 
-  // Custom trend weights slice (diff or ratio)
+  // Custom trend weighting (diff or ratio)
   const customTrendWeights = useMemo(() => {
     if (!useCustomTrendWindow) return undefined;
     const to = Math.max(1, Math.min(trendTo, history.length));
     const from = Math.max(0, Math.min(trendFrom, to - 1));
-    const hiSlice = history.slice(-to);   // last 'to' draws
-    const loSlice = history.slice(-from); // last 'from' draws (recent core)
+    const hiSlice = history.slice(-to);
+    const loSlice = history.slice(-from);
     const count = (arr: Draw[], n: number) =>
       arr.reduce((acc, d) => acc + (d.main.includes(n) || d.supp.includes(n) ? 1 : 0), 0);
     const w: Record<number, number> = {};
     for (let n = 1; n <= 45; n++) {
-      const older = count(hiSlice, n) - count(loSlice, n); // older band hits
+      const olderHits = count(hiSlice, n) - count(loSlice, n);
       const recentHits = count(loSlice, n);
       if (trendMode === "ratio") {
-        w[n] = (older + 1) / (recentHits + 1); // smoothed ratio
+        w[n] = (olderHits + 1) / (recentHits + 1);
       } else {
-        w[n] = Math.max(0, older + 1); // raw diff (+1, clamp ≥1)
+        w[n] = Math.max(0, olderHits + 1);
       }
     }
     return w;
   }, [useCustomTrendWindow, trendFrom, trendTo, trendMode, history]);
 
-  // Reference indices for help panel & tooltip
+  // Reference indices for current (trendFrom, trendTo)
   const qeReference = useMemo(() => {
     const L = history.length;
     const to = Math.max(1, Math.min(trendTo, L));
@@ -233,7 +238,7 @@ export const SurvivalAnalyzer: React.FC<{
     return { L, to, from, recentFromIdx, recentToIdx, olderFromIdx, olderToIdx, olderSize };
   }, [history.length, trendFrom, trendTo]);
 
-  // Combine per-number weights
+  // Combine weights
   const combinedBiasWeights = useMemo(() => {
     const trend = useTrendBias
       ? customTrendWeights ?? trendWeights ?? undefined
@@ -258,15 +263,13 @@ export const SurvivalAnalyzer: React.FC<{
     enableSDE1Global,
   ]);
 
-  // Enriched rows
+  // Enriched rows with bias + zone weighting
   const enriched = useMemo(() => {
     if (!results) return [];
     return results.map((r) => {
       const biasW = combinedBiasWeights[r.number] ?? 1;
       const zpaW = zoneWeightingEnabled && savedZoneWeights ? (savedZoneWeights[r.number] ?? 1) : 1;
-      const biased = r.probNext
-        * Math.pow(biasW, gamma)
-        * Math.pow(zpaW, zoneGamma);
+      const biased = r.probNext * Math.pow(biasW, gamma) * Math.pow(zpaW, zoneGamma);
       return { ...r, biasedProb: biased, baseProb: r.probNext };
     });
   }, [results, combinedBiasWeights, gamma, zoneWeightingEnabled, zoneGamma, savedZoneWeights]);
@@ -282,6 +285,7 @@ export const SurvivalAnalyzer: React.FC<{
     );
   }, [enriched, onStats]);
 
+  // Sorting
   const sortedStats = useMemo(() => {
     const arr = enriched.slice();
     if (sortBy === "biased")
@@ -292,6 +296,7 @@ export const SurvivalAnalyzer: React.FC<{
     return arr;
   }, [enriched, sortBy]);
 
+  // Columns
   const columns = useMemo(() => {
     const numCols = 3;
     const rowsPerCol = Math.ceil(sortedStats.length / numCols) || 15;
@@ -300,9 +305,88 @@ export const SurvivalAnalyzer: React.FC<{
     );
   }, [sortedStats]);
 
-  /**
-   * Optimizer state & logic
-   */
+  /* ------------------------------------------------------------------ */
+  /* Quick Examples Panel                                               */
+  /* ------------------------------------------------------------------ */
+  const [showQuickExamples, setShowQuickExamples] = useState<boolean>(true);
+
+  // Example pairs (expandable if desired)
+  const examplePairs: [number, number][] = [
+    [10, 40],
+    [27, 56],
+    [3, 12],
+  ];
+
+  // Compute effectiveness metric for each (from,to)
+  const quickExamples = useMemo(() => {
+    const L = history.length;
+    const countHits = (slice: Draw[], n: number) =>
+      slice.reduce(
+        (acc, d) => acc + (d.main.includes(n) || d.supp.includes(n) ? 1 : 0),
+        0
+      );
+
+    return examplePairs.map(([fromRaw, toRaw]) => {
+      // Feasibility
+      const feasible = L >= toRaw;
+      const to = Math.min(toRaw, L);
+      const from = Math.min(fromRaw, Math.max(1, to - 1));
+
+      const hiSlice = history.slice(-to);
+      const loSlice = history.slice(-from);
+
+      // older band hits = hits in hiSlice minus hits in loSlice
+      const diffs: number[] = [];
+      for (let n = 1; n <= 45; n++) {
+        const totalHits = countHits(hiSlice, n);
+        const recentHits = countHits(loSlice, n);
+        const olderHits = totalHits - recentHits;
+        const diff = olderHits - recentHits; // difference older vs recent
+        diffs.push(diff);
+      }
+      // variance of diffs
+      const mean =
+        diffs.reduce((a, b) => a + b, 0) / (diffs.length || 1);
+      const variance =
+        diffs.reduce((a, b) => a + Math.pow(b - mean, 2), 0) /
+        (diffs.length || 1);
+
+      const olderSize = Math.max(0, to - from);
+      const olderFromIdx = Math.max(1, L - to + 1);
+      const olderToIdx = Math.max(0, L - from);
+      const recentFromIdx = Math.max(1, L - from + 1);
+      const recentToIdx = L;
+
+      return {
+        from: fromRaw,
+        to: toRaw,
+        label: `${fromRaw}–${toRaw}`,
+        feasible,
+        olderSize,
+        olderRange: feasible ? `${olderFromIdx}–${olderToIdx}` : "n/a",
+        recentRange: feasible ? `${recentFromIdx}–${recentToIdx}` : "n/a",
+        score: variance, // effectiveness score
+        adoptDisabled: !feasible,
+        meaning: `Earlier ${olderSize} vs recent ${from}`,
+      };
+    }).sort((a, b) => b.score - a.score);
+  }, [history, examplePairs]);
+
+  const adoptExample = (ex: typeof quickExamples[0]) => {
+    if (ex.adoptDisabled) return;
+    setUseTrendBias(true);
+    setUseCustomTrendWindow(true);
+    // If history shorter than to, clamp
+    const L = history.length;
+    const toClamped = Math.min(ex.to, L);
+    const fromClamped = Math.min(ex.from, Math.max(1, toClamped - 1));
+    setTrendFrom(fromClamped);
+    setTrendTo(toClamped);
+  };
+
+  /* ------------------------------------------------------------------ */
+  /* Optimizer (unchanged core logic)                                   */
+  /* ------------------------------------------------------------------ */
   const [optRunning, setOptRunning] = useState(false);
   const [optMsg, setOptMsg] = useState<string>("");
   const [optProgress, setOptProgress] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
@@ -336,8 +420,8 @@ export const SurvivalAnalyzer: React.FC<{
       arr.reduce((acc, d) => acc + (d.main.includes(n) || d.supp.includes(n) ? 1 : 0), 0);
     const w: Record<number, number> = {};
     for (let n = 1; n <= 45; n++) {
-      const older = count(hiSlice, n) - count(loSlice, n);
-      w[n] = Math.max(0, older + 1);
+      const olderHits = count(hiSlice, n) - count(loSlice, n);
+      w[n] = Math.max(0, olderHits + 1);
     }
     return w;
   }
@@ -393,15 +477,15 @@ export const SurvivalAnalyzer: React.FC<{
       for (let t = Math.max(toMin, f + 1); t <= toMax; t++) {
         for (let gIdx = 0; gIdx < gammaSteps; gIdx++) {
           const gammaTry = +(gammaMin + gIdx * gammaStep).toFixed(6);
-          const enrichedTry = enrichedFor(f, t, gammaTry).sort(
-            (a, b) => b.biasedProb - a.biasedProb || a.number - b.number
-          );
+            const enrichedTry = enrichedFor(f, t, gammaTry).sort(
+              (a, b) => b.biasedProb - a.biasedProb || a.number - b.number
+            );
 
           const top8 = enrichedTry.slice(0, 8).map(r => r.number);
           const posMap: Record<number, number> = {};
-            for (let i = 0; i < enrichedTry.length; i++) {
-              posMap[enrichedTry[i].number] = i + 1;
-            }
+          for (let i = 0; i < enrichedTry.length; i++) {
+            posMap[enrichedTry[i].number] = i + 1;
+          }
 
           let hits = 0;
           let rankSum = 0;
@@ -456,6 +540,9 @@ export const SurvivalAnalyzer: React.FC<{
     setOptMsg("Cancelling…");
   }
 
+  /* ------------------------------------------------------------------ */
+  /* Render                                                             */
+  /* ------------------------------------------------------------------ */
   return (
     <section
       style={{
@@ -519,7 +606,7 @@ export const SurvivalAnalyzer: React.FC<{
         )}
       </div>
 
-      {/* Biases */}
+      {/* Bias & window controls */}
       <div
         style={{
           margin: "8px 0 10px 0",
@@ -580,7 +667,7 @@ export const SurvivalAnalyzer: React.FC<{
           </span>
         </span>
 
-        {/* Tooltip (dynamic mapping + mode) */}
+        {/* Tooltip */}
         <span
           aria-label="Custom Window help"
           title={
@@ -823,13 +910,14 @@ export const SurvivalAnalyzer: React.FC<{
             )}
           </div>
 
-          {/* Result columns */}
+          {/* Result columns + Quick Examples panel */}
           <div
             style={{
               display: "flex",
               gap: 28,
               marginTop: 18,
               flexWrap: "wrap",
+              alignItems: "flex-start",
             }}
           >
             {columns.map((col, colIdx) => (
@@ -857,7 +945,6 @@ export const SurvivalAnalyzer: React.FC<{
                     const isSelected = selectedNums.has(res.number);
                     const isFocused = res.number === focusNumber;
                     const rowIdx = colIdx * Math.ceil(enriched.length / 3) + i + 1;
-
                     const rowStyle: React.CSSProperties = {
                       cursor: selectable ? "pointer" : "default",
                     };
@@ -869,7 +956,6 @@ export const SurvivalAnalyzer: React.FC<{
                       rowStyle.outline = "2px solid #fbc02d";
                       rowStyle.outlineOffset = "-2px";
                     }
-
                     return (
                       <tr
                         key={res.number}
@@ -901,9 +987,110 @@ export const SurvivalAnalyzer: React.FC<{
                 </tbody>
               </table>
             ))}
+
+            {/* Quick Examples Panel */}
+            {showQuickExamples && (
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 10,
+                  minWidth: 360,
+                  background: "#ffffff",
+                  border: "1px solid #c5e9f2",
+                  borderRadius: 6,
+                  padding: 10,
+                  fontSize: 13,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ fontWeight: 700 }}>Quick Examples (Effectiveness Ranked)</div>
+                  <button
+                    type="button"
+                    onClick={() => setShowQuickExamples(false)}
+                    style={{ fontSize: 11, padding: "2px 6px" }}
+                    title="Hide Quick Examples panel"
+                  >
+                    Hide
+                  </button>
+                </div>
+                <div style={{ fontSize: 12, color: "#555" }}>
+                  Score = variance of (olderHits - recentHits) across 45 numbers. Higher variance ⇒ stronger differentiation.
+                </div>
+                <table
+                  style={{
+                    borderCollapse: "collapse",
+                    fontSize: 12,
+                    width: "100%",
+                  }}
+                >
+                  <thead>
+                    <tr style={{ background: "#e9f7fb" }}>
+                      <th style={{ textAlign: "left", padding: "4px 6px" }}>(from,to)</th>
+                      <th style={{ textAlign: "left", padding: "4px 6px" }}>Meaning</th>
+                      <th style={{ textAlign: "right", padding: "4px 6px" }}>Older size</th>
+                      <th style={{ textAlign: "center", padding: "4px 6px" }}>Older band draws</th>
+                      <th style={{ textAlign: "center", padding: "4px 6px" }}>Recent draws</th>
+                      <th style={{ textAlign: "right", padding: "4px 6px" }}>Score</th>
+                      <th style={{ textAlign: "center", padding: "4px 6px" }}>Adopt</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {quickExamples.map(ex => (
+                      <tr key={ex.label}>
+                        <td style={{ padding: "3px 6px", fontWeight: 600 }}>{ex.label}</td>
+                        <td style={{ padding: "3px 6px" }}>{ex.meaning}</td>
+                        <td style={{ padding: "3px 6px", textAlign: "right" }}>{ex.olderSize}</td>
+                        <td style={{ padding: "3px 6px", textAlign: "center" }}>{ex.olderRange}</td>
+                        <td style={{ padding: "3px 6px", textAlign: "center" }}>{ex.recentRange}</td>
+                        <td style={{ padding: "3px 6px", textAlign: "right" }}>{ex.score.toFixed(2)}</td>
+                        <td style={{ padding: "3px 6px", textAlign: "center" }}>
+                          <button
+                            type="button"
+                            disabled={ex.adoptDisabled}
+                            onClick={() => adoptExample(ex)}
+                            style={{
+                              fontSize: 11,
+                              padding: "2px 6px",
+                              cursor: ex.adoptDisabled ? "not-allowed" : "pointer",
+                              opacity: ex.adoptDisabled ? 0.4 : 1
+                            }}
+                            title={
+                              ex.adoptDisabled
+                                ? "Not enough draws to adopt this example"
+                                : "Set Custom Window and Trend Bias to this pair"
+                            }
+                          >
+                            Adopt
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <button
+                  type="button"
+                  onClick={() => setShowQuickExamples(false)}
+                  style={{ fontSize: 11, alignSelf: "flex-end", marginTop: 4 }}
+                >
+                  Close
+                </button>
+              </div>
+            )}
+
+            {!showQuickExamples && (
+              <button
+                type="button"
+                onClick={() => setShowQuickExamples(true)}
+                style={{ fontSize: 12, padding: "6px 10px", border: "1px solid #90e0ef", background: "#fff", borderRadius: 6 }}
+                title="Show Quick Examples panel"
+              >
+                Show Quick Examples
+              </button>
+            )}
           </div>
 
-          {/* Custom Window Reference panel */}
+          {/* Current Custom Window Reference panel */}
           {useTrendBias && useCustomTrendWindow && (
             <div
               style={{
