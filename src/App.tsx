@@ -1866,6 +1866,7 @@ const churnDataset = useMemo(
         focusNumber={focusNumber}
         highlightColor="#3BD759"
         onSelectionChange={setSelectedNumbers}
+        patternsSelected={selectedWindowPatterns}
         onStats={(rows: any[]) =>
           setSurvivalOut(
             rows.map((r: any) => ({

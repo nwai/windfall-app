@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from "react";
+import React, { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { Draw } from "../types";
 import {
   buildGPWFNumberWeights,
@@ -8,10 +8,22 @@ import {
 } from "../lib/numberBiases";
 import { useZPASettings } from "../context/ZPASettingsContext";
 import { getSavedZoneWeights, WeightsByNumber } from "../lib/zpaStorage";
-
+type WindowPattern = { low: number; high: number; even: number; odd: number; sum: number };
 /* ------------------------------------------------------------------ */
 /* Helper utilities                                                   */
 /* ------------------------------------------------------------------ */
+
+// Top-level helper so it is visible everywhere (prevents 'drawPattern' undefined)
+function drawPattern(draw: Draw): WindowPattern {
+const all = [...draw.main, ...draw.supp];
+const low = all.filter(n => n <= 22).length;
+const high = all.length - low;
+const even = all.filter(n => n % 2 === 0).length;
+const odd = all.length - even;
+const sum = all.reduce((a, b) => a + b, 0);
+return { low, high, even, odd, sum };
+}
+
 function buildEventLog(history: Draw[], number: number) {
   return history.map((draw) =>
     draw.main.includes(number) || draw.supp.includes(number) ? 1 : 0
@@ -71,6 +83,8 @@ export const SurvivalAnalyzer: React.FC<{
   selectable?: boolean;
   initialSelected?: number[];
   onSelectionChange?: (nums: number[]) => void;
+  patternsSelected?: WindowPattern[];
+  patternSumTolerance?: number; // ± tolerance for sum match (default 0)
 }> = ({
   history,
   excludedNumbers,
@@ -88,7 +102,9 @@ export const SurvivalAnalyzer: React.FC<{
   selectable = true,
   initialSelected,
   onSelectionChange,
-}) => {
+    patternsSelected = [],
+    patternSumTolerance = 0,
+  }) => {
   /* ------------------------------------------------------------------ */
   /* Core local state                                                   */
   /* ------------------------------------------------------------------ */
@@ -103,7 +119,8 @@ export const SurvivalAnalyzer: React.FC<{
   const [useHC3Bias, setUseHC3Bias] = useState<boolean>(true);
   const [useSDE1Bias, setUseSDE1Bias] = useState<boolean>(false);
   const [gamma, setGamma] = useState<number>(2);
-
+// allow optimizer to include/exclude pattern bias explicitly (display always includes when patterns exist)
+  const [usePatternBiasInOptimizer, setUsePatternBiasInOptimizer] = useState<boolean>(true);
   // Custom trend window
   const [useCustomTrendWindow, setUseCustomTrendWindow] = useState<boolean>(false);
   const [trendFrom, setTrendFrom] = useState<number>(14);
@@ -198,32 +215,102 @@ export const SurvivalAnalyzer: React.FC<{
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [windowSize, excludedNumbers, history]);
 
-  // Bias components
-  const gpwfWeights = useMemo(() => buildGPWFNumberWeights(recent), [recent]);
-  const hc3Weights = useMemo(() => buildHC3PenaltyWeights(history), [history]);
-  const sde1Weights = useMemo(() => buildSDE1PenaltyWeights(history), [history]);
+ // Bias components
+   const gpwfWeights = useMemo(() => buildGPWFNumberWeights(recent), [recent]);
+   const hc3Weights = useMemo(() => buildHC3PenaltyWeights(history), [history]);
+   const sde1Weights = useMemo(() => buildSDE1PenaltyWeights(history), [history]);
+// Custom trend weighting (diff or ratio) (must precede buildBiasMap dependency)
+   const customTrendWeights = useMemo(() => {
+     if (!useCustomTrendWindow) return undefined;
+     const to = Math.max(1, Math.min(trendTo, history.length));
+     const from = Math.max(0, Math.min(trendFrom, to - 1));
+     const hiSlice = history.slice(-to);
+     const loSlice = history.slice(-from);
+     const count = (arr: Draw[], n: number) =>
+       arr.reduce((acc, d) => acc + (d.main.includes(n) || d.supp.includes(n) ? 1 : 0), 0);
+     const w: Record<number, number> = {};
+     for (let n = 1; n <= 45; n++) {
+       const totalHits = count(hiSlice, n);
+       const recentHits = count(loSlice, n);
+       const olderHits = totalHits - recentHits;
+       if (trendMode === "ratio") {
+         w[n] = (olderHits + 1) / (recentHits + 1);
+       } else {
+         w[n] = Math.max(0, olderHits + 1);
+       }
+     }
+     return w;
+   }, [useCustomTrendWindow, trendFrom, trendTo, trendMode, history]);
 
-  // Custom trend weighting (diff or ratio)
-  const customTrendWeights = useMemo(() => {
-    if (!useCustomTrendWindow) return undefined;
-    const to = Math.max(1, Math.min(trendTo, history.length));
-    const from = Math.max(0, Math.min(trendFrom, to - 1));
-    const hiSlice = history.slice(-to);
-    const loSlice = history.slice(-from);
-    const count = (arr: Draw[], n: number) =>
-      arr.reduce((acc, d) => acc + (d.main.includes(n) || d.supp.includes(n) ? 1 : 0), 0);
-    const w: Record<number, number> = {};
-    for (let n = 1; n <= 45; n++) {
-      const olderHits = count(hiSlice, n) - count(loSlice, n);
-      const recentHits = count(loSlice, n);
-      if (trendMode === "ratio") {
-        w[n] = (olderHits + 1) / (recentHits + 1);
-      } else {
-        w[n] = Math.max(0, olderHits + 1);
-      }
-    }
-    return w;
-  }, [useCustomTrendWindow, trendFrom, trendTo, trendMode, history]);
+   // Pattern bias with sum tolerance (applies over full history)
+   const patternBiasWeights = useMemo(() => {
+     if (!patternsSelected || patternsSelected.length === 0) return undefined;
+ const patternHits = Array(45).fill(0);
+ const totalHits = Array(45).fill(0);
+ const tol = Math.max(0, Math.floor(patternSumTolerance || 0));
+
+for (const d of history) {
+   const pat = drawPattern(d);
+   const hit = patternsSelected.some(sel =>
+     sel.low === pat.low &&
+     sel.high === pat.high &&
+     sel.even === pat.even &&
+     sel.odd === pat.odd &&
+     Math.abs(sel.sum - pat.sum) <= tol
+   );
+   const nums = [...d.main, ...d.supp];
+   for (const n of nums) {
+     if (n >= 1 && n <= 45) {
+       totalHits[n - 1]++;
+       if (hit) patternHits[n - 1]++;
+     }
+   }
+ }
+ const w: Record<number, number> = {};
+ for (let n = 1; n <= 45; n++) {
+   w[n] = (patternHits[n - 1] + 1) / (totalHits[n - 1] + 1);
+ }
+ return w;
+ }, [history, patternsSelected, patternSumTolerance]);
+
+ // Helper: build bias map (used by optimizer & display)
+ const buildBiasMap = useCallback(
+  (includePatternBias: boolean, trendOverride?: Record<number, number>) => {
+    const trend = useTrendBias
+      ? (trendOverride ?? (useCustomTrendWindow ? customTrendWeights ?? trendWeights : trendWeights))
+      : undefined;
+    return combinePerNumberWeights(
+      includePatternBias ? patternBiasWeights : undefined,
+      trend,
+      useGPWF ? gpwfWeights : undefined,
+      (enableHC3Global ?? false)
+        ? hc3Weights
+        : useHC3Bias
+        ? hc3Weights
+        : undefined,
+      (enableSDE1Global ?? false)
+        ? sde1Weights
+        : useSDE1Bias
+        ? sde1Weights
+        : undefined
+    );
+  },
+  [
+    patternBiasWeights,
+    useTrendBias,
+    useCustomTrendWindow,
+    customTrendWeights,
+    trendWeights,
+    useGPWF,
+    gpwfWeights,
+    enableHC3Global,
+    hc3Weights,
+    useHC3Bias,
+    enableSDE1Global,
+    sde1Weights,
+    useSDE1Bias
+  ]
+ );
 
   // Reference indices for current (trendFrom, trendTo)
   const qeReference = useMemo(() => {
@@ -238,30 +325,10 @@ export const SurvivalAnalyzer: React.FC<{
     return { L, to, from, recentFromIdx, recentToIdx, olderFromIdx, olderToIdx, olderSize };
   }, [history.length, trendFrom, trendTo]);
 
-  // Combine weights
-  const combinedBiasWeights = useMemo(() => {
-    const trend = useTrendBias
-      ? customTrendWeights ?? trendWeights ?? undefined
-      : undefined;
-    return combinePerNumberWeights(
-      trend,
-      useGPWF ? gpwfWeights : undefined,
-      (enableHC3Global ?? false) ? hc3Weights : (useHC3Bias ? hc3Weights : undefined),
-      (enableSDE1Global ?? false) ? sde1Weights : (useSDE1Bias ? sde1Weights : undefined)
-    );
-  }, [
-    useTrendBias,
-    useGPWF,
-    useHC3Bias,
-    useSDE1Bias,
-    trendWeights,
-    customTrendWeights,
-    gpwfWeights,
-    hc3Weights,
-    sde1Weights,
-    enableHC3Global,
-    enableSDE1Global,
-  ]);
+  // Display bias map always includes pattern bias if available
+  const combinedBiasWeights = useMemo(
+  () => buildBiasMap(true),   [buildBiasMap]
+  );
 
   // Enriched rows with bias + zone weighting
   const enriched = useMemo(() => {
@@ -426,21 +493,16 @@ export const SurvivalAnalyzer: React.FC<{
     return w;
   }
 
-  function enrichedFor(from: number, to: number, gammaTry: number) {
-    if (!results) return [];
-    const trendW = buildCustomTrendWeightsFor(from, to);
-    const biasMap = combinePerNumberWeights(
-      trendW,
-      useGPWF ? gpwfWeights : undefined,
-      (enableHC3Global ?? false) ? hc3Weights : (useHC3Bias ? hc3Weights : undefined),
-      (enableSDE1Global ?? false) ? sde1Weights : (useSDE1Bias ? sde1Weights : undefined)
-    );
-    return results.map((r) => {
-      const biasW = biasMap[r.number] ?? 1;
-      const zpaW = zoneWeightingEnabled && savedZoneWeights ? (savedZoneWeights[r.number] ?? 1) : 1;
-      const biased = r.probNext * Math.pow(biasW, gammaTry) * Math.pow(zpaW, zoneGamma);
-      return { ...r, biasedProb: biased, baseProb: r.probNext };
-    });
+ function enrichedFor(from: number, to: number, gammaTry: number) {
+  if (!results) return [];
+  const trendW = buildCustomTrendWeightsFor(from, to);
+  const biasMap = buildBiasMap(usePatternBiasInOptimizer, trendW);
+  return results.map(r => {
+    const biasW = biasMap[r.number] ?? 1;
+    const zpaW = zoneWeightingEnabled && savedZoneWeights ? (savedZoneWeights[r.number] ?? 1) : 1;
+    const biased = r.probNext * Math.pow(biasW, gammaTry) * Math.pow(zpaW, zoneGamma);
+    return { ...r, biasedProb: biased, baseProb: r.probNext };
+  });
   }
 
   async function runOptimizer() {
@@ -583,7 +645,21 @@ export const SurvivalAnalyzer: React.FC<{
             HC3 Off
           </span>
         )}
-
+{patternsSelected.length > 0 && (
+        <span
+          style={{
+            background: "#fff3e0",
+            color: "#e65100",
+            padding: "2px 8px",
+            borderRadius: 4,
+            fontSize: 12,
+            fontWeight: 600,
+          }}
+          title={`Pattern Bias active${patternSumTolerance ? ` (sum ±${Math.max(0, Math.floor(patternSumTolerance))})` : ""}`}
+        >
+          Pattern Bias
+        </span>
+        )}
         <span style={{ marginLeft: "auto", fontSize: 12 }}>
           <b>Excluded:</b>{" "}
           {excludedNumbers.length ? excludedNumbers.join(", ") : <span style={{ color: "#888" }}>none</span>}
@@ -752,7 +828,21 @@ export const SurvivalAnalyzer: React.FC<{
             </label>
           </>
         )}
-
+{/* Optimizer pattern-bias toggle + indicator */}
+        <span style={{ marginLeft: 8 }}>
+          <label title="Include Pattern Bias during optimizer runs (display always includes when patterns are selected)">
+            <input
+              type="checkbox"
+              checked={usePatternBiasInOptimizer}
+              onChange={e => setUsePatternBiasInOptimizer(e.target.checked)}
+              style={{ marginRight: 6 }}
+            />
+            Optimizer uses pattern bias
+          </label>
+          <span style={{ marginLeft: 8, fontSize: 12, color: usePatternBiasInOptimizer ? "#2e7d32" : "#555" }}>
+            {usePatternBiasInOptimizer ? "Yes" : "No"}
+          </span>
+        </span>
         <span style={{ marginLeft: 8 }}>
           <b>Gamma:</b>{" "}
           <input
@@ -810,6 +900,12 @@ export const SurvivalAnalyzer: React.FC<{
 
           <div style={{ fontSize: 12, color: "#555", marginBottom: 6 }}>
             Using global zone weighting: {zoneWeightingEnabled ? `On (γ=${zoneGamma})` : "Off"}
+            {/* pattern bias note is visualized by badge above */}
+            {patternsSelected.length > 0 && (
+              <>• Pattern bias active (display)</>
+            )}
+            {" • Optimizer uses pattern bias: "}
+            <b>{usePatternBiasInOptimizer ? "Yes" : "No"}</b>
           </div>
 
           {/* Optimizer */}
