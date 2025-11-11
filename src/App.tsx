@@ -992,71 +992,76 @@ const trendRatioDrawsConsidered = useMemo(
   }
 
 // HELPER: enrichment & resort (place above component return, after computeOGA utilities are available)
-  function recomputeCompositeRanking(base: CandidateSet[]): CandidateSet[] {
-    if (!base.length) return base;
-    const recentDraw = filteredHistory[filteredHistory.length - 1];
-    const recentSet = recentDraw ? new Set([...recentDraw.main, ...recentDraw.supp]) : null;
-    const selectedSet = new Set(userSelectedNumbers);
+ // HELPER: enrichment & resort (place above component return, after computeOGA utilities are available)
+ function recomputeCompositeRanking(base: CandidateSet[]): CandidateSet[] {
+   if (!base.length) return base;
+   const recentDraw = filteredHistory[filteredHistory.length - 1];
+   const recentSet = recentDraw ? new Set([...recentDraw.main, ...recentDraw.supp]) : null;
+   const selectedSet = new Set(userSelectedNumbers);
 
-    // Normalize weights
-    const sum = rankingWeights.oga + rankingWeights.sel + rankingWeights.recent || 1;
-    const wOGA = rankingWeights.oga / sum;
-    const wSel = rankingWeights.sel / sum;
-    const wRecent = rankingWeights.recent / sum;
-    const EPS = 0.003;
+   // Normalize weights
+   const sum = rankingWeights.oga + rankingWeights.sel + rankingWeights.recent || 1;
+   const wOGA = rankingWeights.oga / sum;
+   const wSel = rankingWeights.sel / sum;
+   const wRecent = rankingWeights.recent / sum;
 
-    // Pre-calc past OGA distribution
-    return base
-      .map((c: any) => {
-        const nums = [...c.main, ...c.supp];
-        // OGA score / percentile may already exist; recompute defensively if missing
-        const ogaScore = c.ogaScore ?? computeOGA(nums, filteredHistory);
-        const ogaPercentile = c.ogaPercentile ?? getOGAPercentile(ogaScore, pastOGAScores);
-        const selHits = nums.filter(n => selectedSet.has(n)).length;
-        const recentHits = recentSet ? nums.filter(n => recentSet.has(n)).length : 0;
-        const ogaNorm = Math.max(0, Math.min(1, ogaPercentile / 100));
-        const finalComposite = wOGA * ogaNorm + wSel * (selHits / 8) + wRecent * (recentHits / 8);
+   const hasUserSelected = userSelectedNumbers && userSelectedNumbers.length > 0;
 
-              // Apply optional zone bias as a soft multiplier (default OFF)
-              const zBias = applyZoneBias
-                ? computeCandidateZoneBias(nums, savedZoneWeights || null, zoneGamma)
-                : 1;
+   return base
+     .map((c: any) => {
+       const nums = [...c.main, ...c.supp];
+       const ogaScore = c.ogaScore ?? computeOGA(nums, filteredHistory);
+       const ogaPercentile = c.ogaPercentile ?? getOGAPercentile(ogaScore, pastOGAScores);
+       const selHits = nums.filter(n => selectedSet.has(n)).length;
+       const recentHits = recentSet ? nums.filter(n => recentSet.has(n)).length : 0;
+       const ogaNorm = Math.max(0, Math.min(1, ogaPercentile / 100));
+       const finalComposite = wOGA * ogaNorm + wSel * (selHits / 8) + wRecent * (recentHits / 8);
 
-              let finalCompositeAdj = finalComposite * zBias;
+       const zBias = applyZoneBias
+         ? computeCandidateZoneBias(nums, savedZoneWeights || null, zoneGamma)
+         : 1;
 
-              // Pattern soft-boost (if enabled): multiply by (1 + matches * factor), capped
-if (patternConstraintMode === 'boost' && patternBoostFactor > 0) {
-                const pmRaw = (c as any).patternMatches;
-                const matches = typeof pmRaw === 'number' && pmRaw > 0 ? pmRaw : 0;
-                if (matches) {
-                  const capped = Math.min(matches, 5); // cap influence
-                  finalCompositeAdj *= (1 + capped * patternBoostFactor);
-                }
-              }
+       let finalCompositeAdj = finalComposite * zBias;
 
-              return {
-                ...c,
-                ogaScore,
-                ogaPercentile,
-                selHits,
-                recentHits,
-                finalComposite,
-                finalCompositeAdj,
-                zoneBias: zBias,
-              };
-            })
-            .sort((a: any, b: any) => {
-              if (b.finalCompositeAdj !== a.finalCompositeAdj) return b.finalCompositeAdj - a.finalCompositeAdj;
-              const diff = Math.abs(b.finalCompositeAdj - a.finalCompositeAdj);
-              if (diff < EPS) {
-                if (b.selHits !== a.selHits) return b.selHits - a.selHits;
-                if (b.recentHits !== a.recentHits) return b.recentHits - a.recentHits;
-                // prefer higher OGA percentile as a final tie-break
-                return b.ogaPercentile - a.ogaPercentile;
-              }
+       if (patternConstraintMode === 'boost' && patternBoostFactor > 0) {
+         const pmRaw = (c as any).patternMatches;
+         const matches = typeof pmRaw === 'number' && pmRaw > 0 ? pmRaw : 0;
+         if (matches) {
+           const capped = Math.min(matches, 5);
+           finalCompositeAdj *= (1 + capped * patternBoostFactor);
+         }
+       }
+
+       return {
+         ...c,
+         ogaScore,
+         ogaPercentile,
+         selHits,
+         recentHits,
+         finalComposite,
+         finalCompositeAdj,
+         zoneBias: zBias,
+       };
+     })
+     .sort((a: any, b: any) => {
+       if (hasUserSelected) {
+         // Primary: selHits desc, Secondary: finalCompositeAdj desc, Tertiary: recentHits desc, Quaternary: OGA%
+         if (b.selHits !== a.selHits) return b.selHits - a.selHits;
+         if (b.finalCompositeAdj !== a.finalCompositeAdj) return b.finalCompositeAdj - a.finalCompositeAdj;
+         if (b.recentHits !== a.recentHits) return b.recentHits - a.recentHits;
+         return b.ogaPercentile - a.ogaPercentile;
+       } else {
+         // Primary: recentHits desc, Secondary: finalCompositeAdj desc, Tertiary: selHits desc, Quaternary: OGA%
+         if (b.recentHits !== a.recentHits) return b.recentHits - a.recentHits;
+         if (b.finalCompositeAdj !== a.finalCompositeAdj) return b.finalCompositeAdj - a.finalCompositeAdj;
+         if (b.selHits !== a.selHits) return b.selHits - a.selHits;
+         return b.ogaPercentile - a.ogaPercentile;
+       }
+     });
+ }
               return 0;
-            });
-        }
+
+
 
   /* ========== TREND / TEMPERATURE BLOCK (END) ========== */
 
@@ -1499,14 +1504,17 @@ const churnDataset = useMemo(
                     setTrace(t => [...t, `[TRACE] Added/updated draw via CSV panel. History now ${ordered.length} draws.`]);
                   }}
                 />
-        <pre style={{ maxHeight: 160, overflow: "auto", fontSize: 12 }}>
-          {history.map((d) => `${d.date}: [${d.main.join(", ")}] | Sup: [${d.supp.join(",")}]`).join("\n")}
-          {history.length === 0 && (
-            <div style={{ fontSize: 12, color: "#c00", marginBottom: 8 }}>
-              No draws loaded yet. Check network or click "Re-fetch Draws".
-            </div>
-          )}
-        </pre>
+<pre style={{ maxHeight: 160, overflow: "auto", fontSize: 12 }}>
+                  {filteredHistory.map((d, idx) => {
+                    const oga = pastOGAScores[idx] ?? null;
+                    return `${d.date}: [${d.main.join(", ")}] | Sup: [${d.supp.join(", ")}]${oga !== null ? ` | OGA=${oga.toFixed(2)}` : ""}`;
+                  }).join("\n")}
+                  {filteredHistory.length === 0 && (
+                    <div style={{ fontSize: 12, color: "#c00", marginBottom: 8 }}>
+                      No draws loaded yet. Check network or click "Re-fetch Draws".
+                    </div>
+                  )}
+                </pre>
       </details>
 <DrawHistoryManager
         csvPathHint="file:///Users/admin/Weekly_Windfall/windfall-app/windfall_history_lottolyzer.csv"
@@ -1865,17 +1873,9 @@ const churnDataset = useMemo(
         selectedCheckNumbers={selectedNumbers}
         focusNumber={focusNumber}
         highlightColor="#3BD759"
-        onSelectionChange={setSelectedNumbers}
-        patternsSelected={selectedWindowPatterns}
-        onStats={(rows: any[]) =>
-          setSurvivalOut(
-            rows.map((r: any) => ({
-              number: r.number,
-              baseProb: r.baseProb,
-              biasedProb: r.biasedProb,
-            }))
-                  )
-                }
+onSelectionChange={setSelectedNumbers}
+                patternsSelected={selectedWindowPatterns}
+                onStats={(rows) => setSurvivalOut(rows)}
               />
 <TemperatureTransitionPanel
         history={filteredHistory}

@@ -8,20 +8,22 @@ import {
 } from "../lib/numberBiases";
 import { useZPASettings } from "../context/ZPASettingsContext";
 import { getSavedZoneWeights, WeightsByNumber } from "../lib/zpaStorage";
+
 type WindowPattern = { low: number; high: number; even: number; odd: number; sum: number };
+
 /* ------------------------------------------------------------------ */
-/* Helper utilities                                                   */
+/* Helper utilities                                                    */
 /* ------------------------------------------------------------------ */
 
-// Top-level helper so it is visible everywhere (prevents 'drawPattern' undefined)
+// Top-level helper so it is visible everywhere
 function drawPattern(draw: Draw): WindowPattern {
-const all = [...draw.main, ...draw.supp];
-const low = all.filter(n => n <= 22).length;
-const high = all.length - low;
-const even = all.filter(n => n % 2 === 0).length;
-const odd = all.length - even;
-const sum = all.reduce((a, b) => a + b, 0);
-return { low, high, even, odd, sum };
+  const all = [...draw.main, ...draw.supp];
+  const low = all.filter((n) => n <= 22).length;
+  const high = all.length - low;
+  const even = all.filter((n) => n % 2 === 0).length;
+  const odd = all.length - even;
+  const sum = all.reduce((a, b) => a + b, 0);
+  return { low, high, even, odd, sum };
 }
 
 function buildEventLog(history: Draw[], number: number) {
@@ -58,6 +60,7 @@ function kaplanMeier(times: number[], _window: number) {
   for (let i = 0; i < sorted.length; ++i) {
     let t = sorted[i];
     if (t === last) continue;
+    // single-event decrement
     surv *= (n - 1) / n;
     km.push(surv);
     n--;
@@ -66,6 +69,9 @@ function kaplanMeier(times: number[], _window: number) {
   return { curve: km, probNext: 1 - (km[1] ?? 1) };
 }
 
+/* ------------------------------------------------------------------ */
+/* Component                                                          */
+/* ------------------------------------------------------------------ */
 export const SurvivalAnalyzer: React.FC<{
   history: Draw[];
   excludedNumbers: number[];
@@ -79,10 +85,12 @@ export const SurvivalAnalyzer: React.FC<{
   selectedCheckNumbers?: number[];
   focusNumber?: number | null;
   highlightColor?: string;
+  // FIX: should accept an array of rows, not a single row
   onStats?: (rows: { number: number; baseProb: number; biasedProb: number }[]) => void;
   selectable?: boolean;
   initialSelected?: number[];
   onSelectionChange?: (nums: number[]) => void;
+  // Pattern bias inputs
   patternsSelected?: WindowPattern[];
   patternSumTolerance?: number; // ± tolerance for sum match (default 0)
 }> = ({
@@ -102,9 +110,9 @@ export const SurvivalAnalyzer: React.FC<{
   selectable = true,
   initialSelected,
   onSelectionChange,
-    patternsSelected = [],
-    patternSumTolerance = 0,
-  }) => {
+  patternsSelected = [],
+  patternSumTolerance = 0,
+}) => {
   /* ------------------------------------------------------------------ */
   /* Core local state                                                   */
   /* ------------------------------------------------------------------ */
@@ -119,14 +127,16 @@ export const SurvivalAnalyzer: React.FC<{
   const [useHC3Bias, setUseHC3Bias] = useState<boolean>(true);
   const [useSDE1Bias, setUseSDE1Bias] = useState<boolean>(false);
   const [gamma, setGamma] = useState<number>(2);
-// allow optimizer to include/exclude pattern bias explicitly (display always includes when patterns exist)
+
+  // Optimizer: allow including/excluding pattern bias
   const [usePatternBiasInOptimizer, setUsePatternBiasInOptimizer] = useState<boolean>(true);
+
   // Custom trend window
   const [useCustomTrendWindow, setUseCustomTrendWindow] = useState<boolean>(false);
   const [trendFrom, setTrendFrom] = useState<number>(14);
   const [trendTo, setTrendTo] = useState<number>(30);
 
-  // Raw diff vs ratio mode
+  // Raw diff vs ratio mode for trend weighting
   const [trendMode, setTrendMode] = useState<"diff" | "ratio">("diff");
 
   const [sortBy, setSortBy] = useState<"biased" | "base" | "number">("biased");
@@ -164,7 +174,11 @@ export const SurvivalAnalyzer: React.FC<{
   /* ------------------------------------------------------------------ */
   const { zoneWeightingEnabled, zoneGamma } = useZPASettings();
   const savedZoneWeights: WeightsByNumber | null = useMemo(() => {
-    try { return getSavedZoneWeights(); } catch { return null; }
+    try {
+      return getSavedZoneWeights();
+    } catch {
+      return null;
+    }
   }, []);
 
   /* ------------------------------------------------------------------ */
@@ -215,102 +229,100 @@ export const SurvivalAnalyzer: React.FC<{
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [windowSize, excludedNumbers, history]);
 
- // Bias components
-   const gpwfWeights = useMemo(() => buildGPWFNumberWeights(recent), [recent]);
-   const hc3Weights = useMemo(() => buildHC3PenaltyWeights(history), [history]);
-   const sde1Weights = useMemo(() => buildSDE1PenaltyWeights(history), [history]);
-// Custom trend weighting (diff or ratio) (must precede buildBiasMap dependency)
-   const customTrendWeights = useMemo(() => {
-     if (!useCustomTrendWindow) return undefined;
-     const to = Math.max(1, Math.min(trendTo, history.length));
-     const from = Math.max(0, Math.min(trendFrom, to - 1));
-     const hiSlice = history.slice(-to);
-     const loSlice = history.slice(-from);
-     const count = (arr: Draw[], n: number) =>
-       arr.reduce((acc, d) => acc + (d.main.includes(n) || d.supp.includes(n) ? 1 : 0), 0);
-     const w: Record<number, number> = {};
-     for (let n = 1; n <= 45; n++) {
-       const totalHits = count(hiSlice, n);
-       const recentHits = count(loSlice, n);
-       const olderHits = totalHits - recentHits;
-       if (trendMode === "ratio") {
-         w[n] = (olderHits + 1) / (recentHits + 1);
-       } else {
-         w[n] = Math.max(0, olderHits + 1);
-       }
-     }
-     return w;
-   }, [useCustomTrendWindow, trendFrom, trendTo, trendMode, history]);
+  /* ------------------------------------------------------------------ */
+  /* Bias maps                                                          */
+  /* ------------------------------------------------------------------ */
+  const gpwfWeights = useMemo(() => buildGPWFNumberWeights(recent), [recent]);
+  const hc3Weights = useMemo(() => buildHC3PenaltyWeights(history), [history]);
+  const sde1Weights = useMemo(() => buildSDE1PenaltyWeights(history), [history]);
 
-   // Pattern bias with sum tolerance (applies over full history)
-   const patternBiasWeights = useMemo(() => {
-     if (!patternsSelected || patternsSelected.length === 0) return undefined;
- const patternHits = Array(45).fill(0);
- const totalHits = Array(45).fill(0);
- const tol = Math.max(0, Math.floor(patternSumTolerance || 0));
+  // Custom trend weighting (diff or ratio) used by DISPLAY
+  const customTrendWeights = useMemo((): Record<number, number> | undefined => {
+    if (!useCustomTrendWindow) return undefined;
+    const to = Math.max(1, Math.min(trendTo, history.length));
+    const from = Math.max(0, Math.min(trendFrom, to - 1));
+    const hiSlice = history.slice(-to);
+    const loSlice = history.slice(-from);
+    const count = (arr: Draw[], n: number) =>
+      arr.reduce((acc, d) => acc + (d.main.includes(n) || d.supp.includes(n) ? 1 : 0), 0);
+    const w: Record<number, number> = {};
+    for (let n = 1; n <= 45; n++) {
+      const totalHits = count(hiSlice, n);
+      const recentHits = count(loSlice, n);
+      const olderHits = totalHits - recentHits;
+      if (trendMode === "ratio") {
+        w[n] = (olderHits + 1) / (recentHits + 1);
+      } else {
+        w[n] = Math.max(0, olderHits + 1);
+      }
+    }
+    return w;
+  }, [useCustomTrendWindow, trendFrom, trendTo, trendMode, history]);
 
-for (const d of history) {
-   const pat = drawPattern(d);
-   const hit = patternsSelected.some(sel =>
-     sel.low === pat.low &&
-     sel.high === pat.high &&
-     sel.even === pat.even &&
-     sel.odd === pat.odd &&
-     Math.abs(sel.sum - pat.sum) <= tol
-   );
-   const nums = [...d.main, ...d.supp];
-   for (const n of nums) {
-     if (n >= 1 && n <= 45) {
-       totalHits[n - 1]++;
-       if (hit) patternHits[n - 1]++;
-     }
-   }
- }
- const w: Record<number, number> = {};
- for (let n = 1; n <= 45; n++) {
-   w[n] = (patternHits[n - 1] + 1) / (totalHits[n - 1] + 1);
- }
- return w;
- }, [history, patternsSelected, patternSumTolerance]);
+  // Pattern bias with sum tolerance (applies over full history)
+  const patternBiasWeights = useMemo(() => {
+    if (!patternsSelected || patternsSelected.length === 0) return undefined;
 
- // Helper: build bias map (used by optimizer & display)
- const buildBiasMap = useCallback(
-  (includePatternBias: boolean, trendOverride?: Record<number, number>) => {
-    const trend = useTrendBias
-      ? (trendOverride ?? (useCustomTrendWindow ? customTrendWeights ?? trendWeights : trendWeights))
-      : undefined;
-    return combinePerNumberWeights(
-      includePatternBias ? patternBiasWeights : undefined,
-      trend,
-      useGPWF ? gpwfWeights : undefined,
-      (enableHC3Global ?? false)
-        ? hc3Weights
-        : useHC3Bias
-        ? hc3Weights
-        : undefined,
-      (enableSDE1Global ?? false)
-        ? sde1Weights
-        : useSDE1Bias
-        ? sde1Weights
-        : undefined
-    );
-  },
-  [
-    patternBiasWeights,
-    useTrendBias,
-    useCustomTrendWindow,
-    customTrendWeights,
-    trendWeights,
-    useGPWF,
-    gpwfWeights,
-    enableHC3Global,
-    hc3Weights,
-    useHC3Bias,
-    enableSDE1Global,
-    sde1Weights,
-    useSDE1Bias
-  ]
- );
+    const patternHits = Array(45).fill(0);
+    const totalHits = Array(45).fill(0);
+    const tol = Math.max(0, Math.floor(patternSumTolerance || 0));
+
+    for (const d of history) {
+      const pat = drawPattern(d);
+      const hit = patternsSelected.some(
+        (sel) =>
+          sel.low === pat.low &&
+          sel.high === pat.high &&
+          sel.even === pat.even &&
+          sel.odd === pat.odd &&
+          Math.abs(sel.sum - pat.sum) <= tol
+      );
+      const nums = [...d.main, ...d.supp];
+      for (const n of nums) {
+        if (n >= 1 && n <= 45) {
+          totalHits[n - 1]++;
+          if (hit) patternHits[n - 1]++;
+        }
+      }
+    }
+    const w: Record<number, number> = {};
+    for (let n = 1; n <= 45; n++) {
+      w[n] = (patternHits[n - 1] + 1) / (totalHits[n - 1] + 1);
+    }
+    return w;
+  }, [history, patternsSelected, patternSumTolerance]);
+
+  // Helper: build bias map (shared by DISPLAY and optimizer)
+  const buildBiasMap = useCallback(
+    (includePatternBias: boolean, trendOverride?: Record<number, number>) => {
+      const trend = useTrendBias
+        ? trendOverride ?? (useCustomTrendWindow ? customTrendWeights ?? trendWeights : trendWeights)
+        : undefined;
+
+      return combinePerNumberWeights(
+        includePatternBias ? patternBiasWeights : undefined,
+        trend,
+        useGPWF ? gpwfWeights : undefined,
+        (enableHC3Global ?? false) ? hc3Weights : useHC3Bias ? hc3Weights : undefined,
+        (enableSDE1Global ?? false) ? sde1Weights : useSDE1Bias ? sde1Weights : undefined
+      );
+    },
+    [
+      patternBiasWeights,
+      useTrendBias,
+      useCustomTrendWindow,
+      customTrendWeights,
+      trendWeights,
+      useGPWF,
+      gpwfWeights,
+      enableHC3Global,
+      hc3Weights,
+      useHC3Bias,
+      enableSDE1Global,
+      sde1Weights,
+      useSDE1Bias,
+    ]
+  );
 
   // Reference indices for current (trendFrom, trendTo)
   const qeReference = useMemo(() => {
@@ -325,33 +337,30 @@ for (const d of history) {
     return { L, to, from, recentFromIdx, recentToIdx, olderFromIdx, olderToIdx, olderSize };
   }, [history.length, trendFrom, trendTo]);
 
-  // Display bias map always includes pattern bias if available
-  const combinedBiasWeights = useMemo(
-  () => buildBiasMap(true),   [buildBiasMap]
-  );
+  // Display bias map: always include pattern bias if present
+  const combinedBiasWeights = useMemo(() => buildBiasMap(true), [buildBiasMap]);
 
   // Enriched rows with bias + zone weighting
   const enriched = useMemo(() => {
     if (!results) return [];
     return results.map((r) => {
       const biasW = combinedBiasWeights[r.number] ?? 1;
-      const zpaW = zoneWeightingEnabled && savedZoneWeights ? (savedZoneWeights[r.number] ?? 1) : 1;
+      const zpaW =
+        zoneWeightingEnabled && savedZoneWeights ? savedZoneWeights[r.number] ?? 1 : 1;
       const biased = r.probNext * Math.pow(biasW, gamma) * Math.pow(zpaW, zoneGamma);
       return { ...r, biasedProb: biased, baseProb: r.probNext };
     });
   }, [results, combinedBiasWeights, gamma, zoneWeightingEnabled, zoneGamma, savedZoneWeights]);
 
-  useEffect(() => {
-    if (!enriched?.length) return;
-    onStats?.(
-      enriched.map((r: any) => ({
-        number: r.number,
-        baseProb: r.baseProb,
-        biasedProb: r.biasedProb,
-      }))
-    );
-  }, [enriched, onStats]);
-
+ useEffect(() => {
+   if (!enriched.length || !onStats) return;
+   const rows = enriched.map((r: any) => ({
+     number: r.number,
+     baseProb: r.baseProb,
+     biasedProb: r.biasedProb,
+   }));
+   onStats(rows);
+ }, [enriched, onStats]);
   // Sorting
   const sortedStats = useMemo(() => {
     const arr = enriched.slice();
@@ -388,58 +397,55 @@ for (const d of history) {
   const quickExamples = useMemo(() => {
     const L = history.length;
     const countHits = (slice: Draw[], n: number) =>
-      slice.reduce(
-        (acc, d) => acc + (d.main.includes(n) || d.supp.includes(n) ? 1 : 0),
-        0
-      );
+      slice.reduce((acc, d) => acc + (d.main.includes(n) || d.supp.includes(n) ? 1 : 0), 0);
 
-    return examplePairs.map(([fromRaw, toRaw]) => {
-      // Feasibility
-      const feasible = L >= toRaw;
-      const to = Math.min(toRaw, L);
-      const from = Math.min(fromRaw, Math.max(1, to - 1));
+    return examplePairs
+      .map(([fromRaw, toRaw]) => {
+        // Feasibility
+        const feasible = L >= toRaw;
+        const to = Math.min(toRaw, L);
+        const from = Math.min(fromRaw, Math.max(1, to - 1));
 
-      const hiSlice = history.slice(-to);
-      const loSlice = history.slice(-from);
+        const hiSlice = history.slice(-to);
+        const loSlice = history.slice(-from);
 
-      // older band hits = hits in hiSlice minus hits in loSlice
-      const diffs: number[] = [];
-      for (let n = 1; n <= 45; n++) {
-        const totalHits = countHits(hiSlice, n);
-        const recentHits = countHits(loSlice, n);
-        const olderHits = totalHits - recentHits;
-        const diff = olderHits - recentHits; // difference older vs recent
-        diffs.push(diff);
-      }
-      // variance of diffs
-      const mean =
-        diffs.reduce((a, b) => a + b, 0) / (diffs.length || 1);
-      const variance =
-        diffs.reduce((a, b) => a + Math.pow(b - mean, 2), 0) /
-        (diffs.length || 1);
+        // older band hits = hits in hiSlice minus hits in loSlice
+        const diffs: number[] = [];
+        for (let n = 1; n <= 45; n++) {
+          const totalHits = countHits(hiSlice, n);
+          const recentHits = countHits(loSlice, n);
+          const olderHits = totalHits - recentHits;
+          const diff = olderHits - recentHits; // difference older vs recent
+          diffs.push(diff);
+        }
+        // variance of diffs
+        const mean = diffs.reduce((a, b) => a + b, 0) / (diffs.length || 1);
+        const variance =
+          diffs.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / (diffs.length || 1);
 
-      const olderSize = Math.max(0, to - from);
-      const olderFromIdx = Math.max(1, L - to + 1);
-      const olderToIdx = Math.max(0, L - from);
-      const recentFromIdx = Math.max(1, L - from + 1);
-      const recentToIdx = L;
+        const olderSize = Math.max(0, to - from);
+        const olderFromIdx = Math.max(1, L - to + 1);
+        const olderToIdx = Math.max(0, L - from);
+        const recentFromIdx = Math.max(1, L - from + 1);
+        const recentToIdx = L;
 
-      return {
-        from: fromRaw,
-        to: toRaw,
-        label: `${fromRaw}–${toRaw}`,
-        feasible,
-        olderSize,
-        olderRange: feasible ? `${olderFromIdx}–${olderToIdx}` : "n/a",
-        recentRange: feasible ? `${recentFromIdx}–${recentToIdx}` : "n/a",
-        score: variance, // effectiveness score
-        adoptDisabled: !feasible,
-        meaning: `Earlier ${olderSize} vs recent ${from}`,
-      };
-    }).sort((a, b) => b.score - a.score);
+        return {
+          from: fromRaw,
+          to: toRaw,
+          label: `${fromRaw}–${toRaw}`,
+          feasible,
+          olderSize,
+          olderRange: feasible ? `${olderFromIdx}–${olderToIdx}` : "n/a",
+          recentRange: feasible ? `${recentFromIdx}–${recentToIdx}` : "n/a",
+          score: variance, // effectiveness score
+          adoptDisabled: !feasible,
+          meaning: `Earlier ${olderSize} vs recent ${from}`,
+        };
+      })
+      .sort((a, b) => b.score - a.score);
   }, [history, examplePairs]);
 
-  const adoptExample = (ex: typeof quickExamples[0]) => {
+  const adoptExample = (ex: (typeof quickExamples)[number]) => {
     if (ex.adoptDisabled) return;
     setUseTrendBias(true);
     setUseCustomTrendWindow(true);
@@ -452,11 +458,14 @@ for (const d of history) {
   };
 
   /* ------------------------------------------------------------------ */
-  /* Optimizer (unchanged core logic)                                   */
+  /* Optimizer                                                          */
   /* ------------------------------------------------------------------ */
   const [optRunning, setOptRunning] = useState(false);
   const [optMsg, setOptMsg] = useState<string>("");
-  const [optProgress, setOptProgress] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
+  const [optProgress, setOptProgress] = useState<{ done: number; total: number }>({
+    done: 0,
+    total: 0,
+  });
   const [optBest, setOptBest] = useState<null | {
     hits: number;
     rankSum: number;
@@ -468,9 +477,15 @@ for (const d of history) {
   }>(null);
   const cancelOptRef = useRef<{ cancel: boolean }>({ cancel: false });
 
+  // NEW: optimizer target mode
+  const [optimizeMode, setOptimizeMode] = useState<"biased" | "base">("biased");
+
   const [optRange, setOptRange] = useState({
     fromMin: 3,
-    fromMax: Math.max(6, Math.min(30, Math.max(6, Math.floor((history.length || 60) * 0.5)))),
+    fromMax: Math.max(
+      6,
+      Math.min(30, Math.max(6, Math.floor((history.length || 60) * 0.5)))
+    ),
     toMin: 8,
     toMax: Math.min(60, history.length || 60),
     gammaMin: -1.0,
@@ -487,27 +502,50 @@ for (const d of history) {
       arr.reduce((acc, d) => acc + (d.main.includes(n) || d.supp.includes(n) ? 1 : 0), 0);
     const w: Record<number, number> = {};
     for (let n = 1; n <= 45; n++) {
-      const olderHits = count(hiSlice, n) - count(loSlice, n);
-      w[n] = Math.max(0, olderHits + 1);
+      const totalHits = count(hiSlice, n);
+      const recentHits = count(loSlice, n);
+      const olderHits = totalHits - recentHits;
+      if (trendMode === "ratio") {
+        // Keep positive with smoothing; >1 favors older band, <1 favors recent band
+        w[n] = (olderHits + 1) / (recentHits + 1);
+      } else {
+        // Raw diff + 1 (min 0): larger when older band more active
+        w[n] = Math.max(0, olderHits + 1);
+      }
     }
     return w;
   }
 
- function enrichedFor(from: number, to: number, gammaTry: number) {
-  if (!results) return [];
-  const trendW = buildCustomTrendWeightsFor(from, to);
-  const biasMap = buildBiasMap(usePatternBiasInOptimizer, trendW);
-  return results.map(r => {
-    const biasW = biasMap[r.number] ?? 1;
-    const zpaW = zoneWeightingEnabled && savedZoneWeights ? (savedZoneWeights[r.number] ?? 1) : 1;
-    const biased = r.probNext * Math.pow(biasW, gammaTry) * Math.pow(zpaW, zoneGamma);
-    return { ...r, biasedProb: biased, baseProb: r.probNext };
-  });
+  // Enrichment function for optimizer runs
+  // - When optimizeMode === 'base' we ignore all biases (pattern + others) and zones
+  function enrichedFor(from: number, to: number, gammaTry: number) {
+    if (!results) return [];
+    if (optimizeMode === "base") {
+      return results.map((r) => ({
+        ...r,
+        biasedProb: r.probNext,
+        baseProb: r.probNext,
+      }));
+    }
+    // Biased mode
+    const trendW = buildCustomTrendWeightsFor(from, to);
+    const biasMap = buildBiasMap(usePatternBiasInOptimizer, trendW);
+    return results.map((r) => {
+      const biasW = biasMap[r.number] ?? 1;
+      const zpaW =
+        zoneWeightingEnabled && savedZoneWeights ? savedZoneWeights[r.number] ?? 1 : 1;
+      const biased = r.probNext * Math.pow(biasW, gammaTry) * Math.pow(zpaW, zoneGamma);
+      return {
+        ...r,
+        biasedProb: biased,
+        baseProb: r.probNext,
+      };
+    });
   }
 
   async function runOptimizer() {
     const targets: number[] =
-      (selectedCheckNumbers && selectedCheckNumbers.length > 0)
+      selectedCheckNumbers && selectedCheckNumbers.length > 0
         ? selectedCheckNumbers
         : Array.from(selectedNums);
     if (!results || targets.length === 0) {
@@ -522,7 +560,11 @@ for (const d of history) {
     setOptMsg("Running…");
 
     const { fromMin, fromMax, toMin, toMax, gammaMin, gammaMax, gammaStep } = optRange;
-    const gammaSteps = Math.max(1, Math.floor((gammaMax - gammaMin) / gammaStep + 1e-9) + 1);
+
+    const gammaSteps =
+      optimizeMode === "base"
+        ? 1
+        : Math.max(1, Math.floor((gammaMax - gammaMin) / gammaStep + 1e-9) + 1);
 
     let total = 0;
     for (let f = fromMin; f <= fromMax; f++) {
@@ -532,18 +574,25 @@ for (const d of history) {
 
     let best: typeof optBest = null;
     let done = 0;
-    const maxPerfect = Math.min(8, selectedCheckNumbers.length);
+    const maxPerfect = Math.min(8, targets.length);
 
-    outer:
-    for (let f = fromMin; f <= fromMax; f++) {
+    outer: for (let f = fromMin; f <= fromMax; f++) {
       for (let t = Math.max(toMin, f + 1); t <= toMax; t++) {
         for (let gIdx = 0; gIdx < gammaSteps; gIdx++) {
-          const gammaTry = +(gammaMin + gIdx * gammaStep).toFixed(6);
-            const enrichedTry = enrichedFor(f, t, gammaTry).sort(
-              (a, b) => b.biasedProb - a.biasedProb || a.number - b.number
-            );
+          const gammaTry =
+            optimizeMode === "base" ? 0 : +(gammaMin + gIdx * gammaStep).toFixed(6);
 
-          const top8 = enrichedTry.slice(0, 8).map(r => r.number);
+          const enrichedTryRaw = enrichedFor(f, t, gammaTry);
+          const enrichedTry =
+            optimizeMode === "base"
+              ? enrichedTryRaw.sort(
+                  (a, b) => b.baseProb - a.baseProb || a.number - b.number
+                )
+              : enrichedTryRaw.sort(
+                  (a, b) => b.biasedProb - a.biasedProb || a.number - b.number
+                );
+
+          const top8 = enrichedTry.slice(0, 8).map((r) => r.number);
           const posMap: Record<number, number> = {};
           for (let i = 0; i < enrichedTry.length; i++) {
             posMap[enrichedTry[i].number] = i + 1;
@@ -551,7 +600,7 @@ for (const d of history) {
 
           let hits = 0;
           let rankSum = 0;
-          for (const n of selectedCheckNumbers) {
+          for (const n of targets) {
             const pos = posMap[n];
             if (pos) {
               rankSum += pos;
@@ -561,21 +610,35 @@ for (const d of history) {
             }
           }
 
-          const cand: typeof optBest = { hits, rankSum, from: f, to: t, gamma: gammaTry, top8, positions: posMap };
+          const cand: typeof optBest = {
+            hits,
+            rankSum,
+            from: f,
+            to: t,
+            gamma: gammaTry,
+            top8,
+            positions: posMap,
+          };
 
-          if (!best ||
-              cand.hits > best.hits ||
-              (cand.hits === best.hits && cand.rankSum < best.rankSum)) {
+          if (
+            !best ||
+            cand.hits > best.hits ||
+            (cand.hits === best.hits && cand.rankSum < best.rankSum)
+          ) {
             best = cand;
             setOptBest(best);
-            setOptMsg(`Current best: ${best.hits} hits in top 8 (from=${best.from}, to=${best.to}, γ=${best.gamma.toFixed(2)})`);
+            setOptMsg(
+              `Current best: ${best.hits} hits in top 8 (from=${best.from}, to=${best.to}, γ=${best.gamma.toFixed(
+                2
+              )})`
+            );
             if (best.hits >= maxPerfect) break outer;
           }
 
           done++;
           if (done % 200 === 0) {
             setOptProgress({ done, total });
-            await new Promise(r => setTimeout(r, 0));
+            await new Promise((r) => setTimeout(r, 0));
             if (cancelOptRef.current.cancel) break outer;
           }
         }
@@ -590,8 +653,18 @@ for (const d of history) {
       setUseCustomTrendWindow(true);
       setTrendFrom(best.from);
       setTrendTo(best.to);
-      setGamma(best.gamma);
-      setOptMsg(`Done. Best: ${best.hits} hits in top 8. Applied from=${best.from}, to=${best.to}, γ=${best.gamma.toFixed(2)}.`);
+      if (optimizeMode === "biased") {
+        setGamma(best.gamma);
+        setOptMsg(
+          `Done. Best: ${best.hits} hits in top 8. Applied from=${best.from}, to=${best.to}, γ=${best.gamma.toFixed(
+            2
+          )} (biased).`
+        );
+      } else {
+        setOptMsg(
+          `Done. Best (base): ${best.hits} hits in top 8. Applied from=${best.from}, to=${best.to}.`
+        );
+      }
     } else {
       setOptMsg("No viable combination found.");
     }
@@ -628,47 +701,97 @@ for (const d of history) {
         }}
       >
         {(enableSDE1Global ?? false) ? (
-          <span style={{ background: "#ffe6cc", color: "#a04c00", padding: "2px 8px", borderRadius: 4, fontSize: 12, fontWeight: 600 }}>
+          <span
+            style={{
+              background: "#ffe6cc",
+              color: "#a04c00",
+              padding: "2px 8px",
+              borderRadius: 4,
+              fontSize: 12,
+              fontWeight: 600,
+            }}
+          >
             SDE1 Active
           </span>
         ) : (
-          <span style={{ background: "#f2f2f2", color: "#555", padding: "2px 8px", borderRadius: 4, fontSize: 12, fontWeight: 600 }}>
+          <span
+            style={{
+              background: "#f2f2f2",
+              color: "#555",
+              padding: "2px 8px",
+              borderRadius: 4,
+              fontSize: 12,
+              fontWeight: 600,
+            }}
+          >
             SDE1 Off
           </span>
         )}
         {(enableHC3Global ?? false) ? (
-          <span style={{ background: "#e8f5e9", color: "#2e7d32", padding: "2px 8px", borderRadius: 4, fontSize: 12, fontWeight: 600 }}>
+          <span
+            style={{
+              background: "#e8f5e9",
+              color: "#2e7d32",
+              padding: "2px 8px",
+              borderRadius: 4,
+              fontSize: 12,
+              fontWeight: 600,
+            }}
+          >
             HC3 Active
           </span>
         ) : (
-          <span style={{ background: "#f2f2f2", color: "#555", padding: "2px 8px", borderRadius: 4, fontSize: 12, fontWeight: 600 }}>
+          <span
+            style={{
+              background: "#f2f2f2",
+              color: "#555",
+              padding: "2px 8px",
+              borderRadius: 4,
+              fontSize: 12,
+              fontWeight: 600,
+            }}
+          >
             HC3 Off
           </span>
         )}
-{patternsSelected.length > 0 && (
-        <span
-          style={{
-            background: "#fff3e0",
-            color: "#e65100",
-            padding: "2px 8px",
-            borderRadius: 4,
-            fontSize: 12,
-            fontWeight: 600,
-          }}
-          title={`Pattern Bias active${patternSumTolerance ? ` (sum ±${Math.max(0, Math.floor(patternSumTolerance))})` : ""}`}
-        >
-          Pattern Bias
-        </span>
+        {patternsSelected.length > 0 && (
+          <span
+            style={{
+              background: "#fff3e0",
+              color: "#e65100",
+              padding: "2px 8px",
+              borderRadius: 4,
+              fontSize: 12,
+              fontWeight: 600,
+            }}
+            title={`Pattern Bias active${
+              patternSumTolerance ? ` (sum ±${Math.max(0, Math.floor(patternSumTolerance))})` : ""
+            }`}
+          >
+            Pattern Bias
+          </span>
         )}
         <span style={{ marginLeft: "auto", fontSize: 12 }}>
           <b>Excluded:</b>{" "}
-          {excludedNumbers.length ? excludedNumbers.join(", ") : <span style={{ color: "#888" }}>none</span>}
+          {excludedNumbers.length ? (
+            excludedNumbers.join(", ")
+          ) : (
+            <span style={{ color: "#888" }}>none</span>
+          )}
           {"   "}
           <b>Forced:</b>{" "}
-          {forcedNumbers.length ? forcedNumbers.join(", ") : <span style={{ color: "#888" }}>none</span>}
+          {forcedNumbers.length ? (
+            forcedNumbers.join(", ")
+          ) : (
+            <span style={{ color: "#888" }}>none</span>
+          )}
           {"   "}
           <b>Selected:</b>{" "}
-          {selectedCheckNumbers.length ? selectedCheckNumbers.join(", ") : <span style={{ color: "#888" }}>none</span>}
+          {selectedCheckNumbers.length ? (
+            selectedCheckNumbers.join(", ")
+          ) : (
+            <span style={{ color: "#888" }}>none</span>
+          )}
         </span>
       </div>
 
@@ -716,7 +839,14 @@ for (const d of history) {
           />
           Custom Window
         </label>
-        <span style={{ opacity: useCustomTrendWindow ? 1 : 0.4, display: "inline-flex", gap: 6, alignItems: "center" }}>
+        <span
+          style={{
+            opacity: useCustomTrendWindow ? 1 : 0.4,
+            display: "inline-flex",
+            gap: 6,
+            alignItems: "center",
+          }}
+        >
           <input
             type="number"
             min={1}
@@ -737,9 +867,39 @@ for (const d of history) {
             title="To (most recent)"
           />
           <span style={{ display: "inline-flex", gap: 6 }}>
-            <button type="button" onClick={() => { setUseCustomTrendWindow(true); setTrendFrom(3); setTrendTo(11); }} style={{ fontSize: 12 }}>3→11</button>
-            <button type="button" onClick={() => { setUseCustomTrendWindow(true); setTrendFrom(6); setTrendTo(9); }} style={{ fontSize: 12 }}>6→9</button>
-            <button type="button" onClick={() => { setUseCustomTrendWindow(true); setTrendFrom(11); setTrendTo(13); }} style={{ fontSize: 12 }}>11→13</button>
+            <button
+              type="button"
+              onClick={() => {
+                setUseCustomTrendWindow(true);
+                setTrendFrom(3);
+                setTrendTo(11);
+              }}
+              style={{ fontSize: 12 }}
+            >
+              3→11
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setUseCustomTrendWindow(true);
+                setTrendFrom(6);
+                setTrendTo(9);
+              }}
+              style={{ fontSize: 12 }}
+            >
+              6→9
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setUseCustomTrendWindow(true);
+                setTrendFrom(11);
+                setTrendTo(13);
+              }}
+              style={{ fontSize: 12 }}
+            >
+              11→13
+            </button>
           </span>
         </span>
 
@@ -757,20 +917,26 @@ for (const d of history) {
           }
           style={{ cursor: "help", userSelect: "none", fontSize: 16, lineHeight: 1 }}
           role="img"
-        >ℹ️</span>
+        >
+          ℹ️
+        </span>
 
         {/* Mode buttons */}
         <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
           <button
             type="button"
-            onClick={() => { setUseTrendBias(true); setUseCustomTrendWindow(true); setTrendMode("diff"); }}
+            onClick={() => {
+              setUseTrendBias(true);
+              setUseCustomTrendWindow(true);
+              setTrendMode("diff");
+            }}
             style={{
               fontSize: 12,
               padding: "4px 8px",
               border: trendMode === "diff" ? "1px solid #1976d2" : "1px solid #bbb",
               background: trendMode === "diff" ? "#1976d2" : "#fff",
               color: trendMode === "diff" ? "#fff" : "#222",
-              borderRadius: 4
+              borderRadius: 4,
             }}
             title="Use raw difference: (older - recent) + 1"
           >
@@ -778,14 +944,18 @@ for (const d of history) {
           </button>
           <button
             type="button"
-            onClick={() => { setUseTrendBias(true); setUseCustomTrendWindow(true); setTrendMode("ratio"); }}
+            onClick={() => {
+              setUseTrendBias(true);
+              setUseCustomTrendWindow(true);
+              setTrendMode("ratio");
+            }}
             style={{
               fontSize: 12,
               padding: "4px 8px",
               border: trendMode === "ratio" ? "1px solid #1976d2" : "1px solid #bbb",
               background: trendMode === "ratio" ? "#1976d2" : "#fff",
               color: trendMode === "ratio" ? "#fff" : "#222",
-              borderRadius: 4
+              borderRadius: 4,
             }}
             title="Use ratios: (older+1)/(recent+1)"
           >
@@ -828,21 +998,29 @@ for (const d of history) {
             </label>
           </>
         )}
-{/* Optimizer pattern-bias toggle + indicator */}
+
+        {/* Optimizer pattern-bias toggle + indicator */}
         <span style={{ marginLeft: 8 }}>
           <label title="Include Pattern Bias during optimizer runs (display always includes when patterns are selected)">
             <input
               type="checkbox"
               checked={usePatternBiasInOptimizer}
-              onChange={e => setUsePatternBiasInOptimizer(e.target.checked)}
+              onChange={(e) => setUsePatternBiasInOptimizer(e.target.checked)}
               style={{ marginRight: 6 }}
             />
             Optimizer uses pattern bias
           </label>
-          <span style={{ marginLeft: 8, fontSize: 12, color: usePatternBiasInOptimizer ? "#2e7d32" : "#555" }}>
+          <span
+            style={{
+              marginLeft: 8,
+              fontSize: 12,
+              color: usePatternBiasInOptimizer ? "#2e7d32" : "#555",
+            }}
+          >
             {usePatternBiasInOptimizer ? "Yes" : "No"}
           </span>
         </span>
+
         <span style={{ marginLeft: 8 }}>
           <b>Gamma:</b>{" "}
           <input
@@ -853,8 +1031,10 @@ for (const d of history) {
             value={gamma}
             onChange={(e) => setGamma(Number(e.target.value))}
             style={{ width: 70 }}
+            disabled={false /* gamma slider still useful for display */}
           />
         </span>
+
         <span style={{ marginLeft: "auto" }}>
           <b>Sort by:</b>{" "}
           <select
@@ -874,11 +1054,20 @@ for (const d of history) {
         {((selectedCheckNumbers?.length ?? 0) === 0 && selectedNums.size === 0) &&
           "Hint: Click rows to select numbers; then run optimizer or review probabilities."}
       </div>
+
       {selectable && (
-        <div style={{ margin: "6px 0 10px 0", fontSize: 13, display: "flex", alignItems: "center", gap: 10 }}>
+        <div
+          style={{
+            margin: "6px 0 10px 0",
+            fontSize: 13,
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+          }}
+        >
           <b>Selection:</b>
           {selectedNums.size ? (
-            <span>{Array.from(selectedNums).sort((a,b)=>a-b).join(", ")}</span>
+            <span>{Array.from(selectedNums).sort((a, b) => a - b).join(", ")}</span>
           ) : (
             <span style={{ color: "#777" }}>none</span>
           )}
@@ -896,14 +1085,14 @@ for (const d of history) {
 
       {canRun && results ? (
         <div>
-          <h4>{probabilityHeading ?? "Probability of Appearance in Next Draw (Per Number):"}</h4>
+          <h4>
+            {probabilityHeading ?? "Probability of Appearance in Next Draw (Per Number):"}
+          </h4>
 
           <div style={{ fontSize: 12, color: "#555", marginBottom: 6 }}>
-            Using global zone weighting: {zoneWeightingEnabled ? `On (γ=${zoneGamma})` : "Off"}
+            Using global zone weighting: {zoneWeightingEnabled ? `On (γ=${zoneGamma})` : "Off"}{" "}
             {/* pattern bias note is visualized by badge above */}
-            {patternsSelected.length > 0 && (
-              <>• Pattern bias active (display)</>
-            )}
+            {patternsSelected.length > 0 && <>• Pattern bias active (display)</>}
             {" • Optimizer uses pattern bias: "}
             <b>{usePatternBiasInOptimizer ? "Yes" : "No"}</b>
           </div>
@@ -926,6 +1115,21 @@ for (const d of history) {
             <span style={{ fontSize: 12, color: "#444" }}>
               Finds (Custom from→to, γ) maximizing Selected numbers in top 8.
             </span>
+
+            <span style={{ display: "inline-flex", gap: 6, fontSize: 12, alignItems: "center" }}>
+              Mode:
+              <select
+                value={optimizeMode}
+                onChange={(e) => setOptimizeMode(e.target.value as any)}
+                style={{ fontSize: 12 }}
+                disabled={optRunning}
+                title="Biased mode uses all selected biases; Base mode ignores them."
+              >
+                <option value="biased">Biased</option>
+                <option value="base">Base-only</option>
+              </select>
+            </span>
+
             <div style={{ display: "inline-flex", gap: 6, alignItems: "center", fontSize: 12 }}>
               from:
               <input
@@ -933,10 +1137,12 @@ for (const d of history) {
                 min={1}
                 max={history.length - 2}
                 value={optRange.fromMin}
-                onChange={(e) => setOptRange(r => ({
-                  ...r,
-                  fromMin: Math.max(1, Math.min(Number(e.target.value) || 1, history.length - 2))
-                }))}
+                onChange={(e) =>
+                  setOptRange((r) => ({
+                    ...r,
+                    fromMin: Math.max(1, Math.min(Number(e.target.value) || 1, history.length - 2)),
+                  }))
+                }
                 style={{ width: 60 }}
                 title="Search range: from (older)"
                 disabled={optRunning}
@@ -947,10 +1153,15 @@ for (const d of history) {
                 min={optRange.fromMin + 1}
                 max={history.length - 1}
                 value={optRange.toMax}
-                onChange={(e) => setOptRange(r => ({
-                  ...r,
-                  toMax: Math.max(r.fromMin + 1, Math.min(Number(e.target.value) || r.toMax, history.length - 1))
-                }))}
+                onChange={(e) =>
+                  setOptRange((r) => ({
+                    ...r,
+                    toMax: Math.max(
+                      r.fromMin + 1,
+                      Math.min(Number(e.target.value) || r.toMax, history.length - 1)
+                    ),
+                  }))
+                }
                 style={{ width: 60 }}
                 title="Search range: to (recent)"
                 disabled={optRunning}
@@ -960,9 +1171,11 @@ for (const d of history) {
                 type="number"
                 step={0.1}
                 value={optRange.gammaMin}
-                onChange={(e) => setOptRange(r => ({ ...r, gammaMin: Number(e.target.value) || r.gammaMin }))}
+                onChange={(e) =>
+                  setOptRange((r) => ({ ...r, gammaMin: Number(e.target.value) || r.gammaMin }))
+                }
                 style={{ width: 70 }}
-                disabled={optRunning}
+                disabled={optRunning || optimizeMode === "base"}
                 title="Gamma min"
               />
               to
@@ -970,9 +1183,11 @@ for (const d of history) {
                 type="number"
                 step={0.1}
                 value={optRange.gammaMax}
-                onChange={(e) => setOptRange(r => ({ ...r, gammaMax: Number(e.target.value) || r.gammaMax }))}
+                onChange={(e) =>
+                  setOptRange((r) => ({ ...r, gammaMax: Number(e.target.value) || r.gammaMax }))
+                }
                 style={{ width: 70 }}
-                disabled={optRunning}
+                disabled={optRunning || optimizeMode === "base"}
                 title="Gamma max"
               />
               step
@@ -980,12 +1195,18 @@ for (const d of history) {
                 type="number"
                 step={0.05}
                 value={optRange.gammaStep}
-                onChange={(e) => setOptRange(r => ({ ...r, gammaStep: Math.max(0.01, Number(e.target.value) || r.gammaStep) }))}
+                onChange={(e) =>
+                  setOptRange((r) => ({
+                    ...r,
+                    gammaStep: Math.max(0.01, Number(e.target.value) || r.gammaStep),
+                  }))
+                }
                 style={{ width: 70 }}
-                disabled={optRunning}
+                disabled={optRunning || optimizeMode === "base"}
                 title="Gamma step"
               />
             </div>
+
             {!optRunning ? (
               <button onClick={runOptimizer} title="Run grid search" style={{ marginLeft: 6 }}>
                 Run
@@ -1001,7 +1222,7 @@ for (const d of history) {
             </span>
             {optBest && (
               <span style={{ fontSize: 12, color: "#333" }}>
-                • Top 8: {optBest.top8.join(", ")}
+                • Top 8 ({optimizeMode}): {optBest.top8.join(", ")}
               </span>
             )}
           </div>
@@ -1033,6 +1254,14 @@ for (const d of history) {
                     <th style={{ textAlign: "left", padding: "2px 8px" }}>Number</th>
                     <th style={{ textAlign: "right", padding: "2px 8px" }}>Base</th>
                     <th style={{ textAlign: "right", padding: "2px 8px" }}>Biased</th>
+                    {patternBiasWeights && (
+                      <th
+                        style={{ textAlign: "right", padding: "2px 8px" }}
+                        title="Pattern bias weight (smoothed ratio of appearances in selected patterns)"
+                      >
+                        Pattern
+                      </th>
+                    )}
                     <th style={{ textAlign: "right", padding: "2px 8px" }}>Last Seen</th>
                   </tr>
                 </thead>
@@ -1060,7 +1289,9 @@ for (const d of history) {
                         title={selectable ? "Click to toggle highlight for this number" : undefined}
                       >
                         <td style={{ padding: "2px 8px", color: "#1976d2" }}>{rowIdx}</td>
-                        <td style={{ padding: "2px 8px" }}><b>{res.number}</b></td>
+                        <td style={{ padding: "2px 8px" }}>
+                          <b>{res.number}</b>
+                        </td>
                         <td style={{ padding: "2px 8px", textAlign: "right" }}>
                           {(res.baseProb * 100).toFixed(2)}%
                         </td>
@@ -1074,6 +1305,22 @@ for (const d of history) {
                         >
                           {(res.biasedProb * 100).toFixed(2)}%
                         </td>
+                        {patternBiasWeights && (
+                          <td
+                            style={{
+                              padding: "2px 8px",
+                              textAlign: "right",
+                              fontSize: 12,
+                              color:
+                                (patternBiasWeights[res.number] ?? 1) > 1.05 ? "#d84315" : "#555",
+                            }}
+                            title={`Pattern bias raw weight (number ${res.number}): ${(
+                              patternBiasWeights[res.number] ?? 1
+                            ).toFixed(3)}`}
+                          >
+                            {(patternBiasWeights[res.number] ?? 1).toFixed(2)}
+                          </td>
+                        )}
                         <td style={{ padding: "2px 8px", textAlign: "right" }}>
                           {res.lastSeen ? `${res.lastSeen} draws ago` : "Never"}
                         </td>
@@ -1111,7 +1358,8 @@ for (const d of history) {
                   </button>
                 </div>
                 <div style={{ fontSize: 12, color: "#555" }}>
-                  Score = variance of (olderHits - recentHits) across 45 numbers. Higher variance ⇒ stronger differentiation.
+                  Score = variance of (olderHits - recentHits) across 45 numbers. Higher variance ⇒
+                  stronger differentiation.
                 </div>
                 <table
                   style={{
@@ -1132,14 +1380,16 @@ for (const d of history) {
                     </tr>
                   </thead>
                   <tbody>
-                    {quickExamples.map(ex => (
+                    {quickExamples.map((ex) => (
                       <tr key={ex.label}>
                         <td style={{ padding: "3px 6px", fontWeight: 600 }}>{ex.label}</td>
                         <td style={{ padding: "3px 6px" }}>{ex.meaning}</td>
                         <td style={{ padding: "3px 6px", textAlign: "right" }}>{ex.olderSize}</td>
                         <td style={{ padding: "3px 6px", textAlign: "center" }}>{ex.olderRange}</td>
                         <td style={{ padding: "3px 6px", textAlign: "center" }}>{ex.recentRange}</td>
-                        <td style={{ padding: "3px 6px", textAlign: "right" }}>{ex.score.toFixed(2)}</td>
+                        <td style={{ padding: "3px 6px", textAlign: "right" }}>
+                          {ex.score.toFixed(2)}
+                        </td>
                         <td style={{ padding: "3px 6px", textAlign: "center" }}>
                           <button
                             type="button"
@@ -1149,7 +1399,7 @@ for (const d of history) {
                               fontSize: 11,
                               padding: "2px 6px",
                               cursor: ex.adoptDisabled ? "not-allowed" : "pointer",
-                              opacity: ex.adoptDisabled ? 0.4 : 1
+                              opacity: ex.adoptDisabled ? 0.4 : 1,
                             }}
                             title={
                               ex.adoptDisabled
@@ -1178,7 +1428,13 @@ for (const d of history) {
               <button
                 type="button"
                 onClick={() => setShowQuickExamples(true)}
-                style={{ fontSize: 12, padding: "6px 10px", border: "1px solid #90e0ef", background: "#fff", borderRadius: 6 }}
+                style={{
+                  fontSize: 12,
+                  padding: "6px 10px",
+                  border: "1px solid #90e0ef",
+                  background: "#fff",
+                  borderRadius: 6,
+                }}
                 title="Show Quick Examples panel"
               >
                 Show Quick Examples
@@ -1200,10 +1456,21 @@ for (const d of history) {
               }}
             >
               <div style={{ fontWeight: 700, marginBottom: 6 }}>Custom Window Reference</div>
-              <div>History: <b>{qeReference.L}</b> draws</div>
-              <div>Total lookback (to): last <b>{qeReference.to}</b> draws → <b>{qeReference.olderFromIdx}</b>–<b>{qeReference.L}</b></div>
-              <div>Recent core (from): last <b>{qeReference.from}</b> draws → <b>{qeReference.recentFromIdx}</b>–<b>{qeReference.recentToIdx}</b></div>
-              <div>Older band (to − from = <b>{qeReference.olderSize}</b>): <b>{qeReference.olderFromIdx}</b>–<b>{qeReference.olderToIdx}</b></div>
+              <div>
+                History: <b>{qeReference.L}</b> draws
+              </div>
+              <div>
+                Total lookback (to): last <b>{qeReference.to}</b> draws →{" "}
+                <b>{qeReference.olderFromIdx}</b>–<b>{qeReference.L}</b>
+              </div>
+              <div>
+                Recent core (from): last <b>{qeReference.from}</b> draws →{" "}
+                <b>{qeReference.recentFromIdx}</b>–<b>{qeReference.recentToIdx}</b>
+              </div>
+              <div>
+                Older band (to − from = <b>{qeReference.olderSize}</b>):{" "}
+                <b>{qeReference.olderFromIdx}</b>–<b>{qeReference.olderToIdx}</b>
+              </div>
               <div style={{ marginTop: 6, color: "#555" }}>
                 Mode:{" "}
                 {trendMode === "ratio"
@@ -1215,6 +1482,10 @@ for (const d of history) {
 
           <div style={{ fontSize: 12, color: "#888", marginTop: 8 }}>
             Base = Kaplan–Meier probability. Biased = Base × (combined bias)^γ × (ZPA weight)^γ.
+            {patternBiasWeights && (
+              <> Pattern column shows per-number smoothed pattern ratio weight.</>
+            )}
+            {optimizeMode === "base" && <> Optimizer (base-only) ignores all biases for ranking.</>}
           </div>
         </div>
       ) : (
@@ -1222,4 +1493,4 @@ for (const d of history) {
       )}
     </section>
   );
-}
+};
