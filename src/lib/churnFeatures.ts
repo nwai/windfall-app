@@ -82,3 +82,45 @@ export function buildChurnDataset(history: Draw[], opts: BuildChurnOptions): Num
   }
   return examples;
 }
+
+/**
+ * Extract features for a single number at a specific time index
+ */
+export function extractFeaturesForNumber(history: Draw[], number: number, currentIdx: number) {
+  let freqTotal = 0;
+  let firstSeen = -1;
+  let lastSeen = -1;
+
+  for (let i = 0; i <= currentIdx; i++) {
+    const draw = history[i];
+    const present = draw.main.includes(number) || draw.supp.includes(number);
+    if (present) {
+      freqTotal++;
+      if (firstSeen === -1) firstSeen = i;
+      lastSeen = i;
+    }
+  }
+
+  const tenure = firstSeen === -1 ? 0 : (currentIdx - firstSeen + 1);
+  const timeSinceLast = lastSeen === -1 ? (currentIdx + 1) : (currentIdx - lastSeen);
+
+  // Frequency in windows
+  const countInWindow = (endIdx: number, win: number) => {
+    let c = 0;
+    for (let t = Math.max(0, endIdx - win + 1); t <= endIdx; t++) {
+      const d = history[t];
+      if (d.main.includes(number) || d.supp.includes(number)) c++;
+    }
+    return c;
+  };
+
+  return {
+    number,
+    freqTotal,
+    freqFortnight: countInWindow(currentIdx, 6),
+    freqMonth: countInWindow(currentIdx, 12),
+    freqQuarter: countInWindow(currentIdx, 36),
+    tenure,
+    timeSinceLast,
+  };
+}
