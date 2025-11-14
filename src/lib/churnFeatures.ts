@@ -82,3 +82,69 @@ export function buildChurnDataset(history: Draw[], opts: BuildChurnOptions): Num
   }
   return examples;
 }
+
+/**
+ * Extract features for a single number at a specific point in history
+ * Used for real-time prediction/analysis
+ */
+export function extractFeaturesForNumber(
+  history: Draw[],
+  number: number,
+  currentIdx: number,
+  churnThreshold?: number
+): {
+  freqFortnight: number;
+  freqMonth: number;
+  freqQuarter: number;
+  freqTotal: number;
+  tenure: number;
+  timeSinceLast: number;
+  zpaGroup: number;
+  churned?: boolean;
+} {
+  const K = churnThreshold ?? 12;
+
+  function countInWindow(endIdx: number, win: number): number {
+    let c = 0;
+    for (let t = Math.max(0, endIdx - win + 1); t <= endIdx; t++) {
+      const d = history[t];
+      if (d.main.includes(number) || (d.supp && d.supp.includes(number))) c++;
+    }
+    return c;
+  }
+
+  // Find first and last occurrence
+  let firstSeen = -1;
+  let lastSeen = -1;
+  for (let t = 0; t <= currentIdx; t++) {
+    const d = history[t];
+    if (d.main.includes(number) || (d.supp && d.supp.includes(number))) {
+      if (firstSeen === -1) firstSeen = t;
+      lastSeen = t;
+    }
+  }
+
+  const freqFortnight = countInWindow(currentIdx, 6);
+  const freqMonth = countInWindow(currentIdx, 12);
+  const freqQuarter = countInWindow(currentIdx, 36);
+  const freqTotal = countInWindow(currentIdx, currentIdx + 1);
+
+  const tenure = firstSeen >= 0 ? currentIdx - firstSeen + 1 : 0;
+  const timeSinceLast = lastSeen >= 0 ? currentIdx - lastSeen : currentIdx + 1;
+
+  // Simple ZPA group assignment (number / 5)
+  const zpaGroup = Math.floor((number - 1) / 5);
+
+  const churned = timeSinceLast > K;
+
+  return {
+    freqFortnight,
+    freqMonth,
+    freqQuarter,
+    freqTotal,
+    tenure,
+    timeSinceLast,
+    zpaGroup,
+    churned,
+  };
+}
