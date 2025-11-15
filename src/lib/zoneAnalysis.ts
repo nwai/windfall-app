@@ -1,26 +1,50 @@
 /**
  * Zone Pattern Analysis utilities
  *
- * Divides numbers 1-45 into 9 zones and analyzes patterns and trends.
+ * Divides numbers 1-45 into zones and analyzes patterns and trends.
+ * UPDATED: 15 zones (3 numbers each) replacing previous 9-zone scheme.
  */
 
 import { Draw } from '../types';
 
-// 9 zones: 1-5, 6-10, 11-15, 16-20, 21-25, 26-30, 31-35, 36-40, 41-45
+/**
+ * ZONE_RANGES now defines 15 zones:
+ * Zone 1: 1-3
+ * Zone 2: 4-6
+ * Zone 3: 7-9
+ * Zone 4: 10-12
+ * Zone 5: 13-15
+ * Zone 6: 16-18
+ * Zone 7: 19-21
+ * Zone 8: 22-24
+ * Zone 9: 25-27
+ * Zone 10: 28-30
+ * Zone 11: 31-33
+ * Zone 12: 34-36
+ * Zone 13: 37-39
+ * Zone 14: 40-42
+ * Zone 15: 43-45
+ */
 export const ZONE_RANGES: Array<[number, number]> = [
-  [1, 5],
-  [6, 10],
-  [11, 15],
-  [16, 20],
-  [21, 25],
-  [26, 30],
-  [31, 35],
-  [36, 40],
-  [41, 45],
+  [1, 3],
+  [4, 6],
+  [7, 9],
+  [10, 12],
+  [13, 15],
+  [16, 18],
+  [19, 21],
+  [22, 24],
+  [25, 27],
+  [28, 30],
+  [31, 33],
+  [34, 36],
+  [37, 39],
+  [40, 42],
+  [43, 45],
 ];
 
 /**
- * Get the zone index (0-8) for a given number (1-45)
+ * Get the zone index (0-14) for a given number (1-45)
  */
 export function getZoneIndex(num: number): number | null {
   if (num < 1 || num > 45) return null;
@@ -32,7 +56,7 @@ export function getZoneIndex(num: number): number | null {
 }
 
 /**
- * Get the zone label (e.g., "Zone 1 (1-5)")
+ * Get the zone label (e.g., "Zone 1 (1-3)")
  */
 export function getZoneLabel(zoneIdx: number): string {
   if (zoneIdx < 0 || zoneIdx >= ZONE_RANGES.length) return '';
@@ -41,11 +65,11 @@ export function getZoneLabel(zoneIdx: number): string {
 }
 
 /**
- * Convert a draw's main numbers to a zone pattern (array of 9 booleans)
+ * Convert a draw's main numbers to a zone pattern (array of booleans)
  * True if the zone is hit, false otherwise
  */
 export function drawToZonePattern(draw: Draw): boolean[] {
-  const pattern = new Array(9).fill(false);
+  const pattern = new Array(ZONE_RANGES.length).fill(false);
   for (const num of draw.main) {
     const zoneIdx = getZoneIndex(num);
     if (zoneIdx !== null) {
@@ -56,7 +80,7 @@ export function drawToZonePattern(draw: Draw): boolean[] {
 }
 
 /**
- * Convert a zone pattern to a compact string key (e.g., "0-2-4-6-8")
+ * Convert a zone pattern to a compact string key (e.g., "0-2-4-7-10")
  */
 export function zonePatternToKey(pattern: boolean[]): string {
   const hitZones: number[] = [];
@@ -80,7 +104,7 @@ export interface AnalyzeZoneTrendsOptions {
   significanceThreshold?: number;
   minMagnitudeThreshold?: number;
   dynamicFactor?: number;
-  // NEW: only use the most recent W draws when computing trends
+  // only use the most recent W draws when computing trends (if provided)
   trendWindow?: number; // e.g., 180; if undefined, use all draws
 }
 
@@ -297,17 +321,20 @@ export function analyzeZoneTrends(
     significanceThreshold = 0.1,
     minMagnitudeThreshold = 0.01,
     dynamicFactor = 0.06,
+    trendWindow,
   } = options;
 
-  const n = draws.length;
+  // Optional: limit to last W draws
+  const drawsUsed = trendWindow && trendWindow > 0 ? draws.slice(-trendWindow) : draws;
+  const n = drawsUsed.length;
   const trends: ZoneTrend[] = [];
 
   // For each zone, track frequency over time
-  for (let zoneIdx = 0; zoneIdx < 9; zoneIdx++) {
+  for (let zoneIdx = 0; zoneIdx < ZONE_RANGES.length; zoneIdx++) {
     const frequencies: number[] = [];
     const timePoints: number[] = [];
 
-    draws.forEach((draw, idx) => {
+    drawsUsed.forEach((draw, idx) => {
       const pattern = drawToZonePattern(draw);
       frequencies.push(pattern[zoneIdx] ? 1 : 0);
       timePoints.push(idx);
@@ -325,7 +352,7 @@ export function analyzeZoneTrends(
       else if (regression.slope < 0) direction = 'down';
     } else {
       // Not significant - use magnitude threshold
-      const threshold = Math.max(minMagnitudeThreshold, dynamicFactor / Math.sqrt(n));
+      const threshold = Math.max(minMagnitudeThreshold, dynamicFactor / Math.sqrt(Math.max(1, n)));
       if (Math.abs(regression.slope) >= threshold) {
         if (regression.slope > 0) direction = 'up';
         else if (regression.slope < 0) direction = 'down';

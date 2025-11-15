@@ -1059,7 +1059,7 @@ const trendRatioDrawsConsidered = useMemo(
        }
      });
  }
-              return 0;
+
 
 
 
