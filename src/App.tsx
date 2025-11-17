@@ -1499,7 +1499,59 @@ const churnDataset = useMemo(
       <GroupPatternPanel key={zpaReloadKey} history={filteredHistory} groups={custom} />
       <GlobalZoneWeighting />
 
-      {/* rest of file continues unchanged — panels, operators, DGA, trace, etc. */}
+      {/* Operators Panel */}
+      <OperatorsPanel
+        history={filteredHistory}
+        onOperatorChange={setOperator}
+        selectedOperator={operator}
+      />
+
+      {/* DGA Visualizer */}
+      <DGAVisualizer
+        history={filteredHistory}
+        cellSize={DGA_CELL_SIZE}
+        onCellClick={handleDgaCellClick}
+        selectedNumbers={selectedNumbers}
+      />
+
+      {/* Trace Panel */}
+      <TracePanel
+        traceData={traceData}
+        onClear={handleClearTrace}
+      />
+
+      {/* Monte Carlo Panel */}
+      <MonteCarloPanel
+        history={filteredHistory}
+        candidateSet={candidateSet}
+        onCandidatesUpdate={setCandidateSet}
+      />
+
+      {/* Additional Panels */}
+      <ConsensusPanel history={filteredHistory} />
+      <ChurnPredictor history={filteredHistory} />
+      <ReturnPredictor history={filteredHistory} />
+      <MultiStateChurnPanel history={filteredHistory} />
+      <SurvivalCoxPanel history={filteredHistory} />
+      <SurvivalFrailtyPanel history={filteredHistory} />
+      <DroughtHazardPanel history={filteredHistory} />
+      <BatesPanel history={filteredHistory} />
+      <ModulationDiagnosticsPanel history={filteredHistory} />
+      <RankingWeightsPanel history={filteredHistory} />
+      <WeightedTargetListPanel history={filteredHistory} />
+      <UserSelectedNumbersPanel
+        selectedNumbers={selectedNumbers}
+        onChange={setSelectedNumbers}
+      />
+      <ParameterSearchPanel />
+      <PatternStatsPanel history={filteredHistory} />
+      <NumberFrequencyPanel history={filteredHistory} />
+      <TargetSetQuickStatsPanel candidateSet={candidateSet} />
+      <WindowStatsPanel history={filteredHistory} />
+      <OGAHistogram history={filteredHistory} />
+      <HeatmapLegendBar />
+      <ToastContainer />
+      <DrawHistoryManager />
     </div>
   );
 };
