@@ -639,7 +639,123 @@ export const SurvivalAnalyzer: React.FC<{
           Custom Window
         </label>
 
-        {/* Additional controls omitted for brevity in this output — unchanged from your working version */}
+        {/* Custom window size inputs */}
+        {useCustomTrendWindow && (
+          <>
+            <label style={{ marginLeft: 8 }}>
+              From:
+              <input
+                type="number"
+                min={1}
+                max={draws.length}
+                value={customWindowFrom}
+                onChange={(e) => setCustomWindowFrom(Number(e.target.value))}
+                style={{ width: 60, margin: "0 4px 0 4px" }}
+              />
+            </label>
+            <label>
+              To:
+              <input
+                type="number"
+                min={1}
+                max={draws.length}
+                value={customWindowTo}
+                onChange={(e) => setCustomWindowTo(Number(e.target.value))}
+                style={{ width: 60, margin: "0 4px 0 4px" }}
+              />
+            </label>
+          </>
+        )}
+
+        {/* Mode buttons */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <label>
+            <input
+              type="radio"
+              name="mode"
+              value="GPWF"
+              checked={mode === "GPWF"}
+              onChange={() => setMode("GPWF")}
+              style={{ marginRight: 4 }}
+            />
+            GPWF
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="mode"
+              value="HC3"
+              checked={mode === "HC3"}
+              onChange={() => setMode("HC3")}
+              style={{ marginRight: 4 }}
+            />
+            HC3
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="mode"
+              value="SDE1"
+              checked={mode === "SDE1"}
+              onChange={() => setMode("SDE1")}
+              style={{ marginRight: 4 }}
+            />
+            SDE1
+          </label>
+        </div>
+
+        {/* Optimizer controls */}
+        <label style={{ marginLeft: 8 }}>
+          <input
+            type="checkbox"
+            checked={useOptimizer}
+            onChange={(e) => setUseOptimizer(e.target.checked)}
+            style={{ marginRight: 6 }}
+          />
+          Optimizer
+        </label>
+        {useOptimizer && (
+          <label style={{ marginLeft: 8 }}>
+            Iterations:
+            <input
+              type="number"
+              min={1}
+              max={100}
+              value={optimizerIterations}
+              onChange={(e) => setOptimizerIterations(Number(e.target.value))}
+              style={{ width: 60, margin: "0 4px 0 4px" }}
+            />
+          </label>
+        )}
+
+        {/* Gamma slider */}
+        <label style={{ marginLeft: 8 }}>
+          Gamma:
+          <input
+            type="range"
+            min={0.1}
+            max={2.0}
+            step={0.01}
+            value={gamma}
+            onChange={(e) => setGamma(Number(e.target.value))}
+            style={{ width: 100, margin: "0 4px 0 4px" }}
+          />
+          <span style={{ marginLeft: 4 }}>{gamma.toFixed(2)}</span>
+        </label>
+
+        {/* Sort dropdown */}
+        <label style={{ marginLeft: 8 }}>
+          Sort by:
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value)}
+            style={{ marginLeft: 4 }}
+          >
+            <option value="score">Score</option>
+            <option value="trend">Trend</option>
+            <option value="window">Window</option>
+          </select>
+        </label>
       </div>
 
       {/* Selection strip */}
