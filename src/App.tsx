@@ -227,7 +227,7 @@ function traceFormat(
     "[TRACE START]",
     `History size: ${history.length} draws`,
     // Show EFFECTIVE flags actually used for generation (not the raw defaults)
-    `Effective Flags: OGA=${flags.enableOGA ? "on" : "off"}, Entropy=${flags.entropyEnabled ? "on" : "off"}, Hamming=${flags.hammingEnabled ? "on" : "off"}, Jaccard=${flags.jaccardEnabled ? "on" : "off"}`,
+    `Effective Flags: OGA=${flags.enableOGA ? "on" : "off"}, Entropy=${flags.entropyEnabled ? "on" : "off"}, Hamming=${flags.hammingEnabled ? "on" : "off"}, Jaccard=${flags.jaccardEnabled ? "on" : "off"}, GPWF=${flags.gpwfEnabled ? "on" : "off"}, Lambda=${flags.lambdaEnabled ? "on" : "off"}`,
     // Also show the effective knobs you used
     `Effective Knobs: ${Object.entries(effectiveKnobs).map(([k, v]) => `${k}=${v}`).join(", ")}`,
   ];
