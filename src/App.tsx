@@ -1551,7 +1551,6 @@ const churnDataset = useMemo(
       <OGAHistogram history={filteredHistory} />
       <HeatmapLegendBar />
       <ToastContainer />
-      <DrawHistoryManager />
     </div>
   );
 };
