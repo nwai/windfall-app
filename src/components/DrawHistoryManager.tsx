@@ -13,20 +13,19 @@ import {
 
 type Props = {
   onDrawsUpdated?: (rows: DrawRow[]) => void;
-  mainCount?: number; // default 6
-  suppCount?: number; // default 2
-  minNumber?: number; // default 1
-  maxNumber?: number; // default 45 (Windfall)
-  csvPathHint?: string; // display-only path hint
+  mainCount?: number;
+  suppCount?: number;
+  minNumber?: number;
+  maxNumber?: number;
+  csvPathHint?: string;
 };
 
 function isoToMDYY(iso: string): string {
-  // "2025-10-29" -> "10/29/25"
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
   if (!m) return iso;
   const y = Number(m[1]);
   const yy = String(y % 100).padStart(2, "0");
-  const mm = String(Number(m[2])); // strip leading 0
+  const mm = String(Number(m[2]));
   const dd = String(Number(m[3]));
   return `${mm}/${dd}/${yy}`;
 }
@@ -43,15 +42,13 @@ export default function DrawHistoryManager({
   const [lastFileName, setLastFileName] = useState<string | null>(null);
 
   const [isEntryOpen, setIsEntryOpen] = useState(false);
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0,10)); // YYYY-MM-DD for the date input
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0,10));
   const [mains, setMains] = useState<string[]>(Array(mainCount).fill(""));
   const [supps, setSupps] = useState<string[]>(Array(suppCount).fill(""));
 
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const busyRef = useRef(false);
-
-  const allInputs = useMemo(() => [...mains, ...supps], [mains, supps]);
 
   const pickFile = useCallback(async () => {
     try {
@@ -97,16 +94,13 @@ export default function DrawHistoryManager({
     const suppsNums = supps.map(s => Number(s)).filter(n => Number.isInteger(n));
     if (mainsNums.length !== mainCount) return { ok: false, message: `Enter ${mainCount} main numbers.` };
     if (suppsNums.length !== suppCount) return { ok: false, message: `Enter ${suppCount} supplementary numbers.` };
-
     const all = [...mainsNums, ...suppsNums];
     if (all.some(n => n < minNumber || n > maxNumber)) {
       return { ok: false, message: `Numbers must be between ${minNumber} and ${maxNumber}.` };
     }
-    const set = new Set(all);
-    if (set.size !== all.length) {
+    if (new Set(all).size !== all.length) {
       return { ok: false, message: "Numbers must be unique (no duplicates across main and supplementary)." };
     }
-    // Convert to your CSV date format (M/D/YY)
     const dateForCsv = isoToMDYY(date);
     return { ok: true, row: { date: dateForCsv, mains: mainsNums, supps: suppsNums } };
   }
@@ -114,10 +108,7 @@ export default function DrawHistoryManager({
   const saveNewDraw = useCallback(async () => {
     if (busyRef.current) return;
     const v = validate();
-    if (!v.ok) {
-      setError(v.message);
-      return;
-    }
+    if (!v.ok) { setError(v.message); return; }
     setError(null);
     setStatus("Saving...");
     busyRef.current = true;
@@ -135,23 +126,17 @@ export default function DrawHistoryManager({
       } catch {
         existing = "";
       }
-
       const updatedCsv = prependRowToCsv(existing, v.row);
-
       try {
         await writeCsvToHandle(handle!, updatedCsv);
         setStatus(`Saved to ${lastFileName ?? "selected file"}.`);
       } catch (writeErr: any) {
-        const msg = writeErr?.message ?? String(writeErr);
-        setStatus(`Write not permitted (${msg}). Offered download instead.`);
+        setStatus(`Write not permitted. Offered download instead.`);
         downloadCsvFallback("windfall_history_lottolyzer.csv", updatedCsv);
       }
-
-      // Re-parse and notify app
       const { rows } = parseCsv(updatedCsv);
       onDrawsUpdated?.(rows);
       broadcastDrawHistoryUpdated({ rows, added: v.row });
-
       resetEntry();
     } catch (e: any) {
       setError(e?.message ?? String(e));
@@ -159,8 +144,6 @@ export default function DrawHistoryManager({
       busyRef.current = false;
     }
   }, [fileHandle, lastFileName, onDrawsUpdated, resetEntry]);
-
-  const infoHint = csvPathHint ? `Target CSV: ${csvPathHint}` : undefined;
 
   return (
     <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12, margin: "8px 0" }}>
@@ -170,59 +153,32 @@ export default function DrawHistoryManager({
         <button type="button" onClick={pickFile}>{fileHandle ? "Change CSV file…" : "Select CSV file…"}</button>
         {lastFileName && <span style={{ color: "#555" }}>Selected: {lastFileName}</span>}
       </div>
-
-      {infoHint && <div style={{ marginTop: 6, fontSize: 12, color: "#666" }}>{infoHint}</div>}
-
+      {csvPathHint && <div style={{ marginTop: 6, fontSize: 12, color: "#666" }}>Target CSV: {csvPathHint}</div>}
       {isEntryOpen && (
-        <div style={{ marginTop: 12 }}>
-          <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-            <label>
-              Date:
-              <input type="date" value={date} onChange={e => setDate(e.target.value)} />
-            </label>
-
-            <div>
-              <div style={{ fontWeight: 600, marginBottom: 4 }}>Main numbers ({mainCount}):</div>
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                {Array.from({ length: mainCount }).map((_, i) => (
-                  <input
-                    key={`m${i}`}
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    placeholder={`M${i+1}`}
-                    value={mains[i] ?? ""}
-                    onChange={(e) => onChangeMain(i, e.target.value)}
-                    style={{ width: 56 }}
-                  />
-                ))}
-              </div>
+        <div style={{ marginTop: 12, display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <label> Date: <input type="date" value={date} onChange={e => setDate(e.target.value)} /> </label>
+          <div>
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>Main numbers ({mainCount}):</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {Array.from({ length: mainCount }).map((_, i) => (
+                <input key={`m${i}`} inputMode="numeric" pattern="[0-9]*" placeholder={`M${i+1}`} value={mains[i] ?? ""} onChange={(e) => onChangeMain(i, e.target.value)} style={{ width: 56 }} />
+              ))}
             </div>
-
-            <div>
-              <div style={{ fontWeight: 600, marginBottom: 4 }}>Supplementary ({suppCount}):</div>
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                {Array.from({ length: suppCount }).map((_, i) => (
-                  <input
-                    key={`s${i}`}
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    placeholder={`S${i+1}`}
-                    value={supps[i] ?? ""}
-                    onChange={(e) => onChangeSupp(i, e.target.value)}
-                    style={{ width: 56 }}
-                  />
-                ))}
-              </div>
+          </div>
+          <div>
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>Supplementary ({suppCount}):</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {Array.from({ length: suppCount }).map((_, i) => (
+                <input key={`s${i}`} inputMode="numeric" pattern="[0-9]*" placeholder={`S${i+1}`} value={supps[i] ?? ""} onChange={(e) => onChangeSupp(i, e.target.value)} style={{ width: 56 }} />
+              ))}
             </div>
           </div>
         </div>
       )}
-
       <div style={{ marginTop: 8, minHeight: 20 }}>
         {error && <div style={{ color: "crimson" }}>Error: {error}</div>}
         {!error && status && <div style={{ color: "#2a6" }}>{status}</div>}
       </div>
-
       <div style={{ marginTop: 8, fontSize: 12, color: "#666" }}>
         Tip: Direct file updates work in Chrome/Edge on localhost or HTTPS. If permission is denied, you’ll get a download of the updated CSV; replace your file with it.
       </div>

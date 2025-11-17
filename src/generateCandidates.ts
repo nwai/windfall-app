@@ -21,6 +21,7 @@ export interface GenerateCandidatesResult {
     repeatUnion: number;
     trendRatio: number;
     sumRange: number;        // NEW
+    patternConstraint: number; // NEW
     exclusions: number;
     totalAttempts: number;
     accepted: number;
@@ -28,6 +29,41 @@ export interface GenerateCandidatesResult {
 }
 
 const DEBUG = false;
+
+/* ------------------------ Pattern helpers (top-level) ----------------------- */
+
+const SUM_LOW_MAX = 22;
+
+function computeCandidatePattern(main: number[], supp: number[]) {
+  const all = [...main, ...supp];
+  const low = all.filter(n => n <= SUM_LOW_MAX).length;
+  const high = all.length - low;
+  const even = all.filter(n => n % 2 === 0).length;
+  const odd = all.length - even;
+  const sum = all.reduce((a, b) => a + b, 0);
+  return { low, high, even, odd, sum };
+}
+
+function matchesAnyPattern(
+  pat: { low: number; high: number; even: number; odd: number; sum: number },
+  set: { low: number; high: number; even: number; odd: number; sum: number }[] | undefined,
+  sumTol: number
+): number {
+  if (!set || set.length === 0) return 0;
+  let m = 0;
+  for (const s of set) {
+    if (
+      s.low === pat.low &&
+      s.high === pat.high &&
+      s.even === pat.even &&
+      s.odd === pat.odd &&
+      Math.abs(s.sum - pat.sum) <= sumTol
+    ) {
+      m++;
+    }
+  }
+  return m;
+}
 
 /**
  * Generate candidate draw sets with layered rejection filters.
@@ -55,7 +91,14 @@ export function generateCandidates(
   trendMap?: Map<number, TrendClass>,
   allowedTrendRatios?: string[],
   // NEW: optional sum filter
-  sumFilter?: { enabled?: boolean; min?: number; max?: number; includeSupp?: boolean }
+  sumFilter?: { enabled?: boolean; min?: number; max?: number; includeSupp?: boolean },
+  // NEW: optional pattern constraints (low/high/even/odd + sum tolerance)
+  patternOptions?: {
+    constraints?: { low: number; high: number; even: number; odd: number; sum: number }[];
+    mode?: 'boost' | 'restrict';
+    boostFactor?: number;   // not used here; applied in App ranking
+    sumTolerance?: number;  // default 0 means exact sum
+  }
 ): GenerateCandidatesResult {
 
   if (DEBUG) {
@@ -71,7 +114,8 @@ export function generateCandidates(
       minFromRecentUnionM,
       hasTrendMap: !!trendMap,
       allowedTrendRatios,
-      sumFilter
+      sumFilter,
+      patternOptions
     });
   }
 
@@ -89,6 +133,7 @@ export function generateCandidates(
     repeatUnion: 0,
     trendRatio: 0,
     sumRange: 0,      // NEW
+    patternConstraint: 0, // NEW
     exclusions: 0,
     totalAttempts: 0,
     accepted: 0
@@ -237,7 +282,7 @@ export function generateCandidates(
       if (ratio === "0:8" || ratio === "8:0") { stats.tricky++; continue; }
     }
 
-// Repeat-mode union minimum hits
+    // Repeat-mode union minimum hits
     if (recentUnion && minFromRecentUnionM > 0) {
       const ru = recentUnion; // Set<number> (non-null inside this block)
       let hits = 0;
@@ -272,13 +317,31 @@ export function generateCandidates(
       }
     }
 
+    // NEW: Pattern constraint (restrict mode only; boost happens in App ranking)
+if (patternOptions?.constraints?.length && patternOptions?.mode === 'restrict') {
+      const pat = computeCandidatePattern(main, supp);
+      const sumTol = Math.max(0, patternOptions?.sumTolerance ?? 0);
+      const m = matchesAnyPattern(pat, patternOptions.constraints, sumTol);
+      if (m === 0) {
+        stats.patternConstraint++;
+        if (DEBUG) console.log('[generateCandidates] pattern reject', pat);
+        continue;
+      }
+    }
+
     // Entropy / distance / similarity filters
     if (knobs.enableEntropy && entropy({ main, supp }) < entropyThreshold) { stats.entropy++; continue; }
     if (knobs.enableHamming && minHamming({ main, supp }, history) < hammingThreshold) { stats.hamming++; continue; }
     if (knobs.enableJaccard && maxJaccard({ main, supp }, history) > jaccardThreshold) { stats.jaccard++; continue; }
 
     // ACCEPT
-    candidates.push({ main, supp });
+    let patternMatches = 0;
+    if (patternOptions?.constraints?.length) {
+      const pat = computeCandidatePattern(main, supp);
+      const sumTol = Math.max(0, patternOptions?.sumTolerance ?? 0);
+      patternMatches = matchesAnyPattern(pat, patternOptions.constraints, sumTol);
+    }
+    candidates.push({ main, supp, patternMatches } as any);
     stats.accepted++;
   }
 

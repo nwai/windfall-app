@@ -49,6 +49,7 @@ export type CandidateSet = {
   matchedNumbers?: number[];
   numMatches?: number;
   matchHistoryFrequency?: number;
+  patternMatches?: number;
 };
 
 
