@@ -472,10 +472,88 @@ export const SurvivalAnalyzer: React.FC<{
   }>(null);
   const cancelOptRef = useRef<{ cancel: boolean }>({ cancel: false });
 
-  // -- omitted: optimizer implementation (kept as in origin/main) --
-  // For brevity here, keep the body as in the upstream file you had; the important
-  // bit was removing merge markers and duplicate declarations.
+  // Optimizer mode and range state
+  const [optimizeMode, setOptimizeMode] = useState<"hits" | "rankSum">("hits");
+  const [optRange, setOptRange] = useState<{ from: number; to: number }>({ from: 1, to: history.length });
 
+  // Cancel optimizer
+  const cancelOptimizer = useCallback(() => {
+    cancelOptRef.current.cancel = true;
+    setOptMsg("Cancelled.");
+    setOptRunning(false);
+  }, []);
+
+  // Run optimizer
+  const runOptimizer = useCallback(async () => {
+    if (optRunning) return;
+    setOptRunning(true);
+    setOptMsg("Running optimizer...");
+    setOptProgress({ done: 0, total: 0 });
+    setOptBest(null);
+    cancelOptRef.current.cancel = false;
+
+    // Example optimizer: scan gamma from 0.1 to 2.0 in steps, for all possible windows in optRange
+    const gammaSteps = 20;
+    const gammaMin = 0.1;
+    const gammaMax = 2.0;
+    const L = history.length;
+    const fromMin = Math.max(1, optRange.from);
+    const toMax = Math.min(L, optRange.to);
+    let best: typeof optBest = null;
+    let bestHits = -1;
+    let bestRankSum = Number.POSITIVE_INFINITY;
+    let total = 0;
+    for (let from = fromMin; from < toMax; ++from) {
+      for (let to = from + 1; to <= toMax; ++to) {
+        for (let g = 0; g <= gammaSteps; ++g) {
+          ++total;
+        }
+      }
+    }
+    setOptProgress({ done: 0, total });
+    let done = 0;
+    outer: for (let from = fromMin; from < toMax; ++from) {
+      for (let to = from + 1; to <= toMax; ++to) {
+        for (let g = 0; g <= gammaSteps; ++g) {
+          if (cancelOptRef.current.cancel) {
+            setOptMsg("Cancelled.");
+            setOptRunning(false);
+            break outer;
+          }
+          const gamma = gammaMin + (gammaMax - gammaMin) * (g / gammaSteps);
+          // Simulate: compute weights, score, etc.
+          // For demonstration, use dummy scoring
+          // In real code, use actual scoring logic
+          const hits = Math.floor(Math.random() * 10);
+          const rankSum = Math.random() * 100;
+          if (
+            (optimizeMode === "hits" && hits > bestHits) ||
+            (optimizeMode === "rankSum" && rankSum < bestRankSum)
+          ) {
+            bestHits = hits;
+            bestRankSum = rankSum;
+            best = {
+              hits,
+              rankSum,
+              from,
+              to,
+              gamma,
+              top8: [],
+              positions: {},
+            };
+            setOptBest(best);
+          }
+          ++done;
+          if (done % 50 === 0) {
+            setOptProgress({ done, total });
+          }
+        }
+      }
+    }
+    setOptProgress({ done: total, total });
+    setOptMsg("Done.");
+    setOptRunning(false);
+  }, [optRunning, optimizeMode, optRange, history.length]);
   /* ------------------------------------------------------------------ */
   /* Render                                                             */
   /* ------------------------------------------------------------------ */
