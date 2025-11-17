@@ -1,8 +1,4 @@
-<<<<<<< HEAD
 import React, { useState, useMemo, useEffect, useRef, useCallback } from "react";
-=======
-import React, { useState, useMemo, useEffect, useRef } from "react";
->>>>>>> origin/main
 import { Draw } from "../types";
 import {
   buildGPWFNumberWeights,
@@ -87,25 +83,12 @@ export const SurvivalAnalyzer: React.FC<{
   hideBiasToggles?: boolean;
   forcedNumbers?: number[];
   selectedCheckNumbers?: number[];
-<<<<<<< HEAD
-  focusNumber?: number | null;
-  highlightColor?: string;
-  // FIX: should accept an array of rows, not a single row
-  onStats?: (rows: { number: number; baseProb: number; biasedProb: number }[]) => void;
-  selectable?: boolean;
-  initialSelected?: number[];
-  onSelectionChange?: (nums: number[]) => void;
-  // Pattern bias inputs
-  patternsSelected?: WindowPattern[];
-  patternSumTolerance?: number; // ± tolerance for sum match (default 0)
-=======
   focusNumber?: number | null; // highlight number in table
   highlightColor?: string;
   onStats?: (rows: { number: number; baseProb: number; biasedProb: number }[]) => void;
   selectable?: boolean;                      // default true: allow clicking rows to toggle highlight
   initialSelected?: number[];               // initial selection set (do not pass a new array each render)
   onSelectionChange?: (nums: number[]) => void; // callback on selection changes
->>>>>>> origin/main
 }> = ({
   history,
   excludedNumbers,
@@ -118,19 +101,6 @@ export const SurvivalAnalyzer: React.FC<{
   forcedNumbers = [],
   selectedCheckNumbers = [],
   focusNumber = null,
-<<<<<<< HEAD
-=======
-  // IMPORTANT: do NOT default to [] here (would create a new array each render)
->>>>>>> origin/main
-  highlightColor = "#3BD759",
-  onStats,
-  selectable = true,
-  initialSelected,
-  onSelectionChange,
-<<<<<<< HEAD
-  patternsSelected = [],
-  patternSumTolerance = 0,
-=======
 >>>>>>> origin/main
 }) => {
   /* ------------------------------------------------------------------ */
@@ -426,7 +396,6 @@ export const SurvivalAnalyzer: React.FC<{
   }, [enriched, onStats]);
 
 
->>>>>>> origin/main
   const sortedStats = useMemo(() => {
     const arr = enriched.slice();
     if (sortBy === "biased")
@@ -1114,7 +1083,6 @@ export const SurvivalAnalyzer: React.FC<{
         </span>
       </div>
 
-<<<<<<< HEAD
       {/* Selection strip */}
       <div style={{ fontSize: 12, color: "#666", width: "100%" }}>
         {((selectedCheckNumbers?.length ?? 0) === 0 && selectedNums.size === 0) &&
@@ -1134,14 +1102,6 @@ export const SurvivalAnalyzer: React.FC<{
           <b>Selection:</b>
           {selectedNums.size ? (
             <span>{Array.from(selectedNums).sort((a, b) => a - b).join(", ")}</span>
-=======
-      {/* NEW: selection strip */}
-      {selectable && (
-        <div style={{ margin: "6px 0 10px 0", fontSize: 13, display: "flex", alignItems: "center", gap: 10 }}>
-          <b>Selection:</b>
-          {selectedNums.size ? (
-            <span>{Array.from(selectedNums).sort((a,b)=>a-b).join(", ")}</span>
->>>>>>> origin/main
           ) : (
             <span style={{ color: "#777" }}>none</span>
           )}
@@ -1340,7 +1300,6 @@ export const SurvivalAnalyzer: React.FC<{
                   </tr>
                 </thead>
                 <tbody>
-<<<<<<< HEAD
                   {col.map((res: any, i: number) => {
                     const isSelected = selectedNums.has(res.number);
                     const isFocused = res.number === focusNumber;
@@ -1404,61 +1363,6 @@ export const SurvivalAnalyzer: React.FC<{
                   })}
                 </tbody>
               </table>
-=======
-                 {col.map((res: any, i: number) => {
-                       const isSelected = selectedNums.has(res.number);
-                       const isFocused = res.number === focusNumber;
-                       const rowIdx = colIdx * Math.ceil(enriched.length / 3) + i + 1;
-
-                       const rowStyle: React.CSSProperties = {
-                         cursor: selectable ? "pointer" : "default",
-                       };
-                       if (isSelected) {
-                         // bright green background when selected
-                         rowStyle.background = "#00ff77";
-                       }
-                       if (isFocused) {
-                         // keep your existing focus highlight; combine with selection
-                         rowStyle.background = isSelected ? "#e6efc2" : "#FFF9C4";
-                         rowStyle.outline = "2px solid #fbc02d";
-                         rowStyle.outlineOffset = "-2px";
-                       }
-
-                       return (
-                         <tr
-                           key={res.number}
-                           style={rowStyle}
-                           onClick={() => toggleSelected(res.number)}
-                           title={selectable ? "Click to toggle highlight for this number" : undefined}
-                         >
-                           <td style={{ padding: "2px 8px", color: "#1976d2" }}>
-                             {rowIdx}
-                           </td>
-                           <td style={{ padding: "2px 8px" }}>
-                             <b>{res.number}</b>
-                           </td>
-                           <td style={{ padding: "2px 8px", textAlign: "right" }}>
-                             {(res.baseProb * 100).toFixed(2)}%
-                           </td>
-                           <td
-                             style={{
-                               padding: "2px 8px",
-                               textAlign: "right",
-                               color: "#00796b",
-                               fontWeight: 700,
-                             }}
-                           >
-                             {(res.biasedProb * 100).toFixed(2)}%
-                           </td>
-                           <td style={{ padding: "2px 8px", textAlign: "right" }}>
-                             {res.lastSeen ? `${res.lastSeen} draws ago` : "Never"}
-                           </td>
-                         </tr>
-                       );
-                     })}
-                   </tbody>
-                 </table>
->>>>>>> origin/main
             ))}
 
             {/* Quick Examples Panel */}
