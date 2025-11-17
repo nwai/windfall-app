@@ -145,7 +145,6 @@ const defaultKnobs: Knobs = {
   gpwf_targeted_mode: false,
 };
 
-<<<<<<< HEAD
 =======
 // Count draws safely (works even if filteredHistory is temporarily undefined)
 const totalDraws = filteredHistory?.length ?? 0;
@@ -2042,32 +2041,6 @@ onSelectionChange={setSelectedNumbers}
 
 <<<<<<< HEAD
 /
-=======
-// Survival (WFMQY window, badges reflect global) — toggles hidden, show forced/selected
-<SurvivalAnalyzer
-  history={filteredHistory}
-  excludedNumbers={allExclusions}
-  probabilityHeading="Probability of Appearance in Next Draw (Per Number):"
-  trendWeights={trendWeights}
-  externalWindowSize={activeWindowSize}
-  enableSDE1Global={knobs.enableSDE1}
-  enableHC3Global={knobs.enableHC3}
-  hideBiasToggles={true}
-  forcedNumbers={trendSelectedNumbers}
-  selectedCheckNumbers={selectedNumbers}
-  focusNumber={focusNumber}
-  highlightColor="#3BD759"
-  onStats={(rows: any[]) =>
-    setSurvivalOut(
-      rows.map((r: any) => ({
-        number: r.number,
-        baseProb: r.baseProb,
-        biasedProb: r.biasedProb,
-      }))
-            )
-          }
-        />
->>>>>>> origin/main
 
 {/* Advanced Survival Analysis and Churn/Return Prediction Models */}
 <details open style={{ marginBottom: 16 }}>
@@ -2093,16 +2066,6 @@ onSelectionChange={setSelectedNumbers}
       modelType="rf" // or "rf"
       onPredictions={setReturnOut}
     />
-<<<<<<< HEAD
-<UserExclusionsStrip
-      title="User Exclusions"
-      excludedNumbers={excludedNumbers}
-      setExcludedNumbers={setExcludedNumbers}
-      orientation="horizontal"
-      labelPosition="bottom"
-      showClearButton={true}
-    />
-=======
 >>>>>>> origin/main
 
     <MultiStateChurnPanel
@@ -2121,7 +2084,6 @@ onSelectionChange={setSelectedNumbers}
 <SurvivalFrailtyPanel
 =======
     <SurvivalFrailtyPanel
->>>>>>> origin/main
       history={filteredHistory}
       excludedNumbers={allExclusions}
       exclusionsSlot={
