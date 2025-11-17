@@ -145,11 +145,8 @@ const defaultKnobs: Knobs = {
   gpwf_targeted_mode: false,
 };
 
-<<<<<<< HEAD
-=======
 // Count draws safely (works even if filteredHistory is temporarily undefined)
 const totalDraws = filteredHistory?.length ?? 0;
->>>>>>> origin/main
 
 // Utilities (unchanged)
 function strictValidateDraws(draws: Draw[]): Draw[] {
@@ -2040,9 +2037,6 @@ onSelectionChange={setSelectedNumbers}
 
 
 
-<<<<<<< HEAD
-/
-=======
 // Survival (WFMQY window, badges reflect global) — toggles hidden, show forced/selected
 <SurvivalAnalyzer
   history={filteredHistory}
@@ -2067,7 +2061,6 @@ onSelectionChange={setSelectedNumbers}
             )
           }
         />
->>>>>>> origin/main
 
 {/* Advanced Survival Analysis and Churn/Return Prediction Models */}
 <details open style={{ marginBottom: 16 }}>
@@ -2093,7 +2086,7 @@ onSelectionChange={setSelectedNumbers}
       modelType="rf" // or "rf"
       onPredictions={setReturnOut}
     />
-<<<<<<< HEAD
+
 <UserExclusionsStrip
       title="User Exclusions"
       excludedNumbers={excludedNumbers}
@@ -2102,8 +2095,6 @@ onSelectionChange={setSelectedNumbers}
       labelPosition="bottom"
       showClearButton={true}
     />
-=======
->>>>>>> origin/main
 
     <MultiStateChurnPanel
       history={filteredHistory}
@@ -2117,11 +2108,10 @@ onSelectionChange={setSelectedNumbers}
       excludedNumbers={allExclusions}
     />
 
-<<<<<<< HEAD
+
 <SurvivalFrailtyPanel
-=======
+
     <SurvivalFrailtyPanel
->>>>>>> origin/main
       history={filteredHistory}
       excludedNumbers={allExclusions}
       exclusionsSlot={
