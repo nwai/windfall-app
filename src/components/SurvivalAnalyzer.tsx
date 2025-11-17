@@ -633,7 +633,7 @@ export const SurvivalAnalyzer: React.FC<{
             HC3 Off
           </span>
         )}
-        {patternsSelected && patternsSelected.length > 0 && (
+        {patternsSelected?.length > 0 && (
           <span
             style={{
               background: "#fff3e0",
