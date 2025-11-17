@@ -14,7 +14,7 @@ export type NumberExample = {
   returnLabel?: 0 | 1;       // among churned, 1 if returned in next H draws (placeholder if not computed)
 };
 
-<<<<<<< HEAD
+
 export type NumberFeatures = {
   number: number;
   freqFortnight: number;
@@ -48,7 +48,7 @@ function countInWindow(history: Draw[], endIdx: number, win: number, n: number) 
 
 export function buildChurnDataset(history: Draw[], opts: BuildChurnOptions): NumberExample[] {
   const K = opts.churnWindowK ?? 12;
-=======
+
 export type BuildChurnOptions = {
   churnWindowK?: number;            // e.g., 12
   returnHorizon?: number;           // e.g., 6
@@ -59,7 +59,7 @@ export function buildChurnDataset(history: Draw[], opts: BuildChurnOptions): Num
   const K = opts.churnWindowK ?? 12;
   const H = opts.returnHorizon ?? 6;
 
->>>>>>> origin/main
+
   const total = history.length;
   const seenFirst: Record<number, number> = {};
   const lastSeen: Record<number, number> = {};
@@ -69,24 +69,24 @@ export function buildChurnDataset(history: Draw[], opts: BuildChurnOptions): Num
     const present = new Set([...d.main, ...d.supp]);
     for (let n = 1; n <= 45; n++) {
       if (present.has(n)) {
-<<<<<<< HEAD
+
         if (seenFirst[n] == null) seenFirst[n] = t + 1; // 1-based index
-=======
+
         if (seenFirst[n] == null) seenFirst[n] = t + 1; // 1-based index for simplicity
->>>>>>> origin/main
+
         lastSeen[n] = t + 1;
       }
     }
   }
 
-<<<<<<< HEAD
+
   const end = total - 1;
   const examples: NumberExample[] = [];
   for (let n = 1; n <= 45; n++) {
     const freqFortnight = countInWindow(history, end, 6, n);
     const freqMonth = countInWindow(history, end, 12, n);
     const freqQuarter = countInWindow(history, end, 36, n);
-=======
+
   function countInWindow(endIdx: number, win: number, n: number) {
     let c = 0;
     for (let t = Math.max(0, endIdx - win + 1); t <= endIdx; t++) {
@@ -102,7 +102,7 @@ export function buildChurnDataset(history: Draw[], opts: BuildChurnOptions): Num
     const freqFortnight = countInWindow(end, 6, n);
     const freqMonth = countInWindow(end, 12, n);
     const freqQuarter = countInWindow(end, 36, n);
->>>>>>> origin/main
+
 
     const first = seenFirst[n] ?? 0;
     const tenure = first ? (end + 1) - first + 1 : 0;
@@ -114,12 +114,12 @@ export function buildChurnDataset(history: Draw[], opts: BuildChurnOptions): Num
 
     const churned = timeSinceLast > K ? 1 : 0;
 
-<<<<<<< HEAD
-=======
+
+
     // Return label requires a rolling/evaluation window; leave undefined for now
     const returnLabel: 0 | 1 | undefined = undefined;
 
->>>>>>> origin/main
+
     examples.push({
       number: n,
       freqFortnight,
@@ -129,7 +129,7 @@ export function buildChurnDataset(history: Draw[], opts: BuildChurnOptions): Num
       timeSinceLast,
       zpaGroup,
       churnLabel: churned as 0 | 1,
-<<<<<<< HEAD
+
       returnLabel: undefined as any,
     });
   }
@@ -201,10 +201,10 @@ export function extractFeaturesForNumber(
     isActive,
     hasReturned,
   };
-=======
+
       returnLabel: returnLabel as any,
     });
   }
   return examples;
->>>>>>> origin/main
+
 }
