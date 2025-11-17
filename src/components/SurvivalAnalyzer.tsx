@@ -460,7 +460,7 @@ export const SurvivalAnalyzer: React.FC<{
   /* ------------------------------------------------------------------ */
   const [optRunning, setOptRunning] = useState(false);
   const [optMsg, setOptMsg] = useState<string>("");
-  const [optProgress, setOptProgress] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
+  // Removed unused optProgress state
   const [optBest, setOptBest] = useState<null | {
     hits: number;
     rankSum: number;
