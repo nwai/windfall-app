@@ -787,7 +787,7 @@ export const SurvivalAnalyzer: React.FC<{
 
           <div style={{ fontSize: 12, color: "#555", marginBottom: 6 }}>
             Using global zone weighting: {zoneWeightingEnabled ? `On (γ=${zoneGamma})` : "Off"}{" "}
-            {patternsSelected && patternsSelected.length > 0 && <>• Pattern bias active (display)</>}
+            {patternsSelected?.length > 0 && <>• Pattern bias active (display)</>}
             {" • Optimizer uses pattern bias: "}
             <b>{usePatternBiasInOptimizer ? "Yes" : "No"}</b>
           </div>
