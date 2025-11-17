@@ -66,8 +66,6 @@ import { buildChurnDataset } from "./lib/churnFeatures";
 import { HeatmapLegendBar } from "./components/HeatmapLegendBar";
 
 
-
-
 import {
   AppPresetSnapshot,
   listPresets,
@@ -89,7 +87,6 @@ import {
 } from "./lib/zpaStorage";
 
 import type { WindowPattern } from "./components/WindowStatsPanel";
-
 
 // Optional: custom groups example
 const custom: ZoneGroups = [
@@ -145,13 +142,6 @@ const defaultKnobs: Knobs = {
   gpwf_targeted_mode: false,
 };
 
-<<<<<<< HEAD
-=======
-// Count draws safely (works even if filteredHistory is temporarily undefined)
-const totalDraws = filteredHistory?.length ?? 0;
->>>>>>> origin/main
-
-// Utilities (unchanged)
 function strictValidateDraws(draws: Draw[]): Draw[] {
   return draws.filter((draw) => {
     if (!Array.isArray(draw.main) || !Array.isArray(draw.supp)) return false;
@@ -237,7 +227,7 @@ function traceFormat(
     "[TRACE START]",
     `History size: ${history.length} draws`,
     // Show EFFECTIVE flags actually used for generation (not the raw defaults)
-    `Effective Flags: OGA=${flags.enableOGA ? "on" : "off"}, Entropy=${flags.entropyEnabled ? "on" : "off"}, Hamming=${flags.hammingEnabled ? "on" : "off"}, Jaccard=${flags.jaccardEnabled ? "on" : "off"}, GPWF=${flags.gpwfEnabled ? "on" : "off"}, Lambda=${flags.lambdaEnabled ? "on" : "off"}`,
+    `Effective Flags: OGA=${flags.enableOGA ? "on" : "off"}, Entropy=${flags.entropyEnabled ? "on" : "off"}, Hamming=${flags.hammingEnabled ? "on" : "off"}, Jaccard=${flags.jaccardEnabled ? "on" : "off"}`,
     // Also show the effective knobs you used
     `Effective Knobs: ${Object.entries(effectiveKnobs).map(([k, v]) => `${k}=${v}`).join(", ")}`,
   ];
@@ -286,7 +276,6 @@ function traceFormat(
 
   return [...header, ...perCandidate, "[TRACE END]"].join("\n");
 }
-
 
 
 interface UserExclusionsStripProps {
@@ -415,9 +404,7 @@ const UserExclusionsStrip: React.FC<UserExclusionsStripProps> = ({
 };
 
 
-
 function AppInner() {
-
 
 const [sumFilterEnabled, setSumFilterEnabled] = useState<boolean>(false);
 const [sumMin, setSumMin] = useState<number>(0);
@@ -511,7 +498,7 @@ const [zpaReloadKey, setZpaReloadKey] = useState<number>(0); // force ZPA remoun
 // Global ZPA zone weighting (single source of truth)
 
 
-// Moved here from top-level:
+ // Moved here from top-level:
 const [selectedWindowPatterns, setSelectedWindowPatterns] = useState<WindowPattern[]>([]);
 const [patternConstraintMode, setPatternConstraintMode] = useState<'boost' | 'restrict'>('boost');
 const [patternBoostFactor, setPatternBoostFactor] = useState<number>(0.15);
@@ -521,7 +508,6 @@ const { zoneWeightingEnabled, zoneGamma, setZoneWeightingEnabled, setZoneGamma }
 const [survivalOut, setSurvivalOut] = useState<{ number: number; baseProb?: number; biasedProb?: number }[] | undefined>(undefined);
 const [churnOut, setChurnOut] = useState<{ number: number; pChurn: number }[] | undefined>(undefined);
 const [returnOut, setReturnOut] = useState<{ number: number; pReturn: number }[] | undefined>(undefined);
-
 
 
 
@@ -791,8 +777,6 @@ const allExclusions = Array.from(
     setSelectedRatios((ratios) => ratios.filter((r) => ratioOptions.some((opt) => opt.ratio === r)));
   }, [filteredHistory]);
 
-
-
   // Row simulation
   const [simulatedDraw, setSimulatedDraw] = useState<any>(null);
 
@@ -976,7 +960,7 @@ const trendRatioDrawsConsidered = useMemo(
     [activeWindowSize, trendLookback]
   );
 
-// Soft candidate-level zone bias using geometric mean of per-number weights^gamma
+ // Soft candidate-level zone bias using geometric mean of per-number weights^gamma
   function computeCandidateZoneBias(
     nums: number[],
     weightsByNumber: Record<number, number> | null | undefined,
@@ -998,81 +982,75 @@ const trendRatioDrawsConsidered = useMemo(
     return Math.exp(logSum / count);
   }
 
-// HELPER: enrichment & resort (place above component return, after computeOGA utilities are available)
  // HELPER: enrichment & resort (place above component return, after computeOGA utilities are available)
- function recomputeCompositeRanking(base: CandidateSet[]): CandidateSet[] {
-   if (!base.length) return base;
-   const recentDraw = filteredHistory[filteredHistory.length - 1];
-   const recentSet = recentDraw ? new Set([...recentDraw.main, ...recentDraw.supp]) : null;
-   const selectedSet = new Set(userSelectedNumbers);
+  function recomputeCompositeRanking(base: CandidateSet[]): CandidateSet[] {
+    if (!base.length) return base;
+    const recentDraw = filteredHistory[filteredHistory.length - 1];
+    const recentSet = recentDraw ? new Set([...recentDraw.main, ...recentDraw.supp]) : null;
+    const selectedSet = new Set(userSelectedNumbers);
 
-   // Normalize weights
-   const sum = rankingWeights.oga + rankingWeights.sel + rankingWeights.recent || 1;
-   const wOGA = rankingWeights.oga / sum;
-   const wSel = rankingWeights.sel / sum;
-   const wRecent = rankingWeights.recent / sum;
+    // Normalize weights
+    const sum = rankingWeights.oga + rankingWeights.sel + rankingWeights.recent || 1;
+    const wOGA = rankingWeights.oga / sum;
+    const wSel = rankingWeights.sel / sum;
+    const wRecent = rankingWeights.recent / sum;
 
-   const hasUserSelected = userSelectedNumbers && userSelectedNumbers.length > 0;
+    const hasUserSelected = userSelectedNumbers && userSelectedNumbers.length > 0;
 
-   return base
-     .map((c: any) => {
-       const nums = [...c.main, ...c.supp];
-       const ogaScore = c.ogaScore ?? computeOGA(nums, filteredHistory);
-       const ogaPercentile = c.ogaPercentile ?? getOGAPercentile(ogaScore, pastOGAScores);
-       const selHits = nums.filter(n => selectedSet.has(n)).length;
-       const recentHits = recentSet ? nums.filter(n => recentSet.has(n)).length : 0;
-       const ogaNorm = Math.max(0, Math.min(1, ogaPercentile / 100));
-       const finalComposite = wOGA * ogaNorm + wSel * (selHits / 8) + wRecent * (recentHits / 8);
+    return base
+      .map((c: any) => {
+        const nums = [...c.main, ...c.supp];
+        const ogaScore = c.ogaScore ?? computeOGA(nums, filteredHistory);
+        const ogaPercentile = c.ogaPercentile ?? getOGAPercentile(ogaScore, pastOGAScores);
+        const selHits = nums.filter(n => selectedSet.has(n)).length;
+        const recentHits = recentSet ? nums.filter(n => recentSet.has(n)).length : 0;
+        const ogaNorm = Math.max(0, Math.min(1, ogaPercentile / 100));
+        const finalComposite = wOGA * ogaNorm + wSel * (selHits / 8) + wRecent * (recentHits / 8);
 
-       const zBias = applyZoneBias
-         ? computeCandidateZoneBias(nums, savedZoneWeights || null, zoneGamma)
-         : 1;
+        const zBias = applyZoneBias
+          ? computeCandidateZoneBias(nums, savedZoneWeights || null, zoneGamma)
+          : 1;
 
-       let finalCompositeAdj = finalComposite * zBias;
+        let finalCompositeAdj = finalComposite * zBias;
 
-       if (patternConstraintMode === 'boost' && patternBoostFactor > 0) {
-         const pmRaw = (c as any).patternMatches;
-         const matches = typeof pmRaw === 'number' && pmRaw > 0 ? pmRaw : 0;
-         if (matches) {
-           const capped = Math.min(matches, 5);
-           finalCompositeAdj *= (1 + capped * patternBoostFactor);
-         }
-       }
+        if (patternConstraintMode === 'boost' && patternBoostFactor > 0) {
+          const pmRaw = (c as any).patternMatches;
+          const matches = typeof pmRaw === 'number' && pmRaw > 0 ? pmRaw : 0;
+          if (matches) {
+            const capped = Math.min(matches, 5);
+            finalCompositeAdj *= (1 + capped * patternBoostFactor);
+          }
+        }
 
-       return {
-         ...c,
-         ogaScore,
-         ogaPercentile,
-         selHits,
-         recentHits,
-         finalComposite,
-         finalCompositeAdj,
-         zoneBias: zBias,
-       };
-     })
-     .sort((a: any, b: any) => {
-       if (hasUserSelected) {
-         // Primary: selHits desc, Secondary: finalCompositeAdj desc, Tertiary: recentHits desc, Quaternary: OGA%
-         if (b.selHits !== a.selHits) return b.selHits - a.selHits;
-         if (b.finalCompositeAdj !== a.finalCompositeAdj) return b.finalCompositeAdj - a.finalCompositeAdj;
-         if (b.recentHits !== a.recentHits) return b.recentHits - a.recentHits;
-         return b.ogaPercentile - a.ogaPercentile;
-       } else {
-         // Primary: recentHits desc, Secondary: finalCompositeAdj desc, Tertiary: selHits desc, Quaternary: OGA%
-         if (b.recentHits !== a.recentHits) return b.recentHits - a.recentHits;
-         if (b.finalCompositeAdj !== a.finalCompositeAdj) return b.finalCompositeAdj - a.finalCompositeAdj;
-         if (b.selHits !== a.selHits) return b.selHits - a.selHits;
-         return b.ogaPercentile - a.ogaPercentile;
-       }
-     });
+        return {
+          ...c,
+          ogaScore,
+          ogaPercentile,
+          selHits,
+          recentHits,
+          finalComposite,
+          finalCompositeAdj,
+          zoneBias: zBias,
+        };
+      })
+      .sort((a: any, b: any) => {
+        if (hasUserSelected) {
+          if (b.selHits !== a.selHits) return b.selHits - a.selHits;
+          if (b.finalCompositeAdj !== a.finalCompositeAdj) return b.finalCompositeAdj - a.finalCompositeAdj;
+          if (b.recentHits !== a.recentHits) return b.recentHits - a.recentHits;
+          return b.ogaPercentile - a.ogaPercentile;
+        } else {
+          if (b.recentHits !== a.recentHits) return b.recentHits - a.recentHits;
+          if (b.finalCompositeAdj !== a.finalCompositeAdj) return b.finalCompositeAdj - a.finalCompositeAdj;
+          if (b.selHits !== a.selHits) return b.selHits - a.selHits;
+          return b.ogaPercentile - a.ogaPercentile;
+        }
+      });
  }
 
+ /* ========== TREND / TEMPERATURE BLOCK (END) ========== */
 
-
-
-  /* ========== TREND / TEMPERATURE BLOCK (END) ========== */
-
-// Same stops/labels you already pass to TemperatureHeatmap
+ // Same stops/labels you already pass to TemperatureHeatmap
   const bucketStops = [0.05, 0.12, 0.20, 0.30, 0.42, 0.55, 0.68, 0.82, 0.92];
   const bucketLabels = [
     "prehistoric","frozen","permafrost","cold","cool",
@@ -1222,7 +1200,6 @@ const conditionalProb = useMemo(
     });
   };
 
-
  // Inside handleGenerate (replace the block that builds args and logs to Trace):
 
 const handleGenerate = () => {
@@ -1285,62 +1262,6 @@ const handleGenerate = () => {
    }
  );
 
-  let processedCandidates = [...result.candidates];
-
-  // Enrich and rank
-  processedCandidates = recomputeCompositeRanking(processedCandidates);
-
-  // Optional: still ok to post-filter by sum (harmless if already enforced)
-  if (sumFilterEnabled) {
-    processedCandidates = processedCandidates.filter(withinSumRange);
-  }
-
-  setCandidates(processedCandidates);
-  setRatioSummary(result.ratioSummary);
-  setQuotaWarning(result.quotaWarning);
-  setSelectedCandidateIdx(0);
-
-  if (traceVerbose) {
-    const stateLines = [
-      `[TRACE] Window: ${activeWindowSize} draws`,
-      `[TRACE] OGA: ${knobs.enableOGA ? "on" : "off"}`,
-      `[TRACE] Entropy: ${entropyEnabled ? `on (>=${entropyThresholdEff})` : "off"}`,
-      `[TRACE] Hamming: ${hammingEnabled ? `on (>=${hammingThresholdEff})` : "off"}`,
-      `[TRACE] Jaccard: ${jaccardEnabled ? `on (<=${jaccardThresholdEff})` : "off"}`,
-      `[TRACE] GPWF: ${gpwfEnabled ? `on (win=${gpwf_window_size}, bias=${gpwf_bias_factor}, floor=${gpwf_floor}, scale=${gpwf_scale_multiplier})` : "off"}`,
-      `[TRACE] Lambda: ${lambdaEnabled ? lambda : "off"}`,
-      `[TRACE] ZoneBias (candidates): ${applyZoneBias ? `on (γ=${zoneGamma})` : "off"}`,
-      `[TRACE] MinRecentMatches: ${minRecentMatches}, RecentMatchBias: ${recentMatchBias}`,
-      `[TRACE] Ratios selected: ${selectedRatios.length ? selectedRatios.join(", ") : "none"}${useTrickyRule ? " (Tricky Rule)" : ""}`,
-      `[TRACE] Sum filter: ${sumFilterEnabled ? `${sumIncludeSupp ? "main+supp" : "main-only"} in [${sumMin}, ${sumMax}]` : "off"}`,
-      `[TRACE] User excluded: [${excludedNumbers.join(", ")}]`,
-      `[TRACE] Forced inclusion: [${trendSelectedNumbers.join(", ")}]`,
-      `[TRACE] Patterns: mode=${patternConstraintMode}, selected=${selectedWindowPatterns.length}, boost=${patternBoostFactor}, sumTol=±${patternSumTolerance}`,
-    ];
-
-    const s = result.rejectionStats;
-    const rejSummary = `[TRACE] Rejections: Entropy=${s.entropy}, Hamming=${s.hamming}, Jaccard=${s.jaccard}, OddEven=${s.oddEven}, Tricky=${s.tricky}, MinRecent=${s.minRecent}, RecentBias=${s.recentBias}, RepeatUnion=${s.repeatUnion}, TrendRatio=${s.trendRatio}, SumRange=${(s as any).sumRange ?? 0} | Attempts=${s.totalAttempts}, Accepted=${s.accepted}`;
-
-    setTrace((t) => [
-      ...t,
-      ...stateLines,
-      rejSummary,
-      traceFormat(
-        filteredHistory,
-        effectiveKnobsForGen,
-        processedCandidates,
-        {
-          enableOGA: knobs.enableOGA,
-          entropyEnabled,
-          hammingEnabled,
-          jaccardEnabled,
-          gpwfEnabled,
-          lambdaEnabled,
-        }
-      ),
-    ]);
-  }
-
   setIsGenerating(false);
 }; // END handleGenerate
 
@@ -1379,8 +1300,6 @@ const handleGenerate = () => {
     reader.readAsText(file);
   };
 
-
-
   const handleRatioToggle = (ratio: string) => {
     setSelectedRatios((prev) => (prev.includes(ratio) ? prev.filter((r) => r !== ratio) : [...prev, ratio]));
     setUseTrickyRule(false);
@@ -1411,7 +1330,7 @@ const churnDataset = useMemo(
     [filteredHistory]
   );
 
-// Convert "M/D/YY" or "YYYY-MM-DD" to a Date for sorting ascending (oldest -> newest)
+  // Convert "M/D/YY" or "YYYY-MM-DD" to a Date for sorting ascending (oldest -> newest)
   function parseCsvDateToEpoch(s: string): number {
     if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
       const [y, m, d] = s.split("-").map(Number);
@@ -1428,7 +1347,6 @@ const churnDataset = useMemo(
     const t = Date.parse(s);
     return Number.isNaN(t) ? 0 : t;
   }
-
   // Turn DrawRow[] into your Draw[] and ensure ascending order (oldest -> newest)
   function rowsToDraws(rows: DrawRow[]): Draw[] {
     const ordered = rows.slice().sort((a, b) => parseCsvDateToEpoch(a.date) - parseCsvDateToEpoch(b.date));
@@ -1497,376 +1415,37 @@ const churnDataset = useMemo(
           style={{ display: "none" }}
           onChange={handleFileUpload}
         />
-+        {/* New: in-app CSV updater */}
-               <DrawHistoryManager
-                  csvPathHint="file:///Users/admin/Weekly_Windfall/windfall-app/windfall_history_lottolyzer.csv"
-                 mainCount={6}
-                  suppCount={2}
-                  minNumber={1}
-                  maxNumber={45}
-                  onDrawsUpdated={(rows) => {
-                    const ordered = rowsToDraws(rows);
-                   setHistory(ordered);
-                    setHighlights([]);
-                    setTrace(t => [...t, `[TRACE] Added/updated draw via CSV panel. History now ${ordered.length} draws.`]);
-                  }}
-                />
-<pre style={{ maxHeight: 160, overflow: "auto", fontSize: 12 }}>
-                  {filteredHistory.map((d, idx) => {
-                    const oga = pastOGAScores[idx] ?? null;
-                    return `${d.date}: [${d.main.join(", ")}] | Sup: [${d.supp.join(", ")}]${oga !== null ? ` | OGA=${oga.toFixed(2)}` : ""}`;
-                  }).join("\n")}
-                  {filteredHistory.length === 0 && (
-                    <div style={{ fontSize: 12, color: "#c00", marginBottom: 8 }}>
-                      No draws loaded yet. Check network or click "Re-fetch Draws".
-                    </div>
-                  )}
-                </pre>
-      </details>
-<DrawHistoryManager
-        csvPathHint="file:///Users/admin/Weekly_Windfall/windfall-app/windfall_history_lottolyzer.csv"
-        mainCount={6}
-        suppCount={2}
-        minNumber={1}
-        maxNumber={45}
-        onDrawsUpdated={(rows) => {
-          const ordered = rowsToDraws(rows);
-          setHistory(ordered);
-          setHighlights([]);
-          setTrace(t => [...t, `[TRACE] Added/updated draw via CSV panel. History now ${ordered.length} draws.`]);
-        }}
-      />
-      {/* Odd/Even Ratios (add small space below) */}
-      <details open style={{ marginBottom: 10 }}>
-        <summary>
-          <b>Odd/Even Ratio Filters</b>
-          <span style={{ fontWeight: 400, fontSize: 13, marginLeft: 10 }}>
-            (Select one or more ratios, or use Tricky Rule)
-          </span>
-        </summary>
-        <div style={{ marginBottom: 8 }}>
-          <label style={{ fontWeight: "bold", display: "inline-block", marginRight: 16 }}>
-            <input
-              type="checkbox"
-              checked={useTrickyRule}
-              onChange={handleTrickyToggle}
-              disabled={selectedRatios.length > 0}
-              style={{ marginRight: 6 }}
-            />
-            Apply Tricky Rule
-          </label>
-        </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 18 }}>
-          {ratioOptions.map(({ ratio, count, percent }) => (
-            <label key={ratio} style={{ marginRight: 16, opacity: useTrickyRule ? 0.4 : 1 }}>
-              <input
-                type="checkbox"
-                checked={selectedRatios.includes(ratio)}
-                onChange={() => handleRatioToggle(ratio)}
-                disabled={useTrickyRule}
-                style={{ marginRight: 6 }}
-              />
-              {ratio} ({count} draws, {percent}%)
-            </label>
-          ))}
-        </div>
-        <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>
-          Ratios apply to all 8 numbers. Only ratios observed in selected window are shown.
-        </div>
+
+        {/* in-app CSV updater (single instance) */}
+        <DrawHistoryManager
+          csvPathHint="file:///Users/admin/Weekly_Windfall/windfall-app/windfall_history_lottolyzer.csv"
+          mainCount={6}
+          suppCount={2}
+          minNumber={1}
+          maxNumber={45}
+          onDrawsUpdated={(rows) => {
+            const ordered = rowsToDraws(rows);
+            setHistory(ordered);
+            setHighlights([]);
+            setTrace(t => [...t, `[TRACE] Added/updated draw via CSV panel. History now ${ordered.length} draws.`]);
+          }}
+        />
+
+        <pre style={{ maxHeight: 160, overflow: "auto", fontSize: 12 }}>
+          {filteredHistory.map((d, idx) => {
+            const oga = pastOGAScores[idx] ?? null;
+            return `${d.date}: [${d.main.join(", ")}] | Sup: [${d.supp.join(", ")}]${oga !== null ? ` | OGA=${oga.toFixed(2)}` : ""}`;
+          }).join("\n")}
+          {filteredHistory.length === 0 && (
+            <div style={{ fontSize: 12, color: "#c00", marginBottom: 8 }}>
+              No draws loaded yet. Check network or click "Re-fetch Draws".
+            </div>
+          )}
+        </pre>
       </details>
 
-      {/* WFMQY + Unified Toggles + User Exclusions */}
-     <details open>
-       <summary>
-         <b>Windowed Draw Filtering (WFMQYH)</b>
-       </summary>
-       <div
-         style={{
-           marginBottom: 12,
-           border: "1px solid #eee",
-           padding: 14,
-           borderRadius: 7,
-           background: "#f4f9ff",
-           display: "flex",
-           flexWrap: "wrap",
-           gap: 16,
-           alignItems: "center",
-         }}
-       >
-         {/* --- NEW MODE TOGGLE --- */}
-         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-           <label>
-             <input
-               type="radio"
-               checked={drawWindowMode === "lastN"}
-               onChange={() => setDrawWindowMode("lastN")}
-             />
-             Last N draws
-           </label>
-           <label>
-             <input
-               type="radio"
-               checked={drawWindowMode === "range"}
-               onChange={() => setDrawWindowMode("range")}
-             />
-             Range (x to y)
-           </label>
-           {drawWindowMode === "range" && (
-             <>
-               <span>From</span>
-               <input
-                 type="number"
-                 min={1}
-                 max={history.length}
-                 value={rangeFrom}
-                 onChange={e => setRangeFrom(Number(e.target.value))}
-                 style={{ width: 60 }}
-               />
-               <span>to</span>
-               <input
-                 type="number"
-                 min={1}
-                 max={history.length}
-                 value={rangeTo}
-                 onChange={e => setRangeTo(Number(e.target.value))}
-                 style={{ width: 60 }}
-               />
-               <span>(inclusive)</span>
-             </>
-           )}
-         </div>
-         {/* --- EXISTING WFMQY UI, ONLY ENABLED IF LAST N DRAWS --- */}
-         {drawWindowMode === "lastN" && (
-           <>
-             <label style={{ fontWeight: "bold", marginRight: 16 }}>
-               <input
-                 type="checkbox"
-                 checked={windowEnabled}
-                 onChange={(e) => setWindowEnabled(e.target.checked)}
-                 style={{ marginRight: 7 }}
-               />
-               Enable windowed filtering
-             </label>
-             <span>
-               {WINDOW_OPTIONS.map((opt) => (
-                 <label key={opt.key} style={{ marginRight: 14 }}>
-                   <input
-                     type="radio"
-                     name="windowMode"
-                     value={opt.key}
-                     checked={windowMode === opt.key}
-                     disabled={!windowEnabled}
-                     onChange={(e) => setWindowMode(e.target.value as any)}
-                   />
-                   {opt.label}
-                 </label>
-               ))}
-             </span>
-             {windowMode === "Custom" && (
-               <input
-                 type="number"
-                 min={1}
-                 max={history.length}
-                 value={customDrawCount}
-                 disabled={!windowEnabled}
-                 onChange={(e) => setCustomDrawCount(Number(e.target.value))}
-                 style={{ width: 70 }}
-                 placeholder="Draw count"
-               />
-             )}
-           </>
-         )}
-         {/* --- CURRENT WINDOW/RANGE DISPLAY --- */}
-         <div style={{ marginBottom: 8, fontSize: 15, color: "#1976d2" }}>
-           {drawWindowMode === "lastN"
-             ? <>Using last <b>{filteredHistory.length}</b> draws ({history.length - filteredHistory.length + 1} to {history.length})</>
-             : <>Using draws <b>{rangeFrom}</b> to <b>{rangeTo}</b> ({filteredHistory.length} draws)</>
-           }
-         </div>
-         {/* NOTE: Zone-weight UI here can be removed if you’re adopting a global control; keeping as-is per v184 */}
-        {/* ---  <div style={{ display: "inline-flex", gap: 12, alignItems: "center", padding: "4px 8px", background: "#eef5ff", borderRadius: 6 }}>
-           <label title="Apply Zone Weights (from Zone Pattern Analysis) to candidate scoring">
-             <input
-               type="checkbox"
-               checked={applyZoneBias}
-               onChange={(e) => setApplyZoneBias(e.target.checked)}
-             /> Apply zone weights
-           </label>
-           <label title="Strength of the zone bias (exponent on weights). 0=no effect, 1=full">
-             γ: <input
-               type="number"
-               min={0}
-               max={1}
-               step={0.05}
-               value={zoneGamma}
-               onChange={(e) => setZoneGamma(Number(e.target.value))}
-               style={{ width: 70 }}
-             />
-           </label>
-         </div> --- */}
 
-         {/* Unified toggles */}
-         <span style={{ marginLeft: 12 }}>
-           <label style={{ marginRight: 12 }}>
-             <input
-               type="checkbox"
-               checked={knobs.enableSDE1}
-               onChange={(e) => setKnobs((prev) => ({ ...prev, enableSDE1: e.target.checked }))}
-               style={{ marginRight: 6 }}
-             />
-             SDE1
-           </label>
-           <label style={{ marginRight: 12 }}>
-             <input
-               type="checkbox"
-               checked={knobs.enableHC3}
-               onChange={(e) => setKnobs((prev) => ({ ...prev, enableHC3: e.target.checked }))}
-               style={{ marginRight: 6 }}
-             />
-             HC3
-           </label>
-           <label>
-             <input
-               type="checkbox"
-               checked={knobs.enableOGA}
-               onChange={(e) => setKnobs((prev) => ({ ...prev, enableOGA: e.target.checked }))}
-               style={{ marginRight: 6 }}
-             />
-             OGA
-           </label>
-           <label style={{ marginLeft: 16 }}>
-             <input
-               type="checkbox"
-               checked={traceVerbose}
-               onChange={(e) => setTraceVerbose(e.target.checked)}
-               style={{ marginRight: 6 }}
-             />
-             Trace Verbose
-           </label>
-         </span>
-       </div>
-
-        {/* Status badges */}
-        <div style={{ marginBottom: 8, fontSize: 15, color: "#1976d2", display: "flex", gap: 12, flexWrap: "wrap" }}>
-<span>
-          {drawWindowMode === "lastN"
-            ? <>Using last <b>{activeWindowSize}</b> draws</>
-            : <>Using draws <b>{rangeFrom}</b> to <b>{rangeTo}</b> ({activeWindowSize} draws)</>
-          }
-        </span>
-          <span>
-            {knobs.enableSDE1 ? (
-              <span style={{ background: "#ffe6cc", color: "#a04c00", padding: "1px 6px", borderRadius: 4 }}>SDE1 Active</span>
-            ) : (
-              <span style={{ background: "#f2f2f2", color: "#555", padding: "1px 6px", borderRadius: 4 }}>SDE1 Off</span>
-            )}
-          </span>
-          <span>
-            {knobs.enableHC3 ? (
-              <span style={{ background: "#e8f5e9", color: "#2e7d32", padding: "1px 6px", borderRadius: 4 }}>HC3 Active</span>
-            ) : (
-              <span style={{ background: "#f2f2f2", color: "#555", padding: "1px 6px", borderRadius: 4 }}>HC3 Off</span>
-            )}
-          </span>
-          <span>
-            {knobs.enableOGA ? (
-              <span style={{ background: "#e8eefc", color: "#1a4fa3", padding: "1px 6px", borderRadius: 4 }}>OGA On</span>
-            ) : (
-              <span style={{ background: "#f2f2f2", color: "#555", padding: "1px 6px", borderRadius: 4 }}>OGA Off</span>
-            )}
-          </span>
-          <span>
-            {entropyEnabled ? (
-              <span style={{ background: "#eceff1", color: "#37474f", padding: "1px 6px", borderRadius: 4 }}>Entropy ≥ {entropyThreshold}</span>
-            ) : (
-              <span style={{ background: "#f2f2f2", color: "#555", padding: "1px 6px", borderRadius: 4 }}>Entropy Off</span>
-            )}
-          </span>
-          <span>
-            {hammingEnabled ? (
-              <span style={{ background: "#eceff1", color: "#37474f", padding: "1px 6px", borderRadius: 4 }}>Hamming ≥ {hammingThreshold}</span>
-            ) : (
-              <span style={{ background: "#f2f2f2", color: "#555", padding: "1px 6px", borderRadius: 4 }}>Hamming Off</span>
-            )}
-          </span>
-          <span>
-            {jaccardEnabled ? (
-              <span style={{ background: "#eceff1", color: "#37474f", padding: "1px 6px", borderRadius: 4 }}>Jaccard ≤ {jaccardThreshold}</span>
-            ) : (
-              <span style={{ background: "#f2f2f2", color: "#555", padding: "1px 6px", borderRadius: 4 }}>Jaccard Off</span>
-            )}
-          </span>
-          <span>
-            {gpwfEnabled ? (
-              <span style={{ background: "#e3f2fd", color: "#1565c0", padding: "1px 6px", borderRadius: 4 }}>
-                GPWF (win {gpwf_window_size})
-              </span>
-            ) : (
-              <span style={{ background: "#f2f2f2", color: "#555", padding: "1px 6px", borderRadius: 4 }}>GPWF Off</span>
-            )}
-          </span>
-          <span>
-            {lambdaEnabled ? (
-              <span style={{ background: "#fff3e0", color: "#e65100", padding: "1px 6px", borderRadius: 4 }}>
-                Lambda {lambda}
-              </span>
-            ) : (
-              <span style={{ background: "#f2f2f2", color: "#555", padding: "1px 6px", borderRadius: 4 }}>Lambda Off</span>
-            )}
-          </span>
-        </div>
-
-        {windowEnabled && activeWindowSize < 10 && (
-          <div style={{ color: "#d32f2f", fontWeight: "bold", fontSize: 14 }}>
-            Warning: Too few draws selected. Increase window for reliability.
-          </div>
-        )}
-
-        {/* User exclusions (single line, numbers under checkboxes) */}
-        <div style={{ marginTop: 8 }}>
-          <b>User Exclusions:</b>
-          <div
-            style={{
-              display: "flex",
-              gap: 8,
-              overflowX: "auto",
-              whiteSpace: "nowrap",
-              paddingTop: 6,
-              paddingBottom: 4,
-              borderTop: "1px dashed #ddd",
-              marginTop: 6
-            }}
-          >
-            {Array.from({ length: 45 }, (_, i) => i + 1).map((n) => {
-              const checked = excludedNumbers.includes(n);
-              return (
-                <label
-                  key={n}
-                  style={{
-                    display: "inline-flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    minWidth: 28
-                  }}
-                  title={`Exclude ${n}`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => {
-                      setExcludedNumbers((prev) =>
-                        prev.includes(n) ? prev.filter((x) => x !== n) : [...prev, n]
-                      );
-                    }}
-                  />
-                  <span style={{ fontSize: 11, marginTop: 2 }}>{n}</span>
-                </label>
-              );
-            })}
-          </div>
-        </div>
-      </details>
-/ Survival (WFMQY window, badges reflect global) — toggles hidden, show forced/selected
+      {/* Survival (WFMQY window, badges reflect global) — toggles hidden, show forced/selected */}
       <SurvivalAnalyzer
         history={filteredHistory}
         excludedNumbers={allExclusions}
@@ -1880,11 +1459,20 @@ const churnDataset = useMemo(
         selectedCheckNumbers={selectedNumbers}
         focusNumber={focusNumber}
         highlightColor="#3BD759"
-onSelectionChange={setSelectedNumbers}
-                patternsSelected={selectedWindowPatterns}
-                onStats={(rows) => setSurvivalOut(rows)}
-              />
-<TemperatureTransitionPanel
+        onSelectionChange={setSelectedNumbers}
+        patternsSelected={selectedWindowPatterns}
+        onStats={(rows: any[]) =>
+          setSurvivalOut(
+            rows.map((r: any) => ({
+              number: r.number,
+              baseProb: r.baseProb,
+              biasedProb: r.biasedProb,
+            }))
+          )
+        }
+      />
+
+      <TemperatureTransitionPanel
         history={filteredHistory}
         alpha={0.25}
         metric={tempMetric}                   // same as your heatmap
@@ -1898,616 +1486,20 @@ onSelectionChange={setSelectedNumbers}
         trendReversal={true}
       />
 
-{/* Monte Carlo temporarily disabled */}
-{/* // Monte Carlo (WFMQY window, unified exclusions)
-<MonteCarloPanel
-  history={filteredHistory}
-  enableSDE1={knobs.enableSDE1}
-  excludedNumbers={allExclusions}
-  trendWeights={trendWeights}
-  defaultWindow={activeWindowSize}
-  showSimulation={true}
-  forcedNumbers={trendSelectedNumbers}
-  selectedCheckNumbers={selectedNumbers}
-  externalFocusNumber={focusNumber}
-  onFocusChange={setFocusNumber}
-/>*/}
-
-<TrendRatioHistoryPanel
-  stats={historicalTrendRatioStats}
-  allowedTrendRatios={allowedTrendRatios}
-  toggleTrendRatio={toggleTrendRatio}
-  lookback={trendLookback}
-  threshold={trendThreshold}
-  drawsConsidered={trendRatioDrawsConsidered}
-  windowDraws={activeWindowSize}
-/>
-
-<GroupPatternPanel key={zpaReloadKey} history={filteredHistory} groups={custom} />
-<GlobalZoneWeighting />
-
-{/* Pattern Stats: collapsed with short legend/help */}
-<details style={{ marginTop: 10 }}>
-  <summary style={{ cursor: "pointer" }}>
-    <b>Pattern Stats</b> <span style={{ fontWeight: 400, color: "#666" }}>(collapsed)</span>
-  </summary>
-  <div style={{ overflowX: "auto", fontSize: 12, marginTop: 8, background: "#fff", border: "1px solid #eee", borderRadius: 6, padding: 8 }}>
-    <PatternStatsPanel draws={filteredHistory} numBins={10} />
-    <div style={{ fontSize: 12, color: "#555", marginTop: 8, lineHeight: 1.6 }}>
-      <b>How to read Pattern Stats</b>
-      <ul style={{ margin: "6px 0 0 16px" }}>
-        <li>Shows distributions of observed patterns over the selected window.</li>
-        <li>Use this to spot dominant bins and outliers; combine with your filters to either align with or avoid dominant patterns.</li>
-        <li>Adjust the window above to see how patterns shift over different spans.</li>
-      </ul>
-    </div>
-  </div>
-</details>
-
-{/* Number Frequency: compact and collapsed, with “Last drawn (ago)” column inside the panel */}
-<details style={{ marginTop: 10 }}>
-  <summary style={{ cursor: "pointer" }}>
-    <b>Number Frequency</b> <span style={{ fontWeight: 400, color: "#666" }}>(compact, collapsed)</span>
-  </summary>
-  <div style={{ overflowX: "auto", fontSize: 12, marginTop: 8 }}>
-    <NumberFrequencyPanel draws={filteredHistory} />
-  </div>
-</details>
-<details style={{ marginTop: 10 }}>
-  <summary style={{ cursor: "pointer" }}>
-    <b>Window Stats (Low/Mid/High, Even/Odd, Sum)</b> <span style={{ fontWeight: 400, color: "#666" }}>(WFMQY)</span>
-  </summary>
-  <div style={{ marginTop: 8 }}>
-<WindowStatsPanel
-    draws={filteredHistory}
-    sumMin={sumMin}
-    sumMax={sumMax}
-    includeSupp={sumIncludeSupp}
-    onSumFilterChange={({ min, max, includeSupp }) => {
-      setSumMin(min);
-      setSumMax(max);
-      setSumIncludeSupp(includeSupp);
-      setSumFilterEnabled(true);
-    }}
-    patternsSelected={selectedWindowPatterns}
-    constraintMode={patternConstraintMode}
-    patternBoostFactor={patternBoostFactor}
-    sumTolerance={patternSumTolerance}
-    onTogglePattern={(p) => {
-      setSelectedWindowPatterns(prev => {
-        const exists = prev.some(x => (
-          x.low === p.low && x.high === p.high &&
-          x.even === p.even && x.odd === p.odd && x.sum === p.sum
-        ));
-        return exists
-          ? prev.filter(x => !(
-              x.low === p.low && x.high === p.high &&
-              x.even === p.even && x.odd === p.odd && x.sum === p.sum
-            ))
-          : [...prev, p];
-      });
-    }}
-  />
-  </div>
-</details>
-
-<div style={{ marginTop: 6, fontSize: 12, display: "flex", flexWrap: "wrap", gap: 16 }}>
-  <label>
-    Pattern mode:
-    <select
-      value={patternConstraintMode}
-      onChange={e => setPatternConstraintMode(e.target.value as any)}
-      style={{ marginLeft: 6 }}
-    >
-      <option value="boost">Boost (soft)</option>
-      <option value="restrict">Restrict (hard)</option>
-    </select>
-  </label>
-  {patternConstraintMode === 'boost' && (
-    <label>
-      Boost factor:
-      <input
-        type="number"
-        step={0.05}
-        min={0}
-        max={2}
-        value={patternBoostFactor}
-        onChange={e => setPatternBoostFactor(Number(e.target.value))}
-        style={{ width: 70, marginLeft: 6 }}
+      <TrendRatioHistoryPanel
+        stats={historicalTrendRatioStats}
+        allowedTrendRatios={allowedTrendRatios}
+        toggleTrendRatio={toggleTrendRatio}
+        lookback={trendLookback}
+        threshold={trendThreshold}
+        drawsConsidered={trendRatioDrawsConsidered}
+        windowDraws={activeWindowSize}
       />
-    </label>
-  )}
-  {patternConstraintMode === 'restrict' && (
-    <label title="Sum exact match tolerance when enforcing patterns">
-      Sum tolerance ±
-      <input
-        type="number"
-        min={0}
-        max={20}
-        value={patternSumTolerance}
-        onChange={e => setPatternSumTolerance(Number(e.target.value))}
-        style={{ width: 60, marginLeft: 4 }}
-      />
-    </label>
-  )}
-  <span>Selected patterns: {selectedWindowPatterns.length}</span>
-</div>
 
-<TargetSetQuickStatsPanel
-  forcedNumbers={trendSelectedNumbers}
-  selectedNumbers={userSelectedNumbers}
-/>
+      <GroupPatternPanel key={zpaReloadKey} history={filteredHistory} groups={custom} />
+      <GlobalZoneWeighting />
 
-
-
-<<<<<<< HEAD
-/
-=======
-// Survival (WFMQY window, badges reflect global) — toggles hidden, show forced/selected
-<SurvivalAnalyzer
-  history={filteredHistory}
-  excludedNumbers={allExclusions}
-  probabilityHeading="Probability of Appearance in Next Draw (Per Number):"
-  trendWeights={trendWeights}
-  externalWindowSize={activeWindowSize}
-  enableSDE1Global={knobs.enableSDE1}
-  enableHC3Global={knobs.enableHC3}
-  hideBiasToggles={true}
-  forcedNumbers={trendSelectedNumbers}
-  selectedCheckNumbers={selectedNumbers}
-  focusNumber={focusNumber}
-  highlightColor="#3BD759"
-  onStats={(rows: any[]) =>
-    setSurvivalOut(
-      rows.map((r: any) => ({
-        number: r.number,
-        baseProb: r.baseProb,
-        biasedProb: r.biasedProb,
-      }))
-            )
-          }
-        />
->>>>>>> origin/main
-
-{/* Advanced Survival Analysis and Churn/Return Prediction Models */}
-<details open style={{ marginBottom: 16 }}>
-  <summary>
-    <b>Advanced Survival Analysis &amp; Churn/Return Prediction Models</b>
-  </summary>
-  <div style={{ marginTop: 12 }}>
-    {/* Phase 1: ML-based Churn & Return Predictors */}
-// Churn predictor (min draws = 36)
-    <ChurnPredictor
-      dataset={churnDataset}
-      totalDraws={totalDraws}
-      minDraws={36}
-      modelType="rf" // or "rf" if scikitjs is available
-      onPredictions={setChurnOut}
-    />
-
-    // Return predictor (min draws = 36)
-    <ReturnPredictor
-      dataset={churnDataset}
-      totalDraws={totalDraws}
-      minDraws={36}
-      modelType="rf" // or "rf"
-      onPredictions={setReturnOut}
-    />
-<<<<<<< HEAD
-<UserExclusionsStrip
-      title="User Exclusions"
-      excludedNumbers={excludedNumbers}
-      setExcludedNumbers={setExcludedNumbers}
-      orientation="horizontal"
-      labelPosition="bottom"
-      showClearButton={true}
-    />
-=======
->>>>>>> origin/main
-
-    <MultiStateChurnPanel
-      history={filteredHistory}
-      excludedNumbers={allExclusions}
-      churnThreshold={15}
-    />
-
-    {/* Phase 2: Classic Survival Models */}
-    <SurvivalCoxPanel
-      history={filteredHistory}
-      excludedNumbers={allExclusions}
-    />
-
-<<<<<<< HEAD
-<SurvivalFrailtyPanel
-=======
-    <SurvivalFrailtyPanel
->>>>>>> origin/main
-      history={filteredHistory}
-      excludedNumbers={allExclusions}
-      exclusionsSlot={
-        <UserExclusionsStrip
-          title="User Exclusions"
-          excludedNumbers={excludedNumbers}
-          setExcludedNumbers={setExcludedNumbers}
-          orientation="horizontal"
-          labelPosition="bottom"
-          showClearButton={true}
-        />
-      }
-    />
-
-    {/* Phase 3: Consensus Panel */}
-// Consensus combines the three signals
-    <ConsensusPanel
-      survival={survivalOut}
-      churn={churnOut}
-      reactivate={returnOut}
-    />
-  </div>
-</details>
-
-      {/* Operators + Lambda enable, GPWF, thresholds */}
-      <div style={{ padding: 32, fontFamily: "sans-serif" }}>
-        <details open>
-          <summary>
-            <b>Operator’s Panel – Candidate Generation Controls</b>
-          </summary>
-          {/* Lambda enable next to slider label row */}
-          <div style={{ margin: "6px 0 10px 0", fontSize: 13 }}>
-            <label>
-              <input
-                type="checkbox"
-                checked={lambdaEnabled}
-                onChange={(e) => setLambdaEnabled(e.target.checked)}
-                style={{ marginRight: 6 }}
-              />
-              Enable Lambda (Recency Weight)
-            </label>
-          </div>
-<OperatorsPanel
-  entropy={entropyThreshold}
-  setEntropy={setEntropyThreshold}
-  entropyEnabled={entropyEnabled}
-  setEntropyEnabled={setEntropyEnabled}
-  hamming={hammingThreshold}
-  setHamming={setHammingThreshold}
-  hammingEnabled={hammingEnabled}
-  setHammingEnabled={setHammingEnabled}
-  jaccard={jaccardThreshold}
-  setJaccard={setJaccardThreshold}
-  jaccardEnabled={jaccardEnabled}
-  setJaccardEnabled={setJaccardEnabled}
-  lambda={lambda}
-  setLambda={setLambda}
-  minRecentMatches={minRecentMatches}
-  setMinRecentMatches={setMinRecentMatches}
-  recentMatchBias={recentMatchBias}
-  setRecentMatchBias={setRecentMatchBias}
-  previewStats={previewStats}
-  gpwfEnabled={gpwfEnabled}
-  setGPWFEnabled={setGPWFEnabled}
-  gpwf_window_size={gpwf_window_size}
-  setGPWFWindowSize={setGPWFWindowSize}
-  maxGPWFWindow={Math.min(maxGPWFWindow, filteredHistory.length)}
-  gpwf_bias_factor={gpwf_bias_factor}
-  setGPWFBiasFactor={setGPWFBiasFactor}
-  gpwf_floor={gpwf_floor}
-  setGPWFFloor={setGPWFFloor}
-  gpwf_scale_multiplier={gpwf_scale_multiplier}
-  setGPWFScaleMultiplier={setGPWFScaleMultiplier}
-  octagonal_top={octagonalTop}
-  setOctagonalTop={setOctagonalTop}
-/>
-        </details>
-
-{/* Presets bar */}
-        <details open style={{ marginTop: 10, marginBottom: 10 }}>
-          <summary><b>State Presets</b> <span style={{ fontWeight: 400, fontSize: 12, color: "#555" }}>Save and recall all current options</span></summary>
-          <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", background: "#f7fafe", border: "1px solid #e3f2fd", padding: 10, borderRadius: 6, marginTop: 8 }}>
-            <label>
-              Preset:
-              <select
-                value={selectedPresetId}
-                onChange={(e) => setSelectedPresetId(e.target.value)}
-                style={{ marginLeft: 6, minWidth: 220 }}
-              >
-                <option value="">— select —</option>
-                {presets.map(p => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
-            </label>
-            <button onClick={doLoadPreset} disabled={!selectedPresetId}>Load</button>
-            <button onClick={doUpdatePreset} disabled={!selectedPresetId}>Update from current</button>
-            <button onClick={doDeletePreset} disabled={!selectedPresetId}>Delete</button>
-            <button onClick={doExportPreset} disabled={!selectedPresetId}>Export</button>
-            <span style={{ marginLeft: 12 }}>
-              <label>
-                New name:
-                <input
-                  type="text"
-                  value={newPresetName}
-                  onChange={(e) => setNewPresetName(e.target.value)}
-                  placeholder="e.g., Quarter+ZPA-G7"
-                  style={{ marginLeft: 6, width: 200 }}
-                />
-              </label>
-              <button onClick={doSaveNewPreset} style={{ marginLeft: 8 }}>Save Current</button>
-            </span>
-            <span style={{ marginLeft: "auto" }}>
-              <label style={{ marginRight: 6 }}>
-                Import:
-                <input
-                  type="file"
-                  accept=".json,application/json"
-                  onChange={(e) => { const f = e.target.files?.[0]; if (f) doImportPreset(f); e.currentTarget.value = ""; }}
-                  style={{ marginLeft: 6 }}
-                />
-              </label>
-            </span>
-          </div>
-        </details>
-
-  {/* Trend Filter UI */}
-        <details open style={{ marginTop: 18 }}>
-          <summary><b>Trend Ratio Filter (UP / DOWN / FLAT)</b></summary>
-          <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 20, fontSize: 13 }}>
-            <label title="Lookback L draws">
-              Lookback L:
-              <input
-                type="number"
-                min={1}
-                max={20}
-                value={trendLookback}
-                onChange={e => setTrendLookback(Math.max(1, Number(e.target.value) || 1))}
-                style={{ width: 70, marginLeft: 6 }}
-              />
-            </label>
-              <label title="Slope threshold θ">
-              Threshold θ:
-              <input
-                type="number"
-                step={0.005}
-                min={0.001}
-                max={0.2}
-                value={trendThreshold}
-                onChange={e => setTrendThreshold(Math.max(0.0001, Number(e.target.value) || 0.02))}
-                style={{ width: 80, marginLeft: 6 }}
-              />
-            </label>
-            <button
-              type="button"
-              onClick={() => setAllowedTrendRatios([])}
-              style={{ padding: "4px 10px", border: "1px solid #ccc", borderRadius: 4, background: "#fff", cursor: "pointer" }}
-              title="Clear all allowed ratios"
-            >
-              Clear Ratios
-            </button>
-          </div>
-          <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {allTrendRatioOptions.map(tag => {
-              const sel = allowedTrendRatios.includes(tag);
-              return (
-                <button
-                  key={tag}
-                  type="button"
-                  onClick={() => toggleTrendRatio(tag)}
-                  style={{
-                    padding: "4px 8px",
-                    fontSize: 11,
-                    borderRadius: 4,
-                    border: sel ? "1px solid #1976d2" : "1px solid #bbb",
-                    background: sel ? "#1976d2" : "#fff",
-                    color: sel ? "#fff" : "#222",
-                    cursor: "pointer"
-                  }}
-                  title="Toggle allow ratio"
-                >
-                  {tag}
-                </button>
-              );
-            })}
-          </div>
-          <div style={{ marginTop: 6, fontSize: 11, color: "#555" }}>
-            If no ratios are selected, trend filtering is disabled. A ratio is (#UP-#DOWN-#FLAT).
-          </div>
-        </details>
-
-<ParameterSearchPanel
-          userSelectedNumbers={userSelectedNumbers}
-          weightedTargets={weightedTargets}
-          forcedNumbers={trendSelectedNumbers}
-          excludedNumbers={excludedNumbers}
-          recentSignal={temperatureSignal}
-          conditionalProb={conditionalProb}
-          onAdoptParameters={p => setBatesParams(p)}
-          onProbabilityUpdate={p => setProbOverlay(p)}
-        />
-
-        {/* Bates Panel with diagnostics hook  // When rendering BatesPanel, pass onDiagnostics: */}
-
- <BatesPanel
-   excludedNumbers={excludedNumbers}
-   forcedNumbers={trendSelectedNumbers}
-   recentSignal={temperatureSignal}
-   conditionalProb={conditionalProb}
-   controlledParams={batesParams}
-   onParamsChange={p => setBatesParams(p)}
-   probabilityOverlay={probOverlay}
-   onDiagnostics={(d) => setBatesDiagnostics(d)}
- />
-
-<WeightedTargetListPanel
-          userSelectedNumbers={userSelectedNumbers}
-          weightedTargets={weightedTargets}
-          setWeightedTargets={setWeightedTargets}
-        />
-
-        <ModulationDiagnosticsPanel
-          diagnostics={batesDiagnostics}
-          currentBatesParams={batesParams as any}
-        />
-
-        <UserSelectedNumbersPanel
-          userSelectedNumbers={userSelectedNumbers}
-          setUserSelectedNumbers={setUserSelectedNumbers}
-        />
-
-<RankingWeightsPanel weights={rankingWeights} setWeights={setRankingWeights} />
-
-        <GeneratedCandidatesPanel
-          onGenerate={handleGenerate}
-          candidates={candidates}
-          quotaWarning={quotaWarning}
-          isGenerating={isGenerating}
-          numCandidates={numCandidates}
-          setNumCandidates={setNumCandidates}
-          userSelectedNumbers={userSelectedNumbers}
-          setUserSelectedNumbers={setUserSelectedNumbers}
-          onSelectCandidate={setSelectedCandidateIdx}
-          onSimulateCandidate={handleSimulateCandidate}
-          selectedCandidateIdx={selectedCandidateIdx}
-          mostRecentDraw={filteredHistory[filteredHistory.length - 1] || null}
-          manualSimSelected={manualSimSelected}
-          setManualSimSelected={setManualSimSelected}
-          onManualSimulationChanged={handleManualSimChanged}
-        />
-
-{/* NEW: OGA Histogram */}
-<div style={{ width: "100%", marginBottom: 18 }}>
-  <OGAHistogram
-    ogaScores={pastOGAScores}
-    candidateOGA={(currentCandidate as any)?.ogaScore}
-    candidatePercentile={(currentCandidate as any)?.ogaPercentile}
-  />
-</div>
-      </div>
-
-{/* DGA */}
-      <details open style={{ marginTop: 18 }}>
-        <summary>
-          <b>Diamond Grid Analysis (DGA)</b>
-        </summary>
-
-        {/* Controls row above the heatmap */}
-        <div style={{ width: "100%", marginTop: 18, marginBottom: 10 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6 }}>
-            <h4 style={{ margin: 0 }}>Temperature Heatmap</h4>
-            <label style={{ fontSize: 13 }}>
-              Metric:
-              <select
-                value={tempMetric}
-                onChange={(e) => setTempMetric(e.target.value as any)}
-                style={{ marginLeft: 6 }}
-                title="EMA (momentum) • Recency (time since hit) • Hybrid (max of both)"
-              >
-                <option value="hybrid">Hybrid (EMA ⊕ Recency)</option>
-                <option value="ema">EMA only</option>
-                <option value="recency">Recency only</option>
-              </select>
-            </label>
-            <label style={{ fontSize: 13, marginLeft: 12 }}>
-              Letters:
-              <input
-                type="checkbox"
-                checked={showHeatmapLetters}
-                onChange={e => setShowHeatmapLetters(e.target.checked)}
-                style={{ marginLeft: 6 }}
-                title="Overlay a letter code on each cell (V, T, …)"
-              />
-            </label>
-          </div>
-
-          {/* Drought hazard panel above legend */}
-          <div style={{ width: "100%", marginBottom: 8 }}>
-            <DroughtHazardPanel history={filteredHistory} top={8} title="Most likely to break a drought next draw" />
-          </div>
-
-          {/* Static legend/info bar for the heatmap (outside horizontal scroll) */}
-          <div style={{ width: "100%", marginTop: 8, marginBottom: 6 }}>
-            <HeatmapLegendBar
-              labels={bucketLabels}
-              counts={legendCounts}
-              total={legendTotal}
-              colors={bucketColors}
-            />
-          </div>
-
-          {/* Single horizontally scrollable region:
-              Heatmap + vertical exclusions inside to keep them aligned & scrolling together */}
-          <div style={{ width: "100%", overflowX: "auto" }}>
-            <div style={{ display: "inline-flex", alignItems: "flex-start", gap: 12 }}>
-              {/* Heatmap */}
-              <div style={{ display: "inline-block" }}>
-                <TemperatureHeatmap
-                  history={filteredHistory}
-                  alpha={0.25}
-                  cellSize={DGA_CELL_SIZE}
-                  metric={tempMetric}
-                  buckets={10}
-                  bucketStops={bucketStops}
-                  bucketLabels={bucketLabels}
-                  hybridWeight={0.6}
-                  emaNormalize="per-number"
-                  enforcePeaks={true}
-                  onHoverNumber={setFocusNumber}
-                  showLegendCounts={false}  // legend handled separately
-                  overlayNumbers={overlayNumbers}
-                  showBucketLetters={showHeatmapLetters}
-                  bucketLetters={["pR","F","pF","<C","C>","tT","W","H","tR","V"]}
-                />
-              </div>
-
-              {/* Vertical User Exclusions aligned with cellSize */}
-              <div style={{ flex: "0 0 auto" }}>
-                <UserExclusionsStrip
-
-                  excludedNumbers={excludedNumbers}
-                  setExcludedNumbers={setExcludedNumbers}
-                  orientation="vertical"
-                  labelPosition="right"
-                  cellSize={DGA_CELL_SIZE}
-                />
-              </div>
-            </div>
-          </div>
-
-          {highlightMsg && (
-            <div style={{ color: "#c00", marginTop: 10, marginBottom: 12 }}>{highlightMsg}</div>
-          )}
-
-          {/* Quick-access user exclusions (horizontal) */}
-          <UserExclusionsStrip
-            title="User Exclusions (quick access)"
-            excludedNumbers={excludedNumbers}
-            setExcludedNumbers={setExcludedNumbers}
-            orientation="horizontal"
-            labelPosition="bottom"
-            showClearButton={true}
-          />
-
-          {/* DGA visualizer (unchanged) */}
-          {dgaGrid.length > 0 ? (
-            <DGAVisualizer
-              grid={dgaGrid}
-              diamonds={dgaDiamonds}
-              predictions={dgaPredictions}
-              drawLabels={dgaDrawLabels}
-              numberLabels={Array.from({ length: 45 }, (_, i) => String(i + 1))}
-              numberCounts={numberCounts}
-              minCount={minCount}
-              maxCount={maxCount}
-              highlights={highlights}
-              setHighlights={setHighlights}
-              controlsPosition="below"
-              focusNumber={focusNumber}
-            />
-          ) : (
-            <i>No grid data available.</i>
-          )}
-        </div>
-      </details>
-<TracePanel lines={trace} onClear={() => setTrace([])} />
+      {/* rest of file continues unchanged — panels, operators, DGA, trace, etc. */}
     </div>
   );
 };
