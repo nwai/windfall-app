@@ -156,10 +156,9 @@ export function extractFeaturesForNumber(
     return c;
   };
 
-  const examplesWindow = history;
-  const ff = freqFortnight(examplesWindow);
-  const fm = freqMonth(examplesWindow);
-  const fq = freqQuarter(examplesWindow);
+  const ff = freqFortnight(history);
+  const fm = freqMonth(history);
+  const fq = freqQuarter(history);
 
   const tenure = firstSeen ? (end + 1) - firstSeen + 1 : 0;
   const timeSinceLast = lastSeenIdx ? (end + 1) - lastSeenIdx + 1 : end + 1;
