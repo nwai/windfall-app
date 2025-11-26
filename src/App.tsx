@@ -1737,7 +1737,7 @@ const churnDataset = useMemo(
 
         {/* Status badges */}
         <div style={{ marginBottom: 8, fontSize: 15, color: "#1976d2", display: "flex", gap: 12, flexWrap: "wrap" }}>
-<span>
+        <span>
           {drawWindowMode === "lastN"
             ? <>Using last <b>{activeWindowSize}</b> draws</>
             : <>Using draws <b>{rangeFrom}</b> to <b>{rangeTo}</b> ({activeWindowSize} draws)</>
