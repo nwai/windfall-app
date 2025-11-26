@@ -1855,7 +1855,7 @@ const churnDataset = useMemo(
           </div>
         </div>
       </details>
-/ Survival (WFMQY window, badges reflect global) — toggles hidden, show forced/selected
+// Survival (WFMQY window, badges reflect global) — toggles hidden, show forced/selected
       <SurvivalAnalyzer
         history={filteredHistory}
         excludedNumbers={allExclusions}
@@ -1869,10 +1869,11 @@ const churnDataset = useMemo(
         selectedCheckNumbers={selectedNumbers}
         focusNumber={focusNumber}
         highlightColor="#3BD759"
-onSelectionChange={setSelectedNumbers}
-                patternsSelected={selectedWindowPatterns}
-                onStats={(rows) => setSurvivalOut(rows)}
-              />
+        onSelectionChange={setSelectedNumbers}
+        patternsSelected={selectedWindowPatterns}
+        onStats={(rows) => setSurvivalOut(rows)}
+        />
+        
 <TemperatureTransitionPanel
         history={filteredHistory}
         alpha={0.25}
