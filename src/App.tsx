@@ -126,8 +126,8 @@ const defaultKnobs: Knobs = {
   enableJaccard: true,
   F: 0.03,
   M: 0.8,
-  Q: 0.04,
-  Y: 0.01,
+  Q: 0.4,
+  Y: 0.1,
   Historical_Weight: 0.05,
   gpwf_window_size: 27,
   gpwf_bias_factor: 0.05,
@@ -1855,6 +1855,9 @@ const churnDataset = useMemo(
           </div>
         </div>
       </details>
+
+      
+      
 // Survival (WFMQY window, badges reflect global) — toggles hidden, show forced/selected
       <SurvivalAnalyzer
         history={filteredHistory}
