@@ -46,8 +46,8 @@ import { UserSelectedNumbersPanel } from "./components/UserSelectedNumbersPanel"
 import { ParameterSearchPanel } from "./components/ParameterSearchPanel";
 import { BatesParameterSet } from "./lib/batesWeightsCore";
 import { WeightedTargetListPanel } from "./components/WeightedTargetListPanel";
-import  { RankingWeightsPanel } from "./components/RankingWeightsPanel";
-import  { TemperatureTransitionPanel } from "./components/TemperatureTransitionPanel";
+import { RankingWeightsPanel } from "./components/RankingWeightsPanel";
+import { TemperatureTransitionPanel } from "./components/TemperatureTransitionPanel";
 import { GroupPatternPanel } from "./components/GroupPatternPanel";
 import { ToastContainer } from "./components/ToastContainer";
 import { PatternStatsPanel } from "./components/candidates/PatternStatsPanel";
@@ -64,10 +64,6 @@ import DrawHistoryManager from "./components/DrawHistoryManager";
 import { DrawRow } from "./lib/drawHistory";
 import { buildChurnDataset } from "./lib/churnFeatures";
 import { HeatmapLegendBar } from "./components/HeatmapLegendBar";
-
-
-
-
 import {
   AppPresetSnapshot,
   listPresets,
@@ -87,11 +83,10 @@ import {
   getSavedNormalizeMode,
   setSavedNormalizeMode,
 } from "./lib/zpaStorage";
-
 import type { WindowPattern } from "./components/WindowStatsPanel";
+import { generateCandidates } from "./generateCandidates";
+import { ModulationDiagnosticsPanel } from "./components/ModulationDiagnosticsPanel";
 
-
-// Optional: custom groups example
 const custom: ZoneGroups = [
   [1,2,3,4,5],
   [6,7,8,9,10],
@@ -145,13 +140,11 @@ const defaultKnobs: Knobs = {
   gpwf_targeted_mode: false,
 };
 
-<<<<<<< HEAD
-=======
 // Count draws safely (works even if filteredHistory is temporarily undefined)
 const totalDraws = filteredHistory?.length ?? 0;
->>>>>>> origin/main
 
-// Utilities (unchanged)
+
+// Utilities
 function strictValidateDraws(draws: Draw[]): Draw[] {
   return draws.filter((draw) => {
     if (!Array.isArray(draw.main) || !Array.isArray(draw.supp)) return false;
@@ -165,6 +158,7 @@ function strictValidateDraws(draws: Draw[]): Draw[] {
     return true;
   });
 }
+
 function getNumberFrequencies(history: Draw[]): Map<number, number> {
   const freq = new Map<number, number>();
   for (const draw of history) {
@@ -998,7 +992,6 @@ const trendRatioDrawsConsidered = useMemo(
     return Math.exp(logSum / count);
   }
 
-// HELPER: enrichment & resort (place above component return, after computeOGA utilities are available)
  // HELPER: enrichment & resort (place above component return, after computeOGA utilities are available)
  function recomputeCompositeRanking(base: CandidateSet[]): CandidateSet[] {
    if (!base.length) return base;
@@ -1065,10 +1058,7 @@ const trendRatioDrawsConsidered = useMemo(
          return b.ogaPercentile - a.ogaPercentile;
        }
      });
- }
-
-
-
+}
 
   /* ========== TREND / TEMPERATURE BLOCK (END) ========== */
 
@@ -1221,7 +1211,6 @@ const conditionalProb = useMemo(
       isSimulated: true,
     });
   };
-
 
  // Inside handleGenerate (replace the block that builds args and logs to Trace):
 
@@ -1898,7 +1887,7 @@ onSelectionChange={setSelectedNumbers}
         trendReversal={true}
       />
 
-{/* Monte Carlo temporarily disabled */}
+{/* Monte Carlo @copilot DO NOT REMOVE temporarily disabled */}
 {/* // Monte Carlo (WFMQY window, unified exclusions)
 <MonteCarloPanel
   history={filteredHistory}
@@ -2038,11 +2027,6 @@ onSelectionChange={setSelectedNumbers}
   selectedNumbers={userSelectedNumbers}
 />
 
-
-
-<<<<<<< HEAD
-/
-=======
 // Survival (WFMQY window, badges reflect global) — toggles hidden, show forced/selected
 <SurvivalAnalyzer
   history={filteredHistory}
@@ -2067,7 +2051,7 @@ onSelectionChange={setSelectedNumbers}
             )
           }
         />
->>>>>>> origin/main
+
 
 {/* Advanced Survival Analysis and Churn/Return Prediction Models */}
 <details open style={{ marginBottom: 16 }}>
@@ -2093,7 +2077,7 @@ onSelectionChange={setSelectedNumbers}
       modelType="rf" // or "rf"
       onPredictions={setReturnOut}
     />
-<<<<<<< HEAD
+
 <UserExclusionsStrip
       title="User Exclusions"
       excludedNumbers={excludedNumbers}
@@ -2102,8 +2086,7 @@ onSelectionChange={setSelectedNumbers}
       labelPosition="bottom"
       showClearButton={true}
     />
-=======
->>>>>>> origin/main
+
 
     <MultiStateChurnPanel
       history={filteredHistory}
@@ -2117,11 +2100,9 @@ onSelectionChange={setSelectedNumbers}
       excludedNumbers={allExclusions}
     />
 
-<<<<<<< HEAD
+
 <SurvivalFrailtyPanel
-=======
     <SurvivalFrailtyPanel
->>>>>>> origin/main
       history={filteredHistory}
       excludedNumbers={allExclusions}
       exclusionsSlot={
@@ -2353,36 +2334,42 @@ onSelectionChange={setSelectedNumbers}
           setUserSelectedNumbers={setUserSelectedNumbers}
         />
 
-<RankingWeightsPanel weights={rankingWeights} setWeights={setRankingWeights} />
+        <div style={{ padding: 32, fontFamily: "sans-serif" }}>
+          <RankingWeightsPanel weights={rankingWeights} setWeights={setRankingWeights} />
 
-        <GeneratedCandidatesPanel
-          onGenerate={handleGenerate}
-          candidates={candidates}
-          quotaWarning={quotaWarning}
-          isGenerating={isGenerating}
-          numCandidates={numCandidates}
-          setNumCandidates={setNumCandidates}
-          userSelectedNumbers={userSelectedNumbers}
-          setUserSelectedNumbers={setUserSelectedNumbers}
-          onSelectCandidate={setSelectedCandidateIdx}
-          onSimulateCandidate={handleSimulateCandidate}
-          selectedCandidateIdx={selectedCandidateIdx}
-          mostRecentDraw={filteredHistory[filteredHistory.length - 1] || null}
-          manualSimSelected={manualSimSelected}
-          setManualSimSelected={setManualSimSelected}
-          onManualSimulationChanged={handleManualSimChanged}
-        />
 
-{/* NEW: OGA Histogram */}
-<div style={{ width: "100%", marginBottom: 18 }}>
-  <OGAHistogram
-    ogaScores={pastOGAScores}
-    candidateOGA={(currentCandidate as any)?.ogaScore}
-    candidatePercentile={(currentCandidate as any)?.ogaPercentile}
-  />
-</div>
+          <GeneratedCandidatesPanel
+            onGenerate={handleGenerate}
+            candidates={candidates}
+            quotaWarning={quotaWarning}
+            isGenerating={isGenerating}
+            numCandidates={numCandidates}
+            setNumCandidates={setNumCandidates}
+            userSelectedNumbers={userSelectedNumbers}
+            setUserSelectedNumbers={setUserSelectedNumbers}
+            onSelectCandidate={setSelectedCandidateIdx}
+            onSimulateCandidate={handleSimulateCandidate}
+            selectedCandidateIdx={selectedCandidateIdx}
+            mostRecentDraw={filteredHistory[filteredHistory.length - 1] || null}
+            manualSimSelected={manualSimSelected}
+            setManualSimSelected={setManualSimSelected}
+            onManualSimulationChanged={handleManualSimChanged}
+            activeOGABand={activeOGABand}
+          />
+
+          <div style={{ width: "100%", marginBottom: 18 }}>
+            <OGAHistogram
+              ogaScores={pastOGAScores}
+              candidateOGA={(currentCandidate as any)?.ogaScore}
+              candidatePercentile={(currentCandidate as any)?.ogaPercentile}
+            />
+          </div>
+        </div>
+
+        <TracePanel lines={trace} onClear={() => setTrace([])} />
       </div>
-
+    );
+  }
 {/* DGA */}
       <details open style={{ marginTop: 18 }}>
         <summary>
@@ -2512,10 +2499,14 @@ onSelectionChange={setSelectedNumbers}
   );
 };
 
-export default function App() {
-  return (
-    <ZPASettingsProvider>
-      <AppInner />
-    </ZPASettingsProvider>
-  );
-}
+ export default function App() {
+   return (
+     <ForcedNumbersProvider>
+       <ZPASettingsProvider>
+         <ErrorBoundary>
+           <AppInner />
+         </ErrorBoundary>
+       </ZPASettingsProvider>
+     </ForcedNumbersProvider>
+   );
+ }
