@@ -98,23 +98,23 @@ export function buildChurnDataset(history: Draw[], opts: BuildChurnOptions): Num
 
   const end = total - 1;
   const examples: NumberExample[] = [];
-  for (let n = 1; n <= 45; n++) {
-    const freqFortnight = countInWindow(end, 6, n);
-    const freqMonth = countInWindow(end, 12, n);
-    const freqQuarter = countInWindow(end, 36, n);
-
-
-    const first = seenFirst[n] ?? 0;
-    const tenure = first ? (end + 1) - first + 1 : 0;
-
-    const last = lastSeen[n] ?? 0;
-    const timeSinceLast = last ? (end + 1) - last + 1 : end + 1;
-
-    const zpaGroup = opts.zpaGroupOf ? opts.zpaGroupOf(n) : 0;
-
-    const churned = timeSinceLast > K ? 1 : 0;
-
-
+      for (let n = 1; n <= 45; n++) {
+          const freqFortnight = countInWindow(end, 6, n);
+          const freqMonth = countInWindow(end, 12, n);
+          const freqQuarter = countInWindow(end, 36, n);
+          
+          
+          const first = seenFirst[n] ?? 0;
+          const tenure = first ? (end + 1) - first + 1 : 0;
+          
+          const last = lastSeen[n] ?? 0;
+          const timeSinceLast = last ? (end + 1) - last + 1 : end + 1;
+          
+          const zpaGroup = opts.zpaGroupOf ? opts.zpaGroupOf(n) : 0;
+          
+          const churned = timeSinceLast > K ? 1 : 0;
+          
+      }
 
     // Return label requires a rolling/evaluation window; leave undefined for now
     const returnLabel: 0 | 1 | undefined = undefined;
@@ -207,4 +207,4 @@ export function extractFeaturesForNumber(
   }
   return examples;
 
-};
+}
