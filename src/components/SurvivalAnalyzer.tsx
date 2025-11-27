@@ -1134,7 +1134,7 @@ export const SurvivalAnalyzer: React.FC<{
           <b>Selection:</b>
           {selectedNums.size ? (
             <span>{Array.from(selectedNums).sort((a, b) => a - b).join(", ")}</span>
-
+            ) : (
       {/* NEW: selection strip */}
       {selectable && (
         <div style={{ margin: "6px 0 10px 0", fontSize: 13, display: "flex", alignItems: "center", gap: 10 }}>
@@ -1458,8 +1458,6 @@ export const SurvivalAnalyzer: React.FC<{
                      })}
                    </tbody>
                  </table>
-
-            ))}
 
             {/* Quick Examples Panel */}
             {showQuickExamples && (
