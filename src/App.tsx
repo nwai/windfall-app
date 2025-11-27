@@ -2064,20 +2064,20 @@ const churnDataset = useMemo(
   </summary>
   <div style={{ marginTop: 12 }}>
     {/* Phase 1: ML-based Churn & Return Predictors */}
-// Churn predictor (min draws = 36)
+
     <ChurnPredictor
       dataset={churnDataset}
       totalDraws={totalDraws}
-      minDraws={36}
+      minDraws={21}
       modelType="rf" // or "rf" if scikitjs is available
       onPredictions={setChurnOut}
     />
 
-    // Return predictor (min draws = 36)
+
     <ReturnPredictor
       dataset={churnDataset}
       totalDraws={totalDraws}
-      minDraws={36}
+      minDraws={21}
       modelType="rf" // or "rf"
       onPredictions={setReturnOut}
     />
@@ -2373,8 +2373,8 @@ const churnDataset = useMemo(
         <TracePanel lines={trace} onClear={() => setTrace([])} />
       </div>
     );
-  }
-{/* DGA */}
+  };
+        {/* DGA */}
       <details open style={{ marginTop: 18 }}>
         <summary>
           <b>Diamond Grid Analysis (DGA)</b>
