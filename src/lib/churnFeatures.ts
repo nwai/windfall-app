@@ -11,9 +11,8 @@ export type NumberExample = {
   zpaGroup: number;          // e.g., group index [0..8]
   // Labels
   churnLabel?: 0 | 1;        // 1 if “churned” in last K draws
-  returnLabel?: 0 | 1;       // among churned, 1 if returned in next H draws (placeholder if not computed)
+  returnLabel?: 0 | 1;       // placeholder if not computed
 };
-
 
 export type NumberFeatures = {
   number: number;
@@ -33,7 +32,7 @@ export type ExtractedFeatures = NumberFeatures & {
 
 export type BuildChurnOptions = {
   churnWindowK?: number;              // e.g., 12
-  returnHorizon?: number;             // e.g., 6
+  returnHorizon?: number;             // e.g., 6 (reserved)
   zpaGroupOf?: (n: number) => number; // optional: number -> ZPA group index
 };
 
@@ -49,17 +48,6 @@ function countInWindow(history: Draw[], endIdx: number, win: number, n: number) 
 export function buildChurnDataset(history: Draw[], opts: BuildChurnOptions): NumberExample[] {
   const K = opts.churnWindowK ?? 12;
 
-export type BuildChurnOptions = {
-  churnWindowK?: number;            // e.g., 12
-  returnHorizon?: number;           // e.g., 6
-  zpaGroupOf?: (n: number) => number; // optional: number -> ZPA group index
-};
-
-export function buildChurnDataset(history: Draw[], opts: BuildChurnOptions): NumberExample[] {
-  const K = opts.churnWindowK ?? 12;
-  const H = opts.returnHorizon ?? 6;
-
-
   const total = history.length;
   const seenFirst: Record<number, number> = {};
   const lastSeen: Record<number, number> = {};
@@ -69,56 +57,29 @@ export function buildChurnDataset(history: Draw[], opts: BuildChurnOptions): Num
     const present = new Set([...d.main, ...d.supp]);
     for (let n = 1; n <= 45; n++) {
       if (present.has(n)) {
-
         if (seenFirst[n] == null) seenFirst[n] = t + 1; // 1-based index
-
-        if (seenFirst[n] == null) seenFirst[n] = t + 1; // 1-based index for simplicity
-
-        lastSeen[n] = t + 1;
+        lastSeen[n] = t + 1; // 1-based
       }
     }
   }
 
-
   const end = total - 1;
   const examples: NumberExample[] = [];
+
   for (let n = 1; n <= 45; n++) {
     const freqFortnight = countInWindow(history, end, 6, n);
     const freqMonth = countInWindow(history, end, 12, n);
     const freqQuarter = countInWindow(history, end, 36, n);
 
-  function countInWindow(endIdx: number, win: number, n: number) {
-    let c = 0;
-    for (let t = Math.max(0, endIdx - win + 1); t <= endIdx; t++) {
-      const d = history[t];
-      if (d.main.includes(n) || d.supp.includes(n)) c++;
-    }
-    return c;
-  }
+    const first = seenFirst[n] ?? 0;
+    const tenure = first ? (end + 1) - first + 1 : 0;
 
-  const end = total - 1;
-  const examples: NumberExample[] = [];
-      for (let n = 1; n <= 45; n++) {
-          const freqFortnight = countInWindow(end, 6, n);
-          const freqMonth = countInWindow(end, 12, n);
-          const freqQuarter = countInWindow(end, 36, n);
-          
-          
-          const first = seenFirst[n] ?? 0;
-          const tenure = first ? (end + 1) - first + 1 : 0;
-          
-          const last = lastSeen[n] ?? 0;
-          const timeSinceLast = last ? (end + 1) - last + 1 : end + 1;
-          
-          const zpaGroup = opts.zpaGroupOf ? opts.zpaGroupOf(n) : 0;
-          
-          const churned = timeSinceLast > K ? 1 : 0;
-          
-      }
+    const last = lastSeen[n] ?? 0;
+    const timeSinceLast = last ? (end + 1) - last + 1 : end + 1;
 
-    // Return label requires a rolling/evaluation window; leave undefined for now
-    const returnLabel: 0 | 1 | undefined = undefined;
+    const zpaGroup = opts.zpaGroupOf ? opts.zpaGroupOf(n) : 0;
 
+    const churned = timeSinceLast > K ? 1 : 0;
 
     examples.push({
       number: n,
@@ -129,10 +90,10 @@ export function buildChurnDataset(history: Draw[], opts: BuildChurnOptions): Num
       timeSinceLast,
       zpaGroup,
       churnLabel: churned as 0 | 1,
-
-      returnLabel: undefined as any,
+      returnLabel: undefined,
     });
   }
+
   return examples;
 }
 
@@ -201,10 +162,4 @@ export function extractFeaturesForNumber(
     isActive,
     hasReturned,
   };
-
-      returnLabel: returnLabel as any,
-    });
-  }
-  return examples;
-
 }

@@ -20,7 +20,10 @@ export interface GeneratedCandidatesPanelProps {
 
   manualSimSelected: number[];
   setManualSimSelected: React.Dispatch<React.SetStateAction<number[]>>;
-  onManualSimulationChanged: () => void;
+  onManualSimulationChanged?: (next: number[]) => void;
+
+  // NEW: make this optional so App.tsx can pass it
+  activeOGABand?: { lower: number; upper: number } | null;
 }
 
 export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> = ({
@@ -38,26 +41,13 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
   mostRecentDraw,
   manualSimSelected,
   setManualSimSelected,
-  onManualSimulationChanged
+  onManualSimulationChanged,
+  activeOGABand,
 }) => {
-
   const selSet = new Set(userSelectedNumbers);
   const recentSet = new Set<number>(
     mostRecentDraw ? [...mostRecentDraw.main, ...mostRecentDraw.supp] : []
   );
-
-  function toggleManualPick(n: number) {
-    setManualSimSelected(prev => {
-      let next: number[];
-      if (prev.includes(n)) next = prev.filter(x => x !== n);
-      else {
-        if (prev.length >= 8) return prev;
-        next = [...prev, n];
-      }
-      return next;
-    });
-    onManualSimulationChanged();
-  }
 
   function renderNumber(n: number) {
     const isSel = selSet.has(n);
@@ -68,7 +58,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
       borderRadius: 14,
       display: "inline-block",
       fontVariantNumeric: "tabular-nums",
-      fontSize: 12
+      fontSize: 12,
     };
     if (isSel && isRecent) {
       return (
@@ -79,7 +69,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
             background: "linear-gradient(90deg,#ffe58a,#fff3c4)",
             fontWeight: 700,
             color: "#c62828",
-            textDecoration: "underline"
+            textDecoration: "underline",
           }}
           title="User-selected & Recently drawn"
         >
@@ -95,7 +85,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
             ...base,
             color: "#d32f2f",
             fontWeight: 700,
-            textDecoration: "underline"
+            textDecoration: "underline",
           }}
           title="User-selected"
         >
@@ -110,7 +100,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
           style={{
             ...base,
             background: "#fff59d",
-            fontWeight: 600
+            fontWeight: 600,
           }}
           title="Recently drawn"
         >
@@ -125,10 +115,25 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
     );
   }
 
+  function toggleManualPick(n: number) {
+    setManualSimSelected((prev) => {
+      const next = prev.includes(n)
+        ? prev.filter((x) => x !== n)
+        : prev.length >= 8
+        ? prev
+        : [...prev, n];
+
+      onManualSimulationChanged?.(next);
+      return next;
+    });
+  }
+
   return (
     <section style={panel}>
       <header style={hdr}>
-        <div style={{ fontWeight: 600 }}>Generated Candidates</div>
+        <div style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
+          Generated Candidates
+        </div>
         <label style={{ fontSize: 12 }}>
           Count:
           <input
@@ -136,25 +141,29 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
             min={1}
             max={500}
             value={numCandidates}
-            onChange={e => setNumCandidates(Math.max(1, Number(e.target.value) || 1))}
+            onChange={(e) =>
+              setNumCandidates(Math.max(1, Number(e.target.value) || 1))
+            }
             style={{ width: 80, marginLeft: 6 }}
           />
         </label>
-        <button
-          type="button"
-          disabled={isGenerating}
-          onClick={onGenerate}
-          style={genBtn(isGenerating)}
-        >
+        <button type="button" disabled={isGenerating} onClick={onGenerate} style={genBtn(isGenerating)}>
           {isGenerating ? "Generating…" : "Generate"}
         </button>
-        {quotaWarning && <span style={{ color: "#d32f2f", fontSize: 12 }}>{quotaWarning}</span>}
+        {quotaWarning && (
+          <span style={{ color: "#d32f2f", fontSize: 12 }}>{quotaWarning}</span>
+        )}
+        {activeOGABand && (
+          <div style={{ fontSize: 12, color: "#555", marginTop: 6 }}>
+            OGA raw filter: {activeOGABand.lower.toFixed(2)} – {activeOGABand.upper.toFixed(2)}
+          </div>
+        )}
       </header>
 
-      <LegendBar />
-
       {candidates.length === 0 ? (
-        <div style={{ color: "#777", fontSize: 13 }}>No candidates yet. Click Generate.</div>
+        <div style={{ color: "#777", fontSize: 13 }}>
+          No candidates yet. Click Generate.
+        </div>
       ) : (
         <table style={tbl}>
           <thead>
@@ -163,6 +172,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
               <th style={th}>Main (6)</th>
               <th style={th}>Supp (2)</th>
               <th style={th}>Comp%</th>
+              <th style={th}>OGA Raw</th>
               <th style={th}>OGA%</th>
               <th style={th}>SelHits</th>
               <th style={th}>RecentHits</th>
@@ -173,20 +183,22 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
             {candidates.map((c: any, i) => {
               const isSelRow = i === selectedCandidateIdx;
               const nums = [...c.main, ...c.supp];
-              const selHits = c.selHits ?? nums.filter(n => selSet.has(n)).length;
-              const recentHits = c.recentHits ?? nums.filter(n => recentSet.has(n)).length;
+              const selHits =
+                c.selHits ?? nums.filter((n) => selSet.has(n)).length;
+              const recentHits =
+                c.recentHits ?? nums.filter((n) => recentSet.has(n)).length;
               const shade = selHits
                 ? `rgba(25,118,210,${0.08 + 0.3 * (selHits / 8)})`
                 : isSelRow
-                  ? "#FFF9C4"
-                  : undefined;
+                ? "#FFF9C4"
+                : undefined;
               return (
                 <tr
                   key={i}
                   style={{
                     background: shade,
                     cursor: "pointer",
-                    transition: "background 0.12s"
+                    transition: "background 0.12s",
                   }}
                   onClick={() => onSelectCandidate(i)}
                   title={`SelHits=${selHits} RecentHits=${recentHits}`}
@@ -195,9 +207,12 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                   <td style={td}>{c.main.map(renderNumber)}</td>
                   <td style={td}>{c.supp.map(renderNumber)}</td>
                   <td style={tdCenter}>
-                    {c.finalComposite !== undefined
-                      ? (c.finalComposite * 100).toFixed(2)
+                    {c.finalCompositeAdj !== undefined
+                      ? (c.finalCompositeAdj * 100).toFixed(2)
                       : ""}
+                  </td>
+                  <td style={tdCenter}>
+                    {c.ogaScore !== undefined ? c.ogaScore.toFixed(2) : ""}
                   </td>
                   <td style={tdCenter}>
                     {c.ogaPercentile !== undefined
@@ -209,7 +224,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                   <td style={tdCenter}>
                     <button
                       type="button"
-                      onClick={e => {
+                      onClick={(e) => {
                         e.stopPropagation();
                         onSimulateCandidate?.(i);
                       }}
@@ -229,90 +244,34 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
         manualSimSelected={manualSimSelected}
         setManualSimSelected={setManualSimSelected}
         onManualSimulationChanged={onManualSimulationChanged}
+        toggleManualPick={toggleManualPick}
       />
     </section>
   );
 };
 
-/* Legend */
-const LegendBar: React.FC = () => (
-  <div style={{
-    display: "flex",
-    gap: 22,
-    alignItems: "center",
-    flexWrap: "wrap",
-    fontSize: 11,
-    margin: "4px 0 10px",
-    color: "#444"
-  }}>
-    <span><span style={legBadge("#fff59d", "#444")}>12</span> Recent</span>
-    <span><span style={legSel}>12</span> Selected</span>
-    <span><span style={legBoth}>12</span> Both</span>
-  </div>
-);
-
-const legBadge = (bg: string, color: string): React.CSSProperties => ({
-  display: "inline-block",
-  padding: "2px 8px",
-  borderRadius: 14,
-  background: bg,
-  fontWeight: 600,
-  color,
-  fontSize: 12
-});
-const legSel: React.CSSProperties = {
-  display: "inline-block",
-  padding: "2px 6px",
-  borderRadius: 14,
-  fontWeight: 700,
-  color: "#d32f2f",
-  textDecoration: "underline",
-  fontSize: 12
-};
-const legBoth: React.CSSProperties = {
-  display: "inline-block",
-  padding: "2px 6px",
-  borderRadius: 14,
-  fontWeight: 700,
-  background: "linear-gradient(90deg,#ffe58a,#fff3c4)",
-  color: "#c62828",
-  textDecoration: "underline",
-  fontSize: 12
-};
-
-/* Manual Simulation */
 const ManualSim: React.FC<{
   manualSimSelected: number[];
   setManualSimSelected: React.Dispatch<React.SetStateAction<number[]>>;
-  onManualSimulationChanged: () => void;
-}> = ({ manualSimSelected, setManualSimSelected, onManualSimulationChanged }) => {
-  function toggle(n: number) {
-    setManualSimSelected(prev => {
-      let next: number[];
-      if (prev.includes(n)) next = prev.filter(x => x !== n);
-      else {
-        if (prev.length >= 8) return prev;
-        next = [...prev, n];
-      }
-      return next;
-    });
-    onManualSimulationChanged();
-  }
+  onManualSimulationChanged?: (next: number[]) => void;
+  toggleManualPick: (n: number) => void;
+}> = ({
+  manualSimSelected,
+  setManualSimSelected,
+  onManualSimulationChanged,
+  toggleManualPick,
+}) => {
   return (
     <div style={manual}>
       <div style={{ marginBottom: 6, fontWeight: 600, fontSize: 13 }}>
         Manual Simulation (select up to 8; first 6 main, next 2 supp)
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-        {Array.from({ length: 45 }, (_, i) => i + 1).map(n => {
+        {Array.from({ length: 45 }, (_, i) => i + 1).map((n) => {
           const idx = manualSimSelected.indexOf(n);
           const picked = idx !== -1;
           const atCapacity = manualSimSelected.length >= 8 && !picked;
-          const slotColor = picked
-            ? idx < 6
-              ? "#4a6fe3"
-              : "#8e44ad"
-            : "#fff";
+          const slotColor = picked ? (idx < 6 ? "#4a6fe3" : "#8e44ad") : "#fff";
           return (
             <label
               key={n}
@@ -328,21 +287,31 @@ const ManualSim: React.FC<{
                 color: picked ? "#fff" : "#333",
                 opacity: atCapacity ? 0.35 : 1,
                 cursor: atCapacity ? "not-allowed" : "pointer",
-                fontSize: 11
+                fontSize: 11,
               }}
               title={
                 picked
                   ? `Slot ${idx + 1}`
                   : atCapacity
-                    ? "Capacity full"
-                    : "Add to manual simulation"
+                  ? "Capacity full"
+                  : "Add to manual simulation"
               }
             >
               <input
                 type="checkbox"
                 checked={picked}
                 disabled={atCapacity}
-                onChange={() => toggle(n)}
+                onChange={() => {
+                  setManualSimSelected((prev) => {
+                    const next = prev.includes(n)
+                      ? prev.filter((x) => x !== n)
+                      : prev.length >= 8
+                      ? prev
+                      : [...prev, n];
+                    onManualSimulationChanged?.(next);
+                    return next;
+                  });
+                }}
                 style={{ marginBottom: 2 }}
               />
               {n}
@@ -351,7 +320,8 @@ const ManualSim: React.FC<{
         })}
       </div>
       <div style={{ marginTop: 6, fontSize: 11, color: "#555" }}>
-        Selecting manual sim numbers clears row simulation; simulating a row clears manual list.
+        Manual simulation highlights the Temperature Heatmap only.
+        Use “Simulate” in the table to add a column to the DGA grid.
       </div>
     </div>
   );
@@ -363,14 +333,14 @@ const panel: React.CSSProperties = {
   borderRadius: 8,
   padding: 16,
   background: "#fff",
-  marginTop: 18
+  marginTop: 18,
 };
 const hdr: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 12,
   flexWrap: "wrap",
-  marginBottom: 6
+  marginBottom: 6,
 };
 const genBtn = (disabled: boolean): React.CSSProperties => ({
   padding: "6px 14px",
@@ -379,21 +349,25 @@ const genBtn = (disabled: boolean): React.CSSProperties => ({
   border: "none",
   borderRadius: 4,
   fontWeight: 600,
-  cursor: disabled ? "default" : "pointer"
+  cursor: disabled ? "default" : "pointer",
 });
-const tbl: React.CSSProperties = { borderCollapse: "collapse", width: "100%", fontSize: 12 };
+const tbl: React.CSSProperties = {
+  borderCollapse: "collapse",
+  width: "100%",
+  fontSize: 12,
+};
 const th: React.CSSProperties = {
   textAlign: "center",
   padding: "4px 6px",
   borderBottom: "1px solid #ddd",
   fontWeight: 600,
-  whiteSpace: "nowrap"
+  whiteSpace: "nowrap",
 };
 const td: React.CSSProperties = {
   padding: "4px 6px",
   borderBottom: "1px solid #eee",
   verticalAlign: "top",
-  textAlign: "left"
+  textAlign: "left",
 };
 const tdCenter: React.CSSProperties = { ...td, textAlign: "center" };
 const simBtn: React.CSSProperties = {
@@ -402,12 +376,12 @@ const simBtn: React.CSSProperties = {
   border: "1px solid #ccc",
   background: "#fff",
   cursor: "pointer",
-  fontSize: 11
+  fontSize: 11,
 };
 const manual: React.CSSProperties = {
   marginTop: 16,
   borderTop: "1px solid #ddd",
   paddingTop: 10,
   background: "#f7f3ff",
-  borderRadius: 6
+  borderRadius: 6,
 };

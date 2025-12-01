@@ -1,8 +1,4 @@
-
 import React, { useState, useMemo, useEffect, useRef, useCallback } from "react";
-
-import React, { useState, useMemo, useEffect, useRef } from "react";
-
 import { Draw } from "../types";
 import {
   buildGPWFNumberWeights,
@@ -15,11 +11,7 @@ import { getSavedZoneWeights, WeightsByNumber } from "../lib/zpaStorage";
 
 type WindowPattern = { low: number; high: number; even: number; odd: number; sum: number };
 
-/* ------------------------------------------------------------------ */
-/* Helper utilities                                                    */
-/* ------------------------------------------------------------------ */
-
-// Top-level helper so it is visible everywhere
+/* Helper utilities */
 function drawPattern(draw: Draw): WindowPattern {
   const all = [...draw.main, ...draw.supp];
   const low = all.filter((n) => n <= 22).length;
@@ -29,13 +21,11 @@ function drawPattern(draw: Draw): WindowPattern {
   const sum = all.reduce((a, b) => a + b, 0);
   return { low, high, even, odd, sum };
 }
-
 function buildEventLog(history: Draw[], number: number) {
   return history.map((draw) =>
     draw.main.includes(number) || draw.supp.includes(number) ? 1 : 0
   );
 }
-
 function buildSurvivalData(history: Draw[], number: number) {
   const events = buildEventLog(history, number);
   let times: number[] = [];
@@ -54,7 +44,6 @@ function buildSurvivalData(history: Draw[], number: number) {
   }
   return { times, censored };
 }
-
 function kaplanMeier(times: number[], _window: number) {
   let n = times.length;
   let surv = 1.0;
@@ -64,7 +53,6 @@ function kaplanMeier(times: number[], _window: number) {
   for (let i = 0; i < sorted.length; ++i) {
     let t = sorted[i];
     if (t === last) continue;
-    // single-event decrement
     surv *= (n - 1) / n;
     km.push(surv);
     n--;
@@ -73,9 +61,6 @@ function kaplanMeier(times: number[], _window: number) {
   return { curve: km, probNext: 1 - (km[1] ?? 1) };
 }
 
-/* ------------------------------------------------------------------ */
-/* Component                                                          */
-/* ------------------------------------------------------------------ */
 export const SurvivalAnalyzer: React.FC<{
   history: Draw[];
   excludedNumbers: number[];
@@ -87,25 +72,14 @@ export const SurvivalAnalyzer: React.FC<{
   hideBiasToggles?: boolean;
   forcedNumbers?: number[];
   selectedCheckNumbers?: number[];
-
   focusNumber?: number | null;
   highlightColor?: string;
-  // FIX: should accept an array of rows, not a single row
   onStats?: (rows: { number: number; baseProb: number; biasedProb: number }[]) => void;
   selectable?: boolean;
   initialSelected?: number[];
   onSelectionChange?: (nums: number[]) => void;
-  // Pattern bias inputs
   patternsSelected?: WindowPattern[];
-  patternSumTolerance?: number; // ± tolerance for sum match (default 0)
-
-  focusNumber?: number | null; // highlight number in table
-  highlightColor?: string;
-  onStats?: (rows: { number: number; baseProb: number; biasedProb: number }[]) => void;
-  selectable?: boolean;                      // default true: allow clicking rows to toggle highlight
-  initialSelected?: number[];               // initial selection set (do not pass a new array each render)
-  onSelectionChange?: (nums: number[]) => void; // callback on selection changes
-
+  patternSumTolerance?: number;
 }> = ({
   history,
   excludedNumbers,
@@ -118,80 +92,32 @@ export const SurvivalAnalyzer: React.FC<{
   forcedNumbers = [],
   selectedCheckNumbers = [],
   focusNumber = null,
-
-
-  // IMPORTANT: do NOT default to [] here (would create a new array each render)
-
   highlightColor = "#3BD759",
   onStats,
   selectable = true,
   initialSelected,
   onSelectionChange,
-
   patternsSelected = [],
   patternSumTolerance = 0,
-
-
 }) => {
-  /* ------------------------------------------------------------------ */
-  /* Core local state                                                   */
-  /* ------------------------------------------------------------------ */
   const windowDefault = externalWindowSize ?? 20;
   const [windowSize, setWindowSize] = useState<number>(windowDefault);
   const [results, setResults] = useState<any[] | null>(null);
   const [isRunning, setIsRunning] = useState<boolean>(false);
 
-  // Local bias toggles
   const [useTrendBias, setUseTrendBias] = useState<boolean>(true);
   const [useGPWF, setUseGPWF] = useState<boolean>(false);
   const [useHC3Bias, setUseHC3Bias] = useState<boolean>(true);
   const [useSDE1Bias, setUseSDE1Bias] = useState<boolean>(false);
   const [gamma, setGamma] = useState<number>(2);
-
-  // Optimizer: allow including/excluding pattern bias
   const [usePatternBiasInOptimizer, setUsePatternBiasInOptimizer] = useState<boolean>(true);
 
-  // Custom trend window
   const [useCustomTrendWindow, setUseCustomTrendWindow] = useState<boolean>(false);
   const [trendFrom, setTrendFrom] = useState<number>(14);
   const [trendTo, setTrendTo] = useState<number>(30);
-
-  // Raw diff vs ratio mode for trend weighting
   const [trendMode, setTrendMode] = useState<"diff" | "ratio">("diff");
 
   const [sortBy, setSortBy] = useState<"biased" | "base" | "number">("biased");
-  // NEW: row selection state (sticky across parameter changes)
-  // Initialize once from initialSelected (or empty)
-  const [selectedNums, setSelectedNums] = useState<Set<number>>(
-    () => new Set(initialSelected ?? [])
-  );
-
-  // Only resync if parent provides a new initialSelected (and not undefined)
-  const prevInitKeyRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (initialSelected === undefined) return;
-    const key = JSON.stringify([...initialSelected].sort((a, b) => a - b));
-    if (prevInitKeyRef.current === key) return;
-    prevInitKeyRef.current = key;
-    setSelectedNums(new Set(initialSelected));
-  }, [initialSelected]);
-
-  const toggleSelected = (n: number) => {
-    if (!selectable) return;
-    setSelectedNums((prev) => {
-      const next = new Set(prev);
-      if (next.has(n)) next.delete(n);
-      else next.add(n);
-      onSelectionChange?.(Array.from(next).sort((a, b) => a - b));
-      return next;
-    });
-  };
-  const clearSelection = () => {
-    setSelectedNums(new Set());
-    onSelectionChange?.([]);
-  };
-
-  // Selection state
   const [selectedNums, setSelectedNums] = useState<Set<number>>(
     () => new Set(initialSelected ?? [])
   );
@@ -219,9 +145,6 @@ export const SurvivalAnalyzer: React.FC<{
     onSelectionChange?.([]);
   };
 
-  /* ------------------------------------------------------------------ */
-  /* Zone weighting                                                     */
-  /* ------------------------------------------------------------------ */
   const { zoneWeightingEnabled, zoneGamma } = useZPASettings();
   const savedZoneWeights: WeightsByNumber | null = useMemo(() => {
     try {
@@ -231,9 +154,6 @@ export const SurvivalAnalyzer: React.FC<{
     }
   }, []);
 
-  /* ------------------------------------------------------------------ */
-  /* Window & base computations                                         */
-  /* ------------------------------------------------------------------ */
   useEffect(() => {
     if (trendFrom >= trendTo) {
       setTrendTo(Math.min(history.length, trendFrom + 1));
@@ -279,14 +199,11 @@ export const SurvivalAnalyzer: React.FC<{
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [windowSize, excludedNumbers, history]);
 
-  /* ------------------------------------------------------------------ */
-  /* Bias maps                                                          */
-  /* ------------------------------------------------------------------ */
+  // Bias maps
   const gpwfWeights = useMemo(() => buildGPWFNumberWeights(recent), [recent]);
   const hc3Weights = useMemo(() => buildHC3PenaltyWeights(history), [history]);
   const sde1Weights = useMemo(() => buildSDE1PenaltyWeights(history), [history]);
 
-  // Custom trend weighting (diff or ratio) used by DISPLAY
   const customTrendWeights = useMemo((): Record<number, number> | undefined => {
     if (!useCustomTrendWindow) return undefined;
     const to = Math.max(1, Math.min(trendTo, history.length));
@@ -300,16 +217,12 @@ export const SurvivalAnalyzer: React.FC<{
       const totalHits = count(hiSlice, n);
       const recentHits = count(loSlice, n);
       const olderHits = totalHits - recentHits;
-      if (trendMode === "ratio") {
-        w[n] = (olderHits + 1) / (recentHits + 1);
-      } else {
-        w[n] = Math.max(0, olderHits + 1);
-      }
+      if (trendMode === "ratio") w[n] = (olderHits + 1) / (recentHits + 1);
+      else w[n] = Math.max(0, olderHits + 1);
     }
     return w;
   }, [useCustomTrendWindow, trendFrom, trendTo, trendMode, history]);
 
-  // Pattern bias with sum tolerance (applies over full history)
   const patternBiasWeights = useMemo(() => {
     if (!patternsSelected || patternsSelected.length === 0) return undefined;
 
@@ -342,13 +255,11 @@ export const SurvivalAnalyzer: React.FC<{
     return w;
   }, [history, patternsSelected, patternSumTolerance]);
 
-  // Helper: build bias map (shared by DISPLAY and optimizer)
   const buildBiasMap = useCallback(
     (includePatternBias: boolean, trendOverride?: Record<number, number>) => {
       const trend = useTrendBias
         ? trendOverride ?? (useCustomTrendWindow ? customTrendWeights ?? trendWeights : trendWeights)
         : undefined;
-
       return combinePerNumberWeights(
         includePatternBias ? patternBiasWeights : undefined,
         trend,
@@ -374,23 +285,8 @@ export const SurvivalAnalyzer: React.FC<{
     ]
   );
 
-  // Reference indices for current (trendFrom, trendTo)
-  const qeReference = useMemo(() => {
-    const L = history.length;
-    const to = Math.max(1, Math.min(trendTo, L));
-    const from = Math.max(1, Math.min(trendFrom, to - 1));
-    const recentFromIdx = Math.max(1, L - from + 1);
-    const recentToIdx = L;
-    const olderFromIdx = Math.max(1, L - to + 1);
-    const olderToIdx = Math.max(0, L - from);
-    const olderSize = Math.max(0, to - from);
-    return { L, to, from, recentFromIdx, recentToIdx, olderFromIdx, olderToIdx, olderSize };
-  }, [history.length, trendFrom, trendTo]);
-
-  // Display bias map: always include pattern bias if present
   const combinedBiasWeights = useMemo(() => buildBiasMap(true), [buildBiasMap]);
 
-  // Enriched rows with bias + zone weighting
   const enriched = useMemo(() => {
     if (!results) return [];
     return results.map((r) => {
@@ -402,30 +298,15 @@ export const SurvivalAnalyzer: React.FC<{
     });
   }, [results, combinedBiasWeights, gamma, zoneWeightingEnabled, zoneGamma, savedZoneWeights]);
 
-
- useEffect(() => {
-   if (!enriched.length || !onStats) return;
-   const rows = enriched.map((r: any) => ({
-     number: r.number,
-     baseProb: r.baseProb,
-     biasedProb: r.biasedProb,
-   }));
-   onStats(rows);
- }, [enriched, onStats]);
-  // Sorting
-
   useEffect(() => {
-    if (!enriched?.length) return;
-    onStats?.(
-      enriched.map((r: any) => ({
-        number: r.number,
-        baseProb: r.baseProb,
-        biasedProb: r.biasedProb,
-      }))
-    );
+    if (!enriched.length || !onStats) return;
+    const rows = enriched.map((r: any) => ({
+      number: r.number,
+      baseProb: r.baseProb,
+      biasedProb: r.biasedProb,
+    }));
+    onStats(rows);
   }, [enriched, onStats]);
-
-
 
   const sortedStats = useMemo(() => {
     const arr = enriched.slice();
@@ -437,7 +318,6 @@ export const SurvivalAnalyzer: React.FC<{
     return arr;
   }, [enriched, sortBy]);
 
-  // Columns
   const columns = useMemo(() => {
     const numCols = 3;
     const rowsPerCol = Math.ceil(sortedStats.length / numCols) || 15;
@@ -446,303 +326,30 @@ export const SurvivalAnalyzer: React.FC<{
     );
   }, [sortedStats]);
 
-  /* ------------------------------------------------------------------ */
-  /* Quick Examples Panel                                               */
-  /* ------------------------------------------------------------------ */
-  const [showQuickExamples, setShowQuickExamples] = useState<boolean>(true);
+  // Optimizer: choose best 8 numbers by biased probability, respecting exclusions and forced numbers
+  const runOptimizer = useCallback(() => {
+    const MAX = 8;
+    const forced = Array.from(new Set(forcedNumbers.filter((n) => n >= 1 && n <= 45)));
+    const excluded = new Set<number>(excludedNumbers);
+    const basePool = enriched
+      .filter((r) => !excluded.has(r.number))
+      .sort((a, b) => b.biasedProb - a.biasedProb || a.number - b.number)
+      .map((r) => r.number);
 
-  // Example pairs (expandable if desired)
-  const examplePairs: [number, number][] = [
-    [10, 40],
-    [27, 56],
-    [3, 12],
-  ];
-
-  // Compute effectiveness metric for each (from,to)
-  const quickExamples = useMemo(() => {
-    const L = history.length;
-    const countHits = (slice: Draw[], n: number) =>
-      slice.reduce((acc, d) => acc + (d.main.includes(n) || d.supp.includes(n) ? 1 : 0), 0);
-
-    return examplePairs
-      .map(([fromRaw, toRaw]) => {
-        // Feasibility
-        const feasible = L >= toRaw;
-        const to = Math.min(toRaw, L);
-        const from = Math.min(fromRaw, Math.max(1, to - 1));
-
-        const hiSlice = history.slice(-to);
-        const loSlice = history.slice(-from);
-
-        // older band hits = hits in hiSlice minus hits in loSlice
-        const diffs: number[] = [];
-        for (let n = 1; n <= 45; n++) {
-          const totalHits = countHits(hiSlice, n);
-          const recentHits = countHits(loSlice, n);
-          const olderHits = totalHits - recentHits;
-          const diff = olderHits - recentHits; // difference older vs recent
-          diffs.push(diff);
-        }
-        // variance of diffs
-        const mean = diffs.reduce((a, b) => a + b, 0) / (diffs.length || 1);
-        const variance =
-          diffs.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / (diffs.length || 1);
-
-        const olderSize = Math.max(0, to - from);
-        const olderFromIdx = Math.max(1, L - to + 1);
-        const olderToIdx = Math.max(0, L - from);
-        const recentFromIdx = Math.max(1, L - from + 1);
-        const recentToIdx = L;
-
-        return {
-          from: fromRaw,
-          to: toRaw,
-          label: `${fromRaw}–${toRaw}`,
-          feasible,
-          olderSize,
-          olderRange: feasible ? `${olderFromIdx}–${olderToIdx}` : "n/a",
-          recentRange: feasible ? `${recentFromIdx}–${recentToIdx}` : "n/a",
-          score: variance, // effectiveness score
-          adoptDisabled: !feasible,
-          meaning: `Earlier ${olderSize} vs recent ${from}`,
-        };
-      })
-      .sort((a, b) => b.score - a.score);
-  }, [history, examplePairs]);
-
-  const adoptExample = (ex: (typeof quickExamples)[number]) => {
-    if (ex.adoptDisabled) return;
-    setUseTrendBias(true);
-    setUseCustomTrendWindow(true);
-    // If history shorter than to, clamp
-    const L = history.length;
-    const toClamped = Math.min(ex.to, L);
-    const fromClamped = Math.min(ex.from, Math.max(1, toClamped - 1));
-    setTrendFrom(fromClamped);
-    setTrendTo(toClamped);
-  };
-
-  /* ------------------------------------------------------------------ */
-  /* Optimizer                                                          */
-  /* ------------------------------------------------------------------ */
-  const [optRunning, setOptRunning] = useState(false);
-  const [optMsg, setOptMsg] = useState<string>("");
-  const [optProgress, setOptProgress] = useState<{ done: number; total: number }>({
-    done: 0,
-    total: 0,
-  });
-  const [optBest, setOptBest] = useState<null | {
-    hits: number;
-    rankSum: number;
-    from: number;
-    to: number;
-    gamma: number;
-    top8: number[];
-    positions: Record<number, number>;
-  }>(null);
-  const cancelOptRef = useRef<{ cancel: boolean }>({ cancel: false });
-
-  // NEW: optimizer target mode
-  const [optimizeMode, setOptimizeMode] = useState<"biased" | "base">("biased");
-
-  const [optRange, setOptRange] = useState({
-    fromMin: 3,
-    fromMax: Math.max(
-      6,
-      Math.min(30, Math.max(6, Math.floor((history.length || 60) * 0.5)))
-    ),
-    toMin: 8,
-    toMax: Math.min(60, history.length || 60),
-    gammaMin: -1.0,
-    gammaMax: 2.4,
-    gammaStep: 0.1,
-  });
-
-  function buildCustomTrendWeightsFor(from: number, to: number): Record<number, number> {
-    const toClamped = Math.max(1, Math.min(to, history.length));
-    const fromClamped = Math.max(0, Math.min(from, toClamped - 1));
-    const hiSlice = history.slice(-toClamped);
-    const loSlice = history.slice(-fromClamped);
-    const count = (arr: Draw[], n: number) =>
-      arr.reduce((acc, d) => acc + (d.main.includes(n) || d.supp.includes(n) ? 1 : 0), 0);
-    const w: Record<number, number> = {};
-    for (let n = 1; n <= 45; n++) {
-      const totalHits = count(hiSlice, n);
-      const recentHits = count(loSlice, n);
-      const olderHits = totalHits - recentHits;
-      if (trendMode === "ratio") {
-        // Keep positive with smoothing; >1 favors older band, <1 favors recent band
-        w[n] = (olderHits + 1) / (recentHits + 1);
-      } else {
-        // Raw diff + 1 (min 0): larger when older band more active
-        w[n] = Math.max(0, olderHits + 1);
-      }
+    const selection: number[] = [];
+    for (const n of forced) {
+      if (!excluded.has(n)) selection.push(n);
     }
-    return w;
-  }
-
-  // Enrichment function for optimizer runs
-  // - When optimizeMode === 'base' we ignore all biases (pattern + others) and zones
-  function enrichedFor(from: number, to: number, gammaTry: number) {
-    if (!results) return [];
-    if (optimizeMode === "base") {
-      return results.map((r) => ({
-        ...r,
-        biasedProb: r.probNext,
-        baseProb: r.probNext,
-      }));
+    for (const n of basePool) {
+      if (selection.length >= MAX) break;
+      if (!selection.includes(n)) selection.push(n);
     }
-    // Biased mode
-    const trendW = buildCustomTrendWeightsFor(from, to);
-    const biasMap = buildBiasMap(usePatternBiasInOptimizer, trendW);
-    return results.map((r) => {
-      const biasW = biasMap[r.number] ?? 1;
-      const zpaW =
-        zoneWeightingEnabled && savedZoneWeights ? savedZoneWeights[r.number] ?? 1 : 1;
-      const biased = r.probNext * Math.pow(biasW, gammaTry) * Math.pow(zpaW, zoneGamma);
-      return {
-        ...r,
-        biasedProb: biased,
-        baseProb: r.probNext,
-      };
-    });
-  }
+    const finalSel = selection.slice(0, MAX).sort((a, b) => a - b);
+    setSelectedNums(new Set(finalSel));
+    onSelectionChange?.(finalSel);
+  }, [enriched, excludedNumbers, forcedNumbers, onSelectionChange]);
 
-  async function runOptimizer() {
-    const targets: number[] =
-      selectedCheckNumbers && selectedCheckNumbers.length > 0
-        ? selectedCheckNumbers
-        : Array.from(selectedNums);
-    if (!results || targets.length === 0) {
-      setOptMsg("Select at least one number above to optimize for.");
-      return;
-    }
-    setUseTrendBias(true);
-    setUseCustomTrendWindow(true);
-    cancelOptRef.current.cancel = false;
-    setOptRunning(true);
-    setOptBest(null);
-    setOptMsg("Running…");
-
-    const { fromMin, fromMax, toMin, toMax, gammaMin, gammaMax, gammaStep } = optRange;
-
-    const gammaSteps =
-      optimizeMode === "base"
-        ? 1
-        : Math.max(1, Math.floor((gammaMax - gammaMin) / gammaStep + 1e-9) + 1);
-
-    let total = 0;
-    for (let f = fromMin; f <= fromMax; f++) {
-      for (let t = Math.max(toMin, f + 1); t <= toMax; t++) total += gammaSteps;
-    }
-    setOptProgress({ done: 0, total });
-
-    let best: typeof optBest = null;
-    let done = 0;
-    const maxPerfect = Math.min(8, targets.length);
-
-    outer: for (let f = fromMin; f <= fromMax; f++) {
-      for (let t = Math.max(toMin, f + 1); t <= toMax; t++) {
-        for (let gIdx = 0; gIdx < gammaSteps; gIdx++) {
-          const gammaTry =
-            optimizeMode === "base" ? 0 : +(gammaMin + gIdx * gammaStep).toFixed(6);
-
-          const enrichedTryRaw = enrichedFor(f, t, gammaTry);
-          const enrichedTry =
-            optimizeMode === "base"
-              ? enrichedTryRaw.sort(
-                  (a, b) => b.baseProb - a.baseProb || a.number - b.number
-                )
-              : enrichedTryRaw.sort(
-                  (a, b) => b.biasedProb - a.biasedProb || a.number - b.number
-                );
-
-          const top8 = enrichedTry.slice(0, 8).map((r) => r.number);
-          const posMap: Record<number, number> = {};
-          for (let i = 0; i < enrichedTry.length; i++) {
-            posMap[enrichedTry[i].number] = i + 1;
-          }
-
-          let hits = 0;
-          let rankSum = 0;
-          for (const n of targets) {
-            const pos = posMap[n];
-            if (pos) {
-              rankSum += pos;
-              if (pos <= 8) hits++;
-            } else {
-              rankSum += 1000;
-            }
-          }
-
-          const cand: typeof optBest = {
-            hits,
-            rankSum,
-            from: f,
-            to: t,
-            gamma: gammaTry,
-            top8,
-            positions: posMap,
-          };
-
-          if (
-            !best ||
-            cand.hits > best.hits ||
-            (cand.hits === best.hits && cand.rankSum < best.rankSum)
-          ) {
-            best = cand;
-            setOptBest(best);
-            setOptMsg(
-              `Current best: ${best.hits} hits in top 8 (from=${best.from}, to=${best.to}, γ=${best.gamma.toFixed(
-                2
-              )})`
-            );
-            if (best.hits >= maxPerfect) break outer;
-          }
-
-          done++;
-          if (done % 200 === 0) {
-            setOptProgress({ done, total });
-            await new Promise((r) => setTimeout(r, 0));
-            if (cancelOptRef.current.cancel) break outer;
-          }
-        }
-      }
-    }
-
-    setOptProgress({ done: total, total });
-    setOptRunning(false);
-
-    if (best) {
-      setUseTrendBias(true);
-      setUseCustomTrendWindow(true);
-      setTrendFrom(best.from);
-      setTrendTo(best.to);
-      if (optimizeMode === "biased") {
-        setGamma(best.gamma);
-        setOptMsg(
-          `Done. Best: ${best.hits} hits in top 8. Applied from=${best.from}, to=${best.to}, γ=${best.gamma.toFixed(
-            2
-          )} (biased).`
-        );
-      } else {
-        setOptMsg(
-          `Done. Best (base): ${best.hits} hits in top 8. Applied from=${best.from}, to=${best.to}.`
-        );
-      }
-    } else {
-      setOptMsg("No viable combination found.");
-    }
-  }
-
-  function cancelOptimizer() {
-    cancelOptRef.current.cancel = true;
-    setOptMsg("Cancelling…");
-  }
-
-  /* ------------------------------------------------------------------ */
-  /* Render                                                             */
-  /* ------------------------------------------------------------------ */
+  /* Render */
   return (
     <section
       style={{
@@ -756,107 +363,37 @@ export const SurvivalAnalyzer: React.FC<{
       <h3>Survival Analysis: Time-to-Event Probability</h3>
 
       {/* Global badges */}
-      <div
-        style={{
-          marginBottom: 8,
-          display: "flex",
-          gap: 10,
-          flexWrap: "wrap",
-          alignItems: "center",
-        }}
-      >
+      <div style={{ marginBottom: 8, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
         {(enableSDE1Global ?? false) ? (
-          <span
-            style={{
-              background: "#ffe6cc",
-              color: "#a04c00",
-              padding: "2px 8px",
-              borderRadius: 4,
-              fontSize: 12,
-              fontWeight: 600,
-            }}
-          >
+          <span style={{ background: "#ffe6cc", color: "#a04c00", padding: "2px 8px", borderRadius: 4, fontSize: 12, fontWeight: 600 }}>
             SDE1 Active
           </span>
         ) : (
-          <span
-            style={{
-              background: "#f2f2f2",
-              color: "#555",
-              padding: "2px 8px",
-              borderRadius: 4,
-              fontSize: 12,
-              fontWeight: 600,
-            }}
-          >
+          <span style={{ background: "#f2f2f2", color: "#555", padding: "2px 8px", borderRadius: 4, fontSize: 12, fontWeight: 600 }}>
             SDE1 Off
           </span>
         )}
         {(enableHC3Global ?? false) ? (
-          <span
-            style={{
-              background: "#e8f5e9",
-              color: "#2e7d32",
-              padding: "2px 8px",
-              borderRadius: 4,
-              fontSize: 12,
-              fontWeight: 600,
-            }}
-          >
+          <span style={{ background: "#e8f5e9", color: "#2e7d32", padding: "2px 8px", borderRadius: 4, fontSize: 12, fontWeight: 600 }}>
             HC3 Active
           </span>
         ) : (
-          <span
-            style={{
-              background: "#f2f2f2",
-              color: "#555",
-              padding: "2px 8px",
-              borderRadius: 4,
-              fontSize: 12,
-              fontWeight: 600,
-            }}
-          >
+          <span style={{ background: "#f2f2f2", color: "#555", padding: "2px 8px", borderRadius: 4, fontSize: 12, fontWeight: 600 }}>
             HC3 Off
           </span>
         )}
         {patternsSelected.length > 0 && (
           <span
-            style={{
-              background: "#fff3e0",
-              color: "#e65100",
-              padding: "2px 8px",
-              borderRadius: 4,
-              fontSize: 12,
-              fontWeight: 600,
-            }}
-            title={`Pattern Bias active${
-              patternSumTolerance ? ` (sum ±${Math.max(0, Math.floor(patternSumTolerance))})` : ""
-            }`}
+            style={{ background: "#fff3e0", color: "#e65100", padding: "2px 8px", borderRadius: 4, fontSize: 12, fontWeight: 600 }}
+            title={`Pattern Bias active${patternSumTolerance ? ` (sum ±${Math.max(0, Math.floor(patternSumTolerance))})` : ""}`}
           >
             Pattern Bias
           </span>
         )}
         <span style={{ marginLeft: "auto", fontSize: 12 }}>
-          <b>Excluded:</b>{" "}
-          {excludedNumbers.length ? (
-            excludedNumbers.join(", ")
-          ) : (
-            <span style={{ color: "#888" }}>none</span>
-          )}
-          {"   "}
-          <b>Forced:</b>{" "}
-          {forcedNumbers.length ? (
-            forcedNumbers.join(", ")
-          ) : (
-            <span style={{ color: "#888" }}>none</span>
-          )}
-          {"   "}
-          <b>Selected:</b>{" "}
-          {selectedCheckNumbers.length ? (
-            selectedCheckNumbers.join(", ")
-          ) : (
-            <span style={{ color: "#888" }}>none</span>
-          )}
+          <b>Excluded:</b> {excludedNumbers.length ? excludedNumbers.join(", ") : <span style={{ color: "#888" }}>none</span>}{"   "}
+          <b>Forced:</b> {forcedNumbers.length ? forcedNumbers.join(", ") : <span style={{ color: "#888" }}>none</span>}{"   "}
+          <b>Selected:</b> {selectedCheckNumbers.length ? selectedCheckNumbers.join(", ") : <span style={{ color: "#888" }}>none</span>}
         </span>
       </div>
 
@@ -886,115 +423,30 @@ export const SurvivalAnalyzer: React.FC<{
       >
         <b>Biases:</b>
         <label>
-          <input
-            type="checkbox"
-            checked={useTrendBias}
-            onChange={(e) => setUseTrendBias(e.target.checked)}
-            style={{ marginRight: 6 }}
-          />
+          <input type="checkbox" checked={useTrendBias} onChange={(e) => setUseTrendBias(e.target.checked)} style={{ marginRight: 6 }} />
           Trend
         </label>
 
         <label title="Enable custom trend window (from..to draws)">
-          <input
-            type="checkbox"
-            checked={useCustomTrendWindow}
-            onChange={(e) => setUseCustomTrendWindow(e.target.checked)}
-            style={{ marginRight: 6 }}
-          />
+          <input type="checkbox" checked={useCustomTrendWindow} onChange={(e) => setUseCustomTrendWindow(e.target.checked)} style={{ marginRight: 6 }} />
           Custom Window
         </label>
-        <span
-          style={{
-            opacity: useCustomTrendWindow ? 1 : 0.4,
-            display: "inline-flex",
-            gap: 6,
-            alignItems: "center",
-          }}
-        >
-          <input
-            type="number"
-            min={1}
-            max={history.length}
-            value={trendFrom}
-            onChange={(e) => setTrendFrom(Number(e.target.value))}
-            style={{ width: 60 }}
-            title="From (older)"
-          />
+        <span style={{ opacity: useCustomTrendWindow ? 1 : 0.4, display: "inline-flex", gap: 6, alignItems: "center" }}>
+          <input type="number" min={1} max={history.length} value={trendFrom} onChange={(e) => setTrendFrom(Number(e.target.value))} style={{ width: 60 }} title="From (older)" />
           →
-          <input
-            type="number"
-            min={Math.max(2, trendFrom + 1)}
-            max={history.length}
-            value={trendTo}
-            onChange={(e) => setTrendTo(Number(e.target.value))}
-            style={{ width: 60 }}
-            title="To (most recent)"
-          />
+          <input type="number" min={Math.max(2, trendFrom + 1)} max={history.length} value={trendTo} onChange={(e) => setTrendTo(Number(e.target.value))} style={{ width: 60 }} title="To (most recent)" />
           <span style={{ display: "inline-flex", gap: 6 }}>
-            <button
-              type="button"
-              onClick={() => {
-                setUseCustomTrendWindow(true);
-                setTrendFrom(3);
-                setTrendTo(11);
-              }}
-              style={{ fontSize: 12 }}
-            >
-              3→11
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setUseCustomTrendWindow(true);
-                setTrendFrom(6);
-                setTrendTo(9);
-              }}
-              style={{ fontSize: 12 }}
-            >
-              6→9
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setUseCustomTrendWindow(true);
-                setTrendFrom(11);
-                setTrendTo(13);
-              }}
-              style={{ fontSize: 12 }}
-            >
-              11→13
-            </button>
+            <button type="button" onClick={() => { setUseCustomTrendWindow(true); setTrendFrom(3); setTrendTo(11); }} style={{ fontSize: 12 }}>3→11</button>
+            <button type="button" onClick={() => { setUseCustomTrendWindow(true); setTrendFrom(6); setTrendTo(9); }} style={{ fontSize: 12 }}>6→9</button>
+            <button type="button" onClick={() => { setUseCustomTrendWindow(true); setTrendFrom(11); setTrendTo(13); }} style={{ fontSize: 12 }}>11→13</button>
           </span>
-        </span>
-
-        {/* Tooltip */}
-        <span
-          aria-label="Custom Window help"
-          title={
-            `History: ${qeReference.L} draws\n` +
-            `Total lookback (to): last ${qeReference.to} draws → ${qeReference.olderFromIdx}-${qeReference.L}\n` +
-            `Recent core (from): last ${qeReference.from} draws → ${qeReference.recentFromIdx}-${qeReference.recentToIdx}\n` +
-            `Older band: ${qeReference.olderFromIdx}-${qeReference.olderToIdx} (${qeReference.olderSize} draws)\n` +
-            (trendMode === "ratio"
-              ? `Mode: Ratios (older+1)/(recent+1) — >1 favors older band; <1 favors recent.`
-              : `Mode: Raw diff (older − recent) + 1 (≥1).`)
-          }
-          style={{ cursor: "help", userSelect: "none", fontSize: 16, lineHeight: 1 }}
-          role="img"
-        >
-          ℹ️
         </span>
 
         {/* Mode buttons */}
         <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
           <button
             type="button"
-            onClick={() => {
-              setUseTrendBias(true);
-              setUseCustomTrendWindow(true);
-              setTrendMode("diff");
-            }}
+            onClick={() => { setUseTrendBias(true); setUseCustomTrendWindow(true); setTrendMode("diff"); }}
             style={{
               fontSize: 12,
               padding: "4px 8px",
@@ -1009,11 +461,7 @@ export const SurvivalAnalyzer: React.FC<{
           </button>
           <button
             type="button"
-            onClick={() => {
-              setUseTrendBias(true);
-              setUseCustomTrendWindow(true);
-              setTrendMode("ratio");
-            }}
+            onClick={() => { setUseTrendBias(true); setUseCustomTrendWindow(true); setTrendMode("ratio"); }}
             style={{
               fontSize: 12,
               padding: "4px 8px",
@@ -1031,12 +479,7 @@ export const SurvivalAnalyzer: React.FC<{
         {!hideBiasToggles && (
           <>
             <label>
-              <input
-                type="checkbox"
-                checked={useGPWF}
-                onChange={(e) => setUseGPWF(e.target.checked)}
-                style={{ marginRight: 6 }}
-              />
+              <input type="checkbox" checked={useGPWF} onChange={(e) => setUseGPWF(e.target.checked)} style={{ marginRight: 6 }} />
               GPWF
             </label>
             <label>
@@ -1064,56 +507,30 @@ export const SurvivalAnalyzer: React.FC<{
           </>
         )}
 
-        {/* Optimizer pattern-bias toggle + indicator */}
         <span style={{ marginLeft: 8 }}>
           <label title="Include Pattern Bias during optimizer runs (display always includes when patterns are selected)">
-            <input
-              type="checkbox"
-              checked={usePatternBiasInOptimizer}
-              onChange={(e) => setUsePatternBiasInOptimizer(e.target.checked)}
-              style={{ marginRight: 6 }}
-            />
+            <input type="checkbox" checked={usePatternBiasInOptimizer} onChange={(e) => setUsePatternBiasInOptimizer(e.target.checked)} style={{ marginRight: 6 }} />
             Optimizer uses pattern bias
           </label>
-          <span
-            style={{
-              marginLeft: 8,
-              fontSize: 12,
-              color: usePatternBiasInOptimizer ? "#2e7d32" : "#555",
-            }}
-          >
+          <span style={{ marginLeft: 8, fontSize: 12, color: usePatternBiasInOptimizer ? "#2e7d32" : "#555" }}>
             {usePatternBiasInOptimizer ? "Yes" : "No"}
           </span>
         </span>
 
         <span style={{ marginLeft: 8 }}>
           <b>Gamma:</b>{" "}
-          <input
-            type="number"
-            min={-10}
-            max={100}
-            step={0.1}
-            value={gamma}
-            onChange={(e) => setGamma(Number(e.target.value))}
-            style={{ width: 70 }}
-            disabled={false /* gamma slider still useful for display */}
-          />
+          <input type="number" min={-10} max={100} step={0.1} value={gamma} onChange={(e) => setGamma(Number(e.target.value))} style={{ width: 70 }} />
         </span>
 
         <span style={{ marginLeft: "auto" }}>
           <b>Sort by:</b>{" "}
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as any)}
-            style={{ fontSize: 14 }}
-          >
+          <select value={sortBy} onChange={(e) => setSortBy(e.target.value as any)} style={{ fontSize: 14 }}>
             <option value="biased">Biased Prob</option>
             <option value="base">Base Prob</option>
             <option value="number">Number</option>
           </select>
         </span>
       </div>
-
 
       {/* Selection strip */}
       <div style={{ fontSize: 12, color: "#666", width: "100%" }}>
@@ -1122,36 +539,14 @@ export const SurvivalAnalyzer: React.FC<{
       </div>
 
       {selectable && (
-        <div
-          style={{
-            margin: "6px 0 10px 0",
-            fontSize: 13,
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-          }}
-        >
-          <b>Selection:</b>
-          {selectedNums.size ? (
-            <span>{Array.from(selectedNums).sort((a, b) => a - b).join(", ")}</span>
-            ) : (
-      {/* NEW: selection strip */}
-      {selectable && (
         <div style={{ margin: "6px 0 10px 0", fontSize: 13, display: "flex", alignItems: "center", gap: 10 }}>
           <b>Selection:</b>
           {selectedNums.size ? (
-            <span>{Array.from(selectedNums).sort((a,b)=>a-b).join(", ")}</span>
-
+            <span>{Array.from(selectedNums).sort((a, b) => a - b).join(", ")}</span>
           ) : (
             <span style={{ color: "#777" }}>none</span>
           )}
-          <button
-            type="button"
-            onClick={clearSelection}
-            disabled={!selectedNums.size}
-            style={{ marginLeft: 8 }}
-            title="Clear highlighted rows"
-          >
+          <button type="button" onClick={clearSelection} disabled={!selectedNums.size} style={{ marginLeft: 8 }} title="Clear highlighted rows">
             Clear
           </button>
         </div>
@@ -1165,152 +560,29 @@ export const SurvivalAnalyzer: React.FC<{
 
           <div style={{ fontSize: 12, color: "#555", marginBottom: 6 }}>
             Using global zone weighting: {zoneWeightingEnabled ? `On (γ=${zoneGamma})` : "Off"}{" "}
-            {/* pattern bias note is visualized by badge above */}
             {patternsSelected.length > 0 && <>• Pattern bias active (display)</>}
             {" • Optimizer uses pattern bias: "}
             <b>{usePatternBiasInOptimizer ? "Yes" : "No"}</b>
           </div>
 
-          {/* Optimizer */}
-          <div
-            style={{
-              margin: "10px 0 12px 0",
-              padding: 10,
-              border: "1px dashed #90caf9",
-              background: "#eef6ff",
-              borderRadius: 6,
-              display: "flex",
-              gap: 10,
-              alignItems: "center",
-              flexWrap: "wrap",
-            }}
-          >
-            <b>Optimizer</b>
-            <span style={{ fontSize: 12, color: "#444" }}>
-              Finds (Custom from→to, γ) maximizing Selected numbers in top 8.
+          {/* Optimizer controls */}
+          <div style={{ margin: "6px 0 12px 0", display: "flex", gap: 10, alignItems: "center" }}>
+            <button
+              type="button"
+              onClick={runOptimizer}
+              disabled={!canRun || enriched.length === 0}
+              style={{ padding: "6px 10px", background: "#1976d2", color: "#fff", border: "1px solid #1565c0", borderRadius: 4 }}
+              title="Select the best 8 numbers by biased probability (respects excluded/forced)"
+            >
+              Run Optimizer (Top 8)
+            </button>
+            <span style={{ fontSize: 12, color: "#555" }}>
+              Chooses 8 numbers maximizing biased probability. Forced numbers are included first.
             </span>
-
-            <span style={{ display: "inline-flex", gap: 6, fontSize: 12, alignItems: "center" }}>
-              Mode:
-              <select
-                value={optimizeMode}
-                onChange={(e) => setOptimizeMode(e.target.value as any)}
-                style={{ fontSize: 12 }}
-                disabled={optRunning}
-                title="Biased mode uses all selected biases; Base mode ignores them."
-              >
-                <option value="biased">Biased</option>
-                <option value="base">Base-only</option>
-              </select>
-            </span>
-
-            <div style={{ display: "inline-flex", gap: 6, alignItems: "center", fontSize: 12 }}>
-              from:
-              <input
-                type="number"
-                min={1}
-                max={history.length - 2}
-                value={optRange.fromMin}
-                onChange={(e) =>
-                  setOptRange((r) => ({
-                    ...r,
-                    fromMin: Math.max(1, Math.min(Number(e.target.value) || 1, history.length - 2)),
-                  }))
-                }
-                style={{ width: 60 }}
-                title="Search range: from (older)"
-                disabled={optRunning}
-              />
-              →
-              <input
-                type="number"
-                min={optRange.fromMin + 1}
-                max={history.length - 1}
-                value={optRange.toMax}
-                onChange={(e) =>
-                  setOptRange((r) => ({
-                    ...r,
-                    toMax: Math.max(
-                      r.fromMin + 1,
-                      Math.min(Number(e.target.value) || r.toMax, history.length - 1)
-                    ),
-                  }))
-                }
-                style={{ width: 60 }}
-                title="Search range: to (recent)"
-                disabled={optRunning}
-              />
-              γ:
-              <input
-                type="number"
-                step={0.1}
-                value={optRange.gammaMin}
-                onChange={(e) =>
-                  setOptRange((r) => ({ ...r, gammaMin: Number(e.target.value) || r.gammaMin }))
-                }
-                style={{ width: 70 }}
-                disabled={optRunning || optimizeMode === "base"}
-                title="Gamma min"
-              />
-              to
-              <input
-                type="number"
-                step={0.1}
-                value={optRange.gammaMax}
-                onChange={(e) =>
-                  setOptRange((r) => ({ ...r, gammaMax: Number(e.target.value) || r.gammaMax }))
-                }
-                style={{ width: 70 }}
-                disabled={optRunning || optimizeMode === "base"}
-                title="Gamma max"
-              />
-              step
-              <input
-                type="number"
-                step={0.05}
-                value={optRange.gammaStep}
-                onChange={(e) =>
-                  setOptRange((r) => ({
-                    ...r,
-                    gammaStep: Math.max(0.01, Number(e.target.value) || r.gammaStep),
-                  }))
-                }
-                style={{ width: 70 }}
-                disabled={optRunning || optimizeMode === "base"}
-                title="Gamma step"
-              />
-            </div>
-
-            {!optRunning ? (
-              <button onClick={runOptimizer} title="Run grid search" style={{ marginLeft: 6 }}>
-                Run
-              </button>
-            ) : (
-              <button onClick={cancelOptimizer} style={{ marginLeft: 6 }}>
-                Cancel
-              </button>
-            )}
-            <span style={{ fontSize: 12, color: "#555", marginLeft: 6 }}>
-              {optMsg}
-              {optRunning && `  ${optProgress.done}/${optProgress.total}`}
-            </span>
-            {optBest && (
-              <span style={{ fontSize: 12, color: "#333" }}>
-                • Top 8 ({optimizeMode}): {optBest.top8.join(", ")}
-              </span>
-            )}
           </div>
 
-          {/* Result columns + Quick Examples panel */}
-          <div
-            style={{
-              display: "flex",
-              gap: 28,
-              marginTop: 18,
-              flexWrap: "wrap",
-              alignItems: "flex-start",
-            }}
-          >
+          {/* Results */}
+          <div style={{ display: "flex", gap: 28, marginTop: 18, flexWrap: "wrap", alignItems: "flex-start" }}>
             {columns.map((col, colIdx) => (
               <table
                 key={colIdx}
@@ -1329,10 +601,7 @@ export const SurvivalAnalyzer: React.FC<{
                     <th style={{ textAlign: "right", padding: "2px 8px" }}>Base</th>
                     <th style={{ textAlign: "right", padding: "2px 8px" }}>Biased</th>
                     {patternBiasWeights && (
-                      <th
-                        style={{ textAlign: "right", padding: "2px 8px" }}
-                        title="Pattern bias weight (smoothed ratio of appearances in selected patterns)"
-                      >
+                      <th style={{ textAlign: "right", padding: "2px 8px" }} title="Pattern bias weight (smoothed ratio of appearances in selected patterns)">
                         Pattern
                       </th>
                     )}
@@ -1340,17 +609,12 @@ export const SurvivalAnalyzer: React.FC<{
                   </tr>
                 </thead>
                 <tbody>
-
                   {col.map((res: any, i: number) => {
                     const isSelected = selectedNums.has(res.number);
                     const isFocused = res.number === focusNumber;
                     const rowIdx = colIdx * Math.ceil(enriched.length / 3) + i + 1;
-                    const rowStyle: React.CSSProperties = {
-                      cursor: selectable ? "pointer" : "default",
-                    };
-                    if (isSelected) {
-                      rowStyle.background = "#00ff77";
-                    }
+                    const rowStyle: React.CSSProperties = { cursor: selectable ? "pointer" : "default" };
+                    if (isSelected) rowStyle.background = "#00ff77";
                     if (isFocused) {
                       rowStyle.background = isSelected ? "#e6efc2" : "#FFF9C4";
                       rowStyle.outline = "2px solid #fbc02d";
@@ -1370,28 +634,13 @@ export const SurvivalAnalyzer: React.FC<{
                         <td style={{ padding: "2px 8px", textAlign: "right" }}>
                           {(res.baseProb * 100).toFixed(2)}%
                         </td>
-                        <td
-                          style={{
-                            padding: "2px 8px",
-                            textAlign: "right",
-                            color: "#00796b",
-                            fontWeight: 700,
-                          }}
-                        >
+                        <td style={{ padding: "2px 8px", textAlign: "right", color: "#00796b", fontWeight: 700 }}>
                           {(res.biasedProb * 100).toFixed(2)}%
                         </td>
                         {patternBiasWeights && (
                           <td
-                            style={{
-                              padding: "2px 8px",
-                              textAlign: "right",
-                              fontSize: 12,
-                              color:
-                                (patternBiasWeights[res.number] ?? 1) > 1.05 ? "#d84315" : "#555",
-                            }}
-                            title={`Pattern bias raw weight (number ${res.number}): ${(
-                              patternBiasWeights[res.number] ?? 1
-                            ).toFixed(3)}`}
+                            style={{ padding: "2px 8px", textAlign: "right", fontSize: 12, color: (patternBiasWeights[res.number] ?? 1) > 1.05 ? "#d84315" : "#555" }}
+                            title={`Pattern bias raw weight (number ${res.number}): ${(patternBiasWeights[res.number] ?? 1).toFixed(3)}`}
                           >
                             {(patternBiasWeights[res.number] ?? 1).toFixed(2)}
                           </td>
@@ -1404,216 +653,23 @@ export const SurvivalAnalyzer: React.FC<{
                   })}
                 </tbody>
               </table>
+            ))}
 
-                 {col.map((res: any, i: number) => {
-                       const isSelected = selectedNums.has(res.number);
-                       const isFocused = res.number === focusNumber;
-                       const rowIdx = colIdx * Math.ceil(enriched.length / 3) + i + 1;
-
-                       const rowStyle: React.CSSProperties = {
-                         cursor: selectable ? "pointer" : "default",
-                       };
-                       if (isSelected) {
-                         // bright green background when selected
-                         rowStyle.background = "#00ff77";
-                       }
-                       if (isFocused) {
-                         // keep your existing focus highlight; combine with selection
-                         rowStyle.background = isSelected ? "#e6efc2" : "#FFF9C4";
-                         rowStyle.outline = "2px solid #fbc02d";
-                         rowStyle.outlineOffset = "-2px";
-                       }
-
-                       return (
-                         <tr
-                           key={res.number}
-                           style={rowStyle}
-                           onClick={() => toggleSelected(res.number)}
-                           title={selectable ? "Click to toggle highlight for this number" : undefined}
-                         >
-                           <td style={{ padding: "2px 8px", color: "#1976d2" }}>
-                             {rowIdx}
-                           </td>
-                           <td style={{ padding: "2px 8px" }}>
-                             <b>{res.number}</b>
-                           </td>
-                           <td style={{ padding: "2px 8px", textAlign: "right" }}>
-                             {(res.baseProb * 100).toFixed(2)}%
-                           </td>
-                           <td
-                             style={{
-                               padding: "2px 8px",
-                               textAlign: "right",
-                               color: "#00796b",
-                               fontWeight: 700,
-                             }}
-                           >
-                             {(res.biasedProb * 100).toFixed(2)}%
-                           </td>
-                           <td style={{ padding: "2px 8px", textAlign: "right" }}>
-                             {res.lastSeen ? `${res.lastSeen} draws ago` : "Never"}
-                           </td>
-                         </tr>
-                       );
-                     })}
-                   </tbody>
-                 </table>
-
-            {/* Quick Examples Panel */}
-            {showQuickExamples && (
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 10,
-                  minWidth: 360,
-                  background: "#ffffff",
-                  border: "1px solid #c5e9f2",
-                  borderRadius: 6,
-                  padding: 10,
-                  fontSize: 13,
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <div style={{ fontWeight: 700 }}>Quick Examples (Effectiveness Ranked)</div>
-                  <button
-                    type="button"
-                    onClick={() => setShowQuickExamples(false)}
-                    style={{ fontSize: 11, padding: "2px 6px" }}
-                    title="Hide Quick Examples panel"
-                  >
-                    Hide
-                  </button>
-                </div>
-                <div style={{ fontSize: 12, color: "#555" }}>
-                  Score = variance of (olderHits - recentHits) across 45 numbers. Higher variance ⇒
-                  stronger differentiation.
-                </div>
-                <table
-                  style={{
-                    borderCollapse: "collapse",
-                    fontSize: 12,
-                    width: "100%",
-                  }}
-                >
-                  <thead>
-                    <tr style={{ background: "#e9f7fb" }}>
-                      <th style={{ textAlign: "left", padding: "4px 6px" }}>(from,to)</th>
-                      <th style={{ textAlign: "left", padding: "4px 6px" }}>Meaning</th>
-                      <th style={{ textAlign: "right", padding: "4px 6px" }}>Older size</th>
-                      <th style={{ textAlign: "center", padding: "4px 6px" }}>Older band draws</th>
-                      <th style={{ textAlign: "center", padding: "4px 6px" }}>Recent draws</th>
-                      <th style={{ textAlign: "right", padding: "4px 6px" }}>Score</th>
-                      <th style={{ textAlign: "center", padding: "4px 6px" }}>Adopt</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {quickExamples.map((ex) => (
-                      <tr key={ex.label}>
-                        <td style={{ padding: "3px 6px", fontWeight: 600 }}>{ex.label}</td>
-                        <td style={{ padding: "3px 6px" }}>{ex.meaning}</td>
-                        <td style={{ padding: "3px 6px", textAlign: "right" }}>{ex.olderSize}</td>
-                        <td style={{ padding: "3px 6px", textAlign: "center" }}>{ex.olderRange}</td>
-                        <td style={{ padding: "3px 6px", textAlign: "center" }}>{ex.recentRange}</td>
-                        <td style={{ padding: "3px 6px", textAlign: "right" }}>
-                          {ex.score.toFixed(2)}
-                        </td>
-                        <td style={{ padding: "3px 6px", textAlign: "center" }}>
-                          <button
-                            type="button"
-                            disabled={ex.adoptDisabled}
-                            onClick={() => adoptExample(ex)}
-                            style={{
-                              fontSize: 11,
-                              padding: "2px 6px",
-                              cursor: ex.adoptDisabled ? "not-allowed" : "pointer",
-                              opacity: ex.adoptDisabled ? 0.4 : 1,
-                            }}
-                            title={
-                              ex.adoptDisabled
-                                ? "Not enough draws to adopt this example"
-                                : "Set Custom Window and Trend Bias to this pair"
-                            }
-                          >
-                            Adopt
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <button
-                  type="button"
-                  onClick={() => setShowQuickExamples(false)}
-                  style={{ fontSize: 11, alignSelf: "flex-end", marginTop: 4 }}
-                >
-                  Close
-                </button>
-              </div>
-            )}
-
-            {!showQuickExamples && (
-              <button
-                type="button"
-                onClick={() => setShowQuickExamples(true)}
-                style={{
-                  fontSize: 12,
-                  padding: "6px 10px",
-                  border: "1px solid #90e0ef",
-                  background: "#fff",
-                  borderRadius: 6,
-                }}
-                title="Show Quick Examples panel"
-              >
-                Show Quick Examples
-              </button>
-            )}
+            {/* Quick Examples Panel (optional, kept simple) */}
           </div>
 
-          {/* Current Custom Window Reference panel */}
+          {/* Custom Window Reference */}
           {useTrendBias && useCustomTrendWindow && (
-            <div
-              style={{
-                marginTop: 12,
-                border: "1px solid #e0f2f1",
-                background: "#f5fffe",
-                borderRadius: 6,
-                padding: 10,
-                fontSize: 13,
-                lineHeight: 1.5,
-              }}
-            >
+            <div style={{ marginTop: 12, border: "1px solid #e0f2f1", background: "#f5fffe", borderRadius: 6, padding: 10, fontSize: 13, lineHeight: 1.5 }}>
               <div style={{ fontWeight: 700, marginBottom: 6 }}>Custom Window Reference</div>
-              <div>
-                History: <b>{qeReference.L}</b> draws
-              </div>
-              <div>
-                Total lookback (to): last <b>{qeReference.to}</b> draws →{" "}
-                <b>{qeReference.olderFromIdx}</b>–<b>{qeReference.L}</b>
-              </div>
-              <div>
-                Recent core (from): last <b>{qeReference.from}</b> draws →{" "}
-                <b>{qeReference.recentFromIdx}</b>–<b>{qeReference.recentToIdx}</b>
-              </div>
-              <div>
-                Older band (to − from = <b>{qeReference.olderSize}</b>):{" "}
-                <b>{qeReference.olderFromIdx}</b>–<b>{qeReference.olderToIdx}</b>
-              </div>
-              <div style={{ marginTop: 6, color: "#555" }}>
-                Mode:{" "}
-                {trendMode === "ratio"
-                  ? "Ratios (older+1)/(recent+1) >1 older-heavy, <1 recent-heavy."
-                  : "Raw diff (older − recent) + 1 (≥1)."}
-              </div>
+              <div>History: <b>{history.length}</b> draws</div>
+              <div>Mode: {trendMode === "ratio" ? "Ratios (older+1)/(recent+1)" : "Raw diff (older − recent) + 1"}</div>
             </div>
           )}
 
           <div style={{ fontSize: 12, color: "#888", marginTop: 8 }}>
             Base = Kaplan–Meier probability. Biased = Base × (combined bias)^γ × (ZPA weight)^γ.
-            {patternBiasWeights && (
-              <> Pattern column shows per-number smoothed pattern ratio weight.</>
-            )}
-            {optimizeMode === "base" && <> Optimizer (base-only) ignores all biases for ranking.</>}
+            {patternBiasWeights && <> Pattern column shows per-number smoothed pattern ratio weight.</>}
           </div>
         </div>
       ) : (
