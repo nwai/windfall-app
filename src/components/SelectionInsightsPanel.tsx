@@ -56,6 +56,8 @@ export interface SelectionInsightsPanelProps {
   onComputedOGARaw?: (map: Record<number, number>) => void;
   lazyThreshold?: number;
   useIdleCallback?: boolean;
+  // New optional trace hook
+  onTrace?: (line: string) => void;
 }
 
 interface AnalyticsInfo {
@@ -78,6 +80,7 @@ export const SelectionInsightsPanel: React.FC<SelectionInsightsPanelProps> = ({
   onComputedOGARaw,
   lazyThreshold = 400,
   useIdleCallback = true,
+  onTrace,
 }) => {
   // Previous local state/hooks unchanged...
   const [info, setInfo] = useState<AnalyticsInfo | null>(null);
@@ -98,6 +101,7 @@ export const SelectionInsightsPanel: React.FC<SelectionInsightsPanelProps> = ({
       setOgaRawMap({});
       return;
     }
+    onTrace?.(`[SelectionInsights] computing per-number OGA over ${history.length} draws...`);
     const base = ogaHistory ?? history;
     const accum: Record<number, { sum: number; count: number }> = {};
     for (let n = 1; n <= 45; n++) accum[n] = { sum: 0, count: 0 };
@@ -121,7 +125,8 @@ export const SelectionInsightsPanel: React.FC<SelectionInsightsPanelProps> = ({
     }
     setOgaRawMap(map);
     onComputedOGARaw?.(map);
-  }, [autoComputeOGARaw, history, ogaHistory, onComputedOGARaw]);
+    onTrace?.(`[SelectionInsights] per-number OGA computed.`);
+  }, [autoComputeOGARaw, history, ogaHistory, onComputedOGARaw, onTrace]);
 
   // Heavy analytics (pairs/triplets/companions) – unchanged from enhanced version
   useEffect(() => {
@@ -131,6 +136,7 @@ export const SelectionInsightsPanel: React.FC<SelectionInsightsPanelProps> = ({
       setInfo(null);
       return;
     }
+    onTrace?.(`[SelectionInsights] computing pairs/triplets/companions for ${selected.length} selected…`);
     const heavy = () => {
       if (computeAbortRef.current) return;
       const drawSets: Array<Set<number>> = history.map((d) => new Set([...d.main, ...d.supp]));
@@ -201,15 +207,15 @@ export const SelectionInsightsPanel: React.FC<SelectionInsightsPanelProps> = ({
         .filter(({ count }) => count > 0)
         .sort((a, b) => b.count - a.count || a.n - b.n)
         .slice(0, 12);
-      const result: AnalyticsInfo = {
+      if (!computeAbortRef.current) setInfo({
         pairRows,
         tripletRows,
         topCompanions,
         neverWithCount,
         neverWithSample,
         cappedTriplets: sel.length > 12,
-      };
-      if (!computeAbortRef.current) setInfo(result);
+      });
+      onTrace?.(`[SelectionInsights] analytics ready: ${pairRows.length} pairs, ${tripletRows.length} triplets`);
     };
 
     const shouldLazy = history.length > lazyThreshold;
@@ -233,7 +239,7 @@ export const SelectionInsightsPanel: React.FC<SelectionInsightsPanelProps> = ({
     }
 
     return () => { computeAbortRef.current = true; };
-  }, [history, selected, topKTriplets, lazyThreshold, useIdleCallback]);
+  }, [history, selected, topKTriplets, lazyThreshold, useIdleCallback, onTrace]);
 
   // Compute dynamic OGA for selected 8-number set when exactly 8 selected
   const setOGARaw = useMemo(() => {

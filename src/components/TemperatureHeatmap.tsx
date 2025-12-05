@@ -11,7 +11,7 @@ export interface TemperatureHeatmapProps {
   showLegend?: boolean;
   heightNumbers?: number;
 
-  metric?: "ema" | "recency" | "hybrid";
+  metric?: "ema" | "recency" | "hybrid" | "x-only";
   buckets?: number;
   bucketLabels?: string[];
   bucketStops?: number[];

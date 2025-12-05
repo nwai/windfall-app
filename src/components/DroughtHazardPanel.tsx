@@ -2,7 +2,13 @@ import React from "react";
 import { Draw } from "../types";
 import { computeDroughtHazard } from "../lib/droughtHazard";
 
-export const DroughtHazardPanel: React.FC<{ history: Draw[]; top?: number; title?: string }> = ({ history, top = 12, title }) => {
+export const DroughtHazardPanel: React.FC<{
+  history: Draw[];
+  top?: number;
+  title?: string;
+  onToggleNumber?: (n: number) => void;
+  forcedNumbers?: number[];
+}> = ({ history, top = 12, title, onToggleNumber, forcedNumbers = [] }) => {
   const { hazard, maxK, byNumber } = React.useMemo(() => computeDroughtHazard(history), [history]);
   const sorted = React.useMemo(
     () => byNumber.slice().sort((a, b) => b.p - a.p || b.k - a.k).slice(0, top),
@@ -24,13 +30,21 @@ export const DroughtHazardPanel: React.FC<{ history: Draw[]; top?: number; title
           </tr>
         </thead>
         <tbody>
-          {sorted.map((r) => (
-            <tr key={r.number}>
-              <td style={td}>{r.number}</td>
-              <td style={td}>{r.k}</td>
-              <td style={td}>{(r.p * 100).toFixed(1)}%</td>
-            </tr>
-          ))}
+          {sorted.map((r) => {
+            const isForced = forcedNumbers.includes(r.number);
+            return (
+              <tr
+                key={r.number}
+                onClick={onToggleNumber ? () => onToggleNumber(r.number) : undefined}
+                style={{ cursor: onToggleNumber ? "pointer" : undefined, background: isForced ? "#FFF8E1" : undefined }}
+                title={onToggleNumber ? "Click to (de)select number for trend selection" : undefined}
+              >
+                <td style={td}>{r.number}</td>
+                <td style={td}>{r.k}</td>
+                <td style={td}>{(r.p * 100).toFixed(1)}%</td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
       <div style={{ fontSize: 12, color: "#666", marginTop: 6 }}>

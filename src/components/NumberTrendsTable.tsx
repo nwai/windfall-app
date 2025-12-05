@@ -1,4 +1,5 @@
 import React, { useMemo } from "react";
+import type { Draw } from "../types";
 
 export type NumberTrend = {
   number: number;   // 1..45
@@ -18,40 +19,92 @@ export function NumberTrendsTable({
   trends,
   onToggle,
   selected,
+  // New optional props to support usage in App.tsx
+  history,
+  excludedNumbers,
+  trendSelectedNumbers,
+  onExcludeToggle,
+  onTrendSelectToggle,
+  onTrace,
 }: {
-  trends: NumberTrend[];
-  onToggle: (n: number) => void;
-  selected: number[];
+  trends?: NumberTrend[];
+  onToggle?: (n: number) => void;
+  selected?: number[];
+  // New optional props
+  history?: Draw[];
+  excludedNumbers?: number[];
+  trendSelectedNumbers?: number[];
+  onExcludeToggle?: (n: number) => void;
+  onTrendSelectToggle?: (n: number) => void;
+  onTrace?: (line: string) => void;
 }) {
+  // Compute trends from history if provided and no trends passed
+  const computedTrends: NumberTrend[] = useMemo(() => {
+    if (!history || !history.length) return trends || [];
+    const counts = (windowSize: number): number[] => {
+      const arr = Array(46).fill(0) as number[];
+      const window = history.slice(-windowSize);
+      for (const d of window) {
+        for (const n of [...d.main, ...d.supp]) arr[n] += 1;
+      }
+      return arr;
+    };
+    const allCounts = (() => {
+      const arr = Array(46).fill(0) as number[];
+      for (const d of history) for (const n of [...d.main, ...d.supp]) arr[n] += 1;
+      return arr;
+    })();
+    const d3 = counts(3);
+    const d9 = counts(9);
+    const d15 = counts(15);
+    const d6 = counts(6); // fortnight
+    const d12 = counts(12); // month
+    const d36 = counts(36); // quarter
+    const d156 = counts(156); // year
+    const res: NumberTrend[] = Array.from({ length: 45 }, (_, i) => i + 1).map((n) => ({
+      number: n,
+      d3: d3[n] || 0,
+      d9: d9[n] || 0,
+      d15: d15[n] || 0,
+      fortnight: d6[n] || 0,
+      month: d12[n] || 0,
+      quarter: d36[n] || 0,
+      year: d156[n] || 0,
+      all: allCounts[n] || 0,
+    }));
+    // Simple sort by month desc then number asc to keep table stable
+    return res.sort((a, b) => b.month - a.month || a.number - b.number);
+  }, [history, trends]);
+
+  const activeSelected = trendSelectedNumbers || selected || [];
+
   // 3-column layout
   const columns = 3;
-  const rowsPerCol = Math.ceil(trends.length / columns);
+  const rowsPerCol = Math.ceil((computedTrends.length) / columns);
   const cols = Array.from({ length: columns }, (_, i) =>
-    trends.slice(i * rowsPerCol, (i + 1) * rowsPerCol)
+    computedTrends.slice(i * rowsPerCol, (i + 1) * rowsPerCol)
   );
 
-  // Data for chart (only selected numbers) – include new short windows
+  // Data for chart (only selected numbers)
   const selectedSeries = useMemo(() => {
     const pick = new Map<number, NumberTrend>();
-    trends.forEach((t) => {
-      if (selected.includes(t.number)) pick.set(t.number, t);
+    computedTrends.forEach((t) => {
+      if (activeSelected.includes(t.number)) pick.set(t.number, t);
     });
     return Array.from(pick.values()).map((t) => ({
       number: t.number,
-      // Order: 3D, 12D anchor, then other windows for context
-      // You can reorder as desired; we include the new short windows prominently
       values: [t.d3, t.month, t.d9, t.d15, t.fortnight, t.quarter, t.year, t.all],
     }));
-  }, [trends, selected]);
+  }, [computedTrends, activeSelected]);
 
-  // Helpers for Δ column: use 3→12 (more reactive short window vs stable anchor)
+  // Helpers for Δ column: use 3→12
   const colorForNumber = (n: number) => `hsl(${(n * 23) % 360}, 70%, 45%)`;
   const shortTermDeltaPP = (t: NumberTrend) => {
-    const r3 = t.d3 / 3;     // per-draw rate over 3 draws
-    const r12 = t.month / 12; // per-draw rate over 12 draws
-    const delta = r3 - r12;   // rate difference per draw
-    const deltaPP = delta * 100;     // percentage points (per draw)
-    const THRESH = 0.055;            // 5.5 pp deadband for up/down vs flat
+    const r3 = t.d3 / 3;
+    const r12 = t.month / 12;
+    const delta = r3 - r12;
+    const deltaPP = delta * 100;
+    const THRESH = 0.055;
     const dir: "up" | "down" | "flat" =
       delta > THRESH ? "up" : delta < -THRESH ? "down" : "flat";
     return { r3, r12, deltaPP, dir };
@@ -89,6 +142,13 @@ export function NumberTrendsTable({
     );
   };
 
+  const handleToggle = (n: number) => {
+    // Prefer new callbacks; fall back to legacy onToggle
+    if (onTrendSelectToggle) onTrendSelectToggle(n);
+    else onToggle?.(n);
+    onTrace?.(`[NumberTrendsTable] toggled ${n}`);
+  };
+
   return (
     <div style={{ margin: "12px 0" }}>
       {/* 3-column tables */}
@@ -99,7 +159,7 @@ export function NumberTrendsTable({
             style={{
               fontSize: 13,
               borderCollapse: "collapse",
-              minWidth: 540, // widened to accommodate extra columns
+              minWidth: 540,
               background: "#fff",
               border: "1px solid #eee",
             }}
@@ -124,7 +184,7 @@ export function NumberTrendsTable({
             </thead>
             <tbody>
               {col.map((trend) => {
-                const isSelected = selected.includes(trend.number);
+                const isSelected = activeSelected.includes(trend.number);
                 const { r3, r12, deltaPP, dir } = shortTermDeltaPP(trend);
                 const clr = colorForNumber(trend.number);
                 const tooltip = `#${trend.number} short-term rate: 3D ${(r3 * 100).toFixed(1)}% vs 12D ${(r12 * 100).toFixed(1)}% • Δ ${deltaPP.toFixed(1)} pp (${dir})`;
@@ -137,7 +197,7 @@ export function NumberTrendsTable({
                       cursor: "pointer",
                       userSelect: "none",
                     }}
-                    onClick={() => onToggle(trend.number)}
+                    onClick={() => handleToggle(trend.number)}
                     title="Click to (de)select number for forced inclusion"
                   >
                     <td style={{ padding: "2px 8px" }}>
