@@ -80,6 +80,7 @@ import type { WindowPattern } from "./components/WindowStatsPanel";
 import { generateCandidates } from "./generateCandidates";
 import { ModulationDiagnosticsPanel } from "./components/ModulationDiagnosticsPanel";
 import { SelectionInsightsPanel } from "./components/SelectionInsightsPanel";
+import { CollapsibleSection } from "./components/shared/CollapsibleSection";
 
 
 const custom: ZoneGroups = [
@@ -240,6 +241,14 @@ function AppInner(): JSX.Element {
   const [hammingThreshold, setHammingThreshold] = useState<number>(3);
   const [jaccardThreshold, setJaccardThreshold] = useState<number>(0.5);
 
+  // Sum range filter state used in Candidate Generation Influences
+  const [sumFilter, setSumFilter] = useState<{ enabled: boolean; min: number; max: number; includeSupp: boolean }>({
+    enabled: false,
+    min: 0,
+    max: 0,
+    includeSupp: true,
+  });
+
   const [lambdaEnabled, setLambdaEnabled] = useState<boolean>(true);
   const [lambda, setLambda] = useState<number>(0.85);
 
@@ -302,6 +311,12 @@ function AppInner(): JSX.Element {
   const [insightsEnabled, setInsightsEnabled] = useState<boolean>(false); // default OFF
   // OGA band state for panel (optional)
   const [activeOGABand, setActiveOGABand] = useState<{ lower: number; upper: number } | null>(null);
+
+  // Once-per-toggle trace for Selection Insights
+  useEffect(() => {
+    setTraceMaybe(t => [...t, insightsEnabled ? "[TRACE] Selection Insights: ON" : "[TRACE] Selection Insights: OFF"]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [insightsEnabled]);
 
   useEffect(() => {
     fetchDraws({
@@ -759,53 +774,15 @@ function AppInner(): JSX.Element {
       </h2>
 
       {/* Number Trends */}
-      <details open>
-        <summary>
-          <b>Number Trends Table</b>
-          <span style={{ fontWeight: 400, fontSize: 13, marginLeft: 10 }}>
-            (Click a number to mark for forced inclusion)
-          </span>
-        </summary>
+      <CollapsibleSection title={<b>Number Trends Table</b>} summaryHint="Click a number to mark for forced inclusion" defaultOpen={true}>
         <NumberTrendsTable trends={numberTrends} onToggle={(n) => setTrendSelectedNumbers(prev => prev.includes(n) ? prev.filter(x => x !== n) : [...prev, n])} selected={trendSelectedNumbers} />
         <div style={{ fontSize: 12, color: "#888", marginBottom: 8 }}>
           Colored rows indicate numbers you have selected for forced inclusion.
         </div>
-      </details>
+      </CollapsibleSection>
 
       {/* Phase 0 History */}
-      <details open>
-        <summary>
-          <b>Phase 0: Draw History ({history.length} draws)</b>
-        </summary>
-        <button onClick={() => fileInputRef.current?.click()} style={{ marginRight: 8, marginBottom: 5 }}>
-          Import Draws (CSV/JSON)
-        </button>
-        <button
-          onClick={() =>
-            fetchDraws({
-              apiUrl: API_URL,
-              minValidDraws: MIN_VALID_DRAWS,
-              numMains: NUM_MAINS,
-              mainMin: MAIN_MIN,
-              mainMax: MAIN_MAX,
-              setHistory,
-              setTrace: setTraceMaybe,
-              setHighlights,
-              rng: getUniqueRandomNumbers,
-              strictValidateDraws,
-            })
-          }
-          style={{ marginRight: 8, marginBottom: 5 }}
-        >
-          Re-fetch Draws
-        </button>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".csv,.json"
-          style={{ display: "none" }}
-          onChange={handleFileUpload}
-        />
+      <CollapsibleSection title={<b>Phase 0: Draw History ({history.length} draws)</b>} defaultOpen={true}>
         {/* In-app CSV updater */}
         <DrawHistoryManager
           csvPathHint="file:///Users/admin/Weekly_Windfall/windfall-app/windfall_history_lottolyzer.csv"
@@ -827,16 +804,41 @@ function AppInner(): JSX.Element {
 }).join("\n")}
 {filteredHistory.length === 0 ? "\nNo draws loaded yet. Check network or click \"Re-fetch Draws\"." : ""}
         </pre>
-      </details>
+        <div style={{ marginTop: 8 }}>
+          <button onClick={() => fileInputRef.current?.click()} style={{ marginRight: 8, marginBottom: 5 }}>
+            Import Draws (CSV/JSON)
+          </button>
+          <button
+            onClick={() =>
+              fetchDraws({
+                apiUrl: API_URL,
+                minValidDraws: MIN_VALID_DRAWS,
+                numMains: NUM_MAINS,
+                mainMin: MAIN_MIN,
+                mainMax: MAIN_MAX,
+                setHistory,
+                setTrace: setTraceMaybe,
+                setHighlights,
+                rng: getUniqueRandomNumbers,
+                strictValidateDraws,
+              })
+            }
+            style={{ marginRight: 8, marginBottom: 5 }}
+          >
+            Re-fetch Draws
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv,.json"
+            style={{ display: "none" }}
+            onChange={handleFileUpload}
+          />
+        </div>
+      </CollapsibleSection>
 
       {/* Odd/Even Ratio Filters */}
-      <details open style={{ marginBottom: 10 }}>
-        <summary>
-          <b>Odd/Even Ratio Filters</b>
-          <span style={{ fontWeight: 400, fontSize: 13, marginLeft: 10 }}>
-            (Select one or more ratios, or use Tricky Rule)
-          </span>
-        </summary>
+      <CollapsibleSection title={<b>Odd/Even Ratio Filters</b>} summaryHint="Select one or more ratios, or use Tricky Rule" defaultOpen={true}>
         <div style={{ marginBottom: 8 }}>
           <label style={{ fontWeight: "bold", display: "inline-block", marginRight: 16 }}>
             <input
@@ -866,261 +868,263 @@ function AppInner(): JSX.Element {
         <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>
           Ratios apply to all 8 numbers. Only ratios observed in selected window are shown.
         </div>
-      </details>
+      </CollapsibleSection>
 
       {/* WFMQY + Unified Toggles + User Exclusions */}
-      <details open>
-        <summary>
-          <b>Windowed Draw Filtering (WFMQYH)</b>
-        </summary>
-        <div
-          style={{
-            marginBottom: 12,
-            border: "1px solid #eee",
-            padding: 14,
-            borderRadius: 7,
-            background: "#f4f9ff",
-            display: "flex",
-            flexWrap: "wrap",
-            gap: 16,
-            alignItems: "center",
-          }}
-        >
-          {/* NEW MODE TOGGLE */}
-          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            <label>
-              <input type="radio" checked={drawWindowMode === "lastN"} onChange={() => setDrawWindowMode("lastN")} />
-              Last N draws
-            </label>
-            <label>
-              <input type="radio" checked={drawWindowMode === "range"} onChange={() => setDrawWindowMode("range")} />
-              Range (x to y)
-            </label>
-            {drawWindowMode === "range" && (
-              <>
-                <span>From</span>
-                <input type="number" min={1} max={history.length} value={rangeFrom} onChange={e => setRangeFrom(Number(e.target.value))} style={{ width: 60 }} />
-                <span>to</span>
-                <input type="number" min={1} max={history.length} value={rangeTo} onChange={e => setRangeTo(Number(e.target.value))} style={{ width: 60 }} />
-                <span>(inclusive)</span>
-              </>
-            )}
-          </div>
-
-          {drawWindowMode === "lastN" && (
-            <>
-              <label style={{ fontWeight: "bold", marginRight: 16 }}>
-                <input type="checkbox" checked={windowEnabled} onChange={(e) => setWindowEnabled(e.target.checked)} style={{ marginRight: 7 }} />
-                Enable windowed filtering
-              </label>
-              <span>
-                {WINDOW_OPTIONS.map((opt) => (
-                  <label key={opt.key} style={{ marginRight: 14 }}>
-                    <input
-                      type="radio"
-                      name="windowMode"
-                      value={opt.key}
-                      checked={windowMode === opt.key}
-                      disabled={!windowEnabled}
-                      onChange={(e) => setWindowMode(e.target.value as any)}
-                    />
-                    {opt.label}
-                  </label>
-                ))}
-              </span>
-              {windowMode === "Custom" && (
-                <input
-                  type="number"
-                  min={1}
-                  max={history.length}
-                  value={customDrawCount}
-                  disabled={!windowEnabled}
-                  onChange={(e) => setCustomDrawCount(Number(e.target.value))}
-                  style={{ width: 70 }}
-                  placeholder="Draw count"
-                />
-              )}
-            </>
-          )}
-
-          <div style={{ marginBottom: 8, fontSize: 15, color: "#1976d2" }}>
-            {drawWindowMode === "lastN"
-              ? <>Using last <b>{filteredHistory.length}</b> draws ({history.length - filteredHistory.length + 1} to {history.length})</>
-              : <>Using draws <b>{rangeFrom}</b> to <b>{rangeTo}</b> ({filteredHistory.length} draws)</>
-            }
-          </div>
-
-          {/* Unified toggles */}
-          <span style={{ marginLeft: 12 }}>
-            <label style={{ marginRight: 12 }}>
-              <input type="checkbox" checked={knobs.enableSDE1} onChange={(e) => setKnobs((prev) => ({ ...prev, enableSDE1: e.target.checked }))} style={{ marginRight: 6 }} />
-              SDE1
-            </label>
-            <label style={{ marginRight: 12 }}>
-              <input type="checkbox" checked={knobs.enableHC3} onChange={(e) => setKnobs((prev) => ({ ...prev, enableHC3: e.target.checked }))} style={{ marginRight: 6 }} />
-              HC3
-            </label>
-            <label>
-              <input type="checkbox" checked={knobs.enableOGA} onChange={(e) => setKnobs((prev) => ({ ...prev, enableOGA: e.target.checked }))} style={{ marginRight: 6 }} />
-              OGA
-            </label>
-          </span>
-        </div>
-
-        {/* Status badges */}
-        <div style={{ marginBottom: 8, fontSize: 15, color: "#1976d2", display: "flex", gap: 12, flexWrap: "wrap" }}>
-          <span>
-            {drawWindowMode === "lastN"
-              ? <>Using last <b>{activeWindowSize}</b> draws</>
-              : <>Using draws <b>{rangeFrom}</b> to <b>{rangeTo}</b> ({activeWindowSize} draws)</>
-            }
-          </span>
-          <span>{knobs.enableSDE1 ? (<span style={{ background: "#ffe6cc", color: "#a04c00", padding: "1px 6px", borderRadius: 4 }}>SDE1 Active</span>) : (<span style={{ background: "#f2f2f2", color: "#555", padding: "1px 6px", borderRadius: 4 }}>SDE1 Off</span>)}</span>
-          <span>{knobs.enableHC3 ? (<span style={{ background: "#e8f5e9", color: "#2e7d32", padding: "1px 6px", borderRadius: 4 }}>HC3 Active</span>) : (<span style={{ background: "#f2f2f2", color: "#555", padding: "1px 6px", borderRadius: 4 }}>HC3 Off</span>)}</span>
-          <span>{knobs.enableOGA ? (<span style={{ background: "#e8eefc", color: "#1a4fa3", padding: "1px 6px", borderRadius: 4 }}>OGA On</span>) : (<span style={{ background: "#f2f2f2", color: "#555", padding: "1px 6px", borderRadius: 4 }}>OGA Off</span>)}</span>
-        </div>
-
-        {windowEnabled && activeWindowSize < 10 && (
-          <div style={{ color: "#d32f2f", fontWeight: "bold", fontSize: 14 }}>
-            Warning: Too few draws selected. Increase window for reliability.
-          </div>
-        )}
-
-        {/* User Exclusions */}
-        <div style={{ marginTop: 8 }}>
-          <b>User Exclusions:</b>
-          <div
-            style={{
-              display: "flex",
-              gap: 8,
-              overflowX: "auto",
-              whiteSpace: "nowrap",
-              paddingTop: 6,
-              paddingBottom: 4,
-              borderTop: "1px dashed #ddd",
-              marginTop: 6
-            }}
-          >
-            {Array.from({ length: 45 }, (_, i) => i + 1).map((n) => {
-              const checked = excludedNumbers.includes(n);
-              return (
-                <label
-                  key={n}
-                  style={{
-                    display: "inline-flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    minWidth: 28
-                  }}
-                  title={`Exclude ${n}`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => {
-                      setExcludedNumbers((prev) =>
-                        prev.includes(n) ? prev.filter((x) => x !== n) : [...prev, n]
-                      );
-                    }}
-                  />
-                  <span style={{ fontSize: 11, marginTop: 2 }}>{n}</span>
+      <CollapsibleSection title={<b>Windowed Draw Filtering (WFMQYH)</b>} defaultOpen={true}>
+        {(() => (
+          <>
+            <div
+              style={{
+                marginBottom: 12,
+                border: "1px solid #eee",
+                padding: 14,
+                borderRadius: 7,
+                background: "#f4f9ff",
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 16,
+                alignItems: "center",
+              }}
+            >
+              {/* NEW MODE TOGGLE */}
+              <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                <label>
+                  <input type="radio" checked={drawWindowMode === "lastN"} onChange={() => setDrawWindowMode("lastN")} />
+                  Last N draws
                 </label>
-              );
-            })}
-          </div>
-        </div>
-      </details>
+                <label>
+                  <input type="radio" checked={drawWindowMode === "range"} onChange={() => setDrawWindowMode("range")} />
+                  Range (x to y)
+                </label>
+                {drawWindowMode === "range" && (
+                  <>
+                    <span>From</span>
+                    <input type="number" min={1} max={history.length} value={rangeFrom} onChange={e => setRangeFrom(Number(e.target.value))} style={{ width: 60 }} />
+                    <span>to</span>
+                    <input type="number" min={1} max={history.length} value={rangeTo} onChange={e => setRangeTo(Number(e.target.value))} style={{ width: 60 }} />
+                    <span>(inclusive)</span>
+                  </>
+                )}
+              </div>
+
+              {drawWindowMode === "lastN" && (
+                <>
+                  <label style={{ fontWeight: "bold", marginRight: 16 }}>
+                    <input type="checkbox" checked={windowEnabled} onChange={(e) => setWindowEnabled(e.target.checked)} style={{ marginRight: 7 }} />
+                    Enable windowed filtering
+                  </label>
+                  <span>
+                    {WINDOW_OPTIONS.map((opt) => (
+                      <label key={opt.key} style={{ marginRight: 14 }}>
+                        <input
+                          type="radio"
+                          name="windowMode"
+                          value={opt.key}
+                          checked={windowMode === opt.key}
+                          disabled={!windowEnabled}
+                          onChange={(e) => setWindowMode(e.target.value as any)}
+                        />
+                        {opt.label}
+                      </label>
+                    ))}
+                  </span>
+                  {windowMode === "Custom" && (
+                    <input
+                      type="number"
+                      min={1}
+                      max={history.length}
+                      value={customDrawCount}
+                      disabled={!windowEnabled}
+                      onChange={(e) => setCustomDrawCount(Number(e.target.value))}
+                      style={{ width: 70 }}
+                      placeholder="Draw count"
+                    />
+                  )}
+                </>
+              )}
+
+              <div style={{ marginBottom: 8, fontSize: 15, color: "#1976d2" }}>
+                {drawWindowMode === "lastN"
+                  ? <>Using last <b>{filteredHistory.length}</b> draws ({history.length - filteredHistory.length + 1} to {history.length})</>
+                  : <>Using draws <b>{rangeFrom}</b> to <b>{rangeTo}</b> ({filteredHistory.length} draws)</>
+                }
+              </div>
+
+              {/* Unified toggles */}
+              <span style={{ marginLeft: 12 }}>
+                <label style={{ marginRight: 12 }}>
+                  <input type="checkbox" checked={knobs.enableSDE1} onChange={(e) => setKnobs((prev) => ({ ...prev, enableSDE1: e.target.checked }))} style={{ marginRight: 6 }} />
+                  SDE1
+                </label>
+                <label style={{ marginRight: 12 }}>
+                  <input type="checkbox" checked={knobs.enableHC3} onChange={(e) => setKnobs((prev) => ({ ...prev, enableHC3: e.target.checked }))} style={{ marginRight: 6 }} />
+                  HC3
+                </label>
+                <label>
+                  <input type="checkbox" checked={knobs.enableOGA} onChange={(e) => setKnobs((prev) => ({ ...prev, enableOGA: e.target.checked }))} style={{ marginRight: 6 }} />
+                  OGA
+                </label>
+              </span>
+            </div>
+
+            {/* Status badges */}
+            <div style={{ marginBottom: 8, fontSize: 15, color: "#1976d2", display: "flex", gap: 12, flexWrap: "wrap" }}>
+              <span>
+                {drawWindowMode === "lastN"
+                  ? <>Using last <b>{activeWindowSize}</b> draws</>
+                  : <>Using draws <b>{rangeFrom}</b> to <b>{rangeTo}</b> ({activeWindowSize} draws)</>
+                }
+              </span>
+              <span>{knobs.enableSDE1 ? (<span style={{ background: "#ffe6cc", color: "#a04c00", padding: "1px 6px", borderRadius: 4 }}>SDE1 Active</span>) : (<span style={{ background: "#f2f2f2", color: "#555", padding: "1px 6px", borderRadius: 4 }}>SDE1 Off</span>)}</span>
+              <span>{knobs.enableHC3 ? (<span style={{ background: "#e8f5e9", color: "#2e7d32", padding: "1px 6px", borderRadius: 4 }}>HC3 Active</span>) : (<span style={{ background: "#f2f2f2", color: "#555", padding: "1px 6px", borderRadius: 4 }}>HC3 Off</span>)}</span>
+              <span>{knobs.enableOGA ? (<span style={{ background: "#e8eefc", color: "#1a4fa3", padding: "1px 6px", borderRadius: 4 }}>OGA On</span>) : (<span style={{ background: "#f2f2f2", color: "#555", padding: "1px 6px", borderRadius: 4 }}>OGA Off</span>)}</span>
+            </div>
+
+            {windowEnabled && activeWindowSize < 10 && (
+              <div style={{ color: "#d32f2f", fontWeight: "bold", fontSize: 14 }}>
+                Warning: Too few draws selected. Increase window for reliability.
+              </div>
+            )}
+
+            {/* User Exclusions */}
+            <div style={{ marginTop: 8 }}>
+              <b>User Exclusions:</b>
+              <div
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  overflowX: "auto",
+                  whiteSpace: "nowrap",
+                  paddingTop: 6,
+                  paddingBottom: 4,
+                  borderTop: "1px dashed #ddd",
+                  marginTop: 6
+                }}
+              >
+                {Array.from({ length: 45 }, (_, i) => i + 1).map((n) => {
+                  const checked = excludedNumbers.includes(n);
+                  return (
+                    <label
+                      key={n}
+                      style={{
+                        display: "inline-flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        minWidth: 28
+                      }}
+                      title={`Exclude ${n}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => {
+                          setExcludedNumbers((prev) =>
+                            prev.includes(n) ? prev.filter((x) => x !== n) : [...prev, n]
+                          );
+                        }}
+                      />
+                      <span style={{ fontSize: 11, marginTop: 2 }}>{n}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          </>
+        ))()}
+      </CollapsibleSection>
 
       {/* Survival and Temperature Panels */}
-      <SurvivalAnalyzer
-        history={filteredHistory}
-        excludedNumbers={allExclusions}
-        probabilityHeading="Probability of Appearance in Next Draw (Per Number):"
-        trendWeights={trendWeights}
-        externalWindowSize={activeWindowSize}
-        enableSDE1Global={knobs.enableSDE1}
-        enableHC3Global={knobs.enableHC3}
-        hideBiasToggles={true}
-        forcedNumbers={trendSelectedNumbers}
-        selectedCheckNumbers={selectedNumbers}
-        focusNumber={focusNumber}
-        highlightColor="#3BD759"
-        onSelectionChange={setSelectedNumbers}
-        patternsSelected={selectedWindowPatterns}
-        onStats={(rows) => setSurvivalOut(rows)}
-      />
+      <CollapsibleSection title={<b>Survival Analyzer</b>} defaultOpen={true}>
+        <SurvivalAnalyzer
+          history={filteredHistory}
+          excludedNumbers={allExclusions}
+          probabilityHeading="Probability of Appearance in Next Draw (Per Number):"
+          trendWeights={trendWeights}
+          externalWindowSize={activeWindowSize}
+          enableSDE1Global={knobs.enableSDE1}
+          enableHC3Global={knobs.enableHC3}
+          hideBiasToggles={true}
+          forcedNumbers={trendSelectedNumbers}
+          selectedCheckNumbers={selectedNumbers}
+          focusNumber={focusNumber}
+          highlightColor="#3BD759"
+          onSelectionChange={setSelectedNumbers}
+          patternsSelected={selectedWindowPatterns}
+          onStats={(rows) => setSurvivalOut(rows)}
+        />
+      </CollapsibleSection>
 
-      <TemperatureTransitionPanel
-        history={filteredHistory}
-        alpha={0.25}
-        metric={tempMetric}
-        buckets={10}
-        bucketStops={[0.05, 0.12, 0.20, 0.30, 0.42, 0.55, 0.68, 0.82, 0.92]}
-        hybridWeight={0.6}
-        emaNormalize="per-number"
-        enforcePeaks={true}
-        trendLookback={4}
-        trendDelta={0.02}
-        trendReversal={true}
-      />
-      {/* Monte Carlo (WFMQY window, unified exclusions) */}
-     
-      <MonteCarloPanel
-        history={filteredHistory}
-        enableSDE1={knobs.enableSDE1}
-        excludedNumbers={allExclusions}
-        trendWeights={trendWeights}
-        defaultWindow={activeWindowSize}
-        showSimulation={true}
-        forcedNumbers={trendSelectedNumbers}
-        selectedCheckNumbers={selectedNumbers}
-        externalFocusNumber={focusNumber}
-        onFocusChange={setFocusNumber}
-      />
-      
-      <TrendRatioHistoryPanel
-        stats={computeHistoricalTrendRatios({
-          lookback: 4,
-          threshold: 0.02,
-          valueSeries: trendValueSeries,
-          historyDraws: filteredHistory.map(d => ({ main: d.main, supp: d.supp }))
-        })}
-        allowedTrendRatios={[]}
-        toggleTrendRatio={() => {}}
-        lookback={4}
-        threshold={0.02}
-        drawsConsidered={Math.max(0, activeWindowSize - 4)}
-        windowDraws={activeWindowSize}
-      />
+      <CollapsibleSection title={<b>Temperature Transition</b>} defaultOpen={true}>
+        <TemperatureTransitionPanel
+          history={filteredHistory}
+          alpha={0.25}
+          metric={tempMetric}
+          buckets={10}
+          bucketStops={[0.05, 0.12, 0.20, 0.30, 0.42, 0.55, 0.68, 0.82, 0.92]}
+          hybridWeight={0.6}
+          emaNormalize="per-number"
+          enforcePeaks={true}
+          trendLookback={4}
+          trendDelta={0.02}
+          trendReversal={true}
+        />
+      </CollapsibleSection>
 
-      <GroupPatternPanel key={zpaReloadKey} history={filteredHistory} groups={custom} />
-      <GlobalZoneWeighting />
+      <CollapsibleSection title={<b>Monte Carlo Analyzer</b>} defaultOpen={true}>
+        <MonteCarloPanel
+          history={filteredHistory}
+          enableSDE1={knobs.enableSDE1}
+          excludedNumbers={allExclusions}
+          trendWeights={trendWeights}
+          defaultWindow={activeWindowSize}
+          showSimulation={true}
+          forcedNumbers={trendSelectedNumbers}
+          selectedCheckNumbers={selectedNumbers}
+          externalFocusNumber={focusNumber}
+          onFocusChange={setFocusNumber}
+        />
+      </CollapsibleSection>
+
+      <CollapsibleSection title={<b>Trend Ratio History</b>} defaultOpen={true}>
+        <TrendRatioHistoryPanel
+          stats={computeHistoricalTrendRatios({
+            lookback: 4,
+            threshold: 0.02,
+            valueSeries: trendValueSeries,
+            historyDraws: filteredHistory.map(d => ({ main: d.main, supp: d.supp }))
+          })}
+          allowedTrendRatios={[]}
+          toggleTrendRatio={() => {}}
+          lookback={4}
+          threshold={0.02}
+          drawsConsidered={Math.max(0, activeWindowSize - 4)}
+          windowDraws={activeWindowSize}
+        />
+      </CollapsibleSection>
+
+      {/* Group Pattern Analyzer */}
+      <CollapsibleSection title={<b>Group Pattern Analyzer</b>} defaultOpen={true}>
+        <GroupPatternPanel key={zpaReloadKey} history={filteredHistory} groups={custom} />
+        <GlobalZoneWeighting />
+      </CollapsibleSection>
 
       {/* Pattern Stats */}
-      <details style={{ marginTop: 10 }}>
-        <summary style={{ cursor: "pointer" }}>
-          <b>Pattern Stats</b> <span style={{ fontWeight: 400, color: "#666" }}>(collapsed)</span>
-        </summary>
+      <CollapsibleSection title={<b>Pattern Stats</b>} summaryHint="collapsed" defaultOpen={false}>
         <div style={{ overflowX: "auto", fontSize: 12, marginTop: 8, background: "#fff", border: "1px solid #eee", borderRadius: 6, padding: 8 }}>
           <PatternStatsPanel draws={filteredHistory} numBins={10} />
         </div>
-      </details>
+      </CollapsibleSection>
 
       {/* Number Frequency */}
-      <details style={{ marginTop: 10 }}>
-        <summary style={{ cursor: "pointer" }}>
-          <b>Number Frequency</b> <span style={{ fontWeight: 400, color: "#666" }}>(compact, collapsed)</span>
-        </summary>
+      <CollapsibleSection title={<b>Number Frequency</b>} summaryHint="compact, collapsed" defaultOpen={false}>
         <div style={{ overflowX: "auto", fontSize: 12, marginTop: 8 }}>
           <NumberFrequencyPanel draws={filteredHistory} />
         </div>
-      </details>
+      </CollapsibleSection>
 
       {/* Window Stats */}
-      <details style={{ marginTop: 10 }}>
-        <summary style={{ cursor: "pointer" }}>
-          <b>Window Stats (Low/Mid/High, Even/Odd, Sum)</b> <span style={{ fontWeight: 400, color: "#666" }}>(WFMQY)</span>
-        </summary>
+      <CollapsibleSection title={<b>Window Stats (Low/Mid/High, Even/Odd, Sum)</b>} summaryHint="WFMQY" defaultOpen={true}>
         <div style={{ marginTop: 8 }}>
           <WindowStatsPanel
             draws={filteredHistory}
@@ -1148,38 +1152,14 @@ function AppInner(): JSX.Element {
             }}
           />
         </div>
-      </details>
+      </CollapsibleSection>
 
-      <div style={{ marginTop: 6, fontSize: 12, display: "flex", flexWrap: "wrap", gap: 16 }}>
-        <label>
-          Pattern mode:
-          <select value={patternConstraintMode} onChange={e => setPatternConstraintMode(e.target.value as any)} style={{ marginLeft: 6 }}>
-            <option value="boost">Boost (soft)</option>
-            <option value="restrict">Restrict (hard)</option>
-          </select>
-        </label>
-        {patternConstraintMode === 'boost' && (
-          <label>
-            Boost factor:
-            <input type="number" step={0.05} min={0} max={2} value={patternBoostFactor} onChange={e => setPatternBoostFactor(Number(e.target.value))} style={{ width: 70, marginLeft: 6 }} />
-          </label>
-        )}
-        {patternConstraintMode === 'restrict' && (
-          <label title="Sum exact match tolerance when enforcing patterns">
-            Sum tolerance ±
-            <input type="number" min={0} max={20} value={patternSumTolerance} onChange={e => setPatternSumTolerance(Number(e.target.value))} style={{ width: 60, marginLeft: 4 }} />
-          </label>
-        )}
-        <span>Selected patterns: {selectedWindowPatterns.length}</span>
-      </div>
-
-      <TargetSetQuickStatsPanel forcedNumbers={trendSelectedNumbers} selectedNumbers={userSelectedNumbers} />
+      <CollapsibleSection title={<b>Target Set Quick Stats</b>} defaultOpen={true}>
+        <TargetSetQuickStatsPanel forcedNumbers={trendSelectedNumbers} selectedNumbers={userSelectedNumbers} />
+      </CollapsibleSection>
 
       {/* Advanced Survival Analysis and Churn/Return Prediction Models */}
-      <details open style={{ marginBottom: 16 }}>
-        <summary>
-          <b>Advanced Survival Analysis &amp; Churn/Return Prediction Models</b>
-        </summary>
+      <CollapsibleSection title={<b>Advanced Survival Analysis & Churn/Return Prediction Models</b>} defaultOpen={true}>
         <div style={{ marginTop: 12 }}>
           <ChurnPredictor dataset={churnDataset} totalDraws={activeWindowSize} minDraws={36} modelType="rf" onPredictions={setChurnOut} />
           <ReturnPredictor dataset={churnDataset} totalDraws={activeWindowSize} minDraws={36} modelType="rf" onPredictions={setReturnOut} />
@@ -1211,81 +1191,75 @@ function AppInner(): JSX.Element {
           />
           <ConsensusPanel survival={survivalOut} churn={churnOut} reactivate={returnOut} />
         </div>
-      </details>
+      </CollapsibleSection>
 
       {/* Operators Panel */}
-      <div style={{ padding: 32, fontFamily: "sans-serif" }}>
-        <details open>
-          <summary>
-            <b>Operator’s Panel – Candidate Generation Controls</b>
-          </summary>
-          <div style={{ margin: "6px 0 10px 0", fontSize: 13 }}>
+      <CollapsibleSection title={<b>Operator’s Panel – Candidate Generation Controls</b>} defaultOpen={true}>
+        <div style={{ margin: "6px 0 10px 0", fontSize: 13 }}>
+          <label>
+            <input type="checkbox" checked={lambdaEnabled} onChange={(e) => setLambdaEnabled(e.target.checked)} style={{ marginRight: 6 }} />
+            Enable Lambda (Recency Weight)
+          </label>
+        </div>
+        <OperatorsPanel
+          entropy={entropyThreshold} setEntropy={setEntropyThreshold}
+          entropyEnabled={entropyEnabled} setEntropyEnabled={setEntropyEnabled}
+          hamming={hammingThreshold} setHamming={setHammingThreshold}
+          hammingEnabled={hammingEnabled} setHammingEnabled={setHammingEnabled}
+          jaccard={jaccardThreshold} setJaccard={setJaccardThreshold}
+          jaccardEnabled={jaccardEnabled} setJaccardEnabled={setJaccardEnabled}
+          lambda={lambda} setLambda={setLambda}
+          minRecentMatches={minRecentMatches} setMinRecentMatches={setMinRecentMatches}
+          recentMatchBias={recentMatchBias} setRecentMatchBias={setRecentMatchBias}
+          previewStats={previewStats}
+          gpwfEnabled={gpwfEnabled} setGPWFEnabled={setGPWFEnabled}
+          gpwf_window_size={gpwf_window_size} setGPWFWindowSize={setGPWFWindowSize}
+          maxGPWFWindow={Math.min(maxGPWFWindow, filteredHistory.length)}
+          gpwf_bias_factor={gpwf_bias_factor} setGPWFBiasFactor={setGPWFBiasFactor}
+          gpwf_floor={gpwf_floor} setGPWFFloor={setGPWFFloor}
+          gpwf_scale_multiplier={gpwf_scale_multiplier} setGPWFScaleMultiplier={setGPWFScaleMultiplier}
+          octagonal_top={octagonalTop} setOctagonalTop={setOctagonalTop}
+        />
+      </CollapsibleSection>
+
+      {/* Presets (unchanged) */}
+      <CollapsibleSection title={<b>State Presets</b>} summaryHint="Save and recall all current options" defaultOpen={true}>
+        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", background: "#f7fafe", border: "1px solid #e3f2fd", padding: 10, borderRadius: 6, marginTop: 8 }}>
+          <label>
+            Preset:
+            <select value={selectedPresetId} onChange={(e) => setSelectedPresetId(e.target.value)} style={{ marginLeft: 6, minWidth: 220 }}>
+              <option value="">— select —</option>
+              {presets.map(p => (<option key={p.id} value={p.id}>{p.name}</option>))}
+            </select>
+          </label>
+          <button onClick={() => { if (!selectedPresetId) return; const p = getPreset(selectedPresetId); if (!p) return; applySnapshot(p.state); }} disabled={!selectedPresetId}>Load</button>
+          <button onClick={() => { if (!selectedPresetId) return; const snap = buildSnapshot(); updatePreset(selectedPresetId, snap); setPresets(listPresets()); }} disabled={!selectedPresetId}>Update from current</button>
+          <button onClick={() => { if (!selectedPresetId) return; deletePresetLS(selectedPresetId); setPresets(listPresets()); setSelectedPresetId(""); }} disabled={!selectedPresetId}>Delete</button>
+          <button onClick={async () => { if (!selectedPresetId) return; const json = exportPresetJSON(selectedPresetId); if (!json) return; const blob = new Blob([json], { type: "application/json" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = "windfall-preset.json"; a.click(); URL.revokeObjectURL(url); }} disabled={!selectedPresetId}>Export</button>
+          <span style={{ marginLeft: 12 }}>
             <label>
-              <input type="checkbox" checked={lambdaEnabled} onChange={(e) => setLambdaEnabled(e.target.checked)} style={{ marginRight: 6 }} />
-              Enable Lambda (Recency Weight)
+              New name:
+              <input type="text" value={newPresetName} onChange={(e) => setNewPresetName(e.target.value)} placeholder="e.g., Quarter+ZPA-G7" style={{ marginLeft: 6, width: 200 }} />
             </label>
-          </div>
-          <OperatorsPanel
-            entropy={entropyThreshold} setEntropy={setEntropyThreshold}
-            entropyEnabled={entropyEnabled} setEntropyEnabled={setEntropyEnabled}
-            hamming={hammingThreshold} setHamming={setHammingThreshold}
-            hammingEnabled={hammingEnabled} setHammingEnabled={setHammingEnabled}
-            jaccard={jaccardThreshold} setJaccard={setJaccardThreshold}
-            jaccardEnabled={jaccardEnabled} setJaccardEnabled={setJaccardEnabled}
-            lambda={lambda} setLambda={setLambda}
-            minRecentMatches={minRecentMatches} setMinRecentMatches={setMinRecentMatches}
-            recentMatchBias={recentMatchBias} setRecentMatchBias={setRecentMatchBias}
-            previewStats={previewStats}
-            gpwfEnabled={gpwfEnabled} setGPWFEnabled={setGPWFEnabled}
-            gpwf_window_size={gpwf_window_size} setGPWFWindowSize={setGPWFWindowSize}
-            maxGPWFWindow={Math.min(maxGPWFWindow, filteredHistory.length)}
-            gpwf_bias_factor={gpwf_bias_factor} setGPWFBiasFactor={setGPWFBiasFactor}
-            gpwf_floor={gpwf_floor} setGPWFFloor={setGPWFFloor}
-            gpwf_scale_multiplier={gpwf_scale_multiplier} setGPWFScaleMultiplier={setGPWFScaleMultiplier}
-            octagonal_top={octagonalTop} setOctagonalTop={setOctagonalTop}
-          />
-        </details>
-
-        {/* Presets (unchanged) */}
-        <details open style={{ marginTop: 10, marginBottom: 10 }}>
-          <summary><b>State Presets</b> <span style={{ fontWeight: 400, fontSize: 12, color: "#555" }}>Save and recall all current options</span></summary>
-          <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", background: "#f7fafe", border: "1px solid #e3f2fd", padding: 10, borderRadius: 6, marginTop: 8 }}>
-            <label>
-              Preset:
-              <select value={selectedPresetId} onChange={(e) => setSelectedPresetId(e.target.value)} style={{ marginLeft: 6, minWidth: 220 }}>
-                <option value="">— select —</option>
-                {presets.map(p => (<option key={p.id} value={p.id}>{p.name}</option>))}
-              </select>
+            <button onClick={() => { const name = newPresetName.trim() || `Preset ${presets.length + 1}`; const snap = buildSnapshot(); const created = saveNewPreset(name, snap); setPresets(listPresets()); setSelectedPresetId(created.id); setNewPresetName(""); }} style={{ marginLeft: 8 }}>Save Current</button>
+          </span>
+          <span style={{ marginLeft: "auto" }}>
+            <label style={{ marginRight: 6 }}>
+              Import:
+              <input type="file" accept=".json,application/json" onChange={(e) => { const f = e.target.files?.[0]; if (!f) return; const reader = new FileReader(); reader.onload = (evt) => { const text = String(evt.target?.result || ""); const imported = importPresetJSON(text); if (imported) { setPresets(listPresets()); setSelectedPresetId(imported.id); } }; reader.readAsText(f); e.currentTarget.value = ""; }} style={{ marginLeft: 6 }} />
             </label>
-            <button onClick={() => { if (!selectedPresetId) return; const p = getPreset(selectedPresetId); if (!p) return; applySnapshot(p.state); }} disabled={!selectedPresetId}>Load</button>
-            <button onClick={() => { if (!selectedPresetId) return; const snap = buildSnapshot(); updatePreset(selectedPresetId, snap); setPresets(listPresets()); }} disabled={!selectedPresetId}>Update from current</button>
-            <button onClick={() => { if (!selectedPresetId) return; deletePresetLS(selectedPresetId); setPresets(listPresets()); setSelectedPresetId(""); }} disabled={!selectedPresetId}>Delete</button>
-            <button onClick={async () => { if (!selectedPresetId) return; const json = exportPresetJSON(selectedPresetId); if (!json) return; const blob = new Blob([json], { type: "application/json" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = "windfall-preset.json"; a.click(); URL.revokeObjectURL(url); }} disabled={!selectedPresetId}>Export</button>
-            <span style={{ marginLeft: 12 }}>
-              <label>
-                New name:
-                <input type="text" value={newPresetName} onChange={(e) => setNewPresetName(e.target.value)} placeholder="e.g., Quarter+ZPA-G7" style={{ marginLeft: 6, width: 200 }} />
-              </label>
-              <button onClick={() => { const name = newPresetName.trim() || `Preset ${presets.length + 1}`; const snap = buildSnapshot(); const created = saveNewPreset(name, snap); setPresets(listPresets()); setSelectedPresetId(created.id); setNewPresetName(""); }} style={{ marginLeft: 8 }}>Save Current</button>
-            </span>
-            <span style={{ marginLeft: "auto" }}>
-              <label style={{ marginRight: 6 }}>
-                Import:
-                <input type="file" accept=".json,application/json" onChange={(e) => { const f = e.target.files?.[0]; if (!f) return; const reader = new FileReader(); reader.onload = (evt) => { const text = String(evt.target?.result || ""); const imported = importPresetJSON(text); if (imported) { setPresets(listPresets()); setSelectedPresetId(imported.id); } }; reader.readAsText(f); e.currentTarget.value = ""; }} style={{ marginLeft: 6 }} />
-              </label>
-            </span>
-          </div>
-        </details>
+          </span>
+        </div>
+      </CollapsibleSection>
 
-        {/* Trend Ratio Filter UI */}
-        <details open style={{ marginTop: 18 }}>
-          <summary><b>Trend Ratio Filter (UP / DOWN / FLAT)</b></summary>
-          {/* Minimal placeholder to compile; wire to your trend filters if needed */}
-          <div style={{ marginTop: 6, fontSize: 11, color: "#555" }}>
-            Configure trend ratio filters in dedicated panel (omitted for brevity).
-          </div>
-        </details>
+      {/* Trend Ratio Filter UI */}
+      <CollapsibleSection title={<b>Trend Ratio Filter (UP / DOWN / FLAT)</b>} defaultOpen={true}>
+        <div style={{ marginTop: 6, fontSize: 11, color: "#555" }}>
+          Configure trend ratio filters in dedicated panel (omitted for brevity).
+        </div>
+      </CollapsibleSection>
 
+      <CollapsibleSection title={<b>Parameter Search</b>} defaultOpen={true}>
         <ParameterSearchPanel
           userSelectedNumbers={userSelectedNumbers}
           weightedTargets={weightedTargets}
@@ -1296,7 +1270,9 @@ function AppInner(): JSX.Element {
           onAdoptParameters={p => setBatesParams(p)}
           onProbabilityUpdate={p => setProbOverlay(p)}
         />
+      </CollapsibleSection>
 
+      <CollapsibleSection title={<b>Bates Weighting Panel</b>} defaultOpen={true}>
         <BatesPanel
           excludedNumbers={excludedNumbers}
           forcedNumbers={trendSelectedNumbers}
@@ -1307,55 +1283,78 @@ function AppInner(): JSX.Element {
           probabilityOverlay={probOverlay}
           onDiagnostics={() => {}}
         />
+      </CollapsibleSection>
 
+      <CollapsibleSection title={<b>Weighted Target List</b>} defaultOpen={true}>
         <WeightedTargetListPanel userSelectedNumbers={userSelectedNumbers} weightedTargets={weightedTargets} setWeightedTargets={setWeightedTargets} />
+      </CollapsibleSection>
 
+      <CollapsibleSection title={<b>Modulation Diagnostics</b>} defaultOpen={true}>
         <ModulationDiagnosticsPanel diagnostics={null} currentBatesParams={batesParams as any} />
+      </CollapsibleSection>
 
+      <CollapsibleSection title={<b>User Selected Numbers</b>} defaultOpen={true}>
         <UserSelectedNumbersPanel
-        userSelectedNumbers={userSelectedNumbers}
-        setUserSelectedNumbers={setUserSelectedNumbers}
-      />
-      <SelectionInsightsPanel
-        history={filteredHistory}
-        selected={userSelectedNumbers}
-        topKTriplets={10}
-        historyWindowName={historyWindowName}
-        ogaHistory={filteredHistory}
-        autoComputeOGARaw={true}
-        lazyThreshold={400}
-        useIdleCallback={true}
-      />
-      <div style={{ marginTop: 8 }}>
-        <label style={{ fontSize: 12 }}>
-          <input
-            type="checkbox"
-            checked={insightsEnabled}
-            onChange={(e) => setInsightsEnabled(e.target.checked)}
-            style={{ marginRight: 6 }}
-          />
-          Show Selection Insights
-        </label>
-      </div>
-
-      {insightsEnabled && (
-        <SelectionInsightsPanel
-          history={history /* use full for lifetime co-draws, or filteredHistory for window scope */}
-          selected={userSelectedNumbers}
-          topKTriplets={10}
-          historyWindowName={historyWindowName}
-          // Optional: pass filteredHistory as ogaHistory to base OGA raw on current window only
-          ogaHistory={filteredHistory}
-          autoComputeOGARaw={true}
-          lazyThreshold={400}
-          useIdleCallback={true}
-          onComputedOGARaw={(map) => {
-            // (Optional) attach per-number OGA raw to trace or diagnostics
-            setTrace(t => [...t, `[TRACE] OGA raw computed for ${Object.keys(map).length} numbers.`]);
-          }}
+          userSelectedNumbers={userSelectedNumbers}
+          setUserSelectedNumbers={setUserSelectedNumbers}
         />
-      )}
-        
+      </CollapsibleSection>
+
+      <CollapsibleSection title={<b>Selection Insights</b>} defaultOpen={true}>
+        <div style={{ marginTop: 8 }}>
+          <label style={{ fontSize: 12 }}>
+            <input
+              type="checkbox"
+              checked={insightsEnabled}
+              onChange={(e) => setInsightsEnabled(e.target.checked)}
+              style={{ marginRight: 6 }}
+            />
+            Show Selection Insights
+          </label>
+        </div>
+
+        {insightsEnabled && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 8 }}>
+            {/* Windowed (WFMQY) version */}
+            <div>
+              <div style={{ fontSize: 12, color: "#1a4fa3", fontWeight: 700, marginBottom: 4 }}>Windowed (WFMQY)</div>
+              <SelectionInsightsPanel
+                history={filteredHistory}
+                selected={userSelectedNumbers}
+                topKTriplets={10}
+                historyWindowName={`${historyWindowName} (WFMQY)`}
+                ogaHistory={filteredHistory}
+                autoComputeOGARaw={true}
+                lazyThreshold={400}
+                useIdleCallback={true}
+                onComputedOGARaw={(map) => {
+                  setTrace(t => [...t, `[TRACE] OGA raw computed (Windowed) for ${Object.keys(map).length} numbers.`]);
+                }}
+              />
+            </div>
+
+            {/* All History version */}
+            <div>
+              <div style={{ fontSize: 12, color: "#1a4fa3", fontWeight: 700, marginBottom: 4 }}>All History</div>
+              <SelectionInsightsPanel
+                history={history}
+                selected={userSelectedNumbers}
+                topKTriplets={10}
+                historyWindowName={`All History`}
+                ogaHistory={history}
+                autoComputeOGARaw={true}
+                lazyThreshold={400}
+                useIdleCallback={true}
+                onComputedOGARaw={(map) => {
+                  setTrace(t => [...t, `[TRACE] OGA raw computed (All) for ${Object.keys(map).length} numbers.`]);
+                }}
+              />
+            </div>
+          </div>
+        )}
+      </CollapsibleSection>
+
+      <CollapsibleSection title={<b>Generated Candidates</b>} defaultOpen={true}>
         <div style={{ padding: 32, fontFamily: "sans-serif" }}>
           <RankingWeightsPanel weights={rankingWeights} setWeights={setRankingWeights} />
 
@@ -1378,6 +1377,126 @@ function AppInner(): JSX.Element {
             activeOGABand={activeOGABand}
           />
 
+          {/* Candidate Generation Influences moved here */}
+          <CollapsibleSection title={<b>Candidate Generation Influences</b>} summaryHint="Toggle filters and boosts that affect generation" defaultOpen={true}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(260px, 1fr))", gap: 12 }}>
+              <div style={{ border: "1px solid #eee", borderRadius: 6, padding: 10 }}>
+                <div style={{ fontWeight: 700, marginBottom: 6 }}>Core Filters</div>
+                <label>
+                  <input type="checkbox" checked={entropyEnabled} onChange={(e) => setEntropyEnabled(e.target.checked)} style={{ marginRight: 6 }} />
+                  Entropy (threshold {entropyThreshold})
+                </label>
+                <div style={{ marginLeft: 18, marginTop: 4 }}>
+                  <input type="range" min={0} max={6} step={0.1} value={entropyThreshold} onChange={(e) => setEntropyThreshold(Number(e.target.value))} style={{ width: 200 }} />
+                </div>
+                <label>
+                  <input type="checkbox" checked={hammingEnabled} onChange={(e) => setHammingEnabled(e.target.checked)} style={{ marginRight: 6 }} />
+                  Hamming (min {hammingThreshold})
+                </label>
+                <div style={{ marginLeft: 18, marginTop: 4 }}>
+                  <input type="range" min={0} max={8} step={1} value={hammingThreshold} onChange={(e) => setHammingThreshold(Number(e.target.value))} style={{ width: 200 }} />
+                </div>
+                <label>
+                  <input type="checkbox" checked={jaccardEnabled} onChange={(e) => setJaccardEnabled(e.target.checked)} style={{ marginRight: 6 }} />
+                  Jaccard (max {Math.round(jaccardThreshold * 100)}%)
+                </label>
+                <div style={{ marginLeft: 18, marginTop: 4 }}>
+                  <input type="range" min={0} max={1} step={0.01} value={jaccardThreshold} onChange={(e) => setJaccardThreshold(Number(e.target.value))} style={{ width: 200 }} />
+                </div>
+              </div>
+
+              <div style={{ border: "1px solid #eee", borderRadius: 6, padding: 10 }}>
+                <div style={{ fontWeight: 700, marginBottom: 6 }}>Composition & Recency</div>
+                <label>
+                  <input type="checkbox" checked={useTrickyRule} onChange={(e) => setUseTrickyRule(e.target.checked)} style={{ marginRight: 6 }} />
+                  Tricky Rule (reject 0:8 and 8:0)
+                </label>
+                <div style={{ marginTop: 6 }}>
+                  <b>Odd/Even ratios</b> (disable Tricky to use):
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 6 }}>
+                    {ratioOptions.map(({ ratio }) => (
+                      <label key={ratio} style={{ opacity: useTrickyRule ? 0.4 : 1 }}>
+                        <input type="checkbox" checked={selectedRatios.includes(ratio)} disabled={useTrickyRule} onChange={() => handleRatioToggle(ratio)} style={{ marginRight: 6 }} />
+                        {ratio}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div style={{ marginTop: 6 }}>
+                  <label>
+                    Minimum matches to last draw:
+                    <input type="number" min={0} max={8} value={minRecentMatches} onChange={(e) => setMinRecentMatches(Number(e.target.value))} style={{ width: 60, marginLeft: 6 }} />
+                  </label>
+                </div>
+                <div style={{ marginTop: 6 }}>
+                  <label title="Bias acceptance probability by overlap with last draw">
+                    Recent-match bias:
+                    <input type="number" min={0} max={5} step={0.1} value={recentMatchBias} onChange={(e) => setRecentMatchBias(Number(e.target.value))} style={{ width: 70, marginLeft: 6 }} />
+                  </label>
+                </div>
+                <div style={{ marginTop: 6 }}>
+                  <label title="Require at least M numbers from union of last W draws">
+                    Repeat window W:
+                    <input type="number" min={0} max={history.length} value={repeatWindowSizeW} onChange={(e) => setRepeatWindowSizeW(Number(e.target.value))} style={{ width: 70, marginLeft: 6 }} />
+                  </label>
+                  <label style={{ marginLeft: 10 }}>
+                    Min from union M:
+                    <input type="number" min={0} max={8} value={minFromRecentUnionM} onChange={(e) => setMinFromRecentUnionM(Number(e.target.value))} style={{ width: 60, marginLeft: 6 }} />
+                  </label>
+                </div>
+              </div>
+
+              <div style={{ border: "1px solid #eee", borderRadius: 6, padding: 10 }}>
+                <div style={{ fontWeight: 700, marginBottom: 6 }}>Biases & Pattern Constraints</div>
+                <label>
+                  <input type="checkbox" checked={gpwfEnabled} onChange={(e) => setGPWFEnabled(e.target.checked)} style={{ marginRight: 6 }} />
+                  GPWF bias
+                </label>
+                <div style={{ marginTop: 6 }}>
+                  <label>
+                    Lambda weight:
+                    <input type="checkbox" checked={lambdaEnabled} onChange={(e) => setLambdaEnabled(e.target.checked)} style={{ margin: "0 6px 0 12px" }} />
+                    <input type="number" min={0} max={10} step={0.1} value={lambda} onChange={(e) => setLambda(Number(e.target.value))} style={{ width: 80 }} />
+                  </label>
+                </div>
+                <div style={{ marginTop: 6 }}>
+                  <label>
+                    Sum range filter:
+                    <input type="checkbox" checked={sumFilter.enabled} onChange={(e) => setSumFilter(prev => ({ ...prev, enabled: e.target.checked }))} style={{ margin: "0 6px 0 12px" }} />
+                    <input type="number" value={sumFilter.min ?? 0} onChange={(e) => setSumFilter(prev => ({ ...prev, min: Number(e.target.value) }))} style={{ width: 70, marginLeft: 6 }} />
+                    –
+                    <input type="number" value={sumFilter.max ?? 0} onChange={(e) => setSumFilter(prev => ({ ...prev, max: Number(e.target.value) }))} style={{ width: 70, marginLeft: 6 }} />
+                    <label style={{ marginLeft: 8 }}>
+                      <input type="checkbox" checked={sumFilter.includeSupp ?? true} onChange={(e) => setSumFilter(prev => ({ ...prev, includeSupp: e.target.checked }))} style={{ marginRight: 6 }} />
+                      Include supp
+                    </label>
+                  </label>
+                </div>
+                <div style={{ marginTop: 6 }}>
+                  <label>
+                    Pattern constraints mode:
+                    <select value={patternConstraintMode} onChange={(e) => setPatternConstraintMode(e.target.value as any)} style={{ marginLeft: 6 }}>
+                      <option value="restrict">Restrict</option>
+                      <option value="boost">Boost-only</option>
+                      <option value="off">Off</option>
+                    </select>
+                  </label>
+                  <label style={{ marginLeft: 10 }}>
+                    Sum tolerance:
+                    <input type="number" min={0} max={999} value={patternSumTolerance} onChange={(e) => setPatternSumTolerance(Number(e.target.value))} style={{ width: 80, marginLeft: 6 }} />
+                  </label>
+                  <label style={{ marginLeft: 10 }}>
+                    Boost factor:
+                    <input type="number" min={0} max={10} step={0.1} value={patternBoostFactor} onChange={(e) => setPatternBoostFactor(Number(e.target.value))} style={{ width: 80, marginLeft: 6 }} />
+                  </label>
+                </div>
+              </div>
+            </div>
+            <div style={{ marginTop: 10, fontSize: 12, color: "#555" }}>
+              <b>Provenance:</b> Window={filteredHistory.length}; Entropy={entropyEnabled ? entropyThreshold : "off"}; Hamming={hammingEnabled ? hammingThreshold : "off"}; Jaccard={jaccardEnabled ? jaccardThreshold.toFixed(2) : "off"}; Tricky={useTrickyRule ? "on" : "off"}; Ratios={selectedRatios.length ? selectedRatios.join(" ") : "none"}; RecMin={minRecentMatches}; RecBias={recentMatchBias}; Repeat W={repeatWindowSizeW} M={minFromRecentUnionM}; GPWF={gpwfEnabled ? "on" : "off"}; λ={lambdaEnabled ? lambda.toFixed(2) : "off"}; Sum={sumFilter.enabled ? `${sumFilter.min}–${sumFilter.max}${sumFilter.includeSupp ? "+supp" : ""}` : "off"}; PatternMode={patternConstraintMode} Tol={patternSumTolerance} Boost={patternBoostFactor}
+            </div>
+          </CollapsibleSection>
+
           <div style={{ width: "100%", marginBottom: 18 }}>
             <OGAHistogram
               ogaScores={pastOGAScores}
@@ -1386,14 +1505,10 @@ function AppInner(): JSX.Element {
             />
           </div>
         </div>
-      </div>
+      </CollapsibleSection>
 
       {/* DGA */}
-      <details open style={{ marginTop: 18 }}>
-        <summary>
-          <b>Diamond Grid Analysis (DGA)</b>
-        </summary>
-
+      <CollapsibleSection title={<b>Diamond Grid Analysis (DGA)</b>} defaultOpen={true}>
         <div style={{ width: "100%", marginTop: 18, marginBottom: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6 }}>
             <h4 style={{ margin: 0 }}>Temperature Heatmap</h4>
@@ -1466,7 +1581,7 @@ function AppInner(): JSX.Element {
             <i>No grid data available.</i>
           )}
         </div>
-      </details>
+      </CollapsibleSection>
 
       <TracePanel lines={trace} onClear={() => setTrace([])} />
     </div>
