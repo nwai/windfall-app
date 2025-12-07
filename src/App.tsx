@@ -1140,7 +1140,7 @@ function AppInner(): JSX.Element {
       {/* [ORDER-ANCHOR] 11 Number Frequency */}
       <CollapsibleSection title={<b>Number Frequency</b>} summaryHint="compact, collapsed" defaultOpen={false}>
         <div style={{ overflowX: "auto", fontSize: 12, marginTop: 8 }}>
-          <NumberFrequencyPanel draws={filteredHistory} />
+          <NumberFrequencyPanel draws={filteredHistory} allDraws={history} />
         </div>
       </CollapsibleSection>
 
