@@ -21,6 +21,24 @@ export const RankingWeightsPanel: React.FC<Props> = ({ weights, setWeights }) =>
     setWeights({ ...weights, ...partial });
   }
 
+  // Handlers convert user entry to internal weight
+  const handleOgaChange = (valStr: string) => {
+    const v = Number(valStr);
+    if (!Number.isFinite(v)) return;
+    // Treat entered value as a weight regardless of mode; normalization handles proportions
+    update({ oga: Math.max(0, v) });
+  };
+  const handleSelChange = (valStr: string) => {
+    const v = Number(valStr);
+    if (!Number.isFinite(v)) return;
+    update({ sel: Math.max(0, v) });
+  };
+  const handleRecentChange = (valStr: string) => {
+    const v = Number(valStr);
+    if (!Number.isFinite(v)) return;
+    update({ recent: Math.max(0, v) });
+  };
+
   return (
     <section style={panelStyle}>
       <h4 style={{ margin: "0 0 6px" }}>Ranking Weights</h4>
@@ -33,7 +51,7 @@ export const RankingWeightsPanel: React.FC<Props> = ({ weights, setWeights }) =>
             min={0}
             max={5}
             value={oga}
-            onChange={e => update({ oga: Number(e.target.value) || 0 })}
+            onChange={e => handleOgaChange(e.target.value)}
             style={inp}
           />
         </label>
@@ -45,7 +63,7 @@ export const RankingWeightsPanel: React.FC<Props> = ({ weights, setWeights }) =>
             min={0}
             max={5}
             value={sel}
-            onChange={e => update({ sel: Number(e.target.value) || 0 })}
+            onChange={e => handleSelChange(e.target.value)}
             style={inp}
           />
         </label>
@@ -57,7 +75,7 @@ export const RankingWeightsPanel: React.FC<Props> = ({ weights, setWeights }) =>
             min={0}
             max={5}
             value={recent}
-            onChange={e => update({ recent: Number(e.target.value) || 0 })}
+            onChange={e => handleRecentChange(e.target.value)}
             style={inp}
           />
         </label>
@@ -65,7 +83,7 @@ export const RankingWeightsPanel: React.FC<Props> = ({ weights, setWeights }) =>
       <div style={foot}>
         Normalized: OGA {normOGA.toFixed(0)}% • Sel {normSel.toFixed(0)}% • Recent {normRecent.toFixed(0)}%
         <br />
-        Composite = Σ (normalized weight * normalized metric).
+        Weights are normalized (Σ=100%). Modes let you enter OGA as % and Sel/Recent as hits if preferred; composite still uses normalized weights × normalized metrics.
       </div>
     </section>
   );

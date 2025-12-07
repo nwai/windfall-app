@@ -1595,7 +1595,8 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
             {includeNextCol && (
               <th
                 style={{
-                  minWidth: 20,
+                    width: 36,
+                    minWidth: 36,
                   textAlign: 'center',
                   background: '#f0f7ff',
                   border: '1px solid #dbeaff',

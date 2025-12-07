@@ -43,7 +43,7 @@ export function TemperatureHeatmapWithExclusions(
               background: "#fafafa",
               border: "1px solid #eee",
               borderRadius: 6,
-              padding: "4px 6px",
+              padding: "6px 15px 4px 2px",
             }}
           >
             {headerLabel}
@@ -52,7 +52,7 @@ export function TemperatureHeatmapWithExclusions(
       )}
 
       {/* Heatmap + vertical exclude column */}
-      <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginRight: 10 }}>
         {/* Left: the original heatmap */}
         <div style={{ flex: "1 1 auto" }}>
           <TemperatureHeatmap cellSize={cellSize} {...heatmapProps} />
@@ -81,8 +81,8 @@ export function TemperatureHeatmapWithExclusions(
                 style={{
                   height: rowHeight,
                   display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
+                  alignItems: "left",
+                  justifyContent: "left",
                   gap: 6,
                   borderRadius: 4,
                   background: isFocused ? "#FFF9C4" : "transparent",
@@ -100,7 +100,7 @@ export function TemperatureHeatmapWithExclusions(
                     )
                   }
                 />
-                <span style={{ fontSize: 11, color: "#333", minWidth: 18, textAlign: "right" }}>
+                <span style={{ fontSize: 11, color: "#333", minWidth: 20, textAlign: "left" }}>
                   {n}
                 </span>
               </label>

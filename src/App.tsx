@@ -516,6 +516,25 @@ function AppInner(): JSX.Element {
     [filteredHistory]
   );
 
+  // Reference mode for OGA percentiles and histogram
+  const [ogaRefMode, setOgaRefMode] = useState<"window" | "all">("window");
+
+  // Windowed reference distribution computed against current window baseline
+  const pastOGAScoresRefWindow = useMemo(
+    () => filteredHistory.map((draw) => computeOGA([...draw.main, ...draw.supp], filteredHistory)),
+    [filteredHistory]
+  );
+  // Full-history reference distribution computed against full history baseline
+  const pastOGAScoresRefAll = useMemo(
+    () => history.map((draw) => computeOGA([...draw.main, ...draw.supp], history)),
+    [history]
+  );
+  // Active reference based on toggle
+  const pastOGAScoresRef = useMemo(
+    () => (ogaRefMode === "window" ? pastOGAScoresRefWindow : pastOGAScoresRefAll),
+    [ogaRefMode, pastOGAScoresRefWindow, pastOGAScoresRefAll]
+  );
+  
   const baseScores: Record<number, number> = useMemo(() => {
     const src =
       (Array.isArray(conditionalProb) && conditionalProb.length === 45 ? conditionalProb :
@@ -764,8 +783,8 @@ function AppInner(): JSX.Element {
     <div style={{ fontFamily: "monospace", padding: 20, maxWidth: 1700 }}>
       <ToastContainer position="top-right" duration={1600} />
       <h2>
-        🇦🇺 Weekday Windfall – Maximum Validated Set Generator{" "}
-        <span style={{ fontSize: 16, color: "#666" }}>TypeScript Demo</span>
+        🇦🇺 Weekday Windfall – Set Generator{" "}
+        <span style={{ fontSize: 16, color: "#666" }}>for entertainment use only</span>
         <label style={{ marginLeft: 12, fontSize: 12 }} title="Toggle verbose trace logging">
           <input type="checkbox" checked={traceVerbose} onChange={(e) => setTraceVerbose(e.target.checked)} style={{ marginRight: 6 }} />
           Trace verbose
@@ -1366,6 +1385,17 @@ function AppInner(): JSX.Element {
       {/* [ORDER-ANCHOR] 24 Generated Candidates */}
       <CollapsibleSection title={<b>Generated Candidates</b>} defaultOpen={true}>
         <div style={{ padding: 32, fontFamily: "sans-serif" }}>
+          {/* OGA reference toggle */}
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+            <label style={{ fontSize: 12 }}>
+              OGA reference:
+              <select value={ogaRefMode} onChange={(e) => setOgaRefMode(e.target.value as any)} style={{ marginLeft: 6 }}>
+                <option value="window">Windowed</option>
+                <option value="all">Full History</option>
+              </select>
+            </label>
+          </div>
+
           <RankingWeightsPanel weights={rankingWeights} setWeights={setRankingWeights} />
 
           <GeneratedCandidatesPanel
@@ -1383,8 +1413,8 @@ function AppInner(): JSX.Element {
             mostRecentDraw={filteredHistory[filteredHistory.length - 1] || null}
             manualSimSelected={manualSimSelected}
             setManualSimSelected={setManualSimSelected}
-            onManualSimulationChanged={handleManualSimChanged}
             activeOGABand={activeOGABand}
+            forcedNumbers={trendSelectedNumbers}   // pass forced (trend) picks here
           />
 
           {/* Candidate Generation Influences moved here */}
@@ -1505,11 +1535,40 @@ function AppInner(): JSX.Element {
             <div style={{ marginTop: 10, fontSize: 12, color: "#555" }}>
               <b>Provenance:</b> Window={filteredHistory.length}; Entropy={entropyEnabled ? entropyThreshold : "off"}; Hamming={hammingEnabled ? hammingThreshold : "off"}; Jaccard={jaccardEnabled ? jaccardThreshold.toFixed(2) : "off"}; Tricky={useTrickyRule ? "on" : "off"}; Ratios={selectedRatios.length ? selectedRatios.join(" ") : "none"}; RecMin={minRecentMatches}; RecBias={recentMatchBias}; Repeat W={repeatWindowSizeW} M={minFromRecentUnionM}; GPWF={gpwfEnabled ? "on" : "off"}; λ={lambdaEnabled ? lambda.toFixed(2) : "off"}; Sum={sumFilter.enabled ? `${sumFilter.min}–${sumFilter.max}${sumFilter.includeSupp ? "+supp" : ""}` : "off"}; PatternMode={patternConstraintMode} Tol={patternSumTolerance} Boost={patternBoostFactor}
             </div>
+            {/* Forced and Excluded reporting */}
+            <div style={{ marginTop: 8, fontSize: 12, color: "#333", background: "#fafafa", border: "1px solid #eee", borderRadius: 6, padding: 8 }}>
+              <div style={{ marginBottom: 6 }}>
+                <b>Forced numbers</b> ({trendSelectedNumbers.length}): {trendSelectedNumbers.length ? trendSelectedNumbers.slice().sort((a,b)=>a-b).join(", ") : "— none —"}
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                <div>
+                  <div style={{ fontWeight: 700, marginBottom: 4 }}>User Exclusions</div>
+                  <div>
+                    Count: {excludedNumbers.length}
+                  </div>
+                  <div>
+                    List: {excludedNumbers.length ? excludedNumbers.slice().sort((a,b)=>a-b).join(", ") : "— none —"}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontWeight: 700, marginBottom: 4 }}>System Exclusions</div>
+                  <div>
+                    SDE1: {knobs.enableSDE1 ? "ON" : "OFF"} • Count: {sde1Exclusions.length}
+                  </div>
+                  <div>
+                    HC3: {knobs.enableHC3 ? "ON" : "OFF"} • Count: {hc3Exclusions.length}
+                  </div>
+                  <div style={{ marginTop: 4 }}>
+                    Combined: {allExclusions.length ? allExclusions.slice().sort((a,b)=>a-b).join(", ") : "— none —"}
+                  </div>
+                </div>
+              </div>
+            </div>
           </CollapsibleSection>
 
           <div style={{ width: "100%", marginBottom: 18 }}>
             <OGAHistogram
-              ogaScores={pastOGAScores}
+              ogaScores={pastOGAScoresRef}
               candidateOGA={(currentCandidate as any)?.ogaScore}
               candidatePercentile={(currentCandidate as any)?.ogaPercentile}
             />
@@ -1545,7 +1604,7 @@ function AppInner(): JSX.Element {
           </div>
 
           <div style={{ width: "100%", overflowX: "auto" }}>
-            <div style={{ display: "inline-flex", alignItems: "flex-start", gap: 12 }}>
+            <div style={{ display: "inline-flex", alignItems: "flex-start", gap: 12, position: "relative" }}>
               <div style={{ display: "inline-block" }}>
                 <TemperatureHeatmap
                   history={filteredHistory}
@@ -1565,6 +1624,17 @@ function AppInner(): JSX.Element {
                   bucketLetters={["pR","F","pF","<C","C>","tT","W","H","tR","V"]}
                 />
               </div>
+              {/* Vertical user exclusions aligned to rows for Heatmap */}
+              <div style={{ position: "sticky", right: 0, top: 0 }}>
+                <UserExclusionsStrip
+                  title={undefined}
+                  excludedNumbers={excludedNumbers}
+                  setExcludedNumbers={setExcludedNumbers as any}
+                  orientation="vertical"
+                  labelPosition="right"
+                  cellSize={DGA_CELL_SIZE}
+                />
+              </div>
             </div>
           </div>
 
@@ -1573,20 +1643,33 @@ function AppInner(): JSX.Element {
           )}
 
           {dgaGrid.length > 0 ? (
-            <DGAVisualizer
-              grid={dgaGrid}
-              diamonds={dgaDiamonds}
-              predictions={dgaPredictions}
-              drawLabels={dgaDrawLabels}
-              numberLabels={Array.from({ length: 45 }, (_, i) => String(i + 1))}
-              numberCounts={numberCounts}
-              minCount={minCount}
-              maxCount={maxCount}
-              highlights={highlights}
-              setHighlights={setHighlights}
-              controlsPosition="below"
-              focusNumber={focusNumber}
-            />
+            <div style={{ position: "relative", width: "100%" }}>
+              <DGAVisualizer
+                grid={dgaGrid}
+                diamonds={dgaDiamonds}
+                predictions={dgaPredictions}
+                drawLabels={dgaDrawLabels}
+                numberLabels={Array.from({ length: 45 }, (_, i) => String(i + 1))}
+                numberCounts={numberCounts}
+                minCount={minCount}
+                maxCount={maxCount}
+                highlights={highlights}
+                setHighlights={setHighlights}
+                controlsPosition="below"
+                focusNumber={focusNumber}
+              />
+              {/* Vertical user exclusions aligned to rows for DGA grid; placed at right edge near last column including simulation column */}
+              <div style={{ position: "absolute", right: 0, top: 0, paddingLeft: 8 }}>
+                <UserExclusionsStrip
+                  title={undefined}
+                  excludedNumbers={excludedNumbers}
+                  setExcludedNumbers={setExcludedNumbers as any}
+                  orientation="vertical"
+                  labelPosition="right"
+                  cellSize={DGA_CELL_SIZE}
+                />
+              </div>
+            </div>
           ) : (
             <i>No grid data available.</i>
           )}

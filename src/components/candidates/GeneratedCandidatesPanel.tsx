@@ -8,7 +8,7 @@ export interface GeneratedCandidatesPanelProps {
   isGenerating?: boolean;
   numCandidates: number;
   setNumCandidates: (n: number) => void;
-
+  forcedNumbers?: number[]; // NEW: forced (trend) numbers to count in SelHits
   userSelectedNumbers: number[];
   setUserSelectedNumbers: (nums: number[]) => void;
 
@@ -22,8 +22,9 @@ export interface GeneratedCandidatesPanelProps {
   setManualSimSelected: React.Dispatch<React.SetStateAction<number[]>>;
   onManualSimulationChanged?: (next: number[]) => void;
 
-  // NEW: make this optional so App.tsx can pass it
   activeOGABand?: { lower: number; upper: number } | null;
+
+  ogaScoresRef?: number[];
 }
 
 export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> = ({
@@ -43,14 +44,38 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
   setManualSimSelected,
   onManualSimulationChanged,
   activeOGABand,
+  ogaScoresRef,
+  forcedNumbers = [],
 }) => {
+  const recentSet = new Set([...(mostRecentDraw?.main || []), ...(mostRecentDraw?.supp || [])]);
   const selSet = new Set(userSelectedNumbers);
-  const recentSet = new Set<number>(
-    mostRecentDraw ? [...mostRecentDraw.main, ...mostRecentDraw.supp] : []
-  );
+  const forcedSet = new Set(forcedNumbers);
+  const hitSet = new Set<number>([...selSet, ...forcedSet]); // union for SelHits
+
+  const selHeader = forcedNumbers.length ? "Sel/Forced Hits" : "SelHits";
+
+  function formatOGATooltip(ogaScore?: number, ogaPct?: number): string | undefined {
+    if (ogaScore === undefined || ogaPct === undefined) return undefined;
+    const ref = Array.isArray(ogaScoresRef) ? ogaScoresRef : undefined;
+    if (!ref || ref.length === 0) return `OGA raw ${ogaScore.toFixed(2)} • ${ogaPct.toFixed(1)}%`;
+    const sorted = ref.slice().sort((a, b) => a - b);
+    let rank = 0;
+    for (let i = 0; i < sorted.length; i++) if (sorted[i] <= ogaScore) rank++;
+    let nearestIdx = 0;
+    let best = Infinity;
+    for (let i = 0; i < sorted.length; i++) {
+      const d = Math.abs(sorted[i] - ogaScore);
+      if (d < best) {
+        best = d;
+        nearestIdx = i;
+      }
+    }
+    const nearestRaw = sorted[nearestIdx];
+    return `OGA raw ${ogaScore.toFixed(2)} • ${ogaPct.toFixed(1)}%\nRef: rank ${rank}/${sorted.length}, nearest ${nearestRaw.toFixed(2)}`;
+  }
 
   function renderNumber(n: number) {
-    const isSel = selSet.has(n);
+    const isHit = hitSet.has(n); // selected or forced
     const isRecent = recentSet.has(n);
     const base: React.CSSProperties = {
       padding: "0 4px",
@@ -60,7 +85,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
       fontVariantNumeric: "tabular-nums",
       fontSize: 12,
     };
-    if (isSel && isRecent) {
+    if (isHit && isRecent) {
       return (
         <span
           key={n}
@@ -71,13 +96,13 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
             color: "#c62828",
             textDecoration: "underline",
           }}
-          title="User-selected & Recently drawn"
+          title="Selected/Forced & Recently drawn"
         >
           {n}
         </span>
       );
     }
-    if (isSel) {
+    if (isHit) {
       return (
         <span
           key={n}
@@ -87,7 +112,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
             fontWeight: 700,
             textDecoration: "underline",
           }}
-          title="User-selected"
+          title="Selected/Forced"
         >
           {n}
         </span>
@@ -141,18 +166,14 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
             min={1}
             max={500}
             value={numCandidates}
-            onChange={(e) =>
-              setNumCandidates(Math.max(1, Number(e.target.value) || 1))
-            }
+            onChange={(e) => setNumCandidates(Math.max(1, Number(e.target.value) || 1))}
             style={{ width: 80, marginLeft: 6 }}
           />
         </label>
         <button type="button" disabled={isGenerating} onClick={onGenerate} style={genBtn(isGenerating)}>
           {isGenerating ? "Generating…" : "Generate"}
         </button>
-        {quotaWarning && (
-          <span style={{ color: "#d32f2f", fontSize: 12 }}>{quotaWarning}</span>
-        )}
+        {quotaWarning && <span style={{ color: "#d32f2f", fontSize: 12 }}>{quotaWarning}</span>}
         {activeOGABand && (
           <div style={{ fontSize: 12, color: "#555", marginTop: 6 }}>
             OGA raw filter: {activeOGABand.lower.toFixed(2)} – {activeOGABand.upper.toFixed(2)}
@@ -161,9 +182,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
       </header>
 
       {candidates.length === 0 ? (
-        <div style={{ color: "#777", fontSize: 13 }}>
-          No candidates yet. Click Generate.
-        </div>
+        <div style={{ color: "#777", fontSize: 13 }}>No candidates yet. Click Generate.</div>
       ) : (
         <table style={tbl}>
           <thead>
@@ -174,7 +193,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
               <th style={th}>Comp%</th>
               <th style={th}>OGA Raw</th>
               <th style={th}>OGA%</th>
-              <th style={th}>SelHits</th>
+              <th style={th}>{selHeader}</th>
               <th style={th}>RecentHits</th>
               <th style={th}>Actions</th>
             </tr>
@@ -183,41 +202,35 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
             {candidates.map((c: any, i) => {
               const isSelRow = i === selectedCandidateIdx;
               const nums = [...c.main, ...c.supp];
-              const selHits =
-                c.selHits ?? nums.filter((n) => selSet.has(n)).length;
-              const recentHits =
-                c.recentHits ?? nums.filter((n) => recentSet.has(n)).length;
+              const selHits = c.selHits ?? nums.filter((n) => hitSet.has(n)).length;
+              const recentHits = c.recentHits ?? nums.filter((n) => recentSet.has(n)).length;
               const shade = selHits
                 ? `rgba(25,118,210,${0.08 + 0.3 * (selHits / 8)})`
                 : isSelRow
                 ? "#FFF9C4"
                 : undefined;
+              const ogaRaw = c.ogaScore as number | undefined;
+              const ogaPct = c.ogaPercentile as number | undefined;
+              const ogaTip = formatOGATooltip(ogaRaw, ogaPct);
+
               return (
                 <tr
                   key={i}
-                  style={{
-                    background: shade,
-                    cursor: "pointer",
-                    transition: "background 0.12s",
-                  }}
+                  style={{ background: shade, cursor: "pointer", transition: "background 0.12s" }}
                   onClick={() => onSelectCandidate(i)}
-                  title={`SelHits=${selHits} RecentHits=${recentHits}`}
+                  title={`${selHeader}=${selHits} RecentHits=${recentHits}`}
                 >
                   <td style={tdCenter}>{i + 1}</td>
                   <td style={td}>{c.main.map(renderNumber)}</td>
                   <td style={td}>{c.supp.map(renderNumber)}</td>
                   <td style={tdCenter}>
-                    {c.finalCompositeAdj !== undefined
-                      ? (c.finalCompositeAdj * 100).toFixed(2)
-                      : ""}
+                    {c.finalCompositeAdj !== undefined ? (c.finalCompositeAdj * 100).toFixed(2) : ""}
                   </td>
-                  <td style={tdCenter}>
-                    {c.ogaScore !== undefined ? c.ogaScore.toFixed(2) : ""}
+                  <td style={tdCenter} title={ogaTip}>
+                    {ogaRaw !== undefined ? ogaRaw.toFixed(2) : ""}
                   </td>
-                  <td style={tdCenter}>
-                    {c.ogaPercentile !== undefined
-                      ? c.ogaPercentile.toFixed(1)
-                      : ""}
+                  <td style={tdCenter} title={ogaTip}>
+                    {ogaPct !== undefined ? ogaPct.toFixed(1) : ""}
                   </td>
                   <td style={tdCenter}>{selHits}</td>
                   <td style={tdCenter}>{recentHits}</td>
@@ -255,12 +268,7 @@ const ManualSim: React.FC<{
   setManualSimSelected: React.Dispatch<React.SetStateAction<number[]>>;
   onManualSimulationChanged?: (next: number[]) => void;
   toggleManualPick: (n: number) => void;
-}> = ({
-  manualSimSelected,
-  setManualSimSelected,
-  onManualSimulationChanged,
-  toggleManualPick,
-}) => {
+}> = ({ manualSimSelected, setManualSimSelected, onManualSimulationChanged, toggleManualPick }) => {
   return (
     <div style={manual}>
       <div style={{ marginBottom: 6, fontWeight: 600, fontSize: 13 }}>
