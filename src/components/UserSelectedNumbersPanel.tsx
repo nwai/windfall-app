@@ -5,13 +5,20 @@ interface UserSelectedNumbersPanelProps {
   setUserSelectedNumbers: React.Dispatch<React.SetStateAction<number[]>>;
   title?: string;
   persistKey?: string; // optional localStorage key
+  // New: simulate integration
+  onSimulate?: (nums: number[]) => void;
+  onClear?: () => void;
+  isSimulatingUser?: boolean; // visual feedback when user-based simulation active
 }
 
 export const UserSelectedNumbersPanel: React.FC<UserSelectedNumbersPanelProps> = ({
   userSelectedNumbers,
   setUserSelectedNumbers,
   title = "User Selected Numbers (Highlight Only)",
-  persistKey = "userSelectedNumbers"
+  persistKey = "userSelectedNumbers",
+  onSimulate,
+  onClear,
+  isSimulatingUser = false,
 }) => {
 
   // Optional persistence
@@ -40,7 +47,25 @@ export const UserSelectedNumbersPanel: React.FC<UserSelectedNumbersPanelProps> =
     );
   };
 
-  const clearAll = () => setUserSelectedNumbers([]);
+  const handleClearAll = () => {
+    onClear?.();
+    setUserSelectedNumbers([]);
+  };
+
+  const handleSimulate = () => {
+    if (!onSimulate) return;
+    // Toggle behavior: if currently simulated via user, pressing again will ask parent to clear
+    if (isSimulatingUser) {
+      onClear?.();
+      return;
+    }
+    const nums = userSelectedNumbers.slice(0, 8);
+    if (nums.length < 6) {
+      onSimulate([]); // parent can toast about insufficient selection if desired
+      return;
+    }
+    onSimulate(nums);
+  };
 
   return (
     <section style={{
@@ -52,11 +77,30 @@ export const UserSelectedNumbersPanel: React.FC<UserSelectedNumbersPanelProps> =
     }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
         <h3 style={{ margin: 0, fontSize: 16 }}>{title}</h3>
-        <div style={{ fontSize: 12, color: "#555" }}>
-          Selected: {userSelectedNumbers.length} &nbsp;
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <button
             type="button"
-            onClick={clearAll}
+            onClick={handleSimulate}
+            style={{
+              padding: "6px 12px",
+              borderRadius: 6,
+              border: isSimulatingUser ? "1px solid #1976d2" : "1px solid #bbb",
+              background: isSimulatingUser ? "#1976d2" : "#fafafa",
+              color: isSimulatingUser ? "#fff" : "#222",
+              cursor: "pointer",
+              fontSize: 12,
+              fontWeight: 600
+            }}
+            title={isSimulatingUser ? "Simulated (click to clear)" : "Simulate selected numbers in DGA grid"}
+          >
+            {isSimulatingUser ? "Simulated" : "Simulate"}
+          </button>
+          <div style={{ fontSize: 12, color: "#555" }}>
+            Selected: {userSelectedNumbers.length}
+          </div>
+          <button
+            type="button"
+            onClick={handleClearAll}
             style={{
               padding: "4px 10px",
               border: "1px solid #ccc",
@@ -65,7 +109,7 @@ export const UserSelectedNumbersPanel: React.FC<UserSelectedNumbersPanelProps> =
               cursor: "pointer",
               fontSize: 12
             }}
-            title="Clear all selected highlight numbers"
+            title="Clear all selected highlight numbers and simulation"
           >
             Clear
           </button>

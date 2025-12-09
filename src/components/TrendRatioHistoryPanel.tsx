@@ -349,18 +349,21 @@ export const TrendRatioHistoryPanel: React.FC<TrendRatioHistoryPanelProps> = ({
 
 /* ---------- Helper styling for z ---------- */
 function zColorStyle(z: number | null | undefined): string {
-  if (z == null) return "#555";
-  if (z >= 2.5) return "#0b7d0b";
-  if (z >= 2) return "#2e8b57";
-  if (z <= -2.5) return "#b00020";
-  if (z <= -2) return "#d32f2f";
-  return "#444";
+  if (z == null) return "#999";
+  const absZ = Math.abs(z);
+  if (absZ >= 4) return "#d32f2f"; // dark red
+  if (absZ >= 3) return "#e64a19"; // red
+  if (absZ >= 2) return "#f57c00"; // orange
+  return "#388e3c"; // green
 }
 function styleForZ(z: number | null | undefined): React.CSSProperties {
   if (z == null) return {};
-  const color = zColorStyle(z);
-  const fontWeight = Math.abs(z) >= 2 ? 700 : 500;
-  return { color, fontWeight };
+  const absZ = Math.abs(z);
+  const base = { fontWeight: 500, transition: "all 0.2s" };
+  if (absZ >= 4) return { ...base, color: "#d32f2f", opacity: 1 };
+  if (absZ >= 3) return { ...base, color: "#e64a19", opacity: 1 };
+  if (absZ >= 2) return { ...base, color: "#f57c00", opacity: 1 };
+  return { ...base, color: "#388e3c", opacity: 1 };
 }
 
 /* ---------- Types ---------- */
@@ -379,27 +382,14 @@ const panelStyle: React.CSSProperties = {
   borderRadius: 8,
   padding: 16,
   background: "#fff",
-  marginTop: 16
 };
-const h3Style: React.CSSProperties = { margin: "0 0 6px" };
-const infoRowStyle: React.CSSProperties = { fontSize: 12, color: "#333", marginBottom: 4 };
-const infoSubStyle: React.CSSProperties = { fontSize: 11, color: "#555", marginBottom: 10, lineHeight: 1.35 };
-const barWrapStyle: React.CSSProperties = { display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 };
-const barItemStyle: React.CSSProperties = { width: 46, display: "flex", flexDirection: "column", alignItems: "center", cursor: "pointer" };
-const barLabelStyle: React.CSSProperties = { fontSize: 10, marginTop: 2, textAlign: "center" };
+const h3Style: React.CSSProperties = { margin: 0, marginBottom: 8 };
+const infoRowStyle: React.CSSProperties = { fontSize: 12, color: "#333", marginBottom: 6 };
+const infoSubStyle: React.CSSProperties = { fontSize: 11, color: "#666", marginBottom: 10 };
+const barWrapStyle: React.CSSProperties = { display: "flex", gap: 8, alignItems: "flex-end", margin: "8px 0" };
+const barItemStyle: React.CSSProperties = { display: "flex", flexDirection: "column", alignItems: "center" };
+const barLabelStyle: React.CSSProperties = { fontSize: 10, color: "#555", marginTop: 4 };
 const tableStyle: React.CSSProperties = { borderCollapse: "collapse", width: "100%", fontSize: 12 };
-const th: React.CSSProperties = {
-  padding: "4px 6px",
-  borderBottom: "1px solid #ddd",
-  textAlign: "center",
-  fontWeight: 600,
-  cursor: "pointer",
-  whiteSpace: "nowrap"
-};
-const tdCenter: React.CSSProperties = {
-  padding: "4px 6px",
-  borderBottom: "1px solid #eee",
-  textAlign: "center",
-  fontVariantNumeric: "tabular-nums"
-};
+const th: React.CSSProperties = { textAlign: "center", padding: "4px 6px", borderBottom: "1px solid #ddd", fontWeight: 600, whiteSpace: "nowrap", cursor: "pointer" };
+const tdCenter: React.CSSProperties = { textAlign: "center", padding: "4px 6px", borderBottom: "1px solid " + "#eee" };
 const footStyle: React.CSSProperties = { fontSize: 11, color: "#555", marginTop: 8 };

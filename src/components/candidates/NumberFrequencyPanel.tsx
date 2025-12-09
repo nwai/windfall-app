@@ -9,7 +9,7 @@ interface Row {
   lastAgo: number | null;
   gapWindow: number | null;
   gapAll: number | null;
-  monthlyGaps: Array<{ month: string; gap: number | null }>;
+  monthlyGaps: Array<{ month: string; gap: number }>;
 }
 
 function appearances(draws: Draw[], n: number): number[] {
@@ -31,7 +31,7 @@ function averageGap(idxs: number[]): number | null {
   return sum / (idxs.length - 1);
 }
 
-function monthlyGapTrend(allDraws: Draw[], n: number): Array<{ month: string; gap: number | null }> {
+function monthlyGapTrend(allDraws: Draw[], n: number): Array<{ month: string; gap: number }> {
   const parseDate = (s: string): Date => {
     const dt = new Date(s);
     if (!isNaN(dt.getTime())) return dt;
@@ -58,41 +58,52 @@ function monthlyGapTrend(allDraws: Draw[], n: number): Array<{ month: string; ga
     months.push(`${y}-${String(m + 1).padStart(2, "0")}`);
     m += 1; if (m >= 12) { m = 0; y += 1; }
   }
-  const idxs = appearances(allDraws, n);
-  const perMonth: Map<string, { sum: number; count: number }> = new Map();
-  for (let i = 1; i < idxs.length; i++) {
-    const gap = idxs[i] - idxs[i - 1];
-    const dt = parseDate(allDraws[idxs[i]].date);
+
+  // Rolling gap counter: number of draws since last hit
+  const isHitAt = new Set<number>(appearances(allDraws, n));
+  let since = Infinity; // if number never seen yet, start as Infinity to ramp down on first hit
+  const perMonthSamples: Map<string, number[]> = new Map();
+  for (let i = 0; i < allDraws.length; i++) {
+    const dt = parseDate(allDraws[i].date);
     const key = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}`;
-    const prev = perMonth.get(key) || { sum: 0, count: 0 };
-    prev.sum += gap; prev.count += 1; perMonth.set(key, prev);
+    if (isHitAt.has(i)) {
+      since = 0;
+    } else {
+      since = Number.isFinite(since) ? since + 1 : 1; // first non-Infinity value becomes 1
+    }
+    const arr = perMonthSamples.get(key) || [];
+    arr.push(since);
+    perMonthSamples.set(key, arr);
   }
+
+  // Build contiguous series with average since per month; missing months get 0
   return months.map((mm) => {
-    const agg = perMonth.get(mm);
-    return { month: mm, gap: agg ? agg.sum / agg.count : null };
+    const samples = perMonthSamples.get(mm) || [];
+    const avg = samples.length ? (samples.reduce((a, b) => a + b, 0) / samples.length) : 0;
+    return { month: mm, gap: avg };
   });
 }
 
-const HistogramTooltip: React.FC<{ data: Array<{ month: string; gap: number | null }> }> = ({ data }) => {
+const HistogramTooltip: React.FC<{ data: Array<{ month: string; gap: number }> }> = ({ data }) => {
   if (!data.length) return <div style={{ padding: 6 }}>No monthly data</div>;
-  const gaps = data.map(d => (d.gap ?? 0));
+  const gaps = data.map(d => d.gap);
   const min = Math.min(...gaps);
   const max = Math.max(...gaps);
   const norm = (g: number) => (max === min ? 1 : (g - min) / (max - min));
   return (
     <div style={{ padding: 8, maxWidth: 320 }}>
-      <div style={{ fontWeight: 600, marginBottom: 6 }}>Monthly avg gap (from first draw)</div>
+      <div style={{ fontWeight: 600, marginBottom: 6 }}>Monthly avg gap (draws since last hit)</div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 6 }}>
         {data.map(({ month, gap }) => (
-          <div key={month} title={`${month}: ${gap === null ? "no data" : gap.toFixed(2) + " draws"}`} style={{ textAlign: "center" }}>
+          <div key={month} title={`${month}: ${gap.toFixed(2)} draws`} style={{ textAlign: "center" }}>
             <div style={{ height: 40, background: "#e3f2fd", position: "relative", borderRadius: 3 }}>
-              <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: Math.max(4, Math.round(norm(gap ?? 0) * 40)), background: gap === null ? "#b0bec5" : "#1976d2", borderRadius: 3 }} />
+              <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: Math.max(4, Math.round(norm(gap) * 40)), background: "#1976d2", borderRadius: 3 }} />
             </div>
             <div style={{ fontSize: 10, color: "#555", marginTop: 2 }}>{month.slice(5)}</div>
           </div>
         ))}
       </div>
-      <div style={{ fontSize: 10, color: "#777", marginTop: 6 }}>First block = first draw month; higher bars = longer gaps</div>
+      <div style={{ fontSize: 10, color: "#777", marginTop: 6 }}>Months without hits accumulate larger averages and will show taller bars.</div>
     </div>
   );
 };

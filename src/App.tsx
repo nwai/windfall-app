@@ -81,6 +81,8 @@ import { generateCandidates } from "./generateCandidates";
 import { ModulationDiagnosticsPanel } from "./components/ModulationDiagnosticsPanel";
 import { SelectionInsightsPanel } from "./components/SelectionInsightsPanel";
 import { CollapsibleSection } from "./components/shared/CollapsibleSection";
+import { NextDrawProbabilitiesPanel } from "./components/NextDrawProbabilitiesPanel";
+import { forecastOGA } from "./lib/ogaForecast";
 
 
 const custom: ZoneGroups = [
@@ -855,6 +857,11 @@ function AppInner(): JSX.Element {
         </div>
       </CollapsibleSection>
 
+      {/* [ORDER-ANCHOR] 02.1 Next Draw Probabilities */}
+      <CollapsibleSection title={<b>Next Draw Probabilities</b>} defaultOpen={true}>
+        <NextDrawProbabilitiesPanel history={filteredHistory} allHistory={history} title={`Next Draw Probabilities (${historyWindowName})`} />
+      </CollapsibleSection>
+
       {/* [ORDER-ANCHOR] 03 Odd/Even Ratio Filters */}
       <CollapsibleSection title={<b>Odd/Even Ratio Filters</b>} summaryHint="Select one or more ratios, or use Tricky Rule" defaultOpen={true}>
         <div style={{ marginBottom: 8 }}>
@@ -1342,7 +1349,7 @@ function AppInner(): JSX.Element {
         </div>
 
         {insightsEnabled && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 8 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 8 }}>
             {/* Windowed (WFMQY) version */}
             <div>
               <div style={{ fontSize: 12, color: "#1a4fa3", fontWeight: 700, marginBottom: 4 }}>Windowed (WFMQY)</div>
