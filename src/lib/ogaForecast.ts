@@ -9,6 +9,7 @@ export interface OGAForecast {
   p90: number;
   bands: { low: number; mid: number; high: number };
   scores: number[];
+  deciles?: { thresholds: number[]; probs: number[] };
 }
 
 function gaussianKDE(samples: number[]): { pdf: (x: number) => number } {
@@ -74,11 +75,22 @@ export function forecastOGA(history: Draw[], baseline?: Draw[]): OGAForecast {
   const [p10, p50, p90] = empiricalQuantiles(scores, [0.10, 0.50, 0.90]);
   const kde = gaussianKDE(scores);
   // Integrate KDE over bands
-  const lowProb = integratePDF(kde.pdf, Math.min(...scores) - 4, p10); // extend slightly below min
+  const lowProb = integratePDF(kde.pdf, Math.min(...scores) - 4, p10);
   const midProb = integratePDF(kde.pdf, p10, p90);
-  const highProb = integratePDF(kde.pdf, p90, Math.max(...scores) + 4); // extend slightly above max
-  // Normalize to 1 if numerical drift
-  const total = lowProb + midProb + highProb;
-  const bands = total > 1e-9 ? { low: lowProb / total, mid: midProb / total, high: highProb / total } : { low: 0, mid: 0, high: 0 };
-  return { n, mean, p10, p50, p90, bands, scores };
+  const highProb = integratePDF(kde.pdf, p90, Math.max(...scores) + 4);
+  const totalBands = lowProb + midProb + highProb;
+  const bands = totalBands > 1e-9 ? { low: lowProb / totalBands, mid: midProb / totalBands, high: highProb / totalBands } : { low: 0, mid: 0, high: 0 };
+
+  // Deciles: 10 bins by percentiles at 10%..90%
+  const qs = empiricalQuantiles(scores, [0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9]);
+  const lo = Math.min(...scores) - 4;
+  const hi = Math.max(...scores) + 4;
+  const bounds = [lo, ...qs, hi]; // 11 bounds, 10 bins
+  const rawProbs: number[] = [];
+  for (let i = 0; i < bounds.length - 1; i++) {
+    rawProbs.push(integratePDF(kde.pdf, bounds[i], bounds[i+1]));
+  }
+  const totalDec = rawProbs.reduce((s,x)=>s+x,0);
+  const decProbs = totalDec > 1e-9 ? rawProbs.map(p => p / totalDec) : Array(10).fill(0);
+  return { n, mean, p10, p50, p90, bands, scores, deciles: { thresholds: qs, probs: decProbs } };
 }

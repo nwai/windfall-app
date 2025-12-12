@@ -107,16 +107,18 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
     return { occurSeries: occur, emaSeries: ema };
   }, [chrono, T, alpha, heightNumbers]);
 
-  // Recency 1→0 with drought
+  // Recency exponential-decay: v = exp(-age / k), k ≈ 1/p where p ≈ 8/45
   const recencySeries = useMemo(() => {
     const rec: number[][] = Array.from({ length: heightNumbers }, () => Array(T).fill(0));
+    const p = 8 / 45; // expected hits per draw ratio for Weekday Windfall
+    const k = 1 / (p || 0.0001); // characteristic gap length (~5.625)
+    const maxAgeCap = Math.max(1, Math.floor(k * 8)); // cap to avoid underflow in very long droughts
     for (let n = 0; n < heightNumbers; n++) {
-      let age = T;
+      let age = maxAgeCap; // start with capped age so earliest cells aren’t all zero
       for (let t = 0; t < T; t++) {
-        if (occurSeries[n][t] === 1) age = 0;
-        else age = Math.min(T, age + 1);
-        const normAge = T > 1 ? Math.min(1, age / (T - 1)) : 1;
-        rec[n][t] = 1 - normAge;
+        if (occurSeries[n][t] === 1) age = 0; else age = Math.min(maxAgeCap, age + 1);
+        const v = Math.exp(-age / k);
+        rec[n][t] = v; // 1 on hit, decays smoothly toward ~0 as drought lengthens
       }
     }
     return rec;

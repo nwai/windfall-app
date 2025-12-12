@@ -2,6 +2,7 @@ import { CandidateSet, Draw, Knobs } from "./types";
 import { entropy, minHamming, maxJaccard } from "./analytics";
 import { applyOctagonalPostProcess } from "./octagonal";
 import { getSDE1FilteredPool } from "./sde1";
+import { computeOGA } from "./utils/oga";
 
 /** Trend classification union (avoid missing type) */
 export type TrendClass = 'UP' | 'DOWN' | 'FLAT';
@@ -22,6 +23,7 @@ export interface GenerateCandidatesResult {
     trendRatio: number;
     sumRange: number;        // NEW
     patternConstraint: number; // NEW
+    ogaBias: number;          // NEW
     exclusions: number;
     totalAttempts: number;
     accepted: number;
@@ -98,6 +100,15 @@ export function generateCandidates(
     mode?: 'boost' | 'restrict';
     boostFactor?: number;   // not used here; applied in App ranking
     sumTolerance?: number;  // default 0 means exact sum
+  },
+  // NEW: OGA forecast bias options
+  ogaBiasOptions?: {
+    enabled?: boolean;
+    preferredBand?: 'auto' | 'low' | 'mid' | 'high';
+    bands?: { low: number; mid: number; high: number }; // probabilities from KDE
+    // NEW: decile-based selection
+    deciles?: { thresholds: number[]; probs: number[] };
+    preferredDeciles?: { index: number; weight: number }[]; // allow multiple decile bands with weights
   }
 ): GenerateCandidatesResult {
 
@@ -134,6 +145,7 @@ export function generateCandidates(
     trendRatio: 0,
     sumRange: 0,      // NEW
     patternConstraint: 0, // NEW
+    ogaBias: 0,           // NEW
     exclusions: 0,
     totalAttempts: 0,
     accepted: 0
@@ -333,6 +345,50 @@ if (patternOptions?.constraints?.length && patternOptions?.mode === 'restrict') 
     if (knobs.enableEntropy && entropy({ main, supp }) < entropyThreshold) { stats.entropy++; continue; }
     if (knobs.enableHamming && minHamming({ main, supp }, history) < hammingThreshold) { stats.hamming++; continue; }
     if (knobs.enableJaccard && maxJaccard({ main, supp }, history) > jaccardThreshold) { stats.jaccard++; continue; }
+
+    // OGA forecast bias acceptance — deterministic by raw candidate OGA vs bands/deciles
+    if (ogaBiasOptions?.enabled) {
+      const candidateOGA = computeOGA(nums8, history);
+      let acceptedByDecile = false;
+      if (ogaBiasOptions.deciles && Array.isArray(ogaBiasOptions.preferredDeciles) && ogaBiasOptions.preferredDeciles.length) {
+        const th = ogaBiasOptions.deciles.thresholds || [];
+        // Determine decile index: 0..9
+        let idx = 0;
+        while (idx < th.length && candidateOGA > th[idx]) idx++;
+        // Weighted acceptance based on selected deciles
+        const match = ogaBiasOptions.preferredDeciles.find(d => d.index === idx);
+        const weightSum = ogaBiasOptions.preferredDeciles.reduce((s, d) => s + Math.max(0, d.weight), 0) || 0;
+        const w = match ? Math.max(0, match.weight) : 0;
+        const prob = weightSum > 0 ? (w / weightSum) : 0;
+        if (Math.random() <= prob) acceptedByDecile = true;
+
+        const selList = (ogaBiasOptions.preferredDeciles ?? []).map(d=>`D${d.index}x${d.weight}`).join(', ');
+        traceSetter(t => [...t, `[TRACE] OGA decile check: OGA=${candidateOGA.toFixed(2)} → D${idx} weight=${w} prob=${prob.toFixed(2)} sel=${selList}`]);
+      }
+      if (!acceptedByDecile) {
+        // Fallback to low/mid/high deterministic band matching or probabilistic acceptance
+        const pb = ogaBiasOptions.preferredBand ?? 'auto';
+        const bands = ogaBiasOptions.bands ?? { low: 0.1, mid: 0.8, high: 0.1 };
+        // Compute p10/p90 proxies if available from deciles
+        const th = ogaBiasOptions.deciles?.thresholds;
+        const p10 = th && th[0] !== undefined ? th[0] : undefined;
+        const p90 = th && th[8] !== undefined ? th[8] : undefined;
+        if (p10 !== undefined && p90 !== undefined) {
+          const band = candidateOGA <= p10 ? 'low' : candidateOGA >= p90 ? 'high' : 'mid';
+          const targetBand: 'low' | 'mid' | 'high' = pb === 'auto'
+            ? (bands.low >= bands.mid && bands.low >= bands.high ? 'low' : (bands.mid >= bands.high ? 'mid' : 'high'))
+            : pb;
+          if (band !== targetBand) { stats.ogaBias++; continue; }
+        } else {
+          // Probabilistic fallback
+          const targetBand: 'low' | 'mid' | 'high' = pb === 'auto'
+            ? (bands.low >= bands.mid && bands.low >= bands.high ? 'low' : (bands.mid >= bands.high ? 'mid' : 'high'))
+            : pb;
+          const acceptProb = targetBand === 'low' ? bands.low : targetBand === 'mid' ? bands.mid : bands.high;
+          if (Math.random() > acceptProb) { stats.ogaBias++; continue; }
+        }
+      }
+    }
 
     // ACCEPT
     let patternMatches = 0;

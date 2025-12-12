@@ -83,6 +83,7 @@ import { SelectionInsightsPanel } from "./components/SelectionInsightsPanel";
 import { CollapsibleSection } from "./components/shared/CollapsibleSection";
 import { NextDrawProbabilitiesPanel } from "./components/NextDrawProbabilitiesPanel";
 import { forecastOGA } from "./lib/ogaForecast";
+import { MostLikelyNotDrawnPanel } from "./components/MostLikelyNotDrawnPanel";
 
 
 const custom: ZoneGroups = [
@@ -304,6 +305,12 @@ function AppInner(): JSX.Element {
   const [patternConstraintMode, setPatternConstraintMode] = useState<'boost' | 'restrict'>('boost');
   const [patternBoostFactor, setPatternBoostFactor] = useState<number>(0.15);
   const [patternSumTolerance, setPatternSumTolerance] = useState<number>(0);
+
+  // NEW: OGA bias UI state
+  const [enableOGAForecastBias, setEnableOGAForecastBias] = useState<boolean>(false);
+  const [ogaBaselineMode, setOGABaselineMode] = useState<"window" | "all">("window");
+  const [ogaPreferredBand, setOGAPreferredBand] = useState<"auto" | "low" | "mid" | "high">("auto");
+  const [ogaPreferredDeciles, setOGAPreferredDeciles] = useState<{ index: number; weight: number }[]>([]);
 
   const { zoneGamma, setZoneGamma } = useZPASettings();
 
@@ -639,6 +646,10 @@ function AppInner(): JSX.Element {
       lambda: lambdaEnabled ? lambda : 0.0,
     };
 
+    // OGA forecast bands (KDE) based on selected baseline
+    const baselineForOGAForecast = ogaBaselineMode === "window" ? filteredHistory : history;
+    const ogaStats = forecastOGA(filteredHistory, baselineForOGAForecast);
+
     // Route traces through the verbose-aware dispatcher
     const traceDispatch: React.Dispatch<React.SetStateAction<string[]>> = setTraceMaybe;
 
@@ -671,6 +682,13 @@ function AppInner(): JSX.Element {
         mode: patternConstraintMode,
         boostFactor: patternBoostFactor,
         sumTolerance: patternSumTolerance,
+      },
+      {
+        enabled: enableOGAForecastBias,
+        preferredBand: ogaPreferredBand,
+        bands: ogaStats.bands,
+        deciles: ogaStats.deciles,
+        preferredDeciles: ogaPreferredDeciles,
       }
     );
 
@@ -687,7 +705,7 @@ function AppInner(): JSX.Element {
     const st = result.rejectionStats;
     setTraceMaybe((t) => [
       ...t,
-      `[TRACE] Generation: requested ${numCandidates}, generated ${processedCandidates.length} (accepted ${st.accepted}/${st.totalAttempts} attempts) in ${dt}ms; rejects — ent:${st.entropy} ham:${st.hamming} jac:${st.jaccard} oddEven:${st.oddEven} tricky:${st.tricky} recMin:${st.minRecent} recBias:${st.recentBias} repeat:${st.repeatUnion} trend:${st.trendRatio} sum:${st.sumRange} pattern:${st.patternConstraint} excl:${st.exclusions}`,
+      `[TRACE] Generation: requested ${numCandidates}, generated ${processedCandidates.length} (accepted ${st.accepted}/${st.totalAttempts} attempts) in ${dt}ms; rejects — ent:${st.entropy} ham:${st.hamming} jac:${st.jaccard} oddEven:${st.oddEven} tricky:${st.tricky} recMin:${st.minRecent} recBias:${st.recentBias} repeat:${st.repeatUnion} trend:${st.trendRatio} sum:${st.sumRange} pattern:${st.patternConstraint} ogaBias:${st.ogaBias} excl:${st.exclusions}`,
     ]);
 
     setIsGenerating(false);
@@ -760,7 +778,7 @@ function AppInner(): JSX.Element {
   };
 
   // Legend counts for heatmap (from trendValueSeries)
-  const bucketStops = [0.05, 0.12, 0.20, 0.30, 0.42, 0.55, 0.68, 0.82, 0.92];
+  const bucketStops = [0.01, 0.08, 0.14, 0.20, 0.31, 0.43, 0.50, 0.70, 0.86, 0.96];
   const bucketLabels = ["prehistoric","frozen","permafrost","cold","cool","temperate","warm","hot","tropical","volcanic"];
   const bucketColors = ["#0b1020","#1b2733","#244963","#2c75a0","#3ca0c7","#66c2a5","#a6d854","#fdd835","#fb8c00","#e53935"];
   function bucketIndex(v: number): number { for (let i = 0; i < bucketStops.length; i++) if (v < bucketStops[i]) return i; return bucketStops.length; }
@@ -1113,6 +1131,11 @@ function AppInner(): JSX.Element {
         />
       </CollapsibleSection>
 
+      {/* [ORDER-ANCHOR] 07.1 Most Likely NOT Drawn */}
+      <CollapsibleSection title={<b>Most Likely NOT Drawn</b>} defaultOpen={true}>
+        <MostLikelyNotDrawnPanel history={filteredHistory} title="Most Likely NOT Drawn" />
+      </CollapsibleSection>
+
       {/* [ORDER-ANCHOR] 08 Trend Ratio History */}
       <CollapsibleSection title={<b>Trend Ratio History</b>} defaultOpen={true}>
         <TrendRatioHistoryPanel
@@ -1331,6 +1354,31 @@ function AppInner(): JSX.Element {
         <UserSelectedNumbersPanel
           userSelectedNumbers={userSelectedNumbers}
           setUserSelectedNumbers={setUserSelectedNumbers}
+          onSimulate={(nums) => {
+            // If insufficient selection, clear any existing simulation
+            if (!nums || nums.length < 6) {
+              setSimulatedDraw(null);
+              setManualSimSelected([]);
+              return;
+            }
+            // Apply manual simulation from user selections; clear DGA synthetic draw to avoid dual overlay
+            setSimulatedDraw(null);
+            setManualSimSelected(nums.slice(0, 8));
+          }}
+          onClear={() => {
+            // Clear DGA synthetic column and manual overlay
+            setSimulatedDraw(null);
+            setManualSimSelected([]);
+          }}
+          isSimulatingUser={(() => {
+            const a = manualSimSelected.slice(0, 8);
+            const b = userSelectedNumbers.slice(0, 8);
+            if (a.length !== b.length) return false;
+            const sa = a.slice().sort((x,y)=>x-y);
+            const sb = b.slice().sort((x,y)=>x-y);
+            for (let i=0;i<sa.length;i++) if (sa[i] !== sb[i]) return false;
+            return sa.length >= 6;
+          })()}
         />
       </CollapsibleSection>
 
@@ -1427,6 +1475,7 @@ function AppInner(): JSX.Element {
           {/* Candidate Generation Influences moved here */}
           <CollapsibleSection title={<b>Candidate Generation Influences</b>} summaryHint="Toggle filters and boosts that affect generation" defaultOpen={true}>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(260px, 1fr))", gap: 12 }}>
+              {/* Column 1: Core Filters */}
               <div style={{ border: "1px solid #eee", borderRadius: 6, padding: 10 }}>
                 <div style={{ fontWeight: 700, marginBottom: 6 }}>Core Filters</div>
                 <label>
@@ -1452,6 +1501,7 @@ function AppInner(): JSX.Element {
                 </div>
               </div>
 
+              {/* Column 2: Composition & Recency + OGA Bias */}
               <div style={{ border: "1px solid #eee", borderRadius: 6, padding: 10 }}>
                 <div style={{ fontWeight: 700, marginBottom: 6 }}>Composition & Recency</div>
                 <label>
@@ -1491,56 +1541,105 @@ function AppInner(): JSX.Element {
                     <input type="number" min={0} max={8} value={minFromRecentUnionM} onChange={(e) => setMinFromRecentUnionM(Number(e.target.value))} style={{ width: 60, marginLeft: 6 }} />
                   </label>
                 </div>
+
+                {/* OGA Forecast Bias (KDE) */}
+                <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px dashed #ddd" }}>
+                  <div style={{ fontWeight: 600, marginBottom: 6 }}>OGA Forecast Bias (KDE)</div>
+                  <label style={{ display: "block", marginBottom: 6 }}>
+                    <input type="checkbox" checked={enableOGAForecastBias} onChange={(e) => setEnableOGAForecastBias(e.target.checked)} style={{ marginRight: 6 }} />
+                    Enable bias by Next Draw OGA forecast
+                  </label>
+                  <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 6 }}>
+                    <label style={{ fontSize: 12 }}>
+                      Baseline:
+                      <select value={ogaBaselineMode} onChange={(e) => setOGABaselineMode(e.target.value as any)} style={{ marginLeft: 6 }}>
+                        <option value="window">Windowed</option>
+                        <option value="all">All History</option>
+                      </select>
+                    </label>
+                    <label style={{ fontSize: 12 }}>
+                      Preferred band:
+                      <select value={ogaPreferredBand} onChange={(e) => setOGAPreferredBand(e.target.value as any)} style={{ marginLeft: 6 }}>
+                        <option value="auto">Auto</option>
+                        <option value="low">Low (≤p10)</option>
+                        <option value="mid">Mid (p10–p90)</option>
+                        <option value="high">High (≥p90)</option>
+                      </select>
+                    </label>
+                  </div>
+                  {/* NEW: Decile selector */}
+                  {(() => {
+                    const dec = forecastOGA(filteredHistory, ogaBaselineMode === 'window' ? filteredHistory : history).deciles;
+                    const thresholds = dec?.thresholds || [];
+                    return (
+                      <div style={{ marginTop: 6 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600 }}>Preferred decile bands:</div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
+                          {Array.from({ length: 10 }, (_, i) => i).map((i) => (
+                            <label key={i} style={{ border: '1px solid #eee', borderRadius: 4, padding: '4px 6px' }}>
+                              <input
+                                type="checkbox"
+                                checked={ogaPreferredDeciles.some(d => d.index === i)}
+                                onChange={(e) => {
+                                  setOGAPreferredDeciles(prev => {
+                                    const exists = prev.some(d => d.index === i);
+                                    if (exists) return prev.filter(d => d.index !== i);
+                                    return [...prev, { index: i, weight: 1 }];
+                                  });
+                                }}
+                                style={{ marginRight: 6 }}
+                              />
+                              D{i} {thresholds[i - 1] !== undefined ? `≥ ${thresholds[i - 1].toFixed(2)}` : '(min)'}
+                              <input
+                                type="number"
+                                min={0}
+                                step={0.1}
+                                value={ogaPreferredDeciles.find(d => d.index === i)?.weight ?? 1}
+                                onChange={(e) => {
+                                  const w = Number(e.target.value);
+                                  setOGAPreferredDeciles(prev => {
+                                    const idx = prev.findIndex(d => d.index === i);
+                                    if (idx >= 0) {
+                                      const next = prev.slice();
+                                      next[idx] = { ...next[idx], weight: w };
+                                      return next;
+                                    }
+                                    return [...prev, { index: i, weight: w }];
+                                  });
+                                }}
+                                style={{ width: 60, marginLeft: 6 }}
+                                title="Weight"
+                              />
+                            </label>
+                          ))}
+                        </div>
+                        <div style={{ fontSize: 11, color: '#888', marginTop: 4 }}>Select one or more deciles and assign weights; candidates whose OGA falls in selected deciles are accepted with probability proportional to weight. If none are selected, low/mid/high is used.</div>
+                      </div>
+                    );
+                  })()}
+                </div>
               </div>
 
+              {/* Column 3: Biases & Pattern Constraints (restored) */}
               <div style={{ border: "1px solid #eee", borderRadius: 6, padding: 10 }}>
                 <div style={{ fontWeight: 700, marginBottom: 6 }}>Biases & Pattern Constraints</div>
-                <label>
-                  <input type="checkbox" checked={gpwfEnabled} onChange={(e) => setGPWFEnabled(e.target.checked)} style={{ marginRight: 6 }} />
-                  GPWF bias
+                <label style={{ display: 'block', marginBottom: 6 }}>
+                  <input type="checkbox" checked={patternConstraintMode === 'restrict'} onChange={(e) => setPatternConstraintMode(e.target.checked ? 'restrict' : 'boost')} style={{ marginRight: 6 }} />
+                  Restrict to selected patterns (otherwise Boost in ranking)
                 </label>
-                <div style={{ marginTop: 6 }}>
-                  <label>
-                    Lambda weight:
-                    <input type="checkbox" checked={lambdaEnabled} onChange={(e) => setLambdaEnabled(e.target.checked)} style={{ margin: "0 6px 0 12px" }} />
-                    <input type="number" min={0} max={10} step={0.1} value={lambda} onChange={(e) => setLambda(Number(e.target.value))} style={{ width: 80 }} />
-                  </label>
-                </div>
-                <div style={{ marginTop: 6 }}>
-                  <label>
-                    Sum range filter:
-                    <input type="checkbox" checked={sumFilter.enabled} onChange={(e) => setSumFilter(prev => ({ ...prev, enabled: e.target.checked }))} style={{ margin: "0 6px 0 12px" }} />
-                    <input type="number" value={sumFilter.min ?? 0} onChange={(e) => setSumFilter(prev => ({ ...prev, min: Number(e.target.value) }))} style={{ width: 70, marginLeft: 6 }} />
-                    –
-                    <input type="number" value={sumFilter.max ?? 0} onChange={(e) => setSumFilter(prev => ({ ...prev, max: Number(e.target.value) }))} style={{ width: 70, marginLeft: 6 }} />
-                    <label style={{ marginLeft: 8 }}>
-                      <input type="checkbox" checked={sumFilter.includeSupp ?? true} onChange={(e) => setSumFilter(prev => ({ ...prev, includeSupp: e.target.checked }))} style={{ marginRight: 6 }} />
-                      Include supp
-                    </label>
-                  </label>
-                </div>
-                <div style={{ marginTop: 6 }}>
-                  <label>
-                    Pattern constraints mode:
-                    <select value={patternConstraintMode} onChange={(e) => setPatternConstraintMode(e.target.value as any)} style={{ marginLeft: 6 }}>
-                      <option value="restrict">Restrict</option>
-                      <option value="boost">Boost-only</option>
-                      <option value="off">Off</option>
-                    </select>
-                  </label>
-                  <label style={{ marginLeft: 10 }}>
-                    Sum tolerance:
-                    <input type="number" min={0} max={999} value={patternSumTolerance} onChange={(e) => setPatternSumTolerance(Number(e.target.value))} style={{ width: 80, marginLeft: 6 }} />
-                  </label>
-                  <label style={{ marginLeft: 10 }}>
-                    Boost factor:
-                    <input type="number" min={0} max={10} step={0.1} value={patternBoostFactor} onChange={(e) => setPatternBoostFactor(Number(e.target.value))} style={{ width: 80, marginLeft: 6 }} />
-                  </label>
-                </div>
+                <label style={{ display: 'block', marginBottom: 6 }}>
+                  Sum tolerance:
+                  <input type="number" value={patternSumTolerance} onChange={(e) => setPatternSumTolerance(Number(e.target.value))} style={{ marginLeft: 6, width: 80 }} />
+                </label>
+                <label style={{ display: 'block', marginBottom: 6 }}>
+                  Boost factor:
+                  <input type="number" step={0.05} value={patternBoostFactor} onChange={(e) => setPatternBoostFactor(Number(e.target.value))} style={{ marginLeft: 6, width: 80 }} />
+                </label>
+                <div style={{ fontSize: 11, color: '#888' }}>Pattern constraints use the selections from Window Stats. Restrict filters during generation; Boost increases ranking weight post-generation.</div>
               </div>
             </div>
             <div style={{ marginTop: 10, fontSize: 12, color: "#555" }}>
-              <b>Provenance:</b> Window={filteredHistory.length}; Entropy={entropyEnabled ? entropyThreshold : "off"}; Hamming={hammingEnabled ? hammingThreshold : "off"}; Jaccard={jaccardEnabled ? jaccardThreshold.toFixed(2) : "off"}; Tricky={useTrickyRule ? "on" : "off"}; Ratios={selectedRatios.length ? selectedRatios.join(" ") : "none"}; RecMin={minRecentMatches}; RecBias={recentMatchBias}; Repeat W={repeatWindowSizeW} M={minFromRecentUnionM}; GPWF={gpwfEnabled ? "on" : "off"}; λ={lambdaEnabled ? lambda.toFixed(2) : "off"}; Sum={sumFilter.enabled ? `${sumFilter.min}–${sumFilter.max}${sumFilter.includeSupp ? "+supp" : ""}` : "off"}; PatternMode={patternConstraintMode} Tol={patternSumTolerance} Boost={patternBoostFactor}
+              <b>Provenance:</b> Window={filteredHistory.length}; Entropy={entropyEnabled ? entropyThreshold : "off"}; Hamming={hammingEnabled ? hammingThreshold : "off"}; Jaccard={jaccardEnabled ? jaccardThreshold : "off"}; Tricky={useTrickyRule ? "on" : "off"}; Ratios={selectedRatios.length ? selectedRatios.join(" ") : "none"}; RecMin={minRecentMatches}; RecBias={recentMatchBias}; Repeat W={repeatWindowSizeW} M={minFromRecentUnionM}; GPWF={gpwfEnabled ? "on" : "off"}; λ={lambdaEnabled ? lambda.toFixed(2) : "off"}; Sum={sumFilter.enabled ? `${sumFilter.min}–${sumFilter.max}${sumFilter.includeSupp ? "+supp" : ""}` : "off"}; PatternMode={patternConstraintMode} Tol={patternSumTolerance} Boost={patternBoostFactor}; OGABias={enableOGAForecastBias ? `${ogaPreferredBand} @ ${ogaBaselineMode}` : "off"}
             </div>
             {/* Forced and Excluded reporting */}
             <div style={{ marginTop: 8, fontSize: 12, color: "#333", background: "#fafafa", border: "1px solid #eee", borderRadius: 6, padding: 8 }}>

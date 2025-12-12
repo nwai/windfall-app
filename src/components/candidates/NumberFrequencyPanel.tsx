@@ -47,8 +47,9 @@ function monthlyGapTrend(allDraws: Draw[], n: number): Array<{ month: string; ga
     }
     return new Date(1970, 0, 1);
   };
-  const startDt = allDraws.length ? parseDate(allDraws[0].date) : new Date(1970, 0, 1);
-  const endDt = allDraws.length ? parseDate(allDraws[allDraws.length - 1].date) : new Date(1970, 0, 1);
+  if (!allDraws.length) return [];
+  const startDt = parseDate(allDraws[0].date);
+  const endDt = parseDate(allDraws[allDraws.length - 1].date);
   const months: string[] = [];
   let y = startDt.getFullYear();
   let m = startDt.getMonth();
@@ -59,51 +60,61 @@ function monthlyGapTrend(allDraws: Draw[], n: number): Array<{ month: string; ga
     m += 1; if (m >= 12) { m = 0; y += 1; }
   }
 
-  // Rolling gap counter: number of draws since last hit
-  const isHitAt = new Set<number>(appearances(allDraws, n));
-  let since = Infinity; // if number never seen yet, start as Infinity to ramp down on first hit
+  // Hits index map for quick lookup
+  const hitIdxs = new Set<number>(appearances(allDraws, n));
+
+  // Accumulate per-month samples of the running gap (draws since last hit)
+  let since = 0; // start counting from first draw
   const perMonthSamples: Map<string, number[]> = new Map();
   for (let i = 0; i < allDraws.length; i++) {
     const dt = parseDate(allDraws[i].date);
     const key = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}`;
-    if (isHitAt.has(i)) {
-      since = 0;
+    if (hitIdxs.has(i)) {
+      since = 0; // reset on hit
     } else {
-      since = Number.isFinite(since) ? since + 1 : 1; // first non-Infinity value becomes 1
+      since += 1; // grow on non-hit
     }
     const arr = perMonthSamples.get(key) || [];
     arr.push(since);
     perMonthSamples.set(key, arr);
   }
 
-  // Build contiguous series with average since per month; missing months get 0
-  return months.map((mm) => {
+  // Build contiguous series, carrying forward previous gap for months with no samples
+  const series: Array<{ month: string; gap: number }> = [];
+  let lastGap = 0;
+  for (const mm of months) {
     const samples = perMonthSamples.get(mm) || [];
-    const avg = samples.length ? (samples.reduce((a, b) => a + b, 0) / samples.length) : 0;
-    return { month: mm, gap: avg };
-  });
+    if (samples.length) {
+      const avg = samples.reduce((a, b) => a + b, 0) / samples.length;
+      series.push({ month: mm, gap: avg });
+      lastGap = avg;
+    } else {
+      // No draws recorded for this month; carry forward gap so visualization remains monotonic
+      series.push({ month: mm, gap: lastGap });
+    }
+  }
+  return series;
 }
 
 const HistogramTooltip: React.FC<{ data: Array<{ month: string; gap: number }> }> = ({ data }) => {
   if (!data.length) return <div style={{ padding: 6 }}>No monthly data</div>;
   const gaps = data.map(d => d.gap);
-  const min = Math.min(...gaps);
   const max = Math.max(...gaps);
-  const norm = (g: number) => (max === min ? 1 : (g - min) / (max - min));
+  const norm = (g: number) => (max <= 0 ? 1 : Math.min(1, g / max));
   return (
-    <div style={{ padding: 8, maxWidth: 320 }}>
+    <div style={{ padding: 8, maxWidth: 360 }}>
       <div style={{ fontWeight: 600, marginBottom: 6 }}>Monthly avg gap (draws since last hit)</div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 6 }}>
         {data.map(({ month, gap }) => (
           <div key={month} title={`${month}: ${gap.toFixed(2)} draws`} style={{ textAlign: "center" }}>
-            <div style={{ height: 40, background: "#e3f2fd", position: "relative", borderRadius: 3 }}>
-              <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: Math.max(4, Math.round(norm(gap) * 40)), background: "#1976d2", borderRadius: 3 }} />
+            <div style={{ height: 44, background: "#eef7ff", position: "relative", borderRadius: 3 }}>
+              <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: Math.max(4, Math.round(norm(gap) * 44)), background: "#1976d2", borderRadius: 3 }} />
             </div>
             <div style={{ fontSize: 10, color: "#555", marginTop: 2 }}>{month.slice(5)}</div>
           </div>
         ))}
       </div>
-      <div style={{ fontSize: 10, color: "#777", marginTop: 6 }}>Months without hits accumulate larger averages and will show taller bars.</div>
+      <div style={{ fontSize: 10, color: "#777", marginTop: 6 }}>Months without hits accumulate longer gaps and will show taller bars relative to months with hits.</div>
     </div>
   );
 };

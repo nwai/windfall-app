@@ -86,6 +86,31 @@ export const NextDrawProbabilitiesPanel: React.FC<NextDrawProbabilitiesPanelProp
             </div>
           </div>
 
+          {/* NEW: Decile probabilities */}
+          {ogaStats.deciles && (
+            <div style={{ marginTop: 8 }}>
+              <b style={{ fontSize: 12 }}>OGA decile thresholds and probabilities (KDE)</b>
+              <table style={table}>
+                <thead>
+                  <tr>
+                    <th style={th}>Decile</th>
+                    <th style={th}>Threshold</th>
+                    <th style={th}>Prob%</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Array.from({ length: 10 }, (_, i) => i).map(i => (
+                    <tr key={i}>
+                      <td style={td}>D{i}</td>
+                      <td style={td}>{(i === 0 ? Math.min(...ogaStats.scores) : ogaStats.deciles!.thresholds[i - 1]).toFixed(2)}</td>
+                      <td style={td}>{(ogaStats.deciles!.probs[i] * 100).toFixed(1)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
           <div style={{ marginTop: 8 }}>
             <b style={{ fontSize: 12 }}>Odd/Even ratio probabilities (empirical)</b>
             <table style={table}>

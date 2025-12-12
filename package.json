@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
     "lint:fix": "eslint \"src/**/*.{ts,tsx}\" --fix",
-    "verify": "npm run typecheck && npm run lint"
+    "verify": "npm run typecheck && npm run lint",
+    "test": "vitest --run"
   },
   "dependencies": {
     "@nivo/bar": "^0.85.0",
@@ -35,8 +36,10 @@
     "eslint-plugin-react-hooks": "^7.0.1",
     "globals": "^16.5.0",
     "jiti": "^2.6.1",
+    "jsdom": "^27.3.0",
     "typescript": "^5.6.3",
     "typescript-eslint": "^8.48.1",
-    "vite": "^7.1.12"
+    "vite": "^7.1.12",
+    "vitest": "^1.6.1"
   }
 }
