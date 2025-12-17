@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState } from 'react';
 import type { Draw } from '../types';
 import { runLeaveOneOutBacktest } from '../lib/backtest';
 
@@ -20,23 +20,9 @@ function buildNotDrawnMains(history: Draw[]): { date: string; drawn: number[]; n
 
 export const MostLikelyNotDrawnPanel: React.FC<MostLikelyNotDrawnPanelProps> = ({ history, allHistory, title = 'Most Likely NOT Drawn (Mains Only)' }) => {
   const [activeTab, setActiveTab] = useState<'models'|'frequency'|'prediction'>('models');
-  // load persisted preferences from localStorage if available
-  const persistedForm = (typeof window !== 'undefined' && localStorage.getItem('mlnd.formulation')) || 'old';
-  const persistedSens = (typeof window !== 'undefined' && localStorage.getItem('mlnd.sensitivity')) || '0.9';
-  const [sensitivity, setSensitivity] = useState<number>(Number(persistedSens)); // default more sensitive (0.9)
+  const [selectedModel, setSelectedModel] = useState<string>('historicalUndrawnFreq');
+  const [sensitivity, setSensitivity] = useState<number>(0.5); // 0 (stable) .. 1 (very sensitive)
   const [baselineMode, setBaselineMode] = useState<'window'|'all'>('window');
-  // formulation: 'old' = mains+supp with 37 not-drawn (complement 8); 'new' = mains-only with 39 not-drawn (complement 6)
-  const [formulation, setFormulation] = useState<'old'|'new'>(persistedForm === 'new' ? 'new' : 'old');
-
-  // persist when changed
-  useEffect(() => {
-    try {
-      localStorage.setItem('mlnd.formulation', formulation);
-      localStorage.setItem('mlnd.sensitivity', String(sensitivity));
-    } catch (e) {
-      // ignore in non-browser env
-    }
-  }, [formulation, sensitivity]);
 
   const analysis = useMemo(() => {
     // Expect history chronological oldest->newest
@@ -77,6 +63,40 @@ export const MostLikelyNotDrawnPanel: React.FC<MostLikelyNotDrawnPanelProps> = (
 
     // Predictors (mains-only): return Set<number> of predicted-not-drawn (size cap 39)
     const predictors: Record<string, (training: { date: string; drawn: number[]; notDrawn: number[] }[]) => Set<number>> = {
+      // Historical undrawn frequency: count undrawn numbers across training (recency-weighted), return top 39 not-drawn
+      historicalUndrawnFreq: (training) => {
+        const weights = Array(46).fill(0);
+        const n = training.length;
+        const k = Math.max(1, Math.round(Math.max(3, n / Math.max(1, 8 * (1 - sensitivity)))));
+        for (let idx = 0; idx < training.length; idx++) {
+          const d = training[idx];
+          // recent draws count for more when sensitivity is higher
+          const age = training.length - 1 - idx;
+          const w = Math.exp(-age / k);
+          for (const num of d.notDrawn) weights[num] += w;
+        }
+        const ordered = Array.from({ length: 45 }, (_, i) => i + 1).sort((a, b) => weights[b] - weights[a] || a - b);
+        return new Set(ordered.slice(0, 39));
+      },
+      // Empirical predictor: rank by (recency-weighted) main-frequency and return top-K drawn numbers
+      empiricalDrawnTopK: (training) => {
+        const weights = Array(46).fill(0);
+        const n = training.length;
+        // recency weight: more recent draws count more when sensitivity is high
+        for (let idx = 0; idx < training.length; idx++) {
+          const d = training[idx];
+          // age = how far from the end (0 = most recent)
+          const age = training.length - 1 - idx;
+          const k = Math.max(1, Math.round(Math.max(3, n / Math.max(1, 8 * (1 - sensitivity)))));
+          const w = Math.exp(-age / k);
+          for (const m of d.drawn) weights[m] += w;
+        }
+        // Create array of numbers sorted by descending weight (most likely to be drawn)
+        const ordered = Array.from({ length: 45 }, (_, i) => i + 1).sort((a, b) => weights[b] - weights[a] || a - b);
+        // number of mains expected: 6 (mains-only mode)
+        const K = 6;
+        return new Set(ordered.slice(0, K));
+      },
       empiricalMainsOnly: (training) => {
         const weights = Array(46).fill(0);
         const total = training.length;
@@ -160,10 +180,16 @@ export const MostLikelyNotDrawnPanel: React.FC<MostLikelyNotDrawnPanelProps> = (
 
     // Produce next prediction using best model on the WFMQY window (historyChrono)
     let nextPrediction: number[] = [];
-    if (bestModel) {
+    // use selectedModel (UI) if set; otherwise fall back to bestModel
+    const modelToUse = selectedModel || bestModel;
+    if (modelToUse) {
       try {
-        const mappedFull = historyChrono.map(d => ({ date: d.date || '', drawn: [...d.main], notDrawn: (()=>{ const a:number[]=[]; for (let i=1;i<=45;i++) if (![...d.main].includes(i)) a.push(i); return a; })() }));
-        const set = predictors[bestModel](mappedFull as any) as Set<number>;
+        // If we have at least one historical draw, use all except the latest to train the predictor
+        const trainHistory = historyChrono.length > 1 ? historyChrono.slice(0, historyChrono.length - 1) : [];
+        const mappedTrain = trainHistory.map(d => ({ date: d.date || '', drawn: [...d.main], notDrawn: (()=>{ const a:number[]=[]; for (let i=1;i<=45;i++) if (![...d.main].includes(i)) a.push(i); return a; })() }));
+        // If training set is empty, fall back to using the window (but avoid using the target draw itself)
+        const predictorInput = mappedTrain.length ? mappedTrain : (historyChrono.length ? [ ({ date: historyChrono[0].date || '', drawn: [...historyChrono[0].main], notDrawn: (()=>{ const a:number[]=[]; for (let i=1;i<=45;i++) if (![...historyChrono[0].main].includes(i)) a.push(i); return a; })() }) ] : []);
+        const set = predictors[modelToUse](predictorInput as any) as Set<number>;
         nextPrediction = Array.from(set).filter(x => typeof x === 'number') as number[];
         nextPrediction.sort((a,b)=>a-b);
         if (nextPrediction.length > 39) nextPrediction = nextPrediction.slice(0,39);
@@ -255,6 +281,23 @@ export const MostLikelyNotDrawnPanel: React.FC<MostLikelyNotDrawnPanelProps> = (
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
                   <span style={{ fontSize: 12, color: '#666' }}>0 (stable)</span>
                   <span style={{ fontSize: 12, color: '#666' }}>1 (sensitive)</span>
+                </div>
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ fontWeight: 500, marginBottom: 4 }}>Model</div>
+                  <select value={selectedModel} onChange={(e)=>setSelectedModel(e.target.value)} style={{ width: '100%', padding: 6 }}>
+                    {analysis.rankedModels && analysis.rankedModels.length > 0 ? (
+                      analysis.rankedModels.map((m:any) => <option key={m.name} value={m.name}>{m.name}</option>)
+                    ) : (
+                      // fallback static options
+                      <>
+                        <option value="historicalUndrawnFreq">historicalUndrawnFreq</option>
+                        <option value="empiricalDrawnTopK">empiricalDrawnTopK</option>
+                        <option value="empiricalMainsOnly">empiricalMainsOnly</option>
+                        <option value="hotRotation">hotRotation</option>
+                        <option value="streakBased">streakBased</option>
+                      </>
+                    )}
+                  </select>
                 </div>
               </div>
             </div>
