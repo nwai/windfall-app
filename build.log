@@ -1,0 +1,61 @@
+
+> windfall-app@0.0.0 build
+> tsc -p tsconfig.build.json && vite build
+
+vite v7.1.12 building for production...
+transforming...
+node_modules/mathjs/lib/esm/entry/configReadonly.js (5:20): A comment
+
+"/* #__PURE__ */"
+
+in "node_modules/mathjs/lib/esm/entry/configReadonly.js" contains an annotation that Rollup cannot interpret due to the position of the comment. The comment will be removed to avoid issues.
+node_modules/mathjs/lib/esm/type/unit/physicalConstants.js (42:115): A comment
+
+"// export const createSpectralRadiance = /* #__PURE__ */ unitFactory('spectralRadiance', '1.1910429723971881e-16', 'W m^2 sr^-1') // TODO spectralRadiance"
+
+in "node_modules/mathjs/lib/esm/type/unit/physicalConstants.js" contains an annotation that Rollup cannot interpret due to the position of the comment. The comment will be removed to avoid issues.
+node_modules/mathjs/lib/esm/utils/number.js (25:18): A comment
+
+"/* #__PURE__ */"
+
+in "node_modules/mathjs/lib/esm/utils/number.js" contains an annotation that Rollup cannot interpret due to the position of the comment. The comment will be removed to avoid issues.
+node_modules/mathjs/lib/esm/utils/number.js (40:18): A comment
+
+"/* #__PURE__ */"
+
+in "node_modules/mathjs/lib/esm/utils/number.js" contains an annotation that Rollup cannot interpret due to the position of the comment. The comment will be removed to avoid issues.
+node_modules/mathjs/lib/esm/utils/number.js (49:19): A comment
+
+"/* #__PURE__ */"
+
+in "node_modules/mathjs/lib/esm/utils/number.js" contains an annotation that Rollup cannot interpret due to the position of the comment. The comment will be removed to avoid issues.
+node_modules/mathjs/lib/esm/utils/number.js (58:19): A comment
+
+"/* #__PURE__ */"
+
+in "node_modules/mathjs/lib/esm/utils/number.js" contains an annotation that Rollup cannot interpret due to the position of the comment. The comment will be removed to avoid issues.
+node_modules/mathjs/lib/esm/utils/number.js (71:18): A comment
+
+"/* #__PURE__ */"
+
+in "node_modules/mathjs/lib/esm/utils/number.js" contains an annotation that Rollup cannot interpret due to the position of the comment. The comment will be removed to avoid issues.
+node_modules/mathjs/lib/esm/utils/number.js (99:19): A comment
+
+"/* #__PURE__ */"
+
+in "node_modules/mathjs/lib/esm/utils/number.js" contains an annotation that Rollup cannot interpret due to the position of the comment. The comment will be removed to avoid issues.
+✓ 2930 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                      0.41 kB │ gzip:   0.27 kB
+dist/assets/coxPyodideWorker.return-CAO3L-7g.js      8.92 kB
+dist/assets/index-967yFi2Y.css                       0.44 kB │ gzip:   0.30 kB
+dist/assets/index-CrBnSpiE.js                      235.47 kB │ gzip:  67.32 kB
+dist/assets/index-xT3Nu4Wx.js                      723.96 kB │ gzip: 233.09 kB
+dist/assets/index-B3KgVw49.js                    1,915.85 kB │ gzip: 305.96 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 6.51s

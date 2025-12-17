@@ -1,0 +1,85 @@
+
+[1m[46m RUN [49m[22m [36mv4.0.16 [39m[90m/Users/admin/XCode/windfall-app-clean[39m
+
+[90mstdout[2m | src/lib/zoneAnalysis.test.ts
+[22m[39mTesting getZoneIndex...
+✓ getZoneIndex tests passed
+
+Testing getZoneLabel...
+✓ getZoneLabel tests passed
+
+Testing drawToZonePattern...
+✓ drawToZonePattern tests passed
+
+Testing zonePatternToKey...
+Pattern key: 0-3-6-9-13-14
+✓ zonePatternToKey tests passed
+
+Testing countZonePatterns...
+Found 2 unique patterns
+✓ countZonePatterns tests passed
+
+Testing linearRegression...
+Regression: slope=2.00, R²=1.00
+✓ linearRegression tests passed
+
+Testing analyzeZoneTrends...
+Analyzed 15 zone trends
+Zone 0 trend: up, slope=0.0300
+Zone 8 trend: flat, slope=0.0000
+✓ analyzeZoneTrends tests passed
+
+✅ All zone analysis tests passed!
+
+[90mstderr[2m | src/lib/zoneAnalysis.test.ts
+[22m[39mAssertion failed: Zone 1 should be index 0
+Assertion failed: Zone 2 should be index 1
+Assertion failed: Zone 9 should be index 8
+Assertion failed: Zone label for index 0
+Assertion failed: Zone label for index 8
+Assertion failed: Zone 1 should be hit
+Assertion failed: Zone 8 should be hit
+Assertion failed: Should have 9 zone trends
+
+ [32m✓[39m src/lib/mlndPredictors.test.ts[2m > [22mmlndPredictors[2m > [22mproduces a Set of the expected size for old formulation[32m 1[2mms[22m[39m
+ [32m✓[39m src/lib/mlndPredictors.test.ts[2m > [22mmlndPredictors[2m > [22mproduces a Set of the expected size for new formulation[32m 0[2mms[22m[39m
+ [32m✓[39m src/lib/mlndPredictors.test.ts[2m > [22mmlndPredictors[2m > [22mis deterministic given same input and sensitivity[32m 1[2mms[22m[39m
+ [32m✓[39m src/lib/toastBus.test.ts[2m > [22mtoastBus[2m > [22mshould notify subscribers when showToast is called[32m 2[2mms[22m[39m
+ [32m✓[39m src/lib/toastBus.test.ts[2m > [22mtoastBus[2m > [22mshould not notify after unsubscribe[32m 0[2mms[22m[39m
+ [32m✓[39m src/lib/toastBus.test.ts[2m > [22mtoastBus[2m > [22mshould support multiple subscribers[32m 1[2mms[22m[39m
+ [32m✓[39m src/lib/toastBus.test.ts[2m > [22mtoastBus[2m > [22mshould handle errors in listeners gracefully[32m 1[2mms[22m[39m
+ [32m✓[39m src/lib/logistic.test.ts[2m > [22mlogistic trainer and predictor[2m > [22mcomputeFeaturesForTime returns feature entries for 45 numbers[32m 1[2mms[22m[39m
+ [32m✓[39m src/lib/logistic.test.ts[2m > [22mlogistic trainer and predictor[2m > [22mtrainLogistic and predictFromWeights run without errors and produce probability map[32m 7[2mms[22m[39m
+ [32m✓[39m src/lib/backtest.test.ts[2m > [22mrunWalkForwardBacktest[2m > [22mreturns zeroes for insufficient history[32m 1[2mms[22m[39m
+ [32m✓[39m src/lib/backtest.test.ts[2m > [22mrunWalkForwardBacktest[2m > [22mmeasures excluded winners correctly against deterministic predictor[32m 8[2mms[22m[39m
+ [32m✓[39m src/lib/zoneWeighting.test.ts[2m > [22mzoneWeighting legacy harness[2m > [22mruns legacy assertions[32m 4[2mms[22m[39m
+ [32m✓[39m tests/forecastOGA.test.ts[2m > [22mforecastOGA deciles[2m > [22mcomputes decile thresholds and band probs on a simple history[32m 3[2mms[22m[39m
+ [32m✓[39m src/lib/patternStats.test.ts[2m > [22mpatternStats[2m > [22mcomputePatternFeaturesForHistory[2m > [22mshould compute consecutive pairs correctly[32m 1[2mms[22m[39m
+ [32m✓[39m src/lib/patternStats.test.ts[2m > [22mpatternStats[2m > [22mcomputePatternFeaturesForHistory[2m > [22mshould compute even counts correctly[32m 0[2mms[22m[39m
+ [32m✓[39m src/lib/patternStats.test.ts[2m > [22mpatternStats[2m > [22mcomputePatternFeaturesForHistory[2m > [22mshould compute low counts correctly[32m 0[2mms[22m[39m
+ [32m✓[39m src/lib/patternStats.test.ts[2m > [22mpatternStats[2m > [22mcomputePatternFeaturesForHistory[2m > [22mshould compute sums correctly[32m 0[2mms[22m[39m
+ [32m✓[39m src/lib/patternStats.test.ts[2m > [22mpatternStats[2m > [22mperNumberFrequency[2m > [22mshould count main numbers only by default[32m 1[2mms[22m[39m
+ [32m✓[39m src/lib/patternStats.test.ts[2m > [22mpatternStats[2m > [22mperNumberFrequency[2m > [22mshould include supplementary numbers when requested[32m 0[2mms[22m[39m
+ [32m✓[39m src/lib/patternStats.test.ts[2m > [22mpatternStats[2m > [22mperNumberFrequency[2m > [22mshould initialize all numbers 1-45[32m 0[2mms[22m[39m
+ [32m✓[39m src/lib/patternStats.test.ts[2m > [22mpatternStats[2m > [22mgetTopNumbers[2m > [22mshould return top N numbers by frequency[32m 0[2mms[22m[39m
+ [32m✓[39m src/lib/patternStats.test.ts[2m > [22mpatternStats[2m > [22mgetTopNumbers[2m > [22mshould break ties by number value (lower number first)[32m 0[2mms[22m[39m
+ [32m✓[39m src/lib/patternStats.test.ts[2m > [22mpatternStats[2m > [22mgetBottomNumbers[2m > [22mshould return bottom N numbers by frequency[32m 0[2mms[22m[39m
+ [32m✓[39m src/lib/patternStats.test.ts[2m > [22mpatternStats[2m > [22mcreateHistogram[2m > [22mshould create bins for a distribution[32m 0[2mms[22m[39m
+ [32m✓[39m src/lib/patternStats.test.ts[2m > [22mpatternStats[2m > [22mcreateHistogram[2m > [22mshould handle empty array[32m 0[2mms[22m[39m
+ [32m✓[39m src/lib/patternStats.test.ts[2m > [22mpatternStats[2m > [22mcreateHistogram[2m > [22mshould handle single value[32m 0[2mms[22m[39m
+ [32m✓[39m src/lib/ogaForecast.test.ts[2m > [22mforecastOGA[2m > [22mreturns zeros for empty history[32m 1[2mms[22m[39m
+ [32m✓[39m src/lib/temperatureTransitions.test.ts[2m > [22mtemperatureTransitions basic matrix[2m > [22mcomputes transition probabilities for a tiny fabricated history[32m 1[2mms[22m[39m
+ [32m✓[39m tests/generateCandidates.ogaBias.test.ts[2m > [22mgenerateCandidates OGA bias decile acceptance[2m > [22memits decile/band trace or counts ogaBias rejects[32m 1[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Suites 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m src/lib/zoneAnalysis.test.ts[2m [ src/lib/zoneAnalysis.test.ts ][22m
+[31m[1mError[22m: No test suite found in file /Users/admin/XCode/windfall-app-clean/src/lib/zoneAnalysis.test.ts[39m
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m10 passed[39m[22m[90m (11)[39m
+[2m      Tests [22m [1m[32m29 passed[39m[22m[90m (29)[39m
+[2m   Start at [22m 08:01:25
+[2m   Duration [22m 3.13s[2m (transform 1.23s, setup 0ms, import 1.65s, tests 51ms, environment 13.89s)[22m
+

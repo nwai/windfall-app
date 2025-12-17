@@ -1,0 +1,95 @@
+
+[1m[46m RUN [49m[22m [36mv4.0.16 [39m[90m/Users/admin/XCode/windfall-app-clean[39m
+
+[90mstdout[2m | src/lib/zoneAnalysis.test.ts
+[22m[39mTesting getZoneIndex...
+✓ getZoneIndex tests passed
+
+Testing getZoneLabel...
+✓ getZoneLabel tests passed
+
+Testing drawToZonePattern...
+✓ drawToZonePattern tests passed
+
+Testing zonePatternToKey...
+Pattern key: 0-3-6-9-13-14
+✓ zonePatternToKey tests passed
+
+Testing countZonePatterns...
+Found 2 unique patterns
+✓ countZonePatterns tests passed
+
+Testing linearRegression...
+Regression: slope=2.00, R²=1.00
+✓ linearRegression tests passed
+
+Testing analyzeZoneTrends...
+Analyzed 15 zone trends
+Zone 0 trend: up, slope=0.0300
+Zone 8 trend: flat, slope=0.0000
+✓ analyzeZoneTrends tests passed
+
+✅ All zone analysis tests passed!
+
+[90mstderr[2m | src/lib/zoneAnalysis.test.ts
+[22m[39mAssertion failed: Zone 1 should be index 0
+Assertion failed: Zone 2 should be index 1
+Assertion failed: Zone 9 should be index 8
+Assertion failed: Zone label for index 0
+Assertion failed: Zone label for index 8
+Assertion failed: Zone 1 should be hit
+Assertion failed: Zone 8 should be hit
+Assertion failed: Should have 9 zone trends
+
+ [32m✓[39m src/lib/toastBus.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m src/lib/logistic.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 18[2mms[22m[39m
+ [32m✓[39m src/lib/patternStats.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 14[2mms[22m[39m
+ [31m❯[39m src/lib/zoneWeighting.test.ts [2m([22m[2m1 test[22m[2m | [22m[31m1 failed[39m[2m)[22m[32m 7[2mms[22m[39m
+[31m     [31m×[31m runs legacy assertions[39m[32m 5[2mms[22m[39m
+ [32m✓[39m src/lib/backtest.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+[90mstdout[2m | src/lib/temperatureTransitions.test.ts
+[22m[39m✅ transition matrix basic test passed
+
+ [32m✓[39m src/lib/mlndPredictors.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m src/lib/ogaForecast.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m tests/forecastOGA.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/generateCandidates.ogaBias.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 2[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Suites 2 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m src/lib/temperatureTransitions.test.ts[2m [ src/lib/temperatureTransitions.test.ts ][22m
+[31m[1mError[22m: No test suite found in file /Users/admin/XCode/windfall-app-clean/src/lib/temperatureTransitions.test.ts[39m
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m src/lib/zoneAnalysis.test.ts[2m [ src/lib/zoneAnalysis.test.ts ][22m
+[31m[1mError[22m: No test suite found in file /Users/admin/XCode/windfall-app-clean/src/lib/zoneAnalysis.test.ts[39m
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯[22m[39m
+
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m src/lib/zoneWeighting.test.ts[2m > [22mzoneWeighting legacy harness[2m > [22mruns legacy assertions
+[31m[1mAssertionError[22m: expected 1 to be undefined // Object.is equality[39m
+
+[32m- Expected:[39m 
+undefined
+
+[31m+ Received:[39m 
+1
+
+[36m [2m❯[22m src/lib/zoneWeighting.test.ts:[2m48:31[22m[39m
+    [90m 46| [39m    [35mconst[39m z23 [33m=[39m [34mgetZoneIndex[39m([34m23[39m)[33m![39m[33m;[39m
+    [90m 47| [39m    [34mexpect[39m(numberWeights[[34m1[39m])[33m.[39m[34mtoBe[39m(zoneWeights[z1])[33m;[39m
+    [90m 48| [39m    [34mexpect[39m(numberWeights[[34m45[39m])[33m.[39m[34mtoBe[39m(zoneWeights[z45])[33m;[39m
+    [90m   | [39m                              [31m^[39m
+    [90m 49| [39m    [34mexpect[39m(numberWeights[[34m23[39m])[33m.[39m[34mtoBe[39m(zoneWeights[z23])[33m;[39m
+    [90m 50| [39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m3 failed[39m[22m[2m | [22m[1m[32m8 passed[39m[22m[90m (11)[39m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m27 passed[39m[22m[90m (28)[39m
+[2m   Start at [22m 07:55:51
+[2m   Duration [22m 3.13s[2m (transform 573ms, setup 0ms, import 891ms, tests 66ms, environment 14.01s)[22m
+

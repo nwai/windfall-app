@@ -1,0 +1,126 @@
+
+> windfall-app@0.0.0 verify
+> npm run typecheck && npm run lint
+
+
+> windfall-app@0.0.0 typecheck
+> tsc --noEmit
+
+
+> windfall-app@0.0.0 lint
+> eslint "src/**/*.{ts,tsx}"
+
+
+/Users/admin/XCode/windfall-app-clean/src/App.tsx
+    62:10  warning  'showToast' is defined but never used. Allowed unused vars must match /^_/u                        @typescript-eslint/no-unused-vars
+   249:21  warning  'setSumFilter' is assigned a value but never used. Allowed unused vars must match /^_/u            @typescript-eslint/no-unused-vars
+   261:10  warning  'ratioSummary' is assigned a value but never used. Allowed unused vars must match /^_/u            @typescript-eslint/no-unused-vars
+   323:25  warning  'setActiveOGABand' is assigned a value but never used. Allowed unused vars must match /^_/u        @typescript-eslint/no-unused-vars
+   411:9   warning  'handleManualSimChanged' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+   411:35  warning  'next' is defined but never used. Allowed unused args must match /^_/u                             @typescript-eslint/no-unused-vars
+   417:9   warning  'activeSimulatedDraw' is assigned a value but never used. Allowed unused vars must match /^_/u     @typescript-eslint/no-unused-vars
+   569:9   warning  'rankedNumbers' is assigned a value but never used. Allowed unused vars must match /^_/u           @typescript-eslint/no-unused-vars
+   628:27  warning  'candidate' is defined but never used. Allowed unused args must match /^_/u                        @typescript-eslint/no-unused-vars
+   736:16  warning  'err' is defined but never used                                                                    @typescript-eslint/no-unused-vars
+  1587:44  warning  'e' is defined but never used. Allowed unused args must match /^_/u                                @typescript-eslint/no-unused-vars
+
+/Users/admin/XCode/windfall-app-clean/src/candidateUtils.ts
+  5:49  warning  'history' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/admin/XCode/windfall-app-clean/src/components/BacktestPanel.tsx
+  29:14  warning  'e' is defined but never used  @typescript-eslint/no-unused-vars
+  37:14  warning  'e' is defined but never used  @typescript-eslint/no-unused-vars
+
+/Users/admin/XCode/windfall-app-clean/src/components/DGAVisualizer.tsx
+  100:7   warning  'HATCH_WIDTH' is assigned a value but never used. Allowed unused vars must match /^_/u             @typescript-eslint/no-unused-vars
+  101:7   warning  'HATCH_GAP' is assigned a value but never used. Allowed unused vars must match /^_/u               @typescript-eslint/no-unused-vars
+  264:10  warning  'editingDiamondIndex' is assigned a value but never used. Allowed unused vars must match /^_/u     @typescript-eslint/no-unused-vars
+  264:31  warning  'setEditingDiamondIndex' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/admin/XCode/windfall-app-clean/src/components/DrawHistoryManager.tsx
+    1:30  warning  'useMemo' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  133:16  warning  'writeErr' is defined but never used                                       @typescript-eslint/no-unused-vars
+
+/Users/admin/XCode/windfall-app-clean/src/components/DroughtHazardPanel.tsx
+  12:11  warning  'hazard' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/admin/XCode/windfall-app-clean/src/components/GroupPatternPanel.tsx
+  13:3  warning  'getSavedZoneWeights' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/admin/XCode/windfall-app-clean/src/components/MostLikelyNotDrawnPanel.tsx
+   29:23  warning  'setFormulation' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+   36:14  warning  'e' is defined but never used                                                              @typescript-eslint/no-unused-vars
+  170:16  warning  'e' is defined but never used                                                              @typescript-eslint/no-unused-vars
+
+/Users/admin/XCode/windfall-app-clean/src/components/NextDrawProbabilitiesPanel.tsx
+   3:10  warning  'computeOGA' is defined but never used. Allowed unused vars must match /^_/u             @typescript-eslint/no-unused-vars
+  14:10  warning  'toDecile' is defined but never used. Allowed unused vars must match /^_/u               @typescript-eslint/no-unused-vars
+  21:98  warning  'mode' is assigned a value but never used. Allowed unused args must match /^_/u          @typescript-eslint/no-unused-vars
+  47:9   warning  'ogaBandProbs' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/admin/XCode/windfall-app-clean/src/components/NumberTrendsTable.tsx
+  24:3  warning  'excludedNumbers' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+  26:3  warning  'onExcludeToggle' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/admin/XCode/windfall-app-clean/src/components/ParameterSearchPanel.tsx
+  323:9  warning  'len' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/admin/XCode/windfall-app-clean/src/components/SurvivalAnalyzer.tsx
+   95:3   warning  'highlightColor' is assigned a value but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+  106:10  warning  'isRunning' is assigned a value but never used. Allowed unused vars must match /^_/u       @typescript-eslint/no-unused-vars
+
+/Users/admin/XCode/windfall-app-clean/src/components/SurvivalCoxPanel.tsx
+  69:10  warning  'hazardRatios' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/admin/XCode/windfall-app-clean/src/components/SurvivalFrailtyPanel.tsx
+  11:11  warning  'SurvivalFrailtyPanelProps' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/admin/XCode/windfall-app-clean/src/components/TemperatureHeatmap.tsx
+  68:3  warning  'showLegendCounts' is assigned a value but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/admin/XCode/windfall-app-clean/src/components/ZoneSchemeSelector.tsx
+  2:42  warning  'getSavedSelectedZones' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/admin/XCode/windfall-app-clean/src/components/candidates/GeneratedCandidatesPanel.tsx
+   42:3  warning  'setUserSelectedNumbers' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+  303:3  warning  'toggleManualPick' is defined but never used. Allowed unused args must match /^_/u        @typescript-eslint/no-unused-vars
+
+/Users/admin/XCode/windfall-app-clean/src/components/candidates/MonteCarloPanel.tsx
+   2:49  warning  'useEffect' is defined but never used. Allowed unused vars must match /^_/u          @typescript-eslint/no-unused-vars
+  60:9   warning  'sde1Data' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/admin/XCode/windfall-app-clean/src/dga.ts
+  72:15  warning  'c' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/admin/XCode/windfall-app-clean/src/lib/jsCox.ts
+  76:9  warning  'd' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/admin/XCode/windfall-app-clean/src/lib/ml/logistic.ts
+  19:9  warning  'drawsCount' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/admin/XCode/windfall-app-clean/src/lib/mlndPredictors.ts
+   7:12  warning  'makeLookback' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  11:12  warning  'makeK' is defined but never used. Allowed unused vars must match /^_/u         @typescript-eslint/no-unused-vars
+
+/Users/admin/XCode/windfall-app-clean/src/lib/zoneWeighting.ts
+  7:21  warning  'ZONE_RANGES' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/admin/XCode/windfall-app-clean/src/parseCSVorJSON.ts
+  39:34  warning  'i' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+  40:32  warning  'i' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/admin/XCode/windfall-app-clean/src/shared/CandidatesContext.tsx
+  1:54  warning  'useCallback' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/admin/XCode/windfall-app-clean/src/trickyRule.ts
+  90:9  warning  'evens' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  91:9  warning  'odds' is assigned a value but never used. Allowed unused vars must match /^_/u   @typescript-eslint/no-unused-vars
+
+/Users/admin/XCode/windfall-app-clean/src/validateDraws.ts
+  11:30  warning  'idx' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/admin/XCode/windfall-app-clean/src/workers/coxPyodideWorker.debug.ts
+  16:11  warning  'Tabular' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+✖ 55 problems (0 errors, 55 warnings)
+
