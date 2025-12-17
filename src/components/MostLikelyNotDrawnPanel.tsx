@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import type { Draw } from '../types';
 import { runLeaveOneOutBacktest } from '../lib/backtest';
 
@@ -20,10 +20,23 @@ function buildNotDrawnMains(history: Draw[]): { date: string; drawn: number[]; n
 
 export const MostLikelyNotDrawnPanel: React.FC<MostLikelyNotDrawnPanelProps> = ({ history, allHistory, title = 'Most Likely NOT Drawn (Mains Only)' }) => {
   const [activeTab, setActiveTab] = useState<'models'|'frequency'|'prediction'>('models');
-  const [sensitivity, setSensitivity] = useState<number>(0.5); // 0 (stable) .. 1 (very sensitive)
+  // load persisted preferences from localStorage if available
+  const persistedForm = (typeof window !== 'undefined' && localStorage.getItem('mlnd.formulation')) || 'old';
+  const persistedSens = (typeof window !== 'undefined' && localStorage.getItem('mlnd.sensitivity')) || '0.9';
+  const [sensitivity, setSensitivity] = useState<number>(Number(persistedSens)); // default more sensitive (0.9)
   const [baselineMode, setBaselineMode] = useState<'window'|'all'>('window');
   // formulation: 'old' = mains+supp with 37 not-drawn (complement 8); 'new' = mains-only with 39 not-drawn (complement 6)
-  const [formulation, setFormulation] = useState<'old'|'new'>('new');
+  const [formulation, setFormulation] = useState<'old'|'new'>(persistedForm === 'new' ? 'new' : 'old');
+
+  // persist when changed
+  useEffect(() => {
+    try {
+      localStorage.setItem('mlnd.formulation', formulation);
+      localStorage.setItem('mlnd.sensitivity', String(sensitivity));
+    } catch (e) {
+      // ignore in non-browser env
+    }
+  }, [formulation, sensitivity]);
 
   const analysis = useMemo(() => {
     // Expect history chronological oldest->newest
@@ -63,8 +76,6 @@ export const MostLikelyNotDrawnPanel: React.FC<MostLikelyNotDrawnPanelProps> = (
     const makeK = (lookback: number) => Math.max(1, Math.round(lookback * Math.max(0.25, (1 - sensitivity * 0.7))));
 
     // Predictors (mains-only): return Set<number> of predicted-not-drawn (size cap 39)
-    const targetNotDrawn = formulation === 'old' ? 37 : 39;
-
     const predictors: Record<string, (training: { date: string; drawn: number[]; notDrawn: number[] }[]) => Set<number>> = {
       empiricalMainsOnly: (training) => {
         const weights = Array(46).fill(0);
@@ -76,7 +87,7 @@ export const MostLikelyNotDrawnPanel: React.FC<MostLikelyNotDrawnPanelProps> = (
           for (const n of d.notDrawn) weights[n] += w;
         }
         const ordered = Array.from({length:45},(_,i)=>i+1).sort((a,b)=>weights[b]-weights[a]||a-b);
-        return new Set(ordered.slice(0,targetNotDrawn));
+        return new Set(ordered.slice(0,39));
       },
 
       hotRotation: (training) => {
@@ -98,7 +109,7 @@ export const MostLikelyNotDrawnPanel: React.FC<MostLikelyNotDrawnPanelProps> = (
           for (const n of training[idx].notDrawn) notDrawnW[n] += w;
         }
         const ordered = Array.from({length:45},(_,i)=>i+1).sort((a,b)=>notDrawnW[b]-notDrawnW[a]||a-b);
-        let i=0; while (pred.size < targetNotDrawn && i<ordered.length) { pred.add(ordered[i++]); }
+        let i=0; while (pred.size < 39 && i<ordered.length) { pred.add(ordered[i++]); }
         return pred;
       },
 
@@ -114,7 +125,7 @@ export const MostLikelyNotDrawnPanel: React.FC<MostLikelyNotDrawnPanelProps> = (
           }
         }
         const ordered = Array.from({length:45},(_,i)=>i+1).sort((a,b)=>streaks[b]-streaks[a]||a-b);
-        return new Set(ordered.slice(0,targetNotDrawn));
+        return new Set(ordered.slice(0,39));
       }
     };
 
@@ -151,11 +162,11 @@ export const MostLikelyNotDrawnPanel: React.FC<MostLikelyNotDrawnPanelProps> = (
     let nextPrediction: number[] = [];
     if (bestModel) {
       try {
-        const mappedFull = historyChrono.map(d => ({ date: d.date || '', drawn: formulation === 'old' ? [...d.main, ...(d.supp||[])] : [...d.main], notDrawn: (()=>{ const a:number[]=[]; const drawnArr = formulation === 'old' ? [...d.main, ...(d.supp||[])] : [...d.main]; for (let i=1;i<=45;i++) if (!drawnArr.includes(i)) a.push(i); return a; })() }));
+        const mappedFull = historyChrono.map(d => ({ date: d.date || '', drawn: [...d.main], notDrawn: (()=>{ const a:number[]=[]; for (let i=1;i<=45;i++) if (![...d.main].includes(i)) a.push(i); return a; })() }));
         const set = predictors[bestModel](mappedFull as any) as Set<number>;
         nextPrediction = Array.from(set).filter(x => typeof x === 'number') as number[];
         nextPrediction.sort((a,b)=>a-b);
-        if (nextPrediction.length > targetNotDrawn) nextPrediction = nextPrediction.slice(0,targetNotDrawn);
+        if (nextPrediction.length > 39) nextPrediction = nextPrediction.slice(0,39);
       } catch (e) { nextPrediction = []; }
     }
 
@@ -167,7 +178,7 @@ export const MostLikelyNotDrawnPanel: React.FC<MostLikelyNotDrawnPanelProps> = (
 
     return { draws, overdueNumbers: overdueWithPct, coldNumbers, hotNumbers, predictedNotDrawn: nextPrediction, predictedDrawn, notDrawnFreq, totalDraws, recentLen: recent.length, backtestResults, rankedModels, bestModel };
 
-  }, [history, allHistory, sensitivity, baselineMode, formulation]);
+  }, [history, allHistory, sensitivity, baselineMode]);
 
   const frequencyData = useMemo(() =>
     analysis.overdueNumbers.map(item => ({
@@ -184,13 +195,6 @@ export const MostLikelyNotDrawnPanel: React.FC<MostLikelyNotDrawnPanelProps> = (
         <h3 style={{ margin: 0 }}>{title}</h3>
         <span style={{ fontSize: 12, color: '#666' }}>Window: {analysis.totalDraws} draws • Recent (WFMQY): {analysis.recentLen}</span>
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
-          <label style={{ fontSize: 12 }}>
-            Formulation:
-            <select value={formulation} onChange={(e) => setFormulation(e.target.value as any)} style={{ marginLeft: 8 }}>
-              <option value="new">Mains only (39 not-drawn)</option>
-              <option value="old">Mains + Supp (37 not-drawn)</option>
-            </select>
-          </label>
           <label style={{ fontSize: 12 }}>
             Baseline:
             <select value={baselineMode} onChange={(e) => setBaselineMode(e.target.value as any)} style={{ marginLeft: 8 }}>
