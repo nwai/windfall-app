@@ -1,127 +1,258 @@
 import React, { useMemo, useState } from 'react';
 import type { Draw } from '../types';
+import { runLeaveOneOutBacktest } from '../lib/backtest';
 
 interface MostLikelyNotDrawnPanelProps {
-  history: Draw[];
+  history: Draw[]; // filtered history (WFMQY)
+  allHistory?: Draw[]; // optional full history for baseline comparison
   title?: string;
 }
 
-// Utility: build per-draw not-drawn list for numbers 1..45
-function buildNotDrawn(history: Draw[]): { date: string; drawn: number[]; notDrawn: number[] }[] {
+// Build per-draw mains-only not-drawn list (drawn = mains only)
+function buildNotDrawnMains(history: Draw[]): { date: string; drawn: number[]; notDrawn: number[] }[] {
   return history.map(d => {
-    const drawn = [...d.main, ...d.supp];
+    const drawn = [...d.main];
     const notDrawn: number[] = [];
     for (let n = 1; n <= 45; n++) if (!drawn.includes(n)) notDrawn.push(n);
     return { date: d.date || 'unknown', drawn, notDrawn };
   });
 }
 
-export const MostLikelyNotDrawnPanel: React.FC<MostLikelyNotDrawnPanelProps> = ({ history, title = 'Most Likely NOT Drawn' }) => {
-  const [activeTab, setActiveTab] = useState<'patterns'|'frequency'|'prediction'>('patterns');
+export const MostLikelyNotDrawnPanel: React.FC<MostLikelyNotDrawnPanelProps> = ({ history, allHistory, title = 'Most Likely NOT Drawn (Mains Only)' }) => {
+  const [activeTab, setActiveTab] = useState<'models'|'frequency'|'prediction'>('models');
+  const [sensitivity, setSensitivity] = useState<number>(0.5); // 0 (stable) .. 1 (very sensitive)
+  const [baselineMode, setBaselineMode] = useState<'window'|'all'>('window');
+  // formulation: 'old' = mains+supp with 37 not-drawn (complement 8); 'new' = mains-only with 39 not-drawn (complement 6)
+  const [formulation, setFormulation] = useState<'old'|'new'>('new');
 
   const analysis = useMemo(() => {
-    const draws = buildNotDrawn(history);
+    // Expect history chronological oldest->newest
+    const historyChrono = history.slice();
+    const draws = buildNotDrawnMains(historyChrono);
     const totalDraws = draws.length;
 
     const notDrawnFreq: Record<number, number> = Object.fromEntries(Array.from({ length: 45 }, (_, i) => [i+1, 0]));
     for (const d of draws) for (const n of d.notDrawn) notDrawnFreq[n]++;
 
-    // Recent window equals WFMQY (filtered history length)
     const recent = draws;
     const recentNotDrawnFreq: Record<number, number> = Object.fromEntries(Array.from({ length: 45 }, (_, i) => [i+1, 0]));
     for (const d of recent) for (const n of d.notDrawn) recentNotDrawnFreq[n]++;
 
-    // Consecutive not-drawn streaks
     const currentStreak: Record<number, number> = Object.fromEntries(Array.from({ length: 45 }, (_, i) => [i+1, 0]));
     for (const d of draws) {
+      const drawnSet = new Set(d.drawn);
       for (let n = 1; n <= 45; n++) {
-        if (d.notDrawn.includes(n)) currentStreak[n]++;
+        if (!drawnSet.has(n)) currentStreak[n]++;
         else currentStreak[n] = 0;
       }
     }
 
-    const overdueNumbers = Object.entries(notDrawnFreq)
-      .map(([num, freq]) => ({
-        num: Number(num),
-        freq: Number(freq),
-        percentage: totalDraws > 0 ? Number(((Number(freq) / totalDraws) * 100).toFixed(1)) : 0,
-        currentStreak: currentStreak[Number(num)] || 0,
-      }))
-      .sort((a, b) => b.freq - a.freq || a.num - b.num);
+    const overdueNumbers = Object.entries(notDrawnFreq).map(([num, freq]) => ({ num: Number(num), freq: Number(freq), currentStreak: currentStreak[Number(num)] || 0 })).sort((a,b)=>b.freq-a.freq||a.num-b.num);
 
-    const coldNumbers = Object.entries(recentNotDrawnFreq)
-      .map(([num, freq]) => ({ num: Number(num), freq: Number(freq) }))
-      .sort((a, b) => b.freq - a.freq || a.num - b.num)
-      .slice(0, 37);
+    const coldNumbers = Object.entries(recentNotDrawnFreq).map(([num,freq])=>({ num: Number(num), freq: Number(freq) })).sort((a,b)=>b.freq-a.freq||a.num-b.num).slice(0,39);
 
-    // Recent drawn frequency (for rest heuristic)
     const recentDrawnFreq: Record<number, number> = Object.fromEntries(Array.from({ length: 45 }, (_, i) => [i+1, 0]));
     for (const d of recent) for (const n of d.drawn) recentDrawnFreq[n]++;
-    const hotNumbers = Object.entries(recentDrawnFreq)
-      .map(([num, freq]) => ({ num: Number(num), freq: Number(freq) }))
-      .filter(x => x.freq > 0)
-      .sort((a, b) => b.freq - a.freq || a.num - b.num);
+    const hotNumbers = Object.entries(recentDrawnFreq).map(([num,freq])=>({ num: Number(num), freq: Number(freq) })).filter(x=>x.freq>0).sort((a,b)=>b.freq-a.freq||a.num-b.num);
 
-    // Predict 37 non-drawn numbers next draw (strict cap with priority ordering)
-    const orderedCandidates: number[] = [];
-    const pushUnique = (n: number) => { if (!orderedCandidates.includes(n)) orderedCandidates.push(n); };
-    // Priority 1: very hot numbers likely to rest
-    for (const h of hotNumbers) if (h.freq >= Math.max(3, Math.ceil(recent.length / 5))) pushUnique(h.num);
-    // Priority 2: longest current absence streaks
-    const longStreaks = Object.entries(currentStreak)
-      .map(([num, streak]) => ({ num: Number(num), streak: Number(streak) }))
-      .sort((a, b) => b.streak - a.streak || a.num - b.num)
-      .slice(0, 10);
-    for (const s of longStreaks) pushUnique(s.num);
-    // Priority 3: historically overdue (top 25)
-    for (const o of overdueNumbers.slice(0, 25)) pushUnique(o.num);
-    // Fill remaining until 37
-    let fi = 25;
-    while (orderedCandidates.length < 37 && fi < overdueNumbers.length) { pushUnique(overdueNumbers[fi++].num); }
+    // Helper: sensitivity-adjusted lookback and k
+    const makeLookback = (trainingLen: number, baseFactor = 0.15) => {
+      const factor = Math.max(0.03, baseFactor * (1 - sensitivity * 0.8));
+      return Math.max(1, Math.min(Math.ceil(trainingLen * factor), 60));
+    };
+    const makeK = (lookback: number) => Math.max(1, Math.round(lookback * Math.max(0.25, (1 - sensitivity * 0.7))));
 
-    const predictedNotDrawn = orderedCandidates.slice(0, 37).sort((a, b) => a - b);
+    // Predictors (mains-only): return Set<number> of predicted-not-drawn (size cap 39)
+    const targetNotDrawn = formulation === 'old' ? 37 : 39;
+
+    const predictors: Record<string, (training: { date: string; drawn: number[]; notDrawn: number[] }[]) => Set<number>> = {
+      empiricalMainsOnly: (training) => {
+        const weights = Array(46).fill(0);
+        const total = training.length;
+        const k = Math.max(1, Math.round(Math.max(3, total / Math.max(1, 8 * (1 - sensitivity)))));
+        for (let idx = 0; idx < training.length; idx++) {
+          const d = training[idx];
+          const w = Math.exp(-(training.length - 1 - idx) / k);
+          for (const n of d.notDrawn) weights[n] += w;
+        }
+        const ordered = Array.from({length:45},(_,i)=>i+1).sort((a,b)=>weights[b]-weights[a]||a-b);
+        return new Set(ordered.slice(0,targetNotDrawn));
+      },
+
+      hotRotation: (training) => {
+        const dynLookback = makeLookback(training.length, 0.12);
+        const recentDraws = training.slice(-dynLookback);
+        const drawnFreq = Array(46).fill(0);
+        const k = makeK(dynLookback);
+        for (let idx=0; idx<recentDraws.length; idx++) {
+          const w = Math.exp(-(recentDraws.length-1-idx)/k);
+          for (const n of recentDraws[idx].drawn) drawnFreq[n] += w;
+        }
+        const pred = new Set<number>();
+        const thr = Math.max(1, Math.ceil(dynLookback * Math.max(0.12, 0.22 * (1 - sensitivity * 0.6))));
+        for (let n=1;n<=45;n++) if (drawnFreq[n] >= thr) pred.add(n);
+        const notDrawnW = Array(46).fill(0);
+        const k2 = Math.max(2, Math.round(training.length / Math.max(4, 6 * (1 - sensitivity))));
+        for (let idx=0; idx<training.length; idx++) {
+          const w = Math.exp(-(training.length-1-idx)/k2);
+          for (const n of training[idx].notDrawn) notDrawnW[n] += w;
+        }
+        const ordered = Array.from({length:45},(_,i)=>i+1).sort((a,b)=>notDrawnW[b]-notDrawnW[a]||a-b);
+        let i=0; while (pred.size < targetNotDrawn && i<ordered.length) { pred.add(ordered[i++]); }
+        return pred;
+      },
+
+      streakBased: (training) => {
+        const lookback = makeLookback(training.length, 0.20);
+        const recent = training.slice(-lookback);
+        const streaks = Array(46).fill(0);
+        for (const d of recent) {
+          const drawnSet = new Set(d.drawn);
+          for (let n=1;n<=45;n++) {
+            if (!drawnSet.has(n)) streaks[n]++;
+            else streaks[n]=0;
+          }
+        }
+        const ordered = Array.from({length:45},(_,i)=>i+1).sort((a,b)=>streaks[b]-streaks[a]||a-b);
+        return new Set(ordered.slice(0,targetNotDrawn));
+      }
+    };
+
+    // Backtest history selection based on baselineMode
+    const backtestHistory = baselineMode === 'window' ? historyChrono : ((allHistory && allHistory.slice()) || historyChrono);
+
+    const randomTrials = 200;
+    const bootstrapIters = 300;
+    const seed = 42;
+
+    const backtestResults: Record<string, any> = {};
+
+    for (const modelName of Object.keys(predictors)) {
+      try {
+        const predictorFn = (trainWindow: Draw[]) => {
+          const mapped = trainWindow.map(d => ({ date: d.date || '', drawn: [...d.main], notDrawn: (()=>{ const a:number[]=[]; for (let i=1;i<=45;i++) if (![...d.main].includes(i)) a.push(i); return a; })() }));
+          return predictors[modelName](mapped);
+        };
+        const res = runLeaveOneOutBacktest(backtestHistory, predictorFn, randomTrials, bootstrapIters, seed);
+        const avgCorrect = 39 - res.meanExcluded;
+        const avgAccuracy = res.drawsEvaluated ? (avgCorrect / 39) * 100 : 0;
+        backtestResults[modelName] = { res, avgCorrect, avgAccuracy, totalTests: res.drawsEvaluated };
+      } catch (e) {
+        backtestResults[modelName] = { error: String(e) };
+      }
+    }
+
+    const rankedModels = Object.entries(backtestResults).map(([name,data])=>({ name, ...data }))
+      .sort((a:any,b:any)=> (b.res?.deltaMean ?? 0) - (a.res?.deltaMean ?? 0));
+
+    const bestModel = rankedModels.length ? rankedModels[0].name : '';
+
+    // Produce next prediction using best model on the WFMQY window (historyChrono)
+    let nextPrediction: number[] = [];
+    if (bestModel) {
+      try {
+        const mappedFull = historyChrono.map(d => ({ date: d.date || '', drawn: formulation === 'old' ? [...d.main, ...(d.supp||[])] : [...d.main], notDrawn: (()=>{ const a:number[]=[]; const drawnArr = formulation === 'old' ? [...d.main, ...(d.supp||[])] : [...d.main]; for (let i=1;i<=45;i++) if (!drawnArr.includes(i)) a.push(i); return a; })() }));
+        const set = predictors[bestModel](mappedFull as any) as Set<number>;
+        nextPrediction = Array.from(set).filter(x => typeof x === 'number') as number[];
+        nextPrediction.sort((a,b)=>a-b);
+        if (nextPrediction.length > targetNotDrawn) nextPrediction = nextPrediction.slice(0,targetNotDrawn);
+      } catch (e) { nextPrediction = []; }
+    }
+
     const predictedDrawn: number[] = [];
-    for (let n = 1; n <= 45; n++) if (!predictedNotDrawn.includes(n)) predictedDrawn.push(n);
+    for (let i=1;i<=45;i++) if (!nextPrediction.includes(i)) predictedDrawn.push(i);
 
-    return { draws, overdueNumbers, coldNumbers, hotNumbers, predictedNotDrawn, predictedDrawn, notDrawnFreq, totalDraws, recentLen: recent.length };
-  }, [history]);
+    // include percentage for overdueNumbers for UI convenience
+    const overdueWithPct = overdueNumbers.map(o => ({ ...o, percentage: totalDraws ? Number(((o.freq / totalDraws) * 100).toFixed(1)) : 0 }));
 
-  const frequencyData = useMemo(() => analysis.overdueNumbers.map(item => ({ number: item.num, frequency: item.freq, percentage: item.percentage })), [analysis.overdueNumbers]);
+    return { draws, overdueNumbers: overdueWithPct, coldNumbers, hotNumbers, predictedNotDrawn: nextPrediction, predictedDrawn, notDrawnFreq, totalDraws, recentLen: recent.length, backtestResults, rankedModels, bestModel };
+
+  }, [history, allHistory, sensitivity, baselineMode, formulation]);
+
+  const frequencyData = useMemo(() =>
+    analysis.overdueNumbers.map(item => ({
+      number: item.num,
+      frequency: item.freq,
+      percentage: analysis.totalDraws ? Number(((item.freq / analysis.totalDraws) * 100).toFixed(1)) : 0,
+    })),
+    [analysis.overdueNumbers, analysis.totalDraws]
+  );
 
   return (
     <div style={{ background: '#f8fafc', padding: 12, border: '1px solid #eee', borderRadius: 6 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <h3 style={{ margin: 0 }}>{title}</h3>
         <span style={{ fontSize: 12, color: '#666' }}>Window: {analysis.totalDraws} draws • Recent (WFMQY): {analysis.recentLen}</span>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <label style={{ fontSize: 12 }}>
+            Formulation:
+            <select value={formulation} onChange={(e) => setFormulation(e.target.value as any)} style={{ marginLeft: 8 }}>
+              <option value="new">Mains only (39 not-drawn)</option>
+              <option value="old">Mains + Supp (37 not-drawn)</option>
+            </select>
+          </label>
+          <label style={{ fontSize: 12 }}>
+            Baseline:
+            <select value={baselineMode} onChange={(e) => setBaselineMode(e.target.value as any)} style={{ marginLeft: 8 }}>
+              <option value="window">Use WFMQY window</option>
+              <option value="all">Use all history</option>
+            </select>
+          </label>
+          <label style={{ fontSize: 12 }} title="Sensitivity: higher = more reactive to recent draws">
+            Sensitivity:
+            <input type="range" min={0} max={1} step={0.05} value={sensitivity} onChange={(e)=>setSensitivity(Number(e.target.value))} style={{ marginLeft: 8 }} />
+            <span style={{ marginLeft: 6, fontSize: 12 }}>{(sensitivity*100).toFixed(0)}%</span>
+          </label>
+        </div>
       </div>
 
       <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
-        <button type="button" onClick={() => setActiveTab('patterns')} style={{ padding: '6px 10px', borderRadius: 4, border: '1px solid #ddd', background: activeTab==='patterns'? '#2563eb': '#fff', color: activeTab==='patterns'? '#fff':'#333' }}>Patterns</button>
+        <button type="button" onClick={() => setActiveTab('models')} style={{ padding: '6px 10px', borderRadius: 4, border: '1px solid #ddd', background: activeTab==='models'? '#2563eb': '#fff', color: activeTab==='models'? '#fff':'#333' }}>Models</button>
         <button type="button" onClick={() => setActiveTab('frequency')} style={{ padding: '6px 10px', borderRadius: 4, border: '1px solid #ddd', background: activeTab==='frequency'? '#2563eb': '#fff', color: activeTab==='frequency'? '#fff':'#333' }}>Frequency</button>
         <button type="button" onClick={() => setActiveTab('prediction')} style={{ padding: '6px 10px', borderRadius: 4, border: '1px solid #ddd', background: activeTab==='prediction'? '#2563eb': '#fff', color: activeTab==='prediction'? '#fff':'#333' }}>Predictions</button>
       </div>
 
-      {activeTab === 'patterns' && (
+      {activeTab === 'models' && (
         <div style={{ marginTop: 8 }}>
           <div style={{ background: '#fff', border: '1px solid #eee', borderRadius: 6, padding: 10 }}>
-            <div style={{ fontWeight: 600, marginBottom: 6 }}>Pattern Observations</div>
-            <ul style={{ fontSize: 13, color: '#333', lineHeight: 1.6 }}>
-              <li>Each draw has exactly 37 numbers not drawn (45 total - 8 drawn).</li>
-              <li>Most frequently not drawn (historical): top 15 shown below with % of draws where they were absent.</li>
-            </ul>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6, marginTop: 8 }}>
-              {analysis.overdueNumbers.slice(0, 15).map(item => (
-                <div key={item.num} style={{ background: '#f1f5f9', borderRadius: 6, padding: 8, textAlign: 'center' }}>
-                  <div style={{ fontWeight: 700 }}>{item.num}</div>
-                  <div style={{ fontSize: 12, color: '#555' }}>{item.percentage}%</div>
+            <div style={{ fontWeight: 600, marginBottom: 6 }}>Model Backtest Results</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+              {analysis.rankedModels.map(model => (
+                <div key={model.name} style={{ background: '#f9fafb', borderRadius: 6, padding: 10 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>{model.name}</div>
+                  <div style={{ fontSize: 12, color: '#666', marginBottom: 4 }}>Avg. Accuracy: {model.avgAccuracy.toFixed(1)}%</div>
+                  <div style={{ fontSize: 12, color: '#666', marginBottom: 4 }}>Total Tests: {model.totalTests}</div>
+                  <div style={{ fontSize: 12, color: '#666' }}>
+                    {model.res?.error ? (
+                      <span style={{ color: 'red' }}>Error: {model.res.error}</span>
+                    ) : (
+                      <>
+                        <div>Mean Excluded: {model.res.meanExcluded.toFixed(1)}</div>
+                        <div>Delta Mean: {model.res.deltaMean.toFixed(1)}</div>
+                      </>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
-            <div style={{ marginTop: 12, fontWeight: 600 }}>Cold numbers (not drawn in recent window):</div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
-              {analysis.coldNumbers.map(item => (
-                <span key={item.num} style={{ background: '#e0f2fe', borderRadius: 12, padding: '3px 8px', fontSize: 12 }}>{item.num} ({item.freq}/{analysis.recentLen})</span>
-              ))}
+
+            <div style={{ marginTop: 12, fontWeight: 600 }}>Model Sensitivity and Baseline</div>
+            <div style={{ display: 'flex', gap: 12, marginTop: 6 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 500, marginBottom: 4 }}>Baseline Mode</div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button type="button" onClick={() => setBaselineMode('window')} style={{ flex: 1, padding: 8, borderRadius: 4, border: '1px solid #ddd', background: baselineMode==='window'? '#2563eb': '#fff', color: baselineMode==='window'? '#fff':'#333' }}>WFMQY Window</button>
+                  <button type="button" onClick={() => setBaselineMode('all')} style={{ flex: 1, padding: 8, borderRadius: 4, border: '1px solid #ddd', background: baselineMode==='all'? '#2563eb': '#fff', color: baselineMode==='all'? '#fff':'#333' }}>All History</button>
+                </div>
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 500, marginBottom: 4 }}>Sensitivity</div>
+                <input type="range" min={0} max={1} step={0.05} value={sensitivity} onChange={(e)=>setSensitivity(Number(e.target.value))} style={{ width: '100%' }} />
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
+                  <span style={{ fontSize: 12, color: '#666' }}>0 (stable)</span>
+                  <span style={{ fontSize: 12, color: '#666' }}>1 (sensitive)</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -147,9 +278,9 @@ export const MostLikelyNotDrawnPanel: React.FC<MostLikelyNotDrawnPanelProps> = (
       {activeTab === 'prediction' && (
         <div style={{ marginTop: 8 }}>
           <div style={{ background: '#fff', border: '1px solid #eee', borderRadius: 6, padding: 10 }}>
-            <div style={{ fontWeight: 600, marginBottom: 6 }}>Predicted next 37 non-drawn numbers</div>
+            <div style={{ fontWeight: 600, marginBottom: 6 }}>Predicted next 39 not-drawn mains (mains-only)</div>
             <div style={{ background: '#fff7ed', border: '1px solid #fde68a', borderRadius: 6, padding: 10 }}>
-              <div style={{ fontWeight: 600, marginBottom: 6 }}>Not drawn:</div>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>Not drawn (39):</div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(10, 1fr)', gap: 6 }}>
                 {analysis.predictedNotDrawn.map(n => (
                   <div key={n} style={{ background: '#fde68a', borderRadius: 6, padding: 8, textAlign: 'center', fontWeight: 700 }}>{n}</div>
@@ -157,7 +288,7 @@ export const MostLikelyNotDrawnPanel: React.FC<MostLikelyNotDrawnPanelProps> = (
               </div>
             </div>
             <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: 6, padding: 10, marginTop: 10 }}>
-              <div style={{ fontWeight: 600, marginBottom: 6 }}>Predicted to be drawn (8 numbers):</div>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>Predicted to be drawn (6 mains):</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 {analysis.predictedDrawn.map(n => (
                   <div key={n} style={{ background: '#a7f3d0', borderRadius: 6, padding: '6px 10px', textAlign: 'center', fontWeight: 700 }}>{n}</div>

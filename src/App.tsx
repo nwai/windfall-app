@@ -84,6 +84,7 @@ import { CollapsibleSection } from "./components/shared/CollapsibleSection";
 import { NextDrawProbabilitiesPanel } from "./components/NextDrawProbabilitiesPanel";
 import { forecastOGA } from "./lib/ogaForecast";
 import { MostLikelyNotDrawnPanel } from "./components/MostLikelyNotDrawnPanel";
+import BacktestPanel from "./components/BacktestPanel";
 
 
 const custom: ZoneGroups = [
@@ -1134,6 +1135,9 @@ function AppInner(): JSX.Element {
       {/* [ORDER-ANCHOR] 07.1 Most Likely NOT Drawn */}
       <CollapsibleSection title={<b>Most Likely NOT Drawn</b>} defaultOpen={true}>
         <MostLikelyNotDrawnPanel history={filteredHistory} title="Most Likely NOT Drawn" />
+        <div style={{ marginTop: 10 }}>
+          <BacktestPanel history={filteredHistory} />
+        </div>
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 08 Trend Ratio History */}

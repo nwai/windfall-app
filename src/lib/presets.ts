@@ -81,6 +81,14 @@ export interface AppPresetSnapshot {
     gamma?: number;
     metric?: "ema" | "recency" | "hybrid";
   };
+
+  // MLND backtest panel settings (optional)
+  mlndBacktest?: {
+    windowSize?: number;
+    mode?: "heuristic" | "calibrated";
+    randomTrials?: number;
+    bootstrapIters?: number;
+  };
 }
 
 const KEY = "app:presets:v1";
