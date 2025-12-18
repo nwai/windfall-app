@@ -55,11 +55,17 @@ export function GroupPatternPanel({
 
   useEffect(() => {
     setGroupsJSON(JSON.stringify(localGroups, null, 2));
-  }, [editingOpen]); // refresh when opening
+  }, [localGroups, editingOpen]); // refresh when localGroups changes or when opening
 
-  const lastDraw = history[history.length - 1];
-  const lastPatternMain = lastDraw ? computePatternForDraw(lastDraw.main, localGroups) : Array(9).fill(0);
-  const lastPatternSupp = lastDraw ? computePatternForDraw(lastDraw.supp, localGroups) : Array(9).fill(0);
+  const lastDraw = useMemo(() => history[history.length - 1], [history]);
+  const lastPatternMain = useMemo(
+    () => lastDraw ? computePatternForDraw(lastDraw.main, localGroups) : Array(9).fill(0),
+    [lastDraw, localGroups]
+  );
+  const lastPatternSupp = useMemo(
+    () => lastDraw ? computePatternForDraw(lastDraw.supp, localGroups) : Array(9).fill(0),
+    [lastDraw, localGroups]
+  );
 
   // RECENT-ONLY zone trends for visible table and helper text
   const TREND_WINDOW = 180; // use last 180 draws for stronger, recent signal
@@ -135,7 +141,7 @@ export function GroupPatternPanel({
   const fmt = (x: number, d = 2) => Number.isFinite(x) ? x.toFixed(d) : "-";
 
   // RECENT helper text under the heat map (uses zoneTrendsRecent)
-  const usedN = Math.min(history.length, TREND_WINDOW);
+  const usedN = useMemo(() => Math.min(history.length, TREND_WINDOW), [history.length]);
   const trendingUpZones = useMemo(() => {
     const TH = dynamicTH(usedN);
     return zoneTrendsRecent

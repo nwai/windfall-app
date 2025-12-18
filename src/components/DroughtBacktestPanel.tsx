@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useCallback } from "react";
 import type { Draw } from "../types";
 import { backtestDroughtPredictions, BacktestOptions, BacktestSummary } from "../lib/backtestDrought";
 
@@ -17,7 +17,7 @@ export function DroughtBacktestPanel({ history }: { history: Draw[] }) {
     metric: "hybrid",
   });
 
-  const run = () => {
+  const run = useCallback(() => {
     if (!history || history.length < (opts.minHistory ?? 20)) {
       alert("Not enough draws to run backtest.");
       return;
@@ -31,7 +31,7 @@ export function DroughtBacktestPanel({ history }: { history: Draw[] }) {
         setRunning(false);
       }
     }, 10);
-  };
+  }, [history, opts]);
 
   return (
     <section style={{ border: "1px solid #e0e0e0", padding: 12, borderRadius: 8, background: "#fff" }}>
