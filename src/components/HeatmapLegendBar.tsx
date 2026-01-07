@@ -16,16 +16,16 @@ export const HeatmapLegendBar: React.FC<Props> = ({
   sticky = false,
 }) => {
   const defaultColors = [
-    "#0b1020", // prehistoric
-    "#1b2733", // frozen
-    "#244963", // permafrost
-    "#2c75a0", // cold
-    "#3ca0c7", // cool
-    "#66c2a5", // temperate
-    "#a6d854", // warm
-    "#fdd835", // hot
-    "#fb8c00", // tropical
-    "#e53935", // volcanic
+  "#0b1020", // prehistoric
+  "#3a3a3a", // frozen
+  "#244963", // permafrost
+  "#2c75a0", // cold
+  "#3ca0c7", // cool
+  "#66c2a5", // temperate
+  "#a6d854", // warm
+  "#fdd835", // hot
+  "#fb8c00", // tropical
+  "#e53935", // volcanic
   ];
   const palette = colors && colors.length === labels.length ? colors : defaultColors;
 
@@ -48,7 +48,7 @@ export const HeatmapLegendBar: React.FC<Props> = ({
     <div style={barStyle}>
       {labels.map((label, i) => {
         const c = counts[i] ?? 0;
-        const pct = total > 0 ? ((c / total) * 100).toFixed(1) : "0.0";
+        const pct = total > 0 ? ((c / total) * 100).toFixed(2) : "0.00";
         return (
           <span key={label} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
             <span

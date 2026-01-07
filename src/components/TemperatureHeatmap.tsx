@@ -15,6 +15,8 @@ export interface TemperatureHeatmapProps {
   buckets?: number;
   bucketLabels?: string[];
   bucketStops?: number[];
+  bucketAssignments?: number[];
+  bucketColors?: string[];         // NEW
   onHoverNumber?: (n: number | null) => void;
   showLegendCounts?: boolean;
 
@@ -49,9 +51,18 @@ const DEFAULT_BUCKET_LABELS = [
   "temperate","warm","hot","tropical","volcanic",
 ];
 const DEFAULT_BUCKET_COLORS = [
-  "#0b2e6b","#0d47a1","#167bbf","#26c6da","#6dd5cb",
-  "#b0e3a1","#ffd54f","#ffb300","#f57c00","#d32f2f",
+"#0b1020", // prehistoric
+"#3a3a3a", // frozen
+"#244963", // permafrost
+"#2c75a0", // cold
+"#3ca0c7", // cool
+"#66c2a5", // temperate
+"#a6d854", // warm
+"#fdd835", // hot
+"#fb8c00", // tropical
+"#e53935", // volcanic
 ];
+const DEFAULT_BUCKET_LETTERS = ["pR","F","pF","<C","C>","tT","W","H","tR","V"];
 
 export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
   history,
@@ -71,9 +82,10 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
   enforcePeaks = true,
   showHoverProbability = true,
   overlayNumbers = [],
-  // Letter overlay
   showBucketLetters = false,
   bucketLetters,
+  bucketAssignments,
+  bucketColors,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [hoverN, setHoverN] = useState<number | null>(null);
@@ -107,18 +119,18 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
     return { occurSeries: occur, emaSeries: ema };
   }, [chrono, T, alpha, heightNumbers]);
 
-  // Recency exponential-decay: v = exp(-age / k), k ≈ 1/p where p ≈ 8/45
+  // Recency exponential-decay
   const recencySeries = useMemo(() => {
     const rec: number[][] = Array.from({ length: heightNumbers }, () => Array(T).fill(0));
-    const p = 8 / 45; // expected hits per draw ratio for Weekday Windfall
-    const k = 1 / (p || 0.0001); // characteristic gap length (~5.625)
-    const maxAgeCap = Math.max(1, Math.floor(k * 8)); // cap to avoid underflow in very long droughts
+    const p = 8 / 45;
+    const k = 1 / (p || 0.0001);
+    const maxAgeCap = Math.max(1, Math.floor(k * 8));
     for (let n = 0; n < heightNumbers; n++) {
-      let age = maxAgeCap; // start with capped age so earliest cells aren’t all zero
+      let age = maxAgeCap;
       for (let t = 0; t < T; t++) {
         if (occurSeries[n][t] === 1) age = 0; else age = Math.min(maxAgeCap, age + 1);
         const v = Math.exp(-age / k);
-        rec[n][t] = v; // 1 on hit, decays smoothly toward ~0 as drought lengthens
+        rec[n][t] = v;
       }
     }
     return rec;
@@ -173,16 +185,19 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
   // Buckets (labels/colors/stops)
   const { stops, labels, colors } = useMemo(() => {
     const labels = bucketLabels && bucketLabels.length === buckets ? bucketLabels : DEFAULT_BUCKET_LABELS.slice(0, buckets);
-    const colors = DEFAULT_BUCKET_COLORS.slice(0, buckets);
+    const colors = bucketColors && bucketColors.length >= buckets
+      ? bucketColors.slice(0, buckets)
+      : DEFAULT_BUCKET_COLORS.slice(0, buckets);
     const stops = bucketStops && bucketStops.length === buckets - 1
       ? bucketStops.slice()
       : Array.from({ length: buckets - 1 }, (_, i) => (i + 1) / buckets);
     return { stops, labels, colors };
-  }, [bucketLabels, bucketStops, buckets]);
+  }, [bucketLabels, bucketStops, bucketColors, buckets]);
 
-  // --- Letters (overlay) ---
+  // Letters (overlay)
   const letters = useMemo(() => {
     if (bucketLetters && bucketLetters.length === buckets) return bucketLetters;
+    if (DEFAULT_BUCKET_LETTERS.length === buckets) return DEFAULT_BUCKET_LETTERS;
     return labels.map(l => (l?.length ? l[0].toUpperCase() : "?"));
   }, [bucketLetters, labels, buckets]);
 
@@ -207,11 +222,9 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    // Base background
     ctx.fillStyle = "#fff";
     ctx.fillRect(0, 0, widthPx, heightPx);
 
-    // Prepare font for overlay
     if (showBucketLetters) {
       ctx.font = `bold ${Math.max(9, Math.floor(cellSize * 0.5))}px monospace`;
       ctx.textAlign = "center";
@@ -221,21 +234,21 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
     for (let n = 0; n < heightNumbers; n++) {
       for (let t = 0; t < T; t++) {
         const v = valueSeries[n][t];
-        const bIdx = bucketIndexFor(v);
-        const color = colors[bIdx];
+        const baseBucket = bucketIndexFor(v);
+        const assigned = bucketAssignments && bucketAssignments[n] != null ? bucketAssignments[n] : baseBucket;
+        const color = colors[assigned] ?? colors[colors.length - 1];
         const x = gutter + t * cellSize;
         const y = gutter + n * cellSize;
         ctx.fillStyle = color;
         ctx.fillRect(x, y, cellSize, cellSize);
         if (showBucketLetters) {
-          const letter = letters[bIdx] ?? "?";
+          const letter = letters[assigned] ?? "?";
           ctx.fillStyle = getContrastTextColor(color);
           ctx.fillText(letter, x + cellSize / 2, y + cellSize / 2);
         }
       }
     }
 
-    // Overlay: white dots for simulated numbers near the right edge
     if (overlayNumbers && overlayNumbers.length > 0) {
       ctx.save();
       ctx.fillStyle = "#fff";
@@ -254,15 +267,27 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
       ctx.restore();
     }
 
-    // Axis label
     ctx.fillStyle = "#444";
     ctx.font = "14px monospace";
     ctx.fillText("older → newer", gutter, gutter - 2);
   }, [
     canvasRef, widthPx, heightPx, gutter, heightNumbers, T, cellSize,
     valueSeries, colors, stops, overlayNumbers,
-    showBucketLetters, letters // NEW deps
+    showBucketLetters, letters, bucketAssignments
   ]);
+
+  // Legend counts should match bucket assignments if provided
+  const bucketCounts = useMemo(() => {
+    const counts = Array(buckets).fill(0);
+    for (let n = 0; n < heightNumbers; n++) {
+      for (let t = 0; t < T; t++) {
+        const baseBucket = bucketIndexFor(valueSeries[n][t]);
+        const assigned = bucketAssignments && bucketAssignments[n] != null ? bucketAssignments[n] : baseBucket;
+        counts[assigned] = (counts[assigned] || 0) + 1;
+      }
+    }
+    return counts;
+  }, [valueSeries, buckets, T, heightNumbers, stops, bucketAssignments]);
 
   // Unified hover
   const onMouseMove: React.MouseEventHandler<HTMLCanvasElement> = (e) => {
@@ -337,17 +362,6 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
       minWidth: boxW,
     };
   }, [hoverPt, widthPx, heightPx]);
-
-  // Legend counts (optional)
-  const bucketCounts = useMemo(() => {
-    const counts = Array(buckets).fill(0);
-    for (let n = 0; n < heightNumbers; n++) {
-      for (let t = 0; t < T; t++) {
-        counts[bucketIndexFor(valueSeries[n][t])] += 1;
-      }
-    }
-    return counts;
-  }, [valueSeries, buckets, T, heightNumbers, stops]);
 
   return (
     <div style={{ width: "100%", position: "relative", overflowX: "auto", border: "1px solid #eee", borderRadius: 8, background: "#fff" }}>
