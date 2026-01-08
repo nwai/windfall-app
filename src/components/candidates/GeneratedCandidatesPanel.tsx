@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { CandidateSet, Draw } from "../../types";
 
 export interface GeneratedCandidatesPanelProps {
@@ -59,6 +59,29 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
     const hitSet = new Set<number>([...selSet, ...forcedSet]); // union for SelHits
 
     const selHeader = forcedNumbers.length ? "Sel/Forced Hits" : "SelHits";
+
+    const numberFreq = useMemo(() => {
+      const counts = new Map<number, number>();
+      candidates.forEach((c) => {
+        [...c.main, ...c.supp].forEach((n: number) => {
+          counts.set(n, (counts.get(n) || 0) + 1);
+        });
+      });
+      return Array.from(counts.entries()).sort((a, b) => {
+        const diff = b[1] - a[1];
+        if (diff !== 0) return diff;
+        return a[0] - b[0];
+      });
+    }, [candidates]);
+
+    function renderNumberWithCount(n: number, count: number) {
+      return (
+        <span key={n} style={{ display: "inline-flex", alignItems: "center", gap: 4, marginRight: 8 }}>
+          {renderNumber(n)}
+          <span style={{ fontSize: 11, color: "#555", fontVariantNumeric: "tabular-nums" }}>×{count}</span>
+        </span>
+      );
+    }
 
   function formatOGATooltip(ogaScore?: number, ogaPct?: number): string | undefined {
     if (ogaScore === undefined || ogaPct === undefined) return undefined;
@@ -182,6 +205,12 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
         <button type="button" disabled={isGenerating} onClick={onGenerate} style={genBtn(isGenerating)}>
           {isGenerating ? "Generating…" : "Generate"}
         </button>
+        {numberFreq.length > 0 ? (
+          <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, fontSize: 12 }}>
+            <span style={{ color: "#555" }}>Number counts:</span>
+            {numberFreq.map(([n, c]) => renderNumberWithCount(n, c))}
+          </div>
+        ) : null}
         {quotaWarning && (
           <span style={{ color: "#d32f2f", fontSize: 12 }}>{quotaWarning}</span>
         )}

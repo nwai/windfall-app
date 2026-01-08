@@ -12,7 +12,7 @@ import "./App.css";
 import { ForcedNumbersProvider } from "./context/ForcedNumbersContext";
 import { ZPASettingsProvider, useZPASettings } from "./context/ZPASettingsContext";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import { computeRecencyBuckets, RECENCY_BUCKET_COLORS, RECENCY_BUCKET_LABELS } from "./lib/recencyBuckets";
+
 import { MonteCarloPanel } from "./components/candidates/MonteCarloPanel";
 import { OperatorsPanel } from "./components/OperatorsPanel";
 import { NumberTrendsTable, NumberTrend } from "./components/NumberTrendsTable";
@@ -84,8 +84,8 @@ import { CollapsibleSection } from "./components/shared/CollapsibleSection";
 import { NextDrawProbabilitiesPanel } from "./components/NextDrawProbabilitiesPanel";
 import { forecastOGA } from "./lib/ogaForecast";
 import { MostLikelyNotDrawnPanel } from "./components/MostLikelyNotDrawnPanel";
-import BacktestPanel from "./components/BacktestPanel";
 import { NextHotBlocksPanel } from "./components/NextHotBlocksPanel";
+
 
 const custom: ZoneGroups = [
   [1, 2, 3, 4, 5],
@@ -214,7 +214,7 @@ function AppInner(): JSX.Element {
   const [windowMode, setWindowMode] = useState<"W" | "F" | "M" | "Q" | "Y" | "H" | "Custom">("H");
   const [customDrawCount, setCustomDrawCount] = useState<number>(1);
   const [windowEnabled, setWindowEnabled] = useState<boolean>(true);
-  const [useRecencyBuckets, setUseRecencyBuckets] = useState(false);
+
   const [drawWindowMode, setDrawWindowMode] = useState<"lastN" | "range">("lastN");
   const [rangeFrom, setRangeFrom] = useState<number>(1);
   const [rangeTo, setRangeTo] = useState<number>(history.length);
@@ -394,7 +394,7 @@ function AppInner(): JSX.Element {
     }),
     [filteredHistory]
   );
-  const recencyBuckets = useMemo(() => computeRecencyBuckets(filteredHistory), [filteredHistory]);
+
   // Row simulation
   const [simulatedDraw, setSimulatedDraw] = useState<Draw | null>(null);
 
@@ -574,75 +574,39 @@ function AppInner(): JSX.Element {
 
   function recomputeCompositeRanking(base: CandidateSet[]): CandidateSet[] {
     if (!base.length) return base;
-
     const recentDraw = filteredHistory[filteredHistory.length - 1];
     const recentSet = recentDraw ? new Set([...recentDraw.main, ...recentDraw.supp]) : null;
     const selectedSet = new Set(userSelectedNumbers);
-    const totalSelected = userSelectedNumbers.length;
-    const exclusionSet = new Set(excludedNumbers); // NHB + user strips
     const sumW = rankingWeights.oga + rankingWeights.sel + rankingWeights.recent || 1;
     const wOGA = rankingWeights.oga / sumW;
     const wSel = rankingWeights.sel / sumW;
     const wRecent = rankingWeights.recent / sumW;
+    const hasUserSelected = userSelectedNumbers && userSelectedNumbers.length > 0;
+    const applySelBoost = hasUserSelected && rankingWeights.sel > 0;
 
-    // Map + score
-    let scored = base.map((c: any) => {
-      const nums = [...c.main, ...c.supp];
-      const hasExcluded = nums.some((n) => exclusionSet.has(n));
-      const ogaScore = c.ogaScore ?? computeOGA(nums, filteredHistory);
-      const ogaPercentile = c.ogaPercentile ?? getOGAPercentile(ogaScore, pastOGAScores);
-      const selHits = nums.filter((n) => selectedSet.has(n)).length;
-      const recentHits = recentSet ? nums.filter((n) => recentSet.has(n)).length : 0;
-      const ogaNorm = Math.max(0, Math.min(1, ogaPercentile / 100));
-
-      // Base weighted score
-      const baseScore =
-        wOGA * ogaNorm +
-        wSel * (totalSelected ? selHits / totalSelected : 0) +
-        wRecent * (recentHits / 8);
-
-      // Forced inclusion behavior
-      const missingSel = Math.max(0, totalSelected - selHits);
-      let forcedAdj = 0;
-      if (totalSelected > 0) {
-        if (missingSel === 0) forcedAdj = 2.0; // boost if all present
-        else forcedAdj = -2.0 * missingSel;    // penalty per missing
-      }
-
-      // Exclusion penalty
-      if (hasExcluded) forcedAdj -= 5.0;
-
-      const finalComposite = baseScore + forcedAdj;
-
-      return {
-        ...c,
-        ogaScore,
-        ogaPercentile,
-        selHits,
-        recentHits,
-        missingSel,
-        hasExcluded,
-        finalCompositeAdj: finalComposite,
-      };
-    });
-
-    // HARD FILTERS
-    if (totalSelected > 0) {
-      // require ALL selected numbers
-      scored = scored.filter((c: any) => c.selHits === totalSelected);
-    }
-    // drop any candidate containing excluded numbers
-    scored = scored.filter((c: any) => !c.hasExcluded);
-
-    // Sort
-    return scored.sort((a: any, b: any) => {
-      if (a.missingSel !== b.missingSel) return a.missingSel - b.missingSel;
-      if (a.hasExcluded !== b.hasExcluded) return a.hasExcluded ? 1 : -1;
-      if (b.selHits !== a.selHits) return b.selHits - a.selHits;
-      if (b.recentHits !== a.recentHits) return b.recentHits - a.recentHits;
-      if (b.finalCompositeAdj !== a.finalCompositeAdj) return b.finalCompositeAdj - a.finalCompositeAdj;
-      return (b.ogaPercentile ?? 0) - (a.ogaPercentile ?? 0);
-    });
+    return base
+      .map((c: any) => {
+        const nums = [...c.main, ...c.supp];
+        const ogaScore = c.ogaScore ?? computeOGA(nums, filteredHistory);
+        const ogaPercentile = c.ogaPercentile ?? getOGAPercentile(ogaScore, pastOGAScores);
+        const selHits = nums.filter(n => selectedSet.has(n)).length;
+        const recentHits = recentSet ? nums.filter(n => recentSet.has(n)).length : 0;
+        const ogaNorm = Math.max(0, Math.min(1, ogaPercentile / 100));
+        const finalComposite = wOGA * ogaNorm + wSel * (selHits / 8) + wRecent * (recentHits / 8);
+        return { ...c, ogaScore, ogaPercentile, selHits, recentHits, finalCompositeAdj: finalComposite };
+      })
+      .sort((a: any, b: any) => {
+        if (applySelBoost) {
+          if (b.selHits !== a.selHits) return b.selHits - a.selHits;
+          if (b.recentHits !== a.recentHits) return b.recentHits - a.recentHits;
+          if (b.ogaPercentile !== a.ogaPercentile) return b.ogaPercentile - a.ogaPercentile;
+          return b.finalCompositeAdj - a.finalCompositeAdj;
+        }
+        if (b.finalCompositeAdj !== a.finalCompositeAdj) return b.finalCompositeAdj - a.finalCompositeAdj;
+        if (b.recentHits !== a.recentHits) return b.recentHits - a.recentHits;
+        if (b.ogaPercentile !== a.ogaPercentile) return b.ogaPercentile - a.ogaPercentile;
+        return 0;
+      });
   }
 
   useEffect(() => {
@@ -674,109 +638,6 @@ function AppInner(): JSX.Element {
     const hammingThresholdEff = hammingEnabled ? hammingThreshold : 0;
     const jaccardThresholdEff = jaccardEnabled ? jaccardThreshold : 1;
 
-    // ---- Option A: force all user-selected numbers into every candidate ----
-    const forced = userSelectedNumbers.slice(0, 8); // up to 8 (6 main + 2 supp)
-    if (forced.length > 8) {
-      showToast("Too many selected numbers (max 8 total main+supp).");
-      setIsGenerating(false);
-      return;
-    }
-
-    const exclusionSet = new Set(excludedNumbers);
-    const availablePool = Array.from({ length: 45 }, (_, i) => i + 1)
-      .filter((n) => !forced.includes(n) && !exclusionSet.has(n));
-
-    const slotsNeeded = Math.max(0, 8 - forced.length);
-    if (availablePool.length < slotsNeeded) {
-      showToast("Not enough numbers available to fill candidates (exclusions too tight).");
-      setIsGenerating(false);
-      return;
-    }
-
-    // Parse selected odd/even ratios into pairs; if none selected, allow any
-    const ratioPairs: Array<[number, number]> = selectedRatios.length
-      ? selectedRatios.map((r) => {
-          const [o, e] = r.split(":").map(Number);
-          return [o, e];
-        })
-      : [[-1, -1]]; // sentinel meaning “any ratio”
-
-    // Count forced odds/evens
-    const forcedOdd = forced.filter((n) => n % 2 === 1).length;
-    const forcedEven = forced.length - forcedOdd;
-
-    // Helper to try to build one candidate respecting ratios (if possible)
-    function buildOne(): CandidateSet | null {
-      // If no free slots, just return forced
-      if (slotsNeeded === 0) {
-        const main = forced.slice(0, 6).sort((a, b) => a - b);
-        const supp = forced.slice(6, 8).sort((a, b) => a - b);
-        return { main, supp };
-      }
-
-      // Try a few attempts to satisfy any allowed ratio
-      for (let attempt = 0; attempt < 20; attempt++) {
-        const pool = [...availablePool];
-        // Pick a ratio target that is feasible given forced counts
-        const feasible = ratioPairs.filter(([o, e]) => {
-          if (o < 0 || e < 0) return true; // “any” ratio
-          if (o + e !== 8) return false;
-          return forcedOdd <= o && forcedEven <= e;
-        });
-        if (!feasible.length) return null;
-
-        const [targetO, targetE] = feasible[Math.floor(Math.random() * feasible.length)];
-        let needOdd = targetO < 0 ? -1 : targetO - forcedOdd;
-        let needEven = targetE < 0 ? -1 : targetE - forcedEven;
-
-        // If ratio was “any”, just fill randomly
-        let fill: number[] = [];
-        if (needOdd < 0 || needEven < 0) {
-          for (let k = 0; k < slotsNeeded && pool.length; k++) {
-            const idx = Math.floor(Math.random() * pool.length);
-            fill.push(pool[idx]);
-            pool.splice(idx, 1);
-          }
-        } else {
-          if (needOdd < 0 || needEven < 0 || needOdd + needEven !== slotsNeeded) continue;
-          const odds = pool.filter((n) => n % 2 === 1);
-          const evens = pool.filter((n) => n % 2 === 0);
-          if (odds.length < needOdd || evens.length < needEven) continue;
-          const pickOdds: number[] = [];
-          const pickEvens: number[] = [];
-          // sample odds
-          for (let k = 0; k < needOdd; k++) {
-            const idx = Math.floor(Math.random() * odds.length);
-            pickOdds.push(odds[idx]);
-            odds.splice(idx, 1);
-          }
-          // sample evens
-          for (let k = 0; k < needEven; k++) {
-            const idx = Math.floor(Math.random() * evens.length);
-            pickEvens.push(evens[idx]);
-            evens.splice(idx, 1);
-          }
-          fill = [...pickOdds, ...pickEvens];
-        }
-
-        const allNums = [...forced, ...fill].slice(0, 8);
-        const main = allNums.slice(0, 6).sort((a, b) => a - b);
-        const supp = allNums.slice(6, 8).sort((a, b) => a - b);
-        return { main, supp };
-      }
-      return null;
-    }
-
-    // Build up to numCandidates
-    const builtCandidates: CandidateSet[] = [];
-    for (let i = 0; i < numCandidates; i++) {
-      const cand = buildOne();
-      if (!cand) break;
-      builtCandidates.push(cand);
-    }
-    // -----------------------------------------------------------------------
-
-    // You can keep the knobs/effectiveKnobs calculation if you still need it for tracing
     const effectiveKnobsForGen: Knobs = {
       ...knobs,
       enableEntropy: entropyEnabled,
@@ -786,28 +647,66 @@ function AppInner(): JSX.Element {
       lambda: lambdaEnabled ? lambda : 0.0,
     };
 
-    // OGA forecast bands (KDE) based on selected baseline (kept for trace)
+    // OGA forecast bands (KDE) based on selected baseline
     const baselineForOGAForecast = ogaBaselineMode === "window" ? filteredHistory : history;
     const ogaStats = forecastOGA(filteredHistory, baselineForOGAForecast);
 
+    // Route traces through the verbose-aware dispatcher
     const traceDispatch: React.Dispatch<React.SetStateAction<string[]>> = setTraceMaybe;
 
     const t0 = performance.now();
+    const result = generateCandidates(
+      numCandidates,
+      filteredHistory,
+      effectiveKnobsForGen,
+      traceDispatch,
+      excludedNumbers,
+      selectedRatios,
+      useTrickyRule,
+      0, // minOGAPercentile not used here
+      pastOGAScores as any,
+      trendSelectedNumbers,
+      entropyThresholdEff,
+      hammingThresholdEff,
+      jaccardThresholdEff,
+      lambdaEnabled ? lambda : 0.0,
+      ratioOptions,
+      minRecentMatches,
+      recentMatchBias,
+      repeatWindowSizeW,
+      minFromRecentUnionM,
+      undefined,
+      undefined,
+      { enabled: false, min: 0, max: 0, includeSupp: true },
+      {
+        constraints: selectedWindowPatterns,
+        mode: patternConstraintMode,
+        boostFactor: patternBoostFactor,
+        sumTolerance: patternSumTolerance,
+      },
+      {
+        enabled: enableOGAForecastBias,
+        preferredBand: ogaPreferredBand,
+        bands: ogaStats.bands,
+        deciles: ogaStats.deciles,
+        preferredDeciles: ogaPreferredDeciles,
+      }
+    );
 
-    // Use builtCandidates instead of generateCandidates(...)
-    let processedCandidates = [...builtCandidates];
+    let processedCandidates = [...result.candidates];
     processedCandidates = recomputeCompositeRanking(processedCandidates);
     processedCandidates = processedCandidates.filter(withinSumRange);
 
     setCandidates(processedCandidates);
-    setRatioSummary(null);       // no ratios in this path; optional
-    setQuotaWarning(undefined);
+    setRatioSummary(result.ratioSummary);
+    setQuotaWarning(result.quotaWarning);
     setSelectedCandidateIdx(0);
 
     const dt = Math.round(performance.now() - t0);
+    const st = result.rejectionStats;
     setTraceMaybe((t) => [
       ...t,
-      `[TRACE] Generation (forced user numbers): requested ${numCandidates}, built ${processedCandidates.length} in ${dt}ms; exclusions=${excludedNumbers.length}`,
+      `[TRACE] Generation: requested ${numCandidates}, generated ${processedCandidates.length} (accepted ${st.accepted}/${st.totalAttempts} attempts) in ${dt}ms; rejects — ent:${st.entropy} ham:${st.hamming} jac:${st.jaccard} oddEven:${st.oddEven} tricky:${st.tricky} recMin:${st.minRecent} recBias:${st.recentBias} repeat:${st.repeatUnion} trend:${st.trendRatio} sum:${st.sumRange} pattern:${st.patternConstraint} ogaBias:${st.ogaBias} excl:${st.exclusions}`,
     ]);
 
     setIsGenerating(false);
@@ -878,32 +777,28 @@ function AppInner(): JSX.Element {
       isSimulated: true,
     } as any);
   };
-  const bucketLetters = ["pR","F","pF","<C","C>","tT","W","H","tR","V"];
+
   // Legend counts for heatmap (from trendValueSeries)
   const bucketStops = [0.01, 0.08, 0.14, 0.20, 0.31, 0.43, 0.50, 0.70, 0.86, 0.96];
   const bucketLabels = ["prehistoric","frozen","permafrost","cold","cool","temperate","warm","hot","tropical","volcanic"];
-  const bucketColors = ["#0b1020","#3a3a3a","#244963","#2c75a0","#3ca0c7","#66c2a5","#a6d854","#fdd835","#fb8c00","#e53935"];
+  const bucketColors = ["#0b1020","#1b2733","#244963","#2c75a0","#3ca0c7","#66c2a5","#a6d854","#fdd835","#fb8c00","#e53935"];
   function bucketIndex(v: number): number { for (let i = 0; i < bucketStops.length; i++) if (v < bucketStops[i]) return i; return bucketStops.length; }
-  const legendCounts = useMemo(() => {
-    const counts = Array(bucketLabels.length).fill(0);
-    if (useRecencyBuckets) {
-      for (const b of recencyBuckets.buckets) {
-        if (b >= 0 && b < counts.length) counts[b]++;
+  const [legendCounts, setLegendCounts] = useState<number[]>(() => Array(bucketLabels.length).fill(0));
+  const [legendTotal, setLegendTotal] = useState<number>(0);
+  useEffect(() => {
+    const values: number[] = [];
+    for (let n = 0; n < trendValueSeries.length; n++) {
+      const series = trendValueSeries[n] || [];
+      for (let t = 0; t < series.length; t++) {
+        const v = series[t];
+        if (typeof v === "number" && isFinite(v) && v >= 0 && v <= 1) values.push(v);
       }
-      return counts;
     }
-    // baseline: use the same bucketStops/metric as the heatmap baseline
-    for (const v of temperatureSignal) {
-      const bi = bucketIndex(v);
-      if (bi >= 0 && bi < counts.length) counts[bi]++;
-    }
-    return counts;
-  }, [useRecencyBuckets, recencyBuckets.buckets, temperatureSignal, bucketLabels.length]);
-
-  const legendTotal = useMemo(
-    () => legendCounts.reduce((a, b) => a + b, 0),
-    [legendCounts]
-  );
+    const counts = Array(bucketLabels.length).fill(0);
+    for (const v of values) counts[bucketIndex(v)]++;
+    setLegendCounts(counts);
+    setLegendTotal(values.length);
+  }, [trendValueSeries]);
 
   return (
     <div style={{ fontFamily: "monospace", padding: 20, maxWidth: 1700 }}>
@@ -1239,10 +1134,7 @@ function AppInner(): JSX.Element {
 
       {/* [ORDER-ANCHOR] 07.1 Most Likely NOT Drawn */}
       <CollapsibleSection title={<b>Most Likely NOT Drawn</b>} defaultOpen={true}>
-        <MostLikelyNotDrawnPanel history={filteredHistory} allHistory={history}  title="Most Likely NOT Drawn" />
-        <div style={{ marginTop: 10 }}>
-          <BacktestPanel history={filteredHistory} />
-        </div>
+        <MostLikelyNotDrawnPanel history={filteredHistory} title="Most Likely NOT Drawn" />
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 08 Trend Ratio History */}
@@ -1791,39 +1683,22 @@ function AppInner(): JSX.Element {
         </div>
       </CollapsibleSection>
 
-      {/* [ORDER-ANCHOR] 25 Next Hot Blocks (NHB) */}
-      <CollapsibleSection title={<b>Next Hot Blocks</b>} defaultOpen={true}>
-      <NextHotBlocksPanel
-        history={filteredHistory}          // WFMQYH window
-        excludedNumbers={excludedNumbers}
-        setExcludedNumbers={setExcludedNumbers}
-        maxDraws={filteredHistory.length}  // or use activeWindowSize
-      />
-      </CollapsibleSection>
-
-      {/* [ORDER-ANCHOR] 25.1 Diamond Grid Analysis (DGA) */}
+      {/* [ORDER-ANCHOR] 25 Diamond Grid Analysis (DGA) */}
       <CollapsibleSection title={<b>Diamond Grid Analysis (DGA)</b>} defaultOpen={true}>
         <div style={{ width: "100%", marginTop: 18, marginBottom: 10 }}>
-          
-
-          <div style={{ width: "100%", marginBottom: 8 }}>
-            <DroughtHazardPanel history={filteredHistory} top={8} title="Most likely to break a drought next draw" />
+          {/* Next Hot Blocks above Temperature Heatmap */}
+          <div style={{ marginBottom: 12 }}>
+            <NextHotBlocksPanel
+              history={filteredHistory}
+              excludedNumbers={excludedNumbers}
+              setExcludedNumbers={setExcludedNumbers}
+            />
           </div>
-
-          <div style={{ width: "100%", marginTop: 8, marginBottom: 6 }}>
-          <HeatmapLegendBar
-            labels={bucketLabels}
-            counts={legendCounts}
-            total={legendTotal}
-            colors={useRecencyBuckets ? RECENCY_BUCKET_COLORS : bucketColors}
-          />
-          </div>
-
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6 }}>
             <h4 style={{ margin: 0 }}>Temperature Heatmap</h4>
             <label style={{ fontSize: 13 }}>
               Metric:
-              <select value={tempMetric} onChange={(e) => setTempMetric(e.target.value as any)} style={{ marginLeft: 6 }}>
+              <select value={tempMetric} onChange={(e) => setTempMetric(e.target.value as any)} style={{ marginLeft: 6 }} title="EMA • Recency • Hybrid">
                 <option value="hybrid">Hybrid (EMA ⊕ Recency)</option>
                 <option value="ema">EMA only</option>
                 <option value="recency">Recency only</option>
@@ -1833,40 +1708,36 @@ function AppInner(): JSX.Element {
               Letters:
               <input type="checkbox" checked={showHeatmapLetters} onChange={e => setShowHeatmapLetters(e.target.checked)} style={{ marginLeft: 6 }} title="Overlay letter codes" />
             </label>
-            <label style={{ fontSize: 13, marginLeft: 12, display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <input
-                type="checkbox"
-                checked={useRecencyBuckets}
-                onChange={(e) => setUseRecencyBuckets(e.target.checked)}
-                title="Use recency buckets (volcanic = latest draw; prehistoric = ≥12 draws absent)"
-              />
-              Recency buckets
-            </label>
           </div>
-          
-          
+
+          <div style={{ width: "100%", marginBottom: 8 }}>
+            <DroughtHazardPanel history={filteredHistory} top={8} title="Most likely to break a drought next draw" />
+          </div>
+
+          <div style={{ width: "100%", marginTop: 8, marginBottom: 6 }}>
+            <HeatmapLegendBar labels={bucketLabels} counts={legendCounts} total={legendTotal} colors={bucketColors} />
+          </div>
+
           <div style={{ width: "100%", overflowX: "auto" }}>
             <div style={{ display: "inline-flex", alignItems: "flex-start", gap: 12, position: "relative" }}>
               <div style={{ display: "inline-block" }}>
-              <TemperatureHeatmap
-                history={filteredHistory}
-                alpha={0.25}
-                cellSize={DGA_CELL_SIZE}
-                metric={tempMetric}
-                buckets={10}
-                bucketStops={useRecencyBuckets ? undefined : bucketStops}
-                bucketLabels={useRecencyBuckets ? RECENCY_BUCKET_LABELS : bucketLabels}
-                bucketColors={useRecencyBuckets ? RECENCY_BUCKET_COLORS : bucketColors}
-                hybridWeight={0.6}
-                emaNormalize="per-number"
-                enforcePeaks={true}
-                onHoverNumber={setFocusNumber}
-                showLegendCounts={false}
-                overlayNumbers={overlayNumbers}
-                showBucketLetters={showHeatmapLetters}
-                bucketLetters={bucketLetters}
-                bucketAssignments={useRecencyBuckets ? recencyBuckets.buckets : undefined}
-              />
+                <TemperatureHeatmap
+                  history={filteredHistory}
+                  alpha={0.25}
+                  cellSize={DGA_CELL_SIZE}
+                  metric={tempMetric}
+                  buckets={10}
+                  bucketStops={bucketStops}
+                  bucketLabels={bucketLabels}
+                  hybridWeight={0.6}
+                  emaNormalize="per-number"
+                  enforcePeaks={true}
+                  onHoverNumber={setFocusNumber}
+                  showLegendCounts={false}
+                  overlayNumbers={overlayNumbers}
+                  showBucketLetters={showHeatmapLetters}
+                  bucketLetters={["pR","F","pF","<C","C>","tT","W","H","tR","V"]}
+                />
               </div>
               {/* Vertical user exclusions aligned to rows for Heatmap */}
               <div style={{ position: "sticky", right: 0, top: 0 }}>
