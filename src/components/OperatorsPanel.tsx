@@ -7,6 +7,7 @@ export function OperatorsPanel(props: OperatorsPanelProps) {
     entropy, setEntropy, entropyEnabled, setEntropyEnabled,
     hamming, setHamming, hammingEnabled, setHammingEnabled,
     jaccard, setJaccard, jaccardEnabled, setJaccardEnabled,
+    lambdaEnabled, setLambdaEnabled,
     lambda, setLambda,
     minRecentMatches, setMinRecentMatches,
     recentMatchBias, setRecentMatchBias,
@@ -128,21 +129,33 @@ export function OperatorsPanel(props: OperatorsPanelProps) {
 
         {/* Column 2 */}
         <div>
-          <OperatorSlider
-            label="Lambda (Recency Weight)"
-            min={0.2}
-            max={0.99}
-            step={0.01}
-            value={lambda}
-            onChange={setLambda}
-            tooltip="Shift influence toward recent draws."
-            marks={[
-              { value: 0.2, label: "Oldest matter" },
-              { value: 0.6, label: "Balanced" },
-              { value: 0.99, label: "Recent only" },
-            ]}
-            preview={null}
-          />
+          <div style={{ padding: 8, boxSizing: "border-box" }}>
+            <label>
+              <input
+                type="checkbox"
+                checked={lambdaEnabled}
+                onChange={(e) => setLambdaEnabled(e.target.checked)}
+                style={{ marginRight: 7 }}
+              />
+              <b>Lambda (Recency Weight)</b>
+            </label>
+          </div>
+           <OperatorSlider
+             label="Lambda (Recency Weight)"
+             min={0.2}
+             max={0.99}
+             step={0.01}
+             value={lambda}
+             onChange={setLambda}
+             tooltip="Shift influence toward recent draws."
+             marks={[
+               { value: 0.2, label: "Oldest matter" },
+               { value: 0.6, label: "Balanced" },
+               { value: 0.99, label: "Recent only" },
+             ]}
+             preview={null}
+             disabled={!lambdaEnabled}
+           />
           <OperatorSlider
             label="Min Recent Matches"
             min={0}

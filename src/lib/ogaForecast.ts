@@ -1,5 +1,5 @@
 import type { Draw } from "../types";
-import { computeOGA } from "../utils/oga";
+import { computeOGA, DEFAULT_OGA_SPOKES } from "../utils/oga";
 
 export interface OGAForecast {
   n: number;
@@ -64,9 +64,9 @@ function integratePDF(pdf: (x: number) => number, a: number, b: number, steps = 
  * baseline: draws used to compute OGA per draw (window or all).
  * Returns mean, percentiles, and KDE-derived band probabilities (≤p10, p10–p90, ≥p90).
  */
-export function forecastOGA(history: Draw[], baseline?: Draw[]): OGAForecast {
+export function forecastOGA(history: Draw[], baseline?: Draw[], spokeCount: number = DEFAULT_OGA_SPOKES): OGAForecast {
   const base = baseline && baseline.length ? baseline : history;
-  const scores: number[] = history.map(d => computeOGA([...d.main, ...d.supp], base));
+  const scores: number[] = history.map(d => computeOGA([...d.main, ...d.supp], base, spokeCount));
   const n = scores.length;
   if (n === 0) {
     return { n: 0, mean: 0, p10: 0, p50: 0, p90: 0, bands: { low: 0, mid: 0, high: 0 }, scores: [] };

@@ -4,14 +4,16 @@ export interface RankingWeights {
   oga: number;
   sel: number;
   recent: number;
+  selBonusThreshold: number;
+  selBonusWeight: number;
 }
 interface Props {
   weights: RankingWeights;
-  setWeights: (w: RankingWeights) => void;
+  setWeights: React.Dispatch<React.SetStateAction<RankingWeights>>;
 }
 
 export const RankingWeightsPanel: React.FC<Props> = ({ weights, setWeights }) => {
-  const { oga, sel, recent } = weights;
+  const { oga, sel, recent, selBonusThreshold, selBonusWeight } = weights;
   const sum = (oga + sel + recent) || 1;
   const normOGA = (oga / sum) * 100;
   const normSel = (sel / sum) * 100;
@@ -37,6 +39,16 @@ export const RankingWeightsPanel: React.FC<Props> = ({ weights, setWeights }) =>
     const v = Number(valStr);
     if (!Number.isFinite(v)) return;
     update({ recent: Math.max(0, v) });
+  };
+  const handleSelBonusThresholdChange = (valStr: string) => {
+    const v = Number(valStr);
+    if (!Number.isFinite(v)) return;
+    update({ selBonusThreshold: Math.max(0, Math.floor(v)) });
+  };
+  const handleSelBonusWeightChange = (valStr: string) => {
+    const v = Number(valStr);
+    if (!Number.isFinite(v)) return;
+    update({ selBonusWeight: Math.max(0, v) });
   };
 
   return (
@@ -79,9 +91,33 @@ export const RankingWeightsPanel: React.FC<Props> = ({ weights, setWeights }) =>
             style={inp}
           />
         </label>
+        <label title="Apply a fixed bonus if SelHits meet or exceed this threshold (before normalization)">
+          Sel bonus @≥
+          <input
+            type="number"
+            step={1}
+            min={0}
+            max={8}
+            value={selBonusThreshold}
+            onChange={e => handleSelBonusThresholdChange(e.target.value)}
+            style={inp}
+          />
+        </label>
+        <label title="Bonus added to composite score when threshold is met (before final sort)">
+          Bonus weight
+          <input
+            type="number"
+            step={0.05}
+            min={0}
+            max={5}
+            value={selBonusWeight}
+            onChange={e => handleSelBonusWeightChange(e.target.value)}
+            style={inp}
+          />
+        </label>
       </div>
       <div style={foot}>
-        Normalized: OGA {normOGA.toFixed(0)}% • Sel {normSel.toFixed(0)}% • Recent {normRecent.toFixed(0)}%
+        Normalized: OGA {normOGA.toFixed(0)}% • Sel {normSel.toFixed(0)}% • Recent {normRecent.toFixed(0)}% (bonus adds {selBonusWeight.toFixed(2)} if SelHits ≥ {selBonusThreshold})
         <br />
         Weights are normalized (Σ=100%). Modes let you enter OGA as % and Sel/Recent as hits if preferred; composite still uses normalized weights × normalized metrics.
       </div>

@@ -48,7 +48,7 @@ import { UserSelectedNumbersPanel } from "./components/UserSelectedNumbersPanel"
 import { ParameterSearchPanel } from "./components/ParameterSearchPanel";
 import { BatesParameterSet } from "./lib/batesWeightsCore";
 import { WeightedTargetListPanel } from "./components/WeightedTargetListPanel";
-import { RankingWeightsPanel } from "./components/RankingWeightsPanel";
+import { RankingWeightsPanel, type RankingWeights } from "./components/RankingWeightsPanel";
 import { TemperatureTransitionPanel } from "./components/TemperatureTransitionPanel";
 import { GroupPatternPanel } from "./components/GroupPatternPanel";
 import { ToastContainer } from "./components/ToastContainer";
@@ -85,6 +85,12 @@ import { NextDrawProbabilitiesPanel } from "./components/NextDrawProbabilitiesPa
 import { forecastOGA } from "./lib/ogaForecast";
 import { MostLikelyNotDrawnPanel } from "./components/MostLikelyNotDrawnPanel";
 import { NextHotBlocksPanel } from "./components/NextHotBlocksPanel";
+import UndrawnPatternsPanel from "./components/UndrawnPatternsPanel";
+import MonthlyOverlapPanel from "./components/MonthlyOverlapPanel";
+import MonthlyDrawsSummaryPanel, { type MonthlyConstraintPayload } from "./components/MonthlyDrawsSummaryPanel";
+import { AdjacentCombosPanel } from "./components/AdjacentCombosPanel";
+import { applyOctagonalPostProcess } from "./octagonal";
+import { PickSixPanel, type PickSixSource } from "./components/PickSixPanel";
 
 
 const custom: ZoneGroups = [
@@ -115,6 +121,7 @@ const MAIN_MAX = 45;
 const MIN_VALID_DRAWS = 45;
 const API_URL =
   "https://api.thelott.com/sales/vmax/web/data/lotto/results?companyId=Tatts&productId=WeekdayWindfall&maxDrawCount=50";
+const DEFAULT_ATTEMPT_MULTIPLIER = 400;
 
 const defaultKnobs: Knobs = {
   enableSDE1: true,
@@ -232,7 +239,15 @@ function AppInner(): JSX.Element {
   const [gpwf_floor, setGPWFFloor] = useState<number>(defaultKnobs.gpwf_floor);
   const [gpwf_scale_multiplier, setGPWFScaleMultiplier] = useState<number>(defaultKnobs.gpwf_scale_multiplier);
 
-  const [rankingWeights, setRankingWeights] = useState({ oga: 0.7, sel: 0.2, recent: 0.1 });
+  const [rankingWeights, setRankingWeights] = useState<RankingWeights>({
+      oga: 0.7,
+      sel: 0.2,
+      recent: 0.1,
+      selBonusThreshold: 3,
+      selBonusWeight: 0,
+    });
+  const [selectedBoostEnabled, setSelectedBoostEnabled] = useState<boolean>(false);
+  const [selectedBoostFactor, setSelectedBoostFactor] = useState<number>(2);
   const [weightedTargets, setWeightedTargets] = useState<Record<number, number>>({});
   const [batesParams, setBatesParams] = useState<Partial<BatesParameterSet>>({});
   const [probOverlay, setProbOverlay] = useState<{ pAtLeastRaw: number; pAtLeastWeighted: number; targetRaw: number; targetWeighted: number } | null>(null);
@@ -244,6 +259,9 @@ function AppInner(): JSX.Element {
   const [entropyThreshold, setEntropyThreshold] = useState<number>(1.0);
   const [hammingThreshold, setHammingThreshold] = useState<number>(3);
   const [jaccardThreshold, setJaccardThreshold] = useState<number>(0.5);
+  const [requireDiv5, setRequireDiv5] = useState<boolean>(false);
+  const [maxDiv5, setMaxDiv5] = useState<number>(8);
+  const [attemptMultiplier, setAttemptMultiplier] = useState<number>(DEFAULT_ATTEMPT_MULTIPLIER);
 
   // Sum range filter state used in Candidate Generation Influences
   const [sumFilter, setSumFilter] = useState<{ enabled: boolean; min: number; max: number; includeSupp: boolean }>({
@@ -273,6 +291,55 @@ function AppInner(): JSX.Element {
   const [numCandidates, setNumCandidates] = useState<number>(8);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [octagonalTop, setOctagonalTop] = useState<number>(defaultKnobs.octagonal_top);
+  const [ogaSpokeCount, setOgaSpokeCount] = useState<number>(9);
+  // Batch frequency debug
+  const [batchSize, setBatchSize] = useState<number>(200);
+  const [batchFreq, setBatchFreq] = useState<{ n: number; count: number }[]>([]);
+  const [isBatching, setIsBatching] = useState<boolean>(false);
+  const [batchSummary, setBatchSummary] = useState<string>("");
+  const [batchSessionRuns, setBatchSessionRuns] = useState<number>(10);
+  const [isBatchSessionRunning, setIsBatchSessionRunning] = useState<boolean>(false);
+  const [batchSessionProgress, setBatchSessionProgress] = useState<number>(0);
+  const [batchSessionTopSeries, setBatchSessionTopSeries] = useState<{ run: number; tops: { n: number; count: number }[] }[]>([]);
+  const [batchSessionAggregate, setBatchSessionAggregate] = useState<{ n: number; count: number }[]>([]);
+  const monthlyAvgBuckets = useMemo(() => {
+    if (!history.length) return [] as { times: number; avg: number }[];
+    const monthCounts = new Map<string, number[]>();
+    let latestKey = "";
+    let latestTime = -Infinity;
+    history.forEach((d) => {
+      const t = Date.parse(d.date || "");
+      if (Number.isNaN(t)) return;
+      const dt = new Date(t);
+      const key = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}`;
+      if (t > latestTime) { latestTime = t; latestKey = key; }
+      if (!monthCounts.has(key)) monthCounts.set(key, Array(45).fill(0));
+      const counts = monthCounts.get(key)!;
+      d.main.forEach((n) => { if (n >= 1 && n <= 45) counts[n - 1] += 1; });
+      // Panel default excludes supps; stay consistent unless later wired in.
+    });
+    const totals = new Map<number, number>();
+    let monthTotal = 0;
+    monthCounts.forEach((counts, key) => {
+      if (key === latestKey) return; // exclude current month like panel averages
+      monthTotal += 1;
+      const freqMap = counts.reduce<Map<number, number>>((acc, c) => {
+        if (c > 0) acc.set(c, (acc.get(c) || 0) + 1);
+        return acc;
+      }, new Map());
+      freqMap.forEach((count, times) => {
+        totals.set(times, (totals.get(times) || 0) + count);
+      });
+    });
+    if (monthTotal === 0) return [] as { times: number; avg: number }[];
+    return Array.from(totals.entries())
+      .map(([times, total]) => ({ times, avg: total / monthTotal }))
+      .sort((a, b) => a.times - b.times);
+  }, [history]);
+  const [monthlyBucketLabels, setMonthlyBucketLabels] = useState<Record<number, string>>({});
+  const [monthlyConstraintPayload, setMonthlyConstraintPayload] = useState<MonthlyConstraintPayload | null>(null);
+  const [monthlyConstructiveEnabled, setMonthlyConstructiveEnabled] = useState<boolean>(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [dgaGrid, setDgaGrid] = useState<number[][]>([]);
@@ -282,12 +349,24 @@ function AppInner(): JSX.Element {
   const [numberCounts, setNumberCounts] = useState<number[]>([]);
   const [minCount, setMinCount] = useState<number>(0);
   const [maxCount, setMaxCount] = useState<number>(0);
+  const [focusedDgaCol, setFocusedDgaCol] = useState<number | null>(null);
   const [minRecentMatches, setMinRecentMatches] = useState<number>(0);
   const [recentMatchBias, setRecentMatchBias] = useState<number>(0);
   const [highlightMsg, setHighlightMsg] = useState<string>("");
   const [highlights, setHighlights] = useState<any[]>([]);
 
   const [excludedNumbers, setExcludedNumbers] = useState<number[]>([]);
+  const [userSelectedNumbers, setUserSelectedNumbers] = useState<number[]>([]);
+  const [autoExcludeUnselected, setAutoExcludeUnselected] = useState<boolean>(false);
+  const autoExcludedFromSelection = useMemo(() => {
+    if (!autoExcludeUnselected) return [] as number[];
+    const picked = new Set(userSelectedNumbers);
+    return Array.from({ length: 45 }, (_, i) => i + 1).filter((n) => !picked.has(n));
+  }, [autoExcludeUnselected, userSelectedNumbers]);
+  const effectiveExcludedNumbers = useMemo(
+    () => Array.from(new Set([...excludedNumbers, ...autoExcludedFromSelection])),
+    [excludedNumbers, autoExcludedFromSelection]
+  );
   const [ratioOptions, setRatioOptions] = useState<{ ratio: string; count: number; percent: number }[]>([]);
   const [selectedRatios, setSelectedRatios] = useState<string[]>([]);
   const [useTrickyRule, setUseTrickyRule] = useState<boolean>(false);
@@ -297,13 +376,12 @@ function AppInner(): JSX.Element {
   const [tempMetric, setTempMetric] = useState<"ema" | "recency" | "hybrid">("hybrid");
   const [repeatWindowSizeW, setRepeatWindowSizeW] = useState<number>(12);
   const [minFromRecentUnionM, setMinFromRecentUnionM] = useState<number>(0);
-  const [userSelectedNumbers, setUserSelectedNumbers] = useState<number[]>([]);
   const [presets, setPresets] = useState<AppPreset[]>(() => listPresets());
   const [selectedPresetId, setSelectedPresetId] = useState<string>("");
   const [newPresetName, setNewPresetName] = useState<string>("");
   const [zpaReloadKey, setZpaReloadKey] = useState<number>(0);
   const [selectedWindowPatterns, setSelectedWindowPatterns] = useState<WindowPattern[]>([]);
-  const [patternConstraintMode, setPatternConstraintMode] = useState<'boost' | 'restrict'>('boost');
+  const [patternConstraintMode, setPatternConstraintModeode] = useState<'boost' | 'restrict'>('boost');
   const [patternBoostFactor, setPatternBoostFactor] = useState<number>(0.15);
   const [patternSumTolerance, setPatternSumTolerance] = useState<number>(0);
 
@@ -379,8 +457,8 @@ function AppInner(): JSX.Element {
     );
   }
   const allExclusions = useMemo(
-    () => Array.from(new Set([...excludedNumbers, ...sde1Exclusions, ...hc3Exclusions])),
-    [excludedNumbers, knobs.enableSDE1, knobs.enableHC3, filteredHistory]
+    () => Array.from(new Set([...effectiveExcludedNumbers, ...sde1Exclusions, ...hc3Exclusions])),
+    [effectiveExcludedNumbers, knobs.enableSDE1, knobs.enableHC3, filteredHistory]
   );
 
   const temperatureSignal = useMemo(
@@ -397,29 +475,51 @@ function AppInner(): JSX.Element {
 
   // Row simulation
   const [simulatedDraw, setSimulatedDraw] = useState<Draw | null>(null);
+  const [simNumbers, setSimNumbers] = useState<number[]>([]);
+  const [simSource, setSimSource] = useState<'none' | 'user' | 'candidate'>('none');
+  const [simCandidateIdx, setSimCandidateIdx] = useState<number | null>(null);
 
-  // Manual simulation
+  // Manual simulation (heatmap/NextHotBlocks overlay only)
   const [manualSimSelected, setManualSimSelected] = useState<number[]>([]);
-  const manualSimDraw = useMemo(() => {
-    if (!manualSimSelected.length) return null;
-    const capped = manualSimSelected.slice(0, 8);
-    const main = capped.slice(0, 6).sort((a, b) => a - b);
-    const supp = capped.slice(6, 8).sort((a, b) => a - b);
-    return { main, supp, date: "ManualSim", isSimulated: true } as any;
+  const [pickSixSource, setPickSixSource] = useState<PickSixSource>("manual");
+  const [pickSixManual, setPickSixManual] = useState<number[]>([1, 2, 3, 4, 5, 6, 7, 8]);
+
+  useEffect(() => {
+    // manual simulation drives heatmap/NextHotBlocks overlays only
+    setSimNumbers(manualSimSelected.length >= 6 ? manualSimSelected.slice(0, 8) : []);
   }, [manualSimSelected]);
 
-  const handleManualSimChanged = (next?: number[]) => {
-    // We don't need next here because GeneratedCandidatesPanel already passes it
-    // This callback is used to ensure DGA sim column is cleared when manual sim changes
-    setSimulatedDraw(null); // clear DGA synthetic column
+  const handleSimulateCandidate = (idx: number) => {
+    const cand = candidates[idx];
+    if (!cand) return;
+    setSelectedCandidateIdx(idx);
+    setSimulatedDraw({
+      main: cand.main.slice(),
+      supp: cand.supp.slice(),
+      date: "Simulated",
+      isSimulated: true,
+    } as any);
+    setSimSource('candidate');
+    setSimCandidateIdx(idx);
   };
 
-  const activeSimulatedDraw = manualSimDraw || simulatedDraw;
+  const handleSimulatePickSixManual = (nums: number[]) => {
+    if (nums.length !== 8 || nums.some((n) => !Number.isFinite(n))) return;
+    const main = nums.slice(0, 6).sort((a, b) => a - b);
+    const supp = nums.slice(6, 8).sort((a, b) => a - b);
+    setSimulatedDraw({ main, supp, date: "PickSixManual", isSimulated: true } as any);
+    setSimSource('user');
+    setSimCandidateIdx(null);
+  };
+
+  const activeSimulatedDraw = simulatedDraw;
   // Heatmap overlay only from manual checkboxes (manualSimSelected)
-  const overlayNumbers = useMemo(() => {
-    if (manualSimSelected.length) return manualSimSelected.slice(0, 8);
-    return [];
-  }, [manualSimSelected]);
+  const overlayNumbers = useMemo(() => simNumbers.slice(0, 8), [simNumbers]);
+  const dgaSimNumbers = useMemo(() => {
+    if (!simulatedDraw) return [];
+    const nums = [...(simulatedDraw.main || []), ...(simulatedDraw.supp || [])].filter((n) => Number.isFinite(n));
+    return nums.length === 8 ? nums : [];
+  }, [simulatedDraw]);
   
   const historyWindowName = useMemo(() => {
     if (drawWindowMode === "range") return `Range ${rangeFrom}-${rangeTo}`;
@@ -521,9 +621,9 @@ function AppInner(): JSX.Element {
   const pastOGAScores = useMemo(
     () =>
       filteredHistory.map((draw, idx, arr) =>
-        computeOGA([...draw.main, ...draw.supp], arr.slice(0, idx) || [])
+        computeOGA([...draw.main, ...draw.supp], arr.slice(0, idx) || [], ogaSpokeCount)
       ),
-    [filteredHistory]
+    [filteredHistory, ogaSpokeCount]
   );
 
   // Reference mode for OGA percentiles and histogram
@@ -531,13 +631,13 @@ function AppInner(): JSX.Element {
 
   // Windowed reference distribution computed against current window baseline
   const pastOGAScoresRefWindow = useMemo(
-    () => filteredHistory.map((draw) => computeOGA([...draw.main, ...draw.supp], filteredHistory)),
-    [filteredHistory]
+    () => filteredHistory.map((draw) => computeOGA([...draw.main, ...draw.supp], filteredHistory, ogaSpokeCount)),
+    [filteredHistory, ogaSpokeCount]
   );
   // Full-history reference distribution computed against full history baseline
   const pastOGAScoresRefAll = useMemo(
-    () => history.map((draw) => computeOGA([...draw.main, ...draw.supp], history)),
-    [history]
+    () => history.map((draw) => computeOGA([...draw.main, ...draw.supp], history, ogaSpokeCount)),
+    [history, ogaSpokeCount]
   );
   // Active reference based on toggle
   const pastOGAScoresRef = useMemo(
@@ -574,56 +674,107 @@ function AppInner(): JSX.Element {
 
   function recomputeCompositeRanking(base: CandidateSet[]): CandidateSet[] {
     if (!base.length) return base;
-    const recentDraw = filteredHistory[filteredHistory.length - 1];
-    const recentSet = recentDraw ? new Set([...recentDraw.main, ...recentDraw.supp]) : null;
-    const selectedSet = new Set(userSelectedNumbers);
-    const sumW = rankingWeights.oga + rankingWeights.sel + rankingWeights.recent || 1;
-    const wOGA = rankingWeights.oga / sumW;
-    const wSel = rankingWeights.sel / sumW;
-    const wRecent = rankingWeights.recent / sumW;
-    const hasUserSelected = userSelectedNumbers && userSelectedNumbers.length > 0;
-    const applySelBoost = hasUserSelected && rankingWeights.sel > 0;
+    const manualMainSet = new Set(manualSimSelected.slice(0, 6));
+    const manualSuppSet = new Set(manualSimSelected.slice(6, 8));
+    const computePrize = (main: number[], supp: number[]) => {
+      if (manualMainSet.size < 6 || manualSuppSet.size < 2) return { label: "—", rank: 99 };
+      const mainHits = main.filter((n) => manualMainSet.has(n)).length;
+      const suppHits = supp.filter((n) => manualSuppSet.has(n)).length;
+      if (mainHits === 6) return { label: "Div1", rank: 1 };
+      if (mainHits === 5 && suppHits >= 1) return { label: "Div2", rank: 2 };
+      if (mainHits === 5) return { label: "Div3", rank: 3 };
+      if (mainHits === 4) return { label: "Div4", rank: 4 };
+      if (mainHits === 3 && suppHits >= 1) return { label: "Div5", rank: 5 };
+      if (mainHits >= 1 && suppHits >= 2) return { label: "Div6", rank: 6 };
+      return { label: "—", rank: 99 };
+    };
+     const recentDraw = filteredHistory[filteredHistory.length - 1];
+     const recentSet = recentDraw ? new Set([...recentDraw.main, ...recentDraw.supp]) : null;
+     const selectedSet = new Set(userSelectedNumbers);
+     const sumW = rankingWeights.oga + rankingWeights.sel + rankingWeights.recent || 1;
+     const wOGA = rankingWeights.oga / sumW;
+     const wSel = rankingWeights.sel / sumW;
+     const wRecent = rankingWeights.recent / sumW;
+     const hasUserSelected = userSelectedNumbers && userSelectedNumbers.length > 0;
+     const applySelBoost = hasUserSelected && rankingWeights.sel > 0;
 
     return base
       .map((c: any) => {
         const nums = [...c.main, ...c.supp];
-        const ogaScore = c.ogaScore ?? computeOGA(nums, filteredHistory);
+        const ogaScore = c.ogaScore ?? computeOGA(nums, filteredHistory, ogaSpokeCount);
         const ogaPercentile = c.ogaPercentile ?? getOGAPercentile(ogaScore, pastOGAScores);
         const selHits = nums.filter(n => selectedSet.has(n)).length;
         const recentHits = recentSet ? nums.filter(n => recentSet.has(n)).length : 0;
         const ogaNorm = Math.max(0, Math.min(1, ogaPercentile / 100));
         const finalComposite = wOGA * ogaNorm + wSel * (selHits / 8) + wRecent * (recentHits / 8);
-        return { ...c, ogaScore, ogaPercentile, selHits, recentHits, finalCompositeAdj: finalComposite };
+        const { label: prizeLabel, rank: prizeRank } = computePrize(c.main, c.supp);
+        return { ...c, ogaScore, ogaPercentile, selHits, recentHits, finalCompositeAdj: finalComposite, prizeLabel, prizeRank };
       })
       .sort((a: any, b: any) => {
-        if (applySelBoost) {
-          if (b.selHits !== a.selHits) return b.selHits - a.selHits;
-          if (b.recentHits !== a.recentHits) return b.recentHits - a.recentHits;
-          if (b.ogaPercentile !== a.ogaPercentile) return b.ogaPercentile - a.ogaPercentile;
-          return b.finalCompositeAdj - a.finalCompositeAdj;
-        }
+        const prizeDiff = a.prizeRank - b.prizeRank;
+        if (prizeDiff !== 0) return prizeDiff;
+        if (b.selHits !== a.selHits) return b.selHits - a.selHits;
         if (b.finalCompositeAdj !== a.finalCompositeAdj) return b.finalCompositeAdj - a.finalCompositeAdj;
         if (b.recentHits !== a.recentHits) return b.recentHits - a.recentHits;
         if (b.ogaPercentile !== a.ogaPercentile) return b.ogaPercentile - a.ogaPercentile;
         return 0;
       });
+   }
+
+  function meetsMonthlyConstraints(candidate: CandidateSet): boolean {
+    if (!monthlyConstraintPayload) return true;
+    const { constraints, buckets } = monthlyConstraintPayload;
+    const nums = [...candidate.main, ...candidate.supp];
+    let undrawn = 0, times1 = 0, times2 = 0, times3 = 0, times4 = 0, times5 = 0, times6 = 0, times7 = 0, times8 = 0;
+    for (const n of nums) {
+      if (buckets.undrawn.has(n)) undrawn += 1;
+      if (buckets.times1.has(n)) times1 += 1;
+      if (buckets.times2.has(n)) times2 += 1;
+      if (buckets.times3.has(n)) times3 += 1;
+      if (buckets.times4.has(n)) times4 += 1;
+      if (buckets.times5.has(n)) times5 += 1;
+      if (buckets.times6.has(n)) times6 += 1;
+      if (buckets.times7.has(n)) times7 += 1;
+      if (buckets.times8.has(n)) times8 += 1;
+    }
+    return (
+      undrawn >= constraints.undrawn &&
+      times1 >= constraints.times1 &&
+      times2 >= constraints.times2 &&
+      times3 >= constraints.times3 &&
+      times4 >= constraints.times4 &&
+      times5 >= constraints.times5 &&
+      times6 >= constraints.times6 &&
+      times7 >= constraints.times7 &&
+      times8 >= constraints.times8
+    );
   }
 
-  useEffect(() => {
-    setCandidates(prev => recomputeCompositeRanking(prev));
-  }, [rankingWeights, userSelectedNumbers, filteredHistory, pastOGAScores]);
+  const buildMonthlyTrace = () => {
+    if (!monthlyConstraintPayload) return null;
+    const { buckets, constraints } = monthlyConstraintPayload;
+    const sizes = {
+      undrawn: buckets.undrawn.size,
+      times1: buckets.times1.size,
+      times2: buckets.times2.size,
+      times3: buckets.times3.size,
+      times4: buckets.times4.size,
+      times5: buckets.times5.size,
+      times6: buckets.times6.size,
+      times7: buckets.times7.size,
+      times8: buckets.times8.size,
+    };
+    const req = constraints;
+    return `Monthly buckets — sizes und:${sizes.undrawn} 1x:${sizes.times1} 2x:${sizes.times2} 3x:${sizes.times3} 4x:${sizes.times4} 5x:${sizes.times5} 6x:${sizes.times6} 7x:${sizes.times7} 8x+:${sizes.times8}; required ≥ und:${req.undrawn} 1x:${req.times1} 2x:${req.times2} 3x:${req.times3} 4x:${req.times4} 5x:${req.times5} 6x:${req.times6} 7x:${req.times7} 8x+:${req.times8}`;
+  };
 
   useEffect(() => {
-    if (!candidates.length || !filteredHistory.length) return;
-    setCandidates((prev) =>
-      prev.map((c) => {
-        const nums = [...c.main, ...c.supp];
-        const score = computeOGA(nums, filteredHistory);
-        const percentile = getOGAPercentile(score, pastOGAScores);
-        return { ...c, ogaScore: score, ogaPercentile: percentile };
-      })
-    );
-  }, [candidates, pastOGAScores, filteredHistory]);
+    setCandidates(prev => {
+      // Clear stale cached OGA values so recomputeCompositeRanking recomputes them
+      const cleared = prev.map(c => ({ ...c, ogaScore: undefined, ogaPercentile: undefined }));
+      return recomputeCompositeRanking(cleared);
+    });
+  }, [rankingWeights, userSelectedNumbers, filteredHistory, pastOGAScores, ogaSpokeCount]);
 
   function withinSumRange(candidate: CandidateSet): boolean {
     // Hook for sum filter if you enable it later
@@ -649,7 +800,12 @@ function AppInner(): JSX.Element {
 
     // OGA forecast bands (KDE) based on selected baseline
     const baselineForOGAForecast = ogaBaselineMode === "window" ? filteredHistory : history;
-    const ogaStats = forecastOGA(filteredHistory, baselineForOGAForecast);
+    const ogaStats = forecastOGA(filteredHistory, baselineForOGAForecast, ogaSpokeCount);
+    const monthlyBucketOptions = monthlyConstructiveEnabled && monthlyConstraintPayload ? {
+      constraints: monthlyConstraintPayload.constraints,
+      buckets: monthlyConstraintPayload.buckets,
+      allowShortfall: true,
+    } : undefined;
 
     // Route traces through the verbose-aware dispatcher
     const traceDispatch: React.Dispatch<React.SetStateAction<string[]>> = setTraceMaybe;
@@ -660,12 +816,14 @@ function AppInner(): JSX.Element {
       filteredHistory,
       effectiveKnobsForGen,
       traceDispatch,
-      excludedNumbers,
+      effectiveExcludedNumbers,
       selectedRatios,
       useTrickyRule,
       0, // minOGAPercentile not used here
       pastOGAScores as any,
       trendSelectedNumbers,
+      userSelectedNumbers,
+      { enabled: selectedBoostEnabled, factor: selectedBoostFactor },
       entropyThresholdEff,
       hammingThresholdEff,
       jaccardThresholdEff,
@@ -690,12 +848,56 @@ function AppInner(): JSX.Element {
         bands: ogaStats.bands,
         deciles: ogaStats.deciles,
         preferredDeciles: ogaPreferredDeciles,
-      }
+      },
+      {
+        requireOne: requireDiv5,
+        maxAllowed: maxDiv5
+      },
+      monthlyBucketOptions,
+      attemptMultiplier,
+      ogaSpokeCount
     );
 
+    const monthlyTrace = buildMonthlyTrace();
+    setTraceMaybe((t) => [
+      ...t,
+      `[TRACE] Monthly acceptance toggle: ${monthlyConstraintPayload ? "ON" : "OFF"} (constructive fill: ${monthlyConstructiveEnabled ? "ON" : "OFF"})`,
+    ]);
+    if (monthlyTrace) {
+      setTraceMaybe((t) => [...t, `[TRACE] ${monthlyTrace}`]);
+    }
+
     let processedCandidates = [...result.candidates];
+    let monthlyRejects = 0;
+    if (monthlyConstraintPayload) {
+      processedCandidates = processedCandidates.filter((c) => {
+        const ok = meetsMonthlyConstraints(c);
+        if (!ok) monthlyRejects += 1;
+        return ok;
+      });
+    }
     processedCandidates = recomputeCompositeRanking(processedCandidates);
-    processedCandidates = processedCandidates.filter(withinSumRange);
+    let prizeRejects = 0;
+    if (manualSimSelected.length >= 8) {
+      const before = processedCandidates.length;
+      processedCandidates = processedCandidates.filter((c: any) => c.prizeLabel && c.prizeLabel !== "—");
+      prizeRejects = before - processedCandidates.length;
+    }
+    let capRejects = 0;
+    if (knobs.enableOGA && typeof knobs.octagonal_top === "number" && processedCandidates.length > 0) {
+      const cap = Math.max(1, Math.floor(knobs.octagonal_top));
+      const before = processedCandidates.length;
+      processedCandidates = applyOctagonalPostProcess(
+        processedCandidates,
+        filteredHistory.length ? filteredHistory : history,
+        cap,
+        ogaSpokeCount
+      );
+      capRejects = before - processedCandidates.length;
+      // Re-rank after OGA post-process to restore prize/composite ordering
+      processedCandidates = recomputeCompositeRanking(processedCandidates);
+    }
+     processedCandidates = processedCandidates.filter(withinSumRange);
 
     setCandidates(processedCandidates);
     setRatioSummary(result.ratioSummary);
@@ -706,11 +908,183 @@ function AppInner(): JSX.Element {
     const st = result.rejectionStats;
     setTraceMaybe((t) => [
       ...t,
-      `[TRACE] Generation: requested ${numCandidates}, generated ${processedCandidates.length} (accepted ${st.accepted}/${st.totalAttempts} attempts) in ${dt}ms; rejects — ent:${st.entropy} ham:${st.hamming} jac:${st.jaccard} oddEven:${st.oddEven} tricky:${st.tricky} recMin:${st.minRecent} recBias:${st.recentBias} repeat:${st.repeatUnion} trend:${st.trendRatio} sum:${st.sumRange} pattern:${st.patternConstraint} ogaBias:${st.ogaBias} excl:${st.exclusions}`,
+      `[TRACE] Generation: requested ${numCandidates}, generated ${processedCandidates.length} (accepted ${st.accepted}/${st.totalAttempts} attempts) in ${dt}ms; rejects — excl:${st.exclusions} sum:${st.sumRange} div5:${st.div5} oddEven:${st.oddEven} tricky:${st.tricky} repeat:${st.repeatUnion} recMin:${st.minRecent} recBias:${st.recentBias} trend:${st.trendRatio} pattern:${st.patternConstraint} ent:${st.entropy} ham:${st.hamming} jac:${st.jaccard} ogaBias:${st.ogaBias} monthly:${monthlyRejects} prize:${prizeRejects} cap:${capRejects}`,
     ]);
 
     setIsGenerating(false);
   };
+
+  const runBatch = (target: number, traceLabel: string) => {
+    const entropyThresholdEff = entropyEnabled ? entropyThreshold : 0;
+    const hammingThresholdEff = hammingEnabled ? hammingThreshold : 0;
+    const jaccardThresholdEff = jaccardEnabled ? jaccardThreshold : 1;
+
+    const effectiveKnobsForGen: Knobs = {
+      ...knobs,
+      enableEntropy: entropyEnabled,
+      enableHamming: hammingEnabled,
+      enableJaccard: jaccardEnabled,
+      enableGPWF: gpwfEnabled,
+      lambda: lambdaEnabled ? lambda : 0.0,
+    };
+
+    const baselineForOGAForecast = ogaBaselineMode === "window" ? filteredHistory : history;
+    const ogaStats = forecastOGA(filteredHistory, baselineForOGAForecast, ogaSpokeCount);
+    const monthlyBucketOptions = monthlyConstructiveEnabled && monthlyConstraintPayload ? {
+      constraints: monthlyConstraintPayload.constraints,
+      buckets: monthlyConstraintPayload.buckets,
+      allowShortfall: true,
+    } : undefined;
+
+    const t0 = performance.now();
+    const result = generateCandidates(
+      target,
+      filteredHistory,
+      effectiveKnobsForGen,
+      setTraceMaybe,
+      effectiveExcludedNumbers,
+      selectedRatios,
+      useTrickyRule,
+      0,
+      pastOGAScores as any,
+      trendSelectedNumbers,
+      userSelectedNumbers,
+      { enabled: selectedBoostEnabled, factor: selectedBoostFactor },
+      entropyThresholdEff,
+      hammingThresholdEff,
+      jaccardThresholdEff,
+      lambdaEnabled ? lambda : 0.0,
+      ratioOptions,
+      minRecentMatches,
+      recentMatchBias,
+      repeatWindowSizeW,
+      minFromRecentUnionM,
+      undefined,
+      undefined,
+      { enabled: false, min: 0, max: 0, includeSupp: true },
+      {
+        constraints: selectedWindowPatterns,
+        mode: patternConstraintMode,
+        boostFactor: patternBoostFactor,
+        sumTolerance: patternSumTolerance,
+      },
+      {
+        enabled: enableOGAForecastBias,
+        preferredBand: ogaPreferredBand,
+        bands: ogaStats.bands,
+        deciles: ogaStats.deciles,
+        preferredDeciles: ogaPreferredDeciles,
+      },
+      {
+        requireOne: requireDiv5,
+        maxAllowed: maxDiv5,
+      },
+      monthlyBucketOptions,
+      attemptMultiplier,
+      ogaSpokeCount
+    );
+
+    const monthlyTrace = buildMonthlyTrace();
+    setTraceMaybe((t) => [
+      ...t,
+      `[TRACE] Monthly acceptance toggle: ${monthlyConstraintPayload ? "ON" : "OFF"} (constructive fill: ${monthlyConstructiveEnabled ? "ON" : "OFF"})`,
+    ]);
+    if (monthlyTrace) {
+      setTraceMaybe((t) => [...t, `[TRACE] ${monthlyTrace}`]);
+    }
+
+    let processed = recomputeCompositeRanking([...result.candidates]);
+    let monthlyRejects = 0;
+    if (monthlyConstraintPayload) {
+      processed = processed.filter((c) => {
+        const ok = meetsMonthlyConstraints(c);
+        if (!ok) monthlyRejects += 1;
+        return ok;
+      });
+    }
+    processed = processed.filter(withinSumRange);
+
+    let prizeRejects = 0;
+    if (manualSimSelected.length >= 8) {
+      const before = processed.length;
+      processed = processed.filter((c: any) => c.prizeLabel && c.prizeLabel !== "—");
+      prizeRejects = before - processed.length;
+    }
+
+    let capRejects = 0;
+    if (knobs.enableOGA && typeof knobs.octagonal_top === "number" && processed.length > 0) {
+      const cap = Math.max(1, Math.floor(knobs.octagonal_top));
+      const before = processed.length;
+      processed = applyOctagonalPostProcess(
+        processed,
+        filteredHistory.length ? filteredHistory : history,
+        cap,
+        ogaSpokeCount
+      );
+      capRejects = before - processed.length;
+      processed = recomputeCompositeRanking(processed);
+    }
+
+    const freq = new Map<number, number>();
+    processed.forEach((c) => {
+      [...c.main, ...c.supp].forEach((n) => freq.set(n, (freq.get(n) || 0) + 1));
+    });
+    const freqArr: Array<{ n: number; count: number }> = Array.from(freq.entries())
+      .sort((a, b) => b[1] - a[1] || a[0] - b[0])
+      .slice(0, 8)
+      .map(([n, count]) => ({ n, count }));
+
+    const dt = Math.round(performance.now() - t0);
+    const st = result.rejectionStats;
+    const msg = `[TRACE] ${traceLabel}: requested ${target}, kept ${processed.length} (accepted ${st.accepted}/${st.totalAttempts}) in ${dt}ms; rejects — excl:${st.exclusions} sum:${st.sumRange} div5:${st.div5} oddEven:${st.oddEven} tricky:${st.tricky} repeat:${st.repeatUnion} recMin:${st.minRecent} recBias:${st.recentBias} trend:${st.trendRatio} pattern:${st.patternConstraint} ent:${st.entropy} ham:${st.hamming} jac:${st.jaccard} ogaBias:${st.ogaBias} monthly:${monthlyRejects} prize:${prizeRejects} cap:${capRejects}`;
+    setTraceMaybe((t) => [...t, msg]);
+
+    return { processed, prizeRejects, capRejects, freqArr, dt, st };
+  };
+
+  const handleRunBatchFrequencies = () => {
+    if (isBatching) return;
+    setIsBatching(true);
+    try {
+      const target = Math.max(1, Math.min(1_000_000, batchSize));
+      const { processed, prizeRejects, capRejects, freqArr, dt, st } = runBatch(target, "BatchFreq");
+
+      setBatchFreq(freqArr.map(({ n, count }) => ({ n, count })));
+      setBatchSummary(
+        `Batch ${target}: kept ${processed.length} (accepted ${st.accepted}/${st.totalAttempts}) in ${dt}ms; rejects prize:${prizeRejects} cap:${capRejects}`
+      );
+    } catch (err) {
+      setTraceMaybe((t) => [...t, `[TRACE] BatchFreq error: ${err instanceof Error ? err.message : String(err)}`]);
+    } finally {
+      setIsBatching(false);
+    }
+   };
+
+   const handleRunBatchSession = () => {
+     if (isBatching || isBatchSessionRunning) return;
+     const runs = Math.max(1, Math.min(200, batchSessionRuns));
+     setIsBatchSessionRunning(true);
+     setBatchSessionProgress(0);
+     setBatchSessionTopSeries([]);
+     setBatchSessionAggregate([]);
+
+     try {
+       const agg = new Map<number, number>();
+       for (let i = 0; i < runs; i++) {
+         const { freqArr } = runBatch(Math.max(1, Math.min(1_000_000, batchSize)), `BatchSession run ${i + 1}/${runs}`);
+         const tops = freqArr.slice(0, 8).map(({ n, count }) => ({ n, count }));
+         tops.forEach(({ n, count }) => agg.set(n, (agg.get(n) || 0) + count));
+         setBatchSessionTopSeries((prev) => [...prev, { run: i + 1, tops }]);
+         const aggArr = Array.from(agg.entries()).sort((a, b) => b[1] - a[1] || a[0] - b[0]).slice(0, 8).map(([n, count]) => ({ n, count }));
+         setBatchSessionAggregate(aggArr);
+         setBatchSessionProgress(i + 1);
+       }
+     } catch (err) {
+       setTraceMaybe((t) => [...t, `[TRACE] BatchSession error: ${err instanceof Error ? err.message : String(err)}`]);
+     } finally {
+       setIsBatchSessionRunning(false);
+     }
+   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -766,18 +1140,6 @@ function AppInner(): JSX.Element {
 
   // Candidate simulation: adds synthetic column to DGA only (does not clear manual checkboxes)
 
-  const handleSimulateCandidate = (idx: number) => {
-    const cand = candidates[idx];
-    if (!cand) return;
-    setSelectedCandidateIdx(idx);
-    setSimulatedDraw({
-      main: cand.main.slice(),
-      supp: cand.supp.slice(),
-      date: "Simulated",
-      isSimulated: true,
-    } as any);
-  };
-
   // Legend counts for heatmap (from trendValueSeries)
   const bucketStops = [0.01, 0.08, 0.14, 0.20, 0.31, 0.43, 0.50, 0.70, 0.86, 0.96];
   const bucketLabels = ["prehistoric","frozen","permafrost","cold","cool","temperate","warm","hot","tropical","volcanic"];
@@ -813,7 +1175,7 @@ function AppInner(): JSX.Element {
       </h2>
 
       {/* [ORDER-ANCHOR] 01 Number Trends Table */}
-      <CollapsibleSection title={<b>Number Trends Table</b>} summaryHint="Click a number to mark for forced inclusion" defaultOpen={true}>
+      <CollapsibleSection title={<b>Number Trends Table</b>} summaryHint="Click a number to mark for forced inclusion" defaultOpen={false}>
         <NumberTrendsTable trends={numberTrends} onToggle={(n) => setTrendSelectedNumbers(prev => prev.includes(n) ? prev.filter(x => x !== n) : [...prev, n])} selected={trendSelectedNumbers} />
         <div style={{ fontSize: 12, color: "#888", marginBottom: 8 }}>
           Colored rows indicate numbers you have selected for forced inclusion.
@@ -821,7 +1183,7 @@ function AppInner(): JSX.Element {
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 02 Phase 0: Draw History */}
-      <CollapsibleSection title={<b>Phase 0: Draw History ({history.length} draws)</b>} defaultOpen={true}>
+      <CollapsibleSection title={<b>Phase 0: Draw History ({history.length} draws)</b>} defaultOpen={false}>
         {/* In-app CSV updater */}
         <DrawHistoryManager
           csvPathHint="file:///Users/admin/Weekly_Windfall/windfall-app-clean/windfall_history_lottolyzer.csv"
@@ -837,11 +1199,14 @@ function AppInner(): JSX.Element {
           }}
         />
         <pre style={{ maxHeight: 160, overflow: "auto", fontSize: 12 }}>
-{filteredHistory.map((d, idx) => {
-  const oga = pastOGAScores[idx] ?? null;
-  return `${d.date}: [${d.main.join(", ")}] | Sup: [${d.supp.join(", ")}]${oga !== null ? ` | OGA=${oga.toFixed(2)}` : ""}`;
-}).join("\n")}
-{filteredHistory.length === 0 ? "\nNo draws loaded yet. Check network or click \"Re-fetch Draws\"." : ""}
+        {filteredHistory.map((d, idx) => {
+          const numsAll = [...d.main, ...d.supp];
+          const odd = numsAll.filter((n) => n % 2 === 1).length;
+          const even = numsAll.length - odd;
+          const oga = pastOGAScores[idx] ?? null;
+          return `${d.date}: [${d.main.join(", ")}] | Sup: [${d.supp.join(", ")}]${oga !== null ? ` | OGA=${oga.toFixed(2)}` : ""} | Odd/Even=${odd}:${even}`;
+        }).join("\n")}
+        {filteredHistory.length === 0 ? "\nNo draws loaded yet. Check network or click \"Re-fetch Draws\"." : ""}
         </pre>
         <div style={{ marginTop: 8 }}>
           <button onClick={() => fileInputRef.current?.click()} style={{ marginRight: 8, marginBottom: 5 }}>
@@ -877,12 +1242,12 @@ function AppInner(): JSX.Element {
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 02.1 Next Draw Probabilities */}
-      <CollapsibleSection title={<b>Next Draw Probabilities</b>} defaultOpen={true}>
+      <CollapsibleSection title={<b>Next Draw Probabilities</b>} defaultOpen={false}>
         <NextDrawProbabilitiesPanel history={filteredHistory} allHistory={history} title={`Next Draw Probabilities (${historyWindowName})`} />
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 03 Odd/Even Ratio Filters */}
-      <CollapsibleSection title={<b>Odd/Even Ratio Filters</b>} summaryHint="Select one or more ratios, or use Tricky Rule" defaultOpen={true}>
+      <CollapsibleSection title={<b>Odd/Even Ratio Filters</b>} summaryHint="Select one or more ratios, or use Tricky Rule" defaultOpen={false}>
         <div style={{ marginBottom: 8 }}>
           <label style={{ fontWeight: "bold", display: "inline-block", marginRight: 16 }}>
             <input
@@ -915,7 +1280,7 @@ function AppInner(): JSX.Element {
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 04 Windowed Draw Filtering (WFMQYH) */}
-      <CollapsibleSection title={<b>Windowed Draw Filtering (WFMQYH)</b>} defaultOpen={true}>
+      <CollapsibleSection title={<b>Windowed Draw Filtering (WFMQYH)</b>} defaultOpen={false}>
         {(() => (
           <>
             <div
@@ -997,13 +1362,27 @@ function AppInner(): JSX.Element {
 
               {/* Unified toggles */}
               <span style={{ marginLeft: 12 }}>
-                <label style={{ marginRight: 12 }}>
-                  <input type="checkbox" checked={knobs.enableSDE1} onChange={(e) => setKnobs((prev) => ({ ...prev, enableSDE1: e.target.checked }))} style={{ marginRight: 6 }} />
-                  SDE1
+                <label style={{ marginRight: 12, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <input type="checkbox" checked={knobs.enableSDE1} onChange={(e) => setKnobs((prev) => ({ ...prev, enableSDE1: e.target.checked }))} />
+                  <span>
+                    SDE1
+                    <span style={{ fontSize: 11, color: "#555", marginLeft: 6 }}>
+                      {sde1Exclusions.length
+                        ? `excl ${sde1Exclusions.length}: ${sde1Exclusions.slice().sort((a, b) => a - b).join(", ")}`
+                        : "no excl"}
+                    </span>
+                  </span>
                 </label>
-                <label style={{ marginRight: 12 }}>
-                  <input type="checkbox" checked={knobs.enableHC3} onChange={(e) => setKnobs((prev) => ({ ...prev, enableHC3: e.target.checked }))} style={{ marginRight: 6 }} />
-                  HC3
+                <label style={{ marginRight: 12, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <input type="checkbox" checked={knobs.enableHC3} onChange={(e) => setKnobs((prev) => ({ ...prev, enableHC3: e.target.checked }))} />
+                  <span>
+                    HC3
+                    <span style={{ fontSize: 11, color: "#555", marginLeft: 6 }}>
+                      {hc3Exclusions.length
+                        ? `excl ${hc3Exclusions.length}: ${hc3Exclusions.slice().sort((a, b) => a - b).join(", ")}`
+                        : "no excl"}
+                    </span>
+                  </span>
                 </label>
                 <label>
                   <input type="checkbox" checked={knobs.enableOGA} onChange={(e) => setKnobs((prev) => ({ ...prev, enableOGA: e.target.checked }))} style={{ marginRight: 6 }} />
@@ -1043,11 +1422,11 @@ function AppInner(): JSX.Element {
                   paddingTop: 6,
                   paddingBottom: 4,
                   borderTop: "1px dashed #ddd",
-                  marginTop: 6
+                  marginTop: 6,
                 }}
               >
                 {Array.from({ length: 45 }, (_, i) => i + 1).map((n) => {
-                  const checked = excludedNumbers.includes(n);
+                  const checked = effectiveExcludedNumbers.includes(n);
                   return (
                     <label
                       key={n}
@@ -1055,7 +1434,7 @@ function AppInner(): JSX.Element {
                         display: "inline-flex",
                         flexDirection: "column",
                         alignItems: "center",
-                        minWidth: 28
+                        minWidth: 28,
                       }}
                       title={`Exclude ${n}`}
                     >
@@ -1073,13 +1452,54 @@ function AppInner(): JSX.Element {
                   );
                 })}
               </div>
+
+              {(knobs.enableSDE1 || knobs.enableHC3) && (
+                <div
+                  style={{
+                    marginTop: 10,
+                    fontSize: 12,
+                    color: "#333",
+                    background: "#f8f9fb",
+                    border: "1px solid #eee",
+                    borderRadius: 6,
+                    padding: 8,
+                  }}
+                >
+                  <div style={{ fontWeight: 700, marginBottom: 4 }}>Auto exclusions</div>
+                  <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                    <div>
+                      <div style={{ color: knobs.enableSDE1 ? "#a04c00" : "#888" }}>
+                        SDE1 {knobs.enableSDE1 ? `(${sde1Exclusions.length})` : "(off)"}
+                      </div>
+                      <div style={{ maxWidth: 360 }}>
+                        {sde1Exclusions.length
+                          ? sde1Exclusions.slice().sort((a, b) => a - b).join(", ")
+                          : "— none —"}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ color: knobs.enableHC3 ? "#2e7d32" : "#888" }}>
+                        HC3 {knobs.enableHC3 ? `(${hc3Exclusions.length})` : "(off)"}
+                      </div>
+                      <div style={{ maxWidth: 360 }}>
+                        {hc3Exclusions.length
+                          ? hc3Exclusions.slice().sort((a, b) => a - b).join(", ")
+                          : "— none —"}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ marginTop: 4, color: "#666" }}>
+                    These numbers are automatically excluded when the respective toggles are on.
+                  </div>
+                </div>
+              )}
             </div>
           </>
         ))()}
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 05 Survival Analyzer */}
-      <CollapsibleSection title={<b>Survival Analyzer</b>} defaultOpen={true}>
+      <CollapsibleSection title={<b>Survival Analyzer</b>} defaultOpen={false}>
         <SurvivalAnalyzer
           history={filteredHistory}
           excludedNumbers={allExclusions}
@@ -1100,7 +1520,7 @@ function AppInner(): JSX.Element {
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 06 Temperature Transition */}
-      <CollapsibleSection title={<b>Temperature Transition</b>} defaultOpen={true}>
+      <CollapsibleSection title={<b>Temperature Transition</b>} defaultOpen={false}>
         <TemperatureTransitionPanel
           history={filteredHistory}
           alpha={0.25}
@@ -1117,7 +1537,7 @@ function AppInner(): JSX.Element {
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 07 Monte Carlo Analyzer */}
-      <CollapsibleSection title={<b>Monte Carlo Analyzer</b>} defaultOpen={true}>
+      <CollapsibleSection title={<b>Monte Carlo Analyzer</b>} defaultOpen={false}>
         <MonteCarloPanel
           history={filteredHistory}
           enableSDE1={knobs.enableSDE1}
@@ -1133,12 +1553,12 @@ function AppInner(): JSX.Element {
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 07.1 Most Likely NOT Drawn */}
-      <CollapsibleSection title={<b>Most Likely NOT Drawn</b>} defaultOpen={true}>
+      <CollapsibleSection title={<b>Most Likely NOT Drawn</b>} defaultOpen={false}>
         <MostLikelyNotDrawnPanel history={filteredHistory} title="Most Likely NOT Drawn" />
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 08 Trend Ratio History */}
-      <CollapsibleSection title={<b>Trend Ratio History</b>} defaultOpen={true}>
+      <CollapsibleSection title={<b>Trend Ratio History</b>} defaultOpen={false}>
         <TrendRatioHistoryPanel
           stats={computeHistoricalTrendRatios({
             lookback: 4,
@@ -1156,7 +1576,7 @@ function AppInner(): JSX.Element {
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 09 Group Pattern Analyzer */}
-      <CollapsibleSection title={<b>Group Pattern Analyzer</b>} defaultOpen={true}>
+      <CollapsibleSection title={<b>Group Pattern Analyzer</b>} defaultOpen={false}>
         <GroupPatternPanel key={zpaReloadKey} history={filteredHistory} groups={custom} />
         <GlobalZoneWeighting />
       </CollapsibleSection>
@@ -1175,8 +1595,13 @@ function AppInner(): JSX.Element {
         </div>
       </CollapsibleSection>
 
+      {/* [ORDER-ANCHOR] 11.5 Adjacent Combos (Pairs/Triples) */}
+      <CollapsibleSection title={<b>Adjacent Combos (Pairs / Triples)</b>} summaryHint="Runs, gaps, recent streaks" defaultOpen={false}>
+        <AdjacentCombosPanel history={filteredHistory} allHistory={history} />
+      </CollapsibleSection>
+
       {/* [ORDER-ANCHOR] 12 Window Stats (Low/Mid/High, Even/Odd, Sum) */}
-      <CollapsibleSection title={<b>Window Stats (Low/Mid/High, Even/Odd, Sum)</b>} summaryHint="WFMQY" defaultOpen={true}>
+      <CollapsibleSection title={<b>Window Stats (Low/Mid/High, Even/Odd, Sum)</b>} summaryHint="WFMQY" defaultOpen={false}>
         <div style={{ marginTop: 8 }}>
           <WindowStatsPanel
             draws={filteredHistory}
@@ -1207,12 +1632,12 @@ function AppInner(): JSX.Element {
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 13 Target Set Quick Stats */}
-      <CollapsibleSection title={<b>Target Set Quick Stats</b>} defaultOpen={true}>
+      <CollapsibleSection title={<b>Target Set Quick Stats</b>} defaultOpen={false}>
         <TargetSetQuickStatsPanel forcedNumbers={trendSelectedNumbers} selectedNumbers={userSelectedNumbers} />
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 14 Advanced Survival Analysis & Churn/Return Prediction Models */}
-      <CollapsibleSection title={<b>Advanced Survival Analysis & Churn/Return Prediction Models</b>} defaultOpen={true}>
+      <CollapsibleSection title={<b>Advanced Survival Analysis & Churn/Return Prediction Models</b>} defaultOpen={false}>
         <div style={{ marginTop: 12 }}>
           <ChurnPredictor dataset={churnDataset} totalDraws={activeWindowSize} minDraws={36} modelType="rf" onPredictions={setChurnOut} />
           <ReturnPredictor dataset={churnDataset} totalDraws={activeWindowSize} minDraws={36} modelType="rf" onPredictions={setReturnOut} />
@@ -1248,35 +1673,30 @@ function AppInner(): JSX.Element {
 
       {/* [ORDER-ANCHOR] 15 Operator’s Panel – Candidate Generation Controls */}
       <CollapsibleSection title={<b>Operator’s Panel – Candidate Generation Controls</b>} defaultOpen={true}>
-        <div style={{ margin: "6px 0 10px 0", fontSize: 13 }}>
-          <label>
-            <input type="checkbox" checked={lambdaEnabled} onChange={(e) => setLambdaEnabled(e.target.checked)} style={{ marginRight: 6 }} />
-            Enable Lambda (Recency Weight)
-          </label>
-        </div>
-        <OperatorsPanel
-          entropy={entropyThreshold} setEntropy={setEntropyThreshold}
-          entropyEnabled={entropyEnabled} setEntropyEnabled={setEntropyEnabled}
-          hamming={hammingThreshold} setHamming={setHammingThreshold}
-          hammingEnabled={hammingEnabled} setHammingEnabled={setHammingEnabled}
-          jaccard={jaccardThreshold} setJaccard={setJaccardThreshold}
-          jaccardEnabled={jaccardEnabled} setJaccardEnabled={setJaccardEnabled}
-          lambda={lambda} setLambda={setLambda}
-          minRecentMatches={minRecentMatches} setMinRecentMatches={setMinRecentMatches}
-          recentMatchBias={recentMatchBias} setRecentMatchBias={setRecentMatchBias}
-          previewStats={previewStats}
-          gpwfEnabled={gpwfEnabled} setGPWFEnabled={setGPWFEnabled}
-          gpwf_window_size={gpwf_window_size} setGPWFWindowSize={setGPWFWindowSize}
-          maxGPWFWindow={Math.min(maxGPWFWindow, filteredHistory.length)}
-          gpwf_bias_factor={gpwf_bias_factor} setGPWFBiasFactor={setGPWFBiasFactor}
-          gpwf_floor={gpwf_floor} setGPWFFloor={setGPWFFloor}
-          gpwf_scale_multiplier={gpwf_scale_multiplier} setGPWFScaleMultiplier={setGPWFScaleMultiplier}
-          octagonal_top={octagonalTop} setOctagonalTop={setOctagonalTop}
-        />
+         <OperatorsPanel
+           entropy={entropyThreshold} setEntropy={setEntropyThreshold}
+           entropyEnabled={entropyEnabled} setEntropyEnabled={setEntropyEnabled}
+           hamming={hammingThreshold} setHamming={setHammingThreshold}
+           hammingEnabled={hammingEnabled} setHammingEnabled={setHammingEnabled}
+           jaccard={jaccardThreshold} setJaccard={setJaccardThreshold}
+           jaccardEnabled={jaccardEnabled} setJaccardEnabled={setJaccardEnabled}
+           lambdaEnabled={lambdaEnabled} setLambdaEnabled={setLambdaEnabled}
+           lambda={lambda} setLambda={setLambda}
+           minRecentMatches={minRecentMatches} setMinRecentMatches={setMinRecentMatches}
+           recentMatchBias={recentMatchBias} setRecentMatchBias={setRecentMatchBias}
+           previewStats={previewStats}
+           gpwfEnabled={gpwfEnabled} setGPWFEnabled={setGPWFEnabled}
+           gpwf_window_size={gpwf_window_size} setGPWFWindowSize={setGPWFWindowSize}
+           maxGPWFWindow={Math.min(maxGPWFWindow, filteredHistory.length)}
+           gpwf_bias_factor={gpwf_bias_factor} setGPWFBiasFactor={setGPWFBiasFactor}
+           gpwf_floor={gpwf_floor} setGPWFFloor={setGPWFFloor}
+           gpwf_scale_multiplier={gpwf_scale_multiplier} setGPWFScaleMultiplier={setGPWFScaleMultiplier}
+           octagonal_top={octagonalTop} setOctagonalTop={setOctagonalTop}
+         />
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 16 State Presets */}
-      <CollapsibleSection title={<b>State Presets</b>} summaryHint="Save and recall all current options" defaultOpen={true}>
+      <CollapsibleSection title={<b>State Presets</b>} summaryHint="Save and recall all current options" defaultOpen={false}>
         <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", background: "#f7fafe", border: "1px solid #e3f2fd", padding: 10, borderRadius: 6, marginTop: 8 }}>
           <label>
             Preset:
@@ -1306,30 +1726,30 @@ function AppInner(): JSX.Element {
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 17 Trend Ratio Filter (UP / DOWN / FLAT) */}
-      <CollapsibleSection title={<b>Trend Ratio Filter (UP / DOWN / FLAT)</b>} defaultOpen={true}>
+      <CollapsibleSection title={<b>Trend Ratio Filter (UP / DOWN / FLAT)</b>} defaultOpen={false}>
         <div style={{ marginTop: 6, fontSize: 11, color: "#555" }}>
           Configure trend ratio filters in dedicated panel (omitted for brevity).
         </div>
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 18 Parameter Search */}
-      <CollapsibleSection title={<b>Parameter Search</b>} defaultOpen={true}>
+      <CollapsibleSection title={<b>Parameter Search</b>} defaultOpen={false}>
         <ParameterSearchPanel
           userSelectedNumbers={userSelectedNumbers}
           weightedTargets={weightedTargets}
           forcedNumbers={trendSelectedNumbers}
-          excludedNumbers={excludedNumbers}
+          excludedNumbers={effectiveExcludedNumbers}
           recentSignal={temperatureSignal}
-          conditionalProb={conditionalProb}
+          conditionalProb={ conditionalProb}
           onAdoptParameters={p => setBatesParams(p)}
           onProbabilityUpdate={p => setProbOverlay(p)}
         />
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 19 Bates Weighting Panel */}
-      <CollapsibleSection title={<b>Bates Weighting Panel</b>} defaultOpen={true}>
+      <CollapsibleSection title={<b>Bates Weighting Panel</b>} defaultOpen={false}>
         <BatesPanel
-          excludedNumbers={excludedNumbers}
+          excludedNumbers={effectiveExcludedNumbers}
           forcedNumbers={trendSelectedNumbers}
           recentSignal={temperatureSignal}
           conditionalProb={conditionalProb}
@@ -1341,13 +1761,29 @@ function AppInner(): JSX.Element {
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 20 Weighted Target List */}
-      <CollapsibleSection title={<b>Weighted Target List</b>} defaultOpen={true}>
+      <CollapsibleSection title={<b>Weighted Target List</b>} defaultOpen={false}>
         <WeightedTargetListPanel userSelectedNumbers={userSelectedNumbers} weightedTargets={weightedTargets} setWeightedTargets={setWeightedTargets} />
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 21 Modulation Diagnostics */}
-      <CollapsibleSection title={<b>Modulation Diagnostics</b>} defaultOpen={true}>
+      <CollapsibleSection title={<b>Modulation Diagnostics</b>} defaultOpen={false}>
         <ModulationDiagnosticsPanel diagnostics={null} currentBatesParams={batesParams as any} />
+      </CollapsibleSection>
+
+      {/* [ORDER-ANCHOR] 21.5 Monthly Panels (relocated) */}
+      <CollapsibleSection title={<b>Monthly 4th-Draw Overlap</b>} defaultOpen={false} summaryHint="4th draw vs first 3 each month">
+        <MonthlyOverlapPanel history={history} />
+      </CollapsibleSection>
+
+      <CollapsibleSection title={<b>Monthly Draws Summary</b>} defaultOpen={false} summaryHint="All drawn numbers per month with counts">
+        <MonthlyDrawsSummaryPanel
+          history={history}
+          onConstraintsChange={setMonthlyConstraintPayload}
+          onUseSelectedNumbers={(nums) => setUserSelectedNumbers(nums)}
+          constructiveFillEnabled={monthlyConstructiveEnabled}
+          onConstructiveFillChange={setMonthlyConstructiveEnabled}
+          onBucketInfoChange={(info) => setMonthlyBucketLabels(info.labels)}
+        />
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 22 User Selected Numbers */}
@@ -1355,36 +1791,32 @@ function AppInner(): JSX.Element {
         <UserSelectedNumbersPanel
           userSelectedNumbers={userSelectedNumbers}
           setUserSelectedNumbers={setUserSelectedNumbers}
+          autoExcludeUnselected={autoExcludeUnselected}
+          onToggleAutoExclude={setAutoExcludeUnselected}
           onSimulate={(nums) => {
-            // If insufficient selection, clear any existing simulation
             if (!nums || nums.length < 6) {
               setSimulatedDraw(null);
-              setManualSimSelected([]);
+              setSimSource('none');
+              setSimCandidateIdx(null);
               return;
             }
-            // Apply manual simulation from user selections; clear DGA synthetic draw to avoid dual overlay
-            setSimulatedDraw(null);
-            setManualSimSelected(nums.slice(0, 8));
+            const main = nums.slice(0, 6).sort((a, b) => a - b);
+            const supp = nums.slice(6, 8).sort((a, b) => a - b);
+            setSimulatedDraw({ main, supp, date: "UserSim", isSimulated: true } as any);
+            setSimSource('user');
+            setSimCandidateIdx(null);
           }}
           onClear={() => {
-            // Clear DGA synthetic column and manual overlay
             setSimulatedDraw(null);
-            setManualSimSelected([]);
+            setSimSource('none');
+            setSimCandidateIdx(null);
           }}
-          isSimulatingUser={(() => {
-            const a = manualSimSelected.slice(0, 8);
-            const b = userSelectedNumbers.slice(0, 8);
-            if (a.length !== b.length) return false;
-            const sa = a.slice().sort((x,y)=>x-y);
-            const sb = b.slice().sort((x,y)=>x-y);
-            for (let i=0;i<sa.length;i++) if (sa[i] !== sb[i]) return false;
-            return sa.length >= 6;
-          })()}
+          isSimulatingUser={simSource === 'user'}
         />
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 23 Selection Insights */}
-      <CollapsibleSection title={<b>Selection Insights</b>} defaultOpen={true}>
+      <CollapsibleSection title={<b>Selection Insights</b>} defaultOpen={false}>
         <div style={{ marginTop: 8 }}>
           <label style={{ fontSize: 12 }}>
             <input
@@ -1450,9 +1882,48 @@ function AppInner(): JSX.Element {
                 <option value="all">Full History</option>
               </select>
             </label>
+            <label style={{ fontSize: 12 }}>
+              Spokes:
+              <input
+                type="number"
+                min={3}
+                max={15}
+                step={1}
+                value={ogaSpokeCount}
+                onChange={(e) => setOgaSpokeCount(Math.max(1, Math.min(45, Number(e.target.value) || 9)))}
+                style={{ width: 70, marginLeft: 6 }}
+              />
+            </label>
           </div>
 
           <RankingWeightsPanel weights={rankingWeights} setWeights={setRankingWeights} />
+
+          <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "12px 0 18px" }}>
+            <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 6 }} title="Bias the generator to draw from your User Selected numbers more often">
+              <input
+                type="checkbox"
+                checked={selectedBoostEnabled}
+                onChange={(e) => setSelectedBoostEnabled(e.target.checked)}
+              />
+              Boost User Selected numbers during generation
+            </label>
+            <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 6 }} title="Higher factor increases the odds of picking a selected number (applied before constraints).">
+              Factor
+              <input
+                type="number"
+                min={1}
+                max={5}
+                step={0.25}
+                value={selectedBoostFactor}
+                disabled={!selectedBoostEnabled}
+                onChange={(e) => setSelectedBoostFactor(Math.max(1, Number(e.target.value) || 1))}
+                style={{ width: 70 }}
+              />
+            </label>
+            <span style={{ fontSize: 12, color: "#555" }}>
+              Applies only to generation (not ranking); still respects exclusions/forced numbers.
+            </span>
+          </div>
 
           <GeneratedCandidatesPanel
             onGenerate={handleGenerate}
@@ -1471,6 +1942,27 @@ function AppInner(): JSX.Element {
             setManualSimSelected={setManualSimSelected}
             activeOGABand={activeOGABand}
             forcedNumbers={trendSelectedNumbers}   // pass forced (trend) picks here
+            activeSimCandidateIdx={simCandidateIdx ?? -1}
+            simSourceKind={simSource}
+            batchSize={batchSize}
+            setBatchSize={setBatchSize}
+            onRunBatch={handleRunBatchFrequencies}
+            batchFreq={batchFreq}
+            isBatching={isBatching}
+            batchSummary={batchSummary}
+            batchSessionRuns={batchSessionRuns}
+            setBatchSessionRuns={setBatchSessionRuns}
+            onRunBatchSession={handleRunBatchSession}
+            isBatchSessionRunning={isBatchSessionRunning}
+            batchSessionProgress={batchSessionProgress}
+            batchSessionTopSeries={batchSessionTopSeries}
+            batchSessionAggregate={batchSessionAggregate}
+            onSimulateNumbers={handleSimulatePickSixManual}
+            monthlyAvgBuckets={monthlyAvgBuckets}
+            monthlyBuckets={monthlyConstraintPayload?.buckets}
+            historyForOGA={filteredHistory}
+            ogaRefScores={pastOGAScoresRef}
+            ogaSpokeCount={ogaSpokeCount}
           />
 
           {/* Candidate Generation Influences moved here */}
@@ -1499,6 +1991,37 @@ function AppInner(): JSX.Element {
                 </label>
                 <div style={{ marginLeft: 18, marginTop: 4 }}>
                   <input type="range" min={0} max={1} step={0.01} value={jaccardThreshold} onChange={(e) => setJaccardThreshold(Number(e.target.value))} style={{ width: 200 }} />
+                </div>
+
+                <div style={{ marginTop: 8 }}>
+                  <label title="Require at least one number divisible by 5">
+                    <input type="checkbox" checked={requireDiv5} onChange={(e) => setRequireDiv5(e.target.checked)} style={{ marginRight: 6 }} />
+                    Must include a multiple of 5
+                  </label>
+                  <div style={{ marginLeft: 18, marginTop: 4 }}>
+                    <label title="Reject if more than this many numbers are divisible by 5">
+                      Max multiples of 5:
+                      <input type="number" min={0} max={8} value={maxDiv5} onChange={(e) => setMaxDiv5(Number(e.target.value))} style={{ width: 70, marginLeft: 6 }} />
+                    </label>
+                  </div>
+                  <div style={{ marginLeft: 18, marginTop: 4 }}>
+                    <label title="Attempt budget = Count × multiplier; increase if constraints are tight">
+                      Attempt multiplier:
+                      <input
+                        type="number"
+                        min={50}
+                        max={10000}
+                        step={10}
+                        value={attemptMultiplier}
+                        onChange={(e) => {
+                          const next = Number(e.target.value) || DEFAULT_ATTEMPT_MULTIPLIER;
+                          const clamped = Math.max(50, Math.min(10000, next));
+                          setAttemptMultiplier(clamped);
+                        }}
+                        style={{ width: 90, marginLeft: 6 }}
+                      />
+                    </label>
+                  </div>
                 </div>
               </div>
 
@@ -1570,7 +2093,7 @@ function AppInner(): JSX.Element {
                   </div>
                   {/* NEW: Decile selector */}
                   {(() => {
-                    const dec = forecastOGA(filteredHistory, ogaBaselineMode === 'window' ? filteredHistory : history).deciles;
+                    const dec = forecastOGA(filteredHistory, ogaBaselineMode === 'window' ? filteredHistory : history, ogaSpokeCount).deciles;
                     const thresholds = dec?.thresholds || [];
                     return (
                       <div style={{ marginTop: 6 }}>
@@ -1620,27 +2143,9 @@ function AppInner(): JSX.Element {
                   })()}
                 </div>
               </div>
-
-              {/* Column 3: Biases & Pattern Constraints (restored) */}
-              <div style={{ border: "1px solid #eee", borderRadius: 6, padding: 10 }}>
-                <div style={{ fontWeight: 700, marginBottom: 6 }}>Biases & Pattern Constraints</div>
-                <label style={{ display: 'block', marginBottom: 6 }}>
-                  <input type="checkbox" checked={patternConstraintMode === 'restrict'} onChange={(e) => setPatternConstraintMode(e.target.checked ? 'restrict' : 'boost')} style={{ marginRight: 6 }} />
-                  Restrict to selected patterns (otherwise Boost in ranking)
-                </label>
-                <label style={{ display: 'block', marginBottom: 6 }}>
-                  Sum tolerance:
-                  <input type="number" value={patternSumTolerance} onChange={(e) => setPatternSumTolerance(Number(e.target.value))} style={{ marginLeft: 6, width: 80 }} />
-                </label>
-                <label style={{ display: 'block', marginBottom: 6 }}>
-                  Boost factor:
-                  <input type="number" step={0.05} value={patternBoostFactor} onChange={(e) => setPatternBoostFactor(Number(e.target.value))} style={{ marginLeft: 6, width: 80 }} />
-                </label>
-                <div style={{ fontSize: 11, color: '#888' }}>Pattern constraints use the selections from Window Stats. Restrict filters during generation; Boost increases ranking weight post-generation.</div>
-              </div>
             </div>
             <div style={{ marginTop: 10, fontSize: 12, color: "#555" }}>
-              <b>Provenance:</b> Window={filteredHistory.length}; Entropy={entropyEnabled ? entropyThreshold : "off"}; Hamming={hammingEnabled ? hammingThreshold : "off"}; Jaccard={jaccardEnabled ? jaccardThreshold : "off"}; Tricky={useTrickyRule ? "on" : "off"}; Ratios={selectedRatios.length ? selectedRatios.join(" ") : "none"}; RecMin={minRecentMatches}; RecBias={recentMatchBias}; Repeat W={repeatWindowSizeW} M={minFromRecentUnionM}; GPWF={gpwfEnabled ? "on" : "off"}; λ={lambdaEnabled ? lambda.toFixed(2) : "off"}; Sum={sumFilter.enabled ? `${sumFilter.min}–${sumFilter.max}${sumFilter.includeSupp ? "+supp" : ""}` : "off"}; PatternMode={patternConstraintMode} Tol={patternSumTolerance} Boost={patternBoostFactor}; OGABias={enableOGAForecastBias ? `${ogaPreferredBand} @ ${ogaBaselineMode}` : "off"}
+              <b>Provenance:</b> Window={filteredHistory.length}; Entropy={entropyEnabled ? entropyThreshold : "off"}; Hamming={hammingEnabled ? hammingThreshold : "off"}; Jaccard={jaccardEnabled ? jaccardThreshold : "off"}; Tricky={useTrickyRule ? "on" : "off"}; Ratios={selectedRatios.length ? selectedRatios.join(" ") : "none"}; RecMin={minRecentMatches}; RecBias={recentMatchBias}; Repeat W={repeatWindowSizeW} M={minFromRecentUnionM}; GPWF={gpwfEnabled ? "on" : "off"}; λ={lambdaEnabled ? lambda.toFixed(2) : "off"}; Sum={sumFilter.enabled ? `${sumFilter.min}–${sumFilter.max}${sumFilter.includeSupp ? "+supp" : ""}` : "off"}; PatternMode={patternConstraintMode} Tol={patternSumTolerance} Boost={patternBoostFactor}; OGABias={enableOGAForecastBias ? `${ogaPreferredBand} @ ${ogaBaselineMode}` : "off"}; Div5={requireDiv5 ? `min1 max${maxDiv5}` : "off"}
             </div>
             {/* Forced and Excluded reporting */}
             <div style={{ marginTop: 8, fontSize: 12, color: "#333", background: "#fafafa", border: "1px solid #eee", borderRadius: 6, padding: 8 }}>
@@ -1651,10 +2156,10 @@ function AppInner(): JSX.Element {
                 <div>
                   <div style={{ fontWeight: 700, marginBottom: 4 }}>User Exclusions</div>
                   <div>
-                    Count: {excludedNumbers.length}
+                    Count: {effectiveExcludedNumbers.length}
                   </div>
                   <div>
-                    List: {excludedNumbers.length ? excludedNumbers.slice().sort((a,b)=>a-b).join(", ") : "— none —"}
+                    List: {effectiveExcludedNumbers.length ? effectiveExcludedNumbers.slice().sort((a,b)=>a-b).join(", ") : "— none —"}
                   </div>
                 </div>
                 <div>
@@ -1673,14 +2178,31 @@ function AppInner(): JSX.Element {
             </div>
           </CollapsibleSection>
 
-          <div style={{ width: "100%", marginBottom: 18 }}>
+          <div style={{ width: "100%", marginBottom: 68 }}>
             <OGAHistogram
               ogaScores={pastOGAScoresRef}
               candidateOGA={(currentCandidate as any)?.ogaScore}
               candidatePercentile={(currentCandidate as any)?.ogaPercentile}
             />
           </div>
+
+          <div style={{ marginTop: 12 }}>
+            {/* [ORDER-ANCHOR] 24.5 Pick Six */}
+            <CollapsibleSection title={<b>Pick Six</b>} defaultOpen={false} summaryHint="28 combos of 6 from 8">
+              <PickSixPanel
+                source={pickSixSource}
+                onSourceChange={setPickSixSource}
+                manualValues={pickSixManual}
+                onManualValuesChange={setPickSixManual}
+                manualSimNumbers={manualSimSelected.slice(0, 8)}
+                dgaSimNumbers={dgaSimNumbers}
+                onSimulateManual={handleSimulatePickSixManual}
+              />
+            </CollapsibleSection>
+          </div>
+          
         </div>
+        
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 25 Diamond Grid Analysis (DGA) */}
@@ -1690,8 +2212,9 @@ function AppInner(): JSX.Element {
           <div style={{ marginBottom: 12 }}>
             <NextHotBlocksPanel
               history={filteredHistory}
-              excludedNumbers={excludedNumbers}
+              excludedNumbers={effectiveExcludedNumbers}
               setExcludedNumbers={setExcludedNumbers}
+              onClearAutoExclusions={() => setAutoExcludeUnselected(false)}
             />
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6 }}>
@@ -1711,7 +2234,12 @@ function AppInner(): JSX.Element {
           </div>
 
           <div style={{ width: "100%", marginBottom: 8 }}>
-            <DroughtHazardPanel history={filteredHistory} top={8} title="Most likely to break a drought next draw" />
+            <DroughtHazardPanel
+              history={filteredHistory}
+              top={8}
+              title="Most likely to break a drought next draw"
+              bucketLabels={monthlyBucketLabels}
+            />
           </div>
 
           <div style={{ width: "100%", marginTop: 8, marginBottom: 6 }}>
@@ -1743,7 +2271,7 @@ function AppInner(): JSX.Element {
               <div style={{ position: "sticky", right: 0, top: 0 }}>
                 <UserExclusionsStrip
                   title={undefined}
-                  excludedNumbers={excludedNumbers}
+                  excludedNumbers={effectiveExcludedNumbers}
                   setExcludedNumbers={setExcludedNumbers as any}
                   orientation="vertical"
                   labelPosition="right"
@@ -1772,12 +2300,14 @@ function AppInner(): JSX.Element {
                 setHighlights={setHighlights}
                 controlsPosition="below"
                 focusNumber={focusNumber}
+                focusedCol={focusedDgaCol}
+                onColumnClick={(col) => setFocusedDgaCol((prev) => (prev === col ? null : col))}
               />
               {/* Vertical user exclusions aligned to rows for DGA grid; placed at right edge near last column including simulation column */}
               <div style={{ position: "absolute", right: 0, top: 0, paddingLeft: 8 }}>
                 <UserExclusionsStrip
                   title={undefined}
-                  excludedNumbers={excludedNumbers}
+                  excludedNumbers={effectiveExcludedNumbers}
                   setExcludedNumbers={setExcludedNumbers as any}
                   orientation="vertical"
                   labelPosition="right"
@@ -1789,6 +2319,11 @@ function AppInner(): JSX.Element {
             <i>No grid data available.</i>
           )}
         </div>
+      </CollapsibleSection>
+
+      {/* [ORDER-ANCHOR] 26 Undrawn Patterns (Empirical) */}
+      <CollapsibleSection title={<b>Undrawn Patterns (Empirical)</b>} defaultOpen={false} summaryHint="Mains vs mains+supps toggle">
+        <UndrawnPatternsPanel history={history} />
       </CollapsibleSection>
 
       <TracePanel lines={trace} onClear={() => setTrace([])} />
@@ -1838,6 +2373,33 @@ function AppInner(): JSX.Element {
         groups: zpaGroups,
       },
       ttp: {},
+      requireDiv5,
+      maxDiv5,
+      attemptMultiplier,
+      selectedBoostEnabled,
+      selectedBoostFactor,
+      ogaSpokeCount,
+      autoExcludeUnselected,
+      userSelectedNumbers: [...userSelectedNumbers],
+      manualSimSelected: [...manualSimSelected],
+      minRecentMatches,
+      recentMatchBias,
+      repeatWindowSizeW,
+      minFromRecentUnionM,
+      sumFilter: { ...sumFilter },
+      patternConstraintMode,
+      patternBoostFactor,
+      patternSumTolerance,
+      selectedWindowPatterns: [...selectedWindowPatterns],
+      insightsEnabled,
+      tempMetric,
+      showHeatmapLetters,
+      ogaRefMode,
+      enableOGAForecastBias,
+      ogaBaselineMode,
+      ogaPreferredBand,
+      ogaPreferredDeciles: [...ogaPreferredDeciles],
+      traceVerbose,
     };
   }
 
@@ -1865,18 +2427,45 @@ function AppInner(): JSX.Element {
     setSelectedRatios(s.selectedRatios);
     setUseTrickyRule(s.useTrickyRule);
     setExcludedNumbers(s.excludedNumbers);
-    setRankingWeights(s.rankingWeights);
+    setRankingWeights({
+          oga: s.rankingWeights?.oga ?? 0.7,
+          sel: s.rankingWeights?.sel ?? 0.2,
+          recent: s.rankingWeights?.recent ?? 0.1,
+          selBonusThreshold: s.rankingWeights?.selBonusThreshold ?? 3,
+          selBonusWeight: s.rankingWeights?.selBonusWeight ?? 0,
+    });
     setWeightedTargets(s.weightedTargets);
     setApplyZoneBias(s.applyZoneBias);
     setZoneGamma(s.zoneGamma);
-    try {
-      if (s.zpa?.groups) setSavedGroups(s.zpa.groups);
-      if (s.zpa?.selectedZones) setSavedSelectedZones(s.zpa.selectedZones);
-      if (s.zpa?.normalizeMode) setSavedNormalizeMode(s.zpa.normalizeMode);
-      setZpaReloadKey(k => k + 1);
-    } catch {}
-  }
-}
+    setRequireDiv5(s.requireDiv5 ?? false);
+    setMaxDiv5(s.maxDiv5 ?? 8);
+    setAttemptMultiplier(s.attemptMultiplier ?? DEFAULT_ATTEMPT_MULTIPLIER);
+    setSelectedBoostEnabled(s.selectedBoostEnabled ?? false);
+    setSelectedBoostFactor(s.selectedBoostFactor ?? 2);
+    setOgaSpokeCount(s.ogaSpokeCount ?? 9);
+    setAutoExcludeUnselected(!!s.autoExcludeUnselected);
+    setUserSelectedNumbers(s.userSelectedNumbers ?? []);
+    setManualSimSelected(s.manualSimSelected ?? []);
+    setMinRecentMatches(s.minRecentMatches ?? 0);
+    setRecentMatchBias(s.recentMatchBias ?? 0);
+    setRepeatWindowSizeW(s.repeatWindowSizeW ?? 12);
+    setMinFromRecentUnionM(s.minFromRecentUnionM ?? 0);
+    setSumFilter(s.sumFilter ?? { enabled: false, min: 0, max: 0, includeSupp: true });
+    setPatternConstraintModeode(s.patternConstraintMode ?? 'boost');
+    setPatternBoostFactor(s.patternBoostFactor ?? 0.15);
+    setPatternSumTolerance(s.patternSumTolerance ?? 0);
+    setSelectedWindowPatterns(s.selectedWindowPatterns ?? []);
+    setInsightsEnabled(s.insightsEnabled ?? false);
+    setTempMetric(s.tempMetric ?? 'hybrid');
+    setShowHeatmapLetters(s.showHeatmapLetters ?? false);
+    setOgaRefMode(s.ogaRefMode ?? 'window');
+    setEnableOGAForecastBias(s.enableOGAForecastBias ?? false);
+    setOGABaselineMode(s.ogaBaselineMode ?? 'window');
+    setOGAPreferredBand(s.ogaPreferredBand ?? 'auto');
+    setOGAPreferredDeciles(s.ogaPreferredDeciles ?? []);
+    setTraceVerbose(s.traceVerbose ?? true);
+    }
+ }
 
 // UserExclusionsStrip component (kept local)
 type Orientation = "horizontal" | "vertical";

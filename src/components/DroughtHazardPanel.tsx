@@ -8,8 +8,18 @@ export const DroughtHazardPanel: React.FC<{
   title?: string;
   onToggleNumber?: (n: number) => void;
   forcedNumbers?: number[];
-}> = ({ history, top = 12, title, onToggleNumber, forcedNumbers = [] }) => {
+  bucketLabels?: Record<number, string>;
+}> = ({ history, top = 12, title, onToggleNumber, forcedNumbers = [], bucketLabels }) => {
   const { hazard, maxK, byNumber } = React.useMemo(() => computeDroughtHazard(history), [history]);
+  const fallbackLabels = React.useMemo(() => {
+    const counts = Array(46).fill(0);
+    history.forEach((d) => {
+      [...d.main, ...d.supp].forEach((n) => {
+        if (n >= 1 && n <= 45) counts[n] += 1;
+      });
+    });
+    return counts.map((c) => (c === 0 ? "Undrawn" : `${c}x`));
+  }, [history]);
   const sorted = React.useMemo(
     () => byNumber.slice().sort((a, b) => b.p - a.p || b.k - a.k).slice(0, top),
     [byNumber, top]
@@ -25,6 +35,7 @@ export const DroughtHazardPanel: React.FC<{
         <thead>
           <tr style={{ background: "#f7f7f7" }}>
             <th style={th}>#</th>
+            <th style={{ ...th, textAlign: "left" }}>Bucket</th>
             <th style={th}>Current drought (k)</th>
             <th style={th}>P(hit next)</th>
           </tr>
@@ -40,6 +51,7 @@ export const DroughtHazardPanel: React.FC<{
                 title={onToggleNumber ? "Click to (de)select number for trend selection" : undefined}
               >
                 <td style={td}>{r.number}</td>
+                <td style={{ ...td, textAlign: "left" }}>{bucketLabels?.[r.number] ?? fallbackLabels[r.number] ?? "—"}</td>
                 <td style={td}>{r.k}</td>
                 <td style={td}>{(r.p * 100).toFixed(1)}%</td>
               </tr>

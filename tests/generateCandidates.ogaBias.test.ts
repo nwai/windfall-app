@@ -66,6 +66,10 @@ describe("generateCandidates OGA bias decile acceptance", () => {
         bands: { low: 0.2, mid: 0.6, high: 0.2 },
         deciles: { thresholds: [0,1,2,3,4,5,6,7,8], probs: Array(10).fill(0.1) },
         preferredDeciles: [{ index: 5, weight: 1 }, { index: 6, weight: 1 }]
+      },
+      {
+        requireOne: false,
+        maxAllowed: 8,
       }
     );
     const hasTrace = trace.some(l => l.includes("OGA decile") || l.includes("OGA band"));

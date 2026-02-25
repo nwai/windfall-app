@@ -7,10 +7,11 @@
     "node": ">=20.19.0 || >=22.12.0"
   },
   "scripts": {
+    "start": "vite dev",
     "dev": "vite",
-    "build": "tsc -p tsconfig.build.json && vite build",
+    "build": "node --max-old-space-size=6144 node_modules/typescript/bin/tsc -p tsconfig.build.json && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "node --max-old-space-size=6144 node_modules/typescript/bin/tsc --noEmit",
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
     "lint:fix": "eslint \"src/**/*.{ts,tsx}\" --fix",
     "verify": "npm run typecheck && npm run lint",

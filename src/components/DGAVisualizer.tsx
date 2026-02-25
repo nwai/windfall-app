@@ -70,6 +70,8 @@ export interface DGAVisualizerProps {
   setHighlights: React.Dispatch<React.SetStateAction<HighlightShape[]>>;
   controlsPosition?: 'above' | 'below'; // default 'above'
 focusNumber?: number | null;
+focusedCol?: number | null;
+onColumnClick?: (col: number) => void;
 }
 
 type SolveMode = 'center-and-targets' | 'targets-only';
@@ -205,6 +207,8 @@ export const DGAVisualizer: React.FC<DGAVisualizerProps> = ({
   setHighlights,
   controlsPosition = 'above',
 focusNumber = null,
+focusedCol = null,
+onColumnClick,
 }) => {
   // Defensive defaults
   grid = grid || [];
@@ -1587,7 +1591,10 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
                   textAlign: 'center',
                   background: '#f9f9f9',
                   border: '1px solid #eee',
+                  opacity: focusedCol !== null && focusedCol !== cIdx ? 0.3 : 1,
+                  cursor: 'pointer',
                 }}
+                onClick={() => onColumnClick?.(cIdx)}
               >
                 {label}
               </th>
@@ -1600,8 +1607,11 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
                   textAlign: 'center',
                   background: '#f0f7ff',
                   border: '1px solid #dbeaff',
+                  opacity: focusedCol !== null && focusedCol !== drawLabels.length ? 0.3 : 1,
+                  cursor: 'pointer',
                 }}
                 title="Next draw (synthetic column)"
+                onClick={() => onColumnClick?.(drawLabels.length)}
               >
                 Next
               </th>
@@ -1611,6 +1621,7 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
        <tbody>
   {grid.map((rowArr, rIdx) => {
     const isFocusedRow = focusNumber === rIdx + 1;
+    const dimCol = (c: number) => focusedCol !== null && focusedCol !== c;
 
     return (
       <tr key={rIdx}>
@@ -1654,6 +1665,7 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
           let background = baseHeat;
           let bgImage: string | undefined;
           let border = '1px solid #eee';
+          const opacity = dimCol(cIdx) ? 0.3 : 1;
 
           if (hasHighlight) {
             if (firstHighlight?.renderStyle === 'hatch') {
@@ -1673,22 +1685,25 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
             }
           }
 
+          const label = drawLabels[cIdx] ?? '';
+          const isSimulatedCol = label.endsWith('*');
+
           let symbol: React.ReactNode = '';
           let cellType = '';
           if (cell === 1) {
-            symbol = '⬢';
+            symbol = isSimulatedCol ? <span style={{ color: '#c62828' }}>⬢</span> : '⬢';
             cellType = 'Main';
           } else if (cell === 2) {
-            symbol = '◯';
+            symbol = isSimulatedCol ? <span style={{ color: '#2e7d32' }}>◯</span> : '◯';
             cellType = 'Supp';
           }
           const isPred = predictions && predictions.includes(rIdx + 1) && cIdx === (grid[0]?.length || 1) - 1;
           if (isPred) cellType = cellType ? `${cellType}, Prediction` : 'Prediction';
 
-          let tt = `Number: ${numberLabels[rIdx]}, Draw: ${drawLabels[cIdx]}`;
-          if (cellType) tt += `\nType: ${cellType}`;
+          let cellTitle = `Number: ${numberLabels[rIdx]}, Draw: ${drawLabels[cIdx]}`;
+          if (cellType) cellTitle += `\nType: ${cellType}`;
           if (highlightInfos.length > 0) {
-            tt +=
+            cellTitle +=
               '\nHighlights: ' +
               highlightInfos
                 .map(
@@ -1716,25 +1731,30 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
               }
             }
             if (diamondsHere.length > 0) {
-              tt += '\nDiamonds: ' + diamondsHere.join('; ');
+              cellTitle += '\nDiamonds: ' + diamondsHere.join('; ');
             }
           }
-          tt += `\nHot/Cold: ${numberCounts[rIdx]} times`;
-
-          const style: React.CSSProperties = {
-            minWidth: 20,
-            height: 20,
-            textAlign: 'center',
-            border,
-            position: 'relative',
-            cursor: 'pointer',
-            background,
-          };
-          if (bgImage) style.backgroundImage = bgImage;
-          if (isFocusedRow) style.boxShadow = 'inset 0 0 0 9999px rgba(255,235,59,0.08)';
+          cellTitle += `\nHot/Cold: ${numberCounts[rIdx]} times`;
 
           return (
-            <td key={cIdx} style={style} title={tt}>
+            <td
+              key={cIdx}
+              style={{
+                width: 20,
+                minWidth: 20,
+                height: 20,
+                textAlign: 'center',
+                verticalAlign: 'middle',
+                border,
+                position: 'relative',
+                background,
+                backgroundImage: bgImage,
+                backgroundSize: '6px 6px',
+                padding: 0,
+                opacity,
+              }}
+              title={cellTitle}
+            >
               {symbol}
             </td>
           );
@@ -1746,6 +1766,7 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
             key="next"
             style={(() => {
               const cIdx = (grid[0]?.length || 1);
+              const opacity = focusedCol !== null && focusedCol !== cIdx ? 0.3 : 1;
               const highlightInfos = getHighlightInfos(rIdx, cIdx);
               const hasHighlight = highlightInfos.length > 0;
               const firstHighlight = hasHighlight ? highlights[highlightInfos[0].idx] : undefined;
@@ -1772,6 +1793,7 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
                 cursor: 'pointer',
                 background: baseHeat,
                 border: '1px solid #eee',
+                opacity,
               };
 
               if (hasHighlight) {
@@ -1798,6 +1820,7 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
             title={(() => {
               let tt = `Number: ${numberLabels[rIdx]}, Draw: Next`;
               const cIdx = (grid[0]?.length || 1);
+              const opacity = focusedCol !== null && focusedCol !== cIdx ? 0.3 : 1;
               const highlightInfos = getHighlightInfos(rIdx, cIdx);
               if (highlightInfos.length > 0) {
                 tt +=
@@ -1829,6 +1852,7 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
               }
               const isPred = predictions && predictions.includes(rIdx + 1);
               if (isPred) tt += '\nType: Prediction';
+              tt += `\nOpacity: ${opacity}`;
               return tt;
             })()}
           >

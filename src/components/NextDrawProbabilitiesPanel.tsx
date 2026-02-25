@@ -42,6 +42,40 @@ export const NextDrawProbabilitiesPanel: React.FC<NextDrawProbabilitiesPanelProp
   // Compute OGA distribution for each observed draw using baseline = current history
   const ogaStats = useMemo(() => forecastOGA(history, baseline), [history, baseline]);
 
+  const decileMembers = useMemo(() => {
+    if (!ogaStats.deciles || !ogaStats.deciles.thresholds) return [] as number[][];
+    const thresholds = ogaStats.deciles.thresholds;
+    const bins: number[][] = Array.from({ length: 10 }, () => []);
+    const sortedScores = (ogaStats.scores || []).slice().sort((a, b) => a - b);
+    for (const s of sortedScores) {
+      const idx = thresholds.findIndex((t) => s <= t);
+      const bin = idx === -1 ? 9 : Math.max(0, idx);
+      bins[bin].push(s);
+    }
+    return bins;
+  }, [ogaStats]);
+
+  const decileRanges = useMemo(() => {
+    if (!ogaStats.deciles || !ogaStats.deciles.thresholds || !ogaStats.scores?.length) return [] as { lo: number; hi: number }[];
+    const thresholds = ogaStats.deciles.thresholds;
+    const minScore = Math.min(...ogaStats.scores);
+    const maxScore = Math.max(...ogaStats.scores);
+    const ranges: { lo: number; hi: number }[] = [];
+    for (let i = 0; i < 10; i++) {
+      const lo = i === 0 ? minScore : thresholds[i - 1];
+      const hi = i === 9 ? maxScore : thresholds[i];
+      ranges.push({ lo, hi });
+    }
+    return ranges;
+  }, [ogaStats]);
+
+  const formatDecileValues = (vals: number[]): string => {
+    if (!vals || vals.length === 0) return "—";
+    const shown = vals.slice(0, 12).map((v) => v.toFixed(2)).join(", ");
+    if (vals.length > 12) return `${shown} … (+${vals.length - 12} more)`;
+    return shown;
+  };
+
   // Naive next-draw OGA band probabilities:
   // Use empirical distribution; report probability of falling below p10, between p10-p90, above p90
   const ogaBandProbs = useMemo(() => {
@@ -94,15 +128,23 @@ export const NextDrawProbabilitiesPanel: React.FC<NextDrawProbabilitiesPanelProp
                 <thead>
                   <tr>
                     <th style={th}>Decile</th>
-                    <th style={th}>Threshold</th>
-                    <th style={th}>Prob%</th>
+                    <th style={th}>Range</th>
+                    <th style={th}>Count</th>
+                    <th style={th}>Scores</th>
+                    <th style={th}>KDE Prob%</th>
                   </tr>
                 </thead>
                 <tbody>
                   {Array.from({ length: 10 }, (_, i) => i).map(i => (
                     <tr key={i}>
                       <td style={td}>D{i}</td>
-                      <td style={td}>{(i === 0 ? Math.min(...ogaStats.scores) : ogaStats.deciles!.thresholds[i - 1]).toFixed(2)}</td>
+                      <td style={td} title={`Range for D${i}`}>
+                        {decileRanges[i] ? `[${decileRanges[i].lo.toFixed(2)}, ${decileRanges[i].hi.toFixed(2)}]` : "—"}
+                      </td>
+                      <td style={td}>{decileMembers[i]?.length ?? 0}</td>
+                      <td style={td} title={`${decileMembers[i]?.length ?? 0} scores`}>
+                        {formatDecileValues(decileMembers[i] || [])}
+                      </td>
                       <td style={td}>{(ogaStats.deciles!.probs[i] * 100).toFixed(1)}</td>
                     </tr>
                   ))}

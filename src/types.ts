@@ -13,6 +13,8 @@ export interface OperatorsPanelProps {
   setJaccard: (v: number) => void;
   jaccardEnabled: boolean;
   setJaccardEnabled: (v: boolean) => void;
+  lambdaEnabled: boolean;
+  setLambdaEnabled: (v: boolean) => void;
   lambda: number;
   setLambda: (v: number) => void;
   minRecentMatches: number;
@@ -97,6 +99,8 @@ export interface OperatorsPanelProps {
   setJaccard: (v: number) => void;
   jaccardEnabled: boolean;
   setJaccardEnabled: (v: boolean) => void;
+  lambdaEnabled: boolean;
+  setLambdaEnabled: (v: boolean) => void;
   lambda: number;
   setLambda: (v: number) => void;
   minRecentMatches: number;

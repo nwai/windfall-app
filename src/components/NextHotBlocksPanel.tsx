@@ -9,6 +9,8 @@ interface NextHotBlocksPanelProps {
   excludedNumbers: number[];
   setExcludedNumbers: React.Dispatch<React.SetStateAction<number[]>>;
   maxDraws?: number;            // optional cap for rendering (default 160)
+  simNumbers?: number[];        // optional simulated overlay (from App)
+  onClearAutoExclusions?: () => void; // notify parent to drop derived exclusions
 }
 
 function buildBlocks(blockSize: number): Block[] {
@@ -73,6 +75,8 @@ export const NextHotBlocksPanel: React.FC<NextHotBlocksPanelProps> = ({
   excludedNumbers,
   setExcludedNumbers,
   maxDraws = 160,
+  simNumbers,
+  onClearAutoExclusions,
 }) => {
   const [blockSize, setBlockSize] = useState<number>(5);
   const [windowSize, setWindowSize] = useState<number>(7);
@@ -125,6 +129,28 @@ export const NextHotBlocksPanel: React.FC<NextHotBlocksPanelProps> = ({
     return { blocks, heatMatrix, hitsMatrix, drawsUsed, hotBlocks, perBlockMax, globalMax, percentileMatrix, stability };
   }, [history, blockSize, windowSize, normalize, maxDraws, hybridOn, alpha, topKCount, effectiveWindow]);
 
+  const simBlocks = useMemo(() => {
+    if (!simNumbers || !simNumbers.length) return new Set<number>();
+    const set = new Set<number>();
+    blocks.forEach((b, bi) => {
+      const has = simNumbers.some((n) => n >= b.start && n <= b.end);
+      if (has) set.add(bi);
+    });
+    return set;
+  }, [blocks, simNumbers]);
+
+  const latestMarkers = useMemo(() => {
+    const last = history[history.length - 1];
+    const mainSet = new Set<number>();
+    const suppSet = new Set<number>();
+    if (!last) return { mainSet, suppSet };
+    blocks.forEach((b, bi) => {
+      if (last.main.some((n) => n >= b.start && n <= b.end)) mainSet.add(bi);
+      if ((last.supp || []).some((n) => n >= b.start && n <= b.end)) suppSet.add(bi);
+    });
+    return { mainSet, suppSet };
+  }, [blocks, history]);
+
   // simple color scale: light to dark
   const colorFor = (v: number, maxV: number) => {
     if (maxV <= 0) return '#f5f5f5';
@@ -167,6 +193,7 @@ export const NextHotBlocksPanel: React.FC<NextHotBlocksPanelProps> = ({
 
   const clearNHBExclusions = () => {
     setExcludedNumbers((prev) => prev.filter((n) => !nhbBlockNumbers.includes(n)));
+    onClearAutoExclusions?.();
   };
   return (
     <div style={{ background: '#fff', border: '1px solid #eee', borderRadius: 8, padding: 12, width: '100%', maxWidth: '100%' }}>
@@ -319,8 +346,9 @@ export const NextHotBlocksPanel: React.FC<NextHotBlocksPanelProps> = ({
       {viewMode === 'heatmap' ? (
         <div style={{ marginTop: 10, overflowX: 'auto' }}>
           <div style={{ fontSize: 11, color: '#666', marginBottom: 4 }}>Grid: block rows × draws (newest on the right)</div>
-          <div style={{ display: 'grid', gridTemplateColumns: `80px repeat(${drawsUsed}, 16px)` }}>
+          <div style={{ display: 'grid', gridTemplateColumns: `40px 80px repeat(${drawsUsed}, 16px)` }}>
             {/* header row */}
+            <div style={{ fontSize: 11, color: '#666', padding: 4, textAlign: 'center' }}>Last</div>
             <div style={{ fontSize: 11, color: '#666', padding: 4 }}>Block</div>
             {Array.from({ length: drawsUsed }, (_, i) => (
               <div key={i} style={{ fontSize: 10, color: '#aaa', textAlign: 'center' }}>
@@ -330,7 +358,11 @@ export const NextHotBlocksPanel: React.FC<NextHotBlocksPanelProps> = ({
             {/* rows */}
             {blocks.map((b, bi) => (
               <React.Fragment key={b.label}>
-                <div style={{ fontSize: 12, padding: 4, borderRight: '1px solid #eee' }}>{b.label}</div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3, padding: 4 }}>
+                  {latestMarkers.mainSet.has(bi) && <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#ef4444', display: 'inline-block' }} />}
+                  {latestMarkers.suppSet.has(bi) && <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#16a34a', display: 'inline-block' }} />}
+                </div>
+                <div style={{ fontSize: 12, padding: 4, borderRight: '1px solid #eee', boxShadow: simBlocks.has(bi) ? 'inset 0 0 0 2px #ef4444' : undefined }}>{b.label}</div>
                 {Array.from({ length: drawsUsed }, (_, ci) => {
                   const val = heatMatrix[bi][ci] ?? 0;
                   const hits = hitsMatrix[bi][ci] ?? 0;
@@ -340,6 +372,7 @@ export const NextHotBlocksPanel: React.FC<NextHotBlocksPanelProps> = ({
                     <div
                       key={ci}
                       style={{
+                        position: 'relative',
                         width: 16,
                         height: 16,
                         background: colorFor(val, maxForCell),
@@ -348,10 +381,14 @@ export const NextHotBlocksPanel: React.FC<NextHotBlocksPanelProps> = ({
                           ? 'inset 0 0 0 1px #ef4444'
                           : ex.any
                           ? 'inset 0 0 0 1px #fca5a5'
+                          : simBlocks.has(bi)
+                          ? 'inset 0 0 0 1px #ef4444'
                           : undefined,
                       }}
                       title={`Draw ${history.length - drawsUsed + ci + 1} • ${b.label}: hits ${hits}, value ${val.toFixed(2)}${perBlockNormalize ? ' (per-block scale)' : ''}${ex.all ? ' [excluded]' : ex.any ? ' [partial]' : ''}`}
-                    />
+                    >
+                      {simBlocks.has(bi) && <div style={{ position: 'absolute', top: 1, left: 1, width: 4, height: 4, background: '#b91c1c', borderRadius: 1 }} />}
+                    </div>
                   );
                 })}
               </React.Fragment>
@@ -363,18 +400,23 @@ export const NextHotBlocksPanel: React.FC<NextHotBlocksPanelProps> = ({
           <div style={{ fontSize: 11, color: '#666', marginBottom: 4 }}>
             Drift view: block lanes × draws (newest on the right). Color = percentile per draw; dot = top-k for that draw.
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: `120px repeat(${drawsUsed}, 10px) 80px 40px`, gap: 2, alignItems: 'center', minWidth: '760px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: `40px 120px repeat(${drawsUsed}, 10px) 80px 40px`, gap: 2, alignItems: 'center', minWidth: '760px' }}>
              {blocks.map((b, bi) => (
                <React.Fragment key={b.label}>
-                 <div style={{ fontSize: 12 }}>{b.label}</div>
+                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3 }}>
+                   {latestMarkers.mainSet.has(bi) && <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#ef4444', display: 'inline-block' }} />}
+                   {latestMarkers.suppSet.has(bi) && <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#16a34a', display: 'inline-block' }} />}
+                 </div>
+                 <div style={{ fontSize: 12, boxShadow: simBlocks.has(bi) ? 'inset 0 0 0 2px #ef4444' : undefined, paddingLeft: 2 }}>{b.label}</div>
                  {Array.from({ length: drawsUsed }, (_, ci) => {
                    const pct = percentileMatrix[bi][ci] || 0;
                    const isTop = pct >= 1 - (topKCount - 1) / Math.max(1, blocks.length - 1);
                    const base = Math.round(255 - 180 * pct);
                    const bg = `rgb(${base}, ${240 - Math.round(100 * pct)}, ${255 - Math.round(200 * pct)})`;
                    return (
-                     <div key={ci} style={{ position: 'relative', width: 10, height: 10, background: bg, border: '1px solid #f5f5f5' }} title={`Draw ${history.length - drawsUsed + ci + 1} • pct ${(pct * 100).toFixed(0)}${isTop ? ' [top-k]' : ''}`}>
+                     <div key={ci} style={{ position: 'relative', width: 10, height: 10, background: bg, border: '1px solid #f5f5f5', boxShadow: simBlocks.has(bi) ? 'inset 0 0 0 1px #ef4444' : undefined }} title={`Draw ${history.length - drawsUsed + ci + 1} • pct ${(pct * 100).toFixed(0)}${isTop ? ' [top-k]' : ''}`}>
                        {isTop && <div style={{ position: 'absolute', inset: 1, borderRadius: '50%', background: '#ef4444' }} />}
+                       {simBlocks.has(bi) && <div style={{ position: 'absolute', top: 0, left: 0, width: 3, height: 3, background: '#b91c1c', borderRadius: 1 }} />}
                      </div>
                    );
                  })}

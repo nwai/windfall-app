@@ -9,6 +9,8 @@ interface UserSelectedNumbersPanelProps {
   onSimulate?: (nums: number[]) => void;
   onClear?: () => void;
   isSimulatingUser?: boolean; // visual feedback when user-based simulation active
+  autoExcludeUnselected?: boolean;
+  onToggleAutoExclude?: (enabled: boolean) => void;
 }
 
 export const UserSelectedNumbersPanel: React.FC<UserSelectedNumbersPanelProps> = ({
@@ -19,6 +21,8 @@ export const UserSelectedNumbersPanel: React.FC<UserSelectedNumbersPanelProps> =
   onSimulate,
   onClear,
   isSimulatingUser = false,
+  autoExcludeUnselected = false,
+  onToggleAutoExclude,
 }) => {
 
   // Optional persistence
@@ -49,6 +53,7 @@ export const UserSelectedNumbersPanel: React.FC<UserSelectedNumbersPanelProps> =
 
   const handleClearAll = () => {
     onClear?.();
+    onToggleAutoExclude?.(false);
     setUserSelectedNumbers([]);
   };
 
@@ -95,6 +100,14 @@ export const UserSelectedNumbersPanel: React.FC<UserSelectedNumbersPanelProps> =
           >
             {isSimulatingUser ? "Simulated" : "Simulate"}
           </button>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }} title="When on, every unselected number becomes a user exclusion">
+            <input
+              type="checkbox"
+              checked={autoExcludeUnselected}
+              onChange={(e) => onToggleAutoExclude?.(e.target.checked)}
+            />
+            Exclude unselected
+          </label>
           <div style={{ fontSize: 12, color: "#555" }}>
             Selected: {userSelectedNumbers.length}
           </div>
@@ -149,7 +162,8 @@ export const UserSelectedNumbersPanel: React.FC<UserSelectedNumbersPanelProps> =
       </div>
       <div style={{ fontSize: 11, color: "#666", marginTop: 8, lineHeight: 1.4 }}>
         These selections highlight matches in Generated Candidates and show a SelHits count. They DO NOT force inclusion or
-        affect weighting (different from forced/trend lists and manual simulation).
+        affect weighting (different from forced/trend lists and manual simulation). Turning on "Exclude unselected" will add every
+        unselected number to User Exclusions until toggled off or cleared via NHB block clear.
       </div>
     </section>
   );

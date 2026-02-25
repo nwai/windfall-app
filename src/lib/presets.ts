@@ -57,7 +57,7 @@ export interface AppPresetSnapshot {
   trendSelectedNumbers: number[];
 
   // Ranking / targets
-  rankingWeights: { oga: number; sel: number; recent: number };
+  rankingWeights: { oga: number; sel: number; recent: number; selBonusThreshold?: number; selBonusWeight?: number };
   weightedTargets: Record<number, number>;
 
   // Candidate zone bias (ranking)
@@ -89,6 +89,41 @@ export interface AppPresetSnapshot {
     randomTrials?: number;
     bootstrapIters?: number;
   };
+
+  // Divisible-by-5 constraints
+  requireDiv5?: boolean;
+  maxDiv5?: number;
+
+  // Attempt budget multiplier
+  attemptMultiplier?: number;
+
+  // Generation-time boost for user selected numbers
+  selectedBoostEnabled?: boolean;
+  selectedBoostFactor?: number;
+  ogaSpokeCount?: number;
+
+  // Additional UI state to persist toggles/inputs
+  autoExcludeUnselected?: boolean;
+  userSelectedNumbers?: number[];
+  manualSimSelected?: number[];
+  minRecentMatches?: number;
+  recentMatchBias?: number;
+  repeatWindowSizeW?: number;
+  minFromRecentUnionM?: number;
+  sumFilter?: { enabled: boolean; min: number; max: number; includeSupp: boolean };
+  patternConstraintMode?: "boost" | "restrict";
+  patternBoostFactor?: number;
+  patternSumTolerance?: number;
+  selectedWindowPatterns?: { low: number; high: number; even: number; odd: number; sum: number }[];
+  insightsEnabled?: boolean;
+  tempMetric?: "ema" | "recency" | "hybrid";
+  showHeatmapLetters?: boolean;
+  ogaRefMode?: "window" | "all";
+  enableOGAForecastBias?: boolean;
+  ogaBaselineMode?: "window" | "all";
+  ogaPreferredBand?: "auto" | "low" | "mid" | "high";
+  ogaPreferredDeciles?: { index: number; weight: number }[];
+  traceVerbose?: boolean;
 }
 
 const KEY = "app:presets:v1";
