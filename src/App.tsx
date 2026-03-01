@@ -127,10 +127,10 @@ const defaultKnobs: Knobs = {
   enableSDE1: true,
   enableHC3: true,
   enableOGA: true,
-  enableGPWF: true,
-  enableEntropy: true,
-  enableHamming: true,
-  enableJaccard: true,
+  enableGPWF: false,
+  enableEntropy: false,
+  enableHamming: false,
+  enableJaccard: false,
   F: 0.03,
   M: 0.8,
   Q: 0.4,
@@ -271,7 +271,7 @@ function AppInner(): JSX.Element {
     includeSupp: true,
   });
 
-  const [lambdaEnabled, setLambdaEnabled] = useState<boolean>(true);
+  const [lambdaEnabled, setLambdaEnabled] = useState<boolean>(false);
   const [lambda, setLambda] = useState<number>(0.85);
 
   const [selectedNumbers, setSelectedNumbers] = useState<number[]>([]);
