@@ -22,8 +22,11 @@ Use these commands to update your local files with the latest changes from the r
 ```bash
 git status
 git fetch origin
+git branch --show-current
 git pull --ff-only origin <your-branch>
 ```
+
+Replace `<your-branch>` with the branch name from `git branch --show-current` (often `main`).
 
 If you have local changes you want to keep, stash them first:
 
