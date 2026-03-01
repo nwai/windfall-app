@@ -57,13 +57,13 @@ function colorForTimes(times: number): string {
   return palette[times] ?? "rgba(142,36,170,0.74)";
 }
 
-function buildRows(history: Draw[], includeSupp: boolean, drawsPerMonth: number): MonthRow[] {
+function buildRows(history: Draw[], drawsPerMonth: number): MonthRow[] {
   if (!history.length) return [];
   const items = history
     .map((d) => {
       const dt = parseDate(d.date || "");
       if (!dt) return null;
-      const nums = includeSupp ? [...d.main, ...d.supp] : [...d.main];
+      const nums = [...d.main, ...d.supp];
       return { date: dt, nums };
     })
     .filter(Boolean)
@@ -129,7 +129,6 @@ export const MonthlyDrawsSummaryPanel: React.FC<{
   onConstructiveFillChange?: (enabled: boolean) => void;
   onBucketInfoChange?: (info: { labels: Record<number, string> }) => void;
 }> = ({ history, onConstraintsChange, onUseSelectedNumbers, constructiveFillEnabled = false, onConstructiveFillChange, onBucketInfoChange }) => {
-  const [includeSupp, setIncludeSupp] = useState<boolean>(false);
   const [drawsPerMonth, setDrawsPerMonth] = useState<number>(12);
   const [constraints, setConstraints] = useState<MonthlyFrequencyConstraints>({
     undrawn: 0,
@@ -170,7 +169,7 @@ export const MonthlyDrawsSummaryPanel: React.FC<{
   // Clamp drawsPerMonth to available max to avoid empty rows when user enters large numbers
   const safeDrawsPerMonth = Math.min(Math.max(1, drawsPerMonth), maxDrawsPerMonth);
 
-  const rows = useMemo(() => buildRows(history, includeSupp, safeDrawsPerMonth), [history, includeSupp, safeDrawsPerMonth]);
+  const rows = useMemo(() => buildRows(history, safeDrawsPerMonth), [history, safeDrawsPerMonth]);
   const hasData = rows.length > 0;
   const currentMonthKey = useMemo(() => getMonthKey(new Date()), []);
   const latestRow = useMemo(() => (rows.length ? rows[rows.length - 1] : null), [rows]);
@@ -315,15 +314,6 @@ export const MonthlyDrawsSummaryPanel: React.FC<{
     <div style={{ width: "100%", maxWidth: "100%", margin: "0 auto", display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
         <h4 style={{ margin: 0 }}>Monthly Draws Summary</h4>
-        <label style={{ fontSize: 13 }}>
-          <input
-            type="checkbox"
-            checked={includeSupp}
-            onChange={(e) => setIncludeSupp(e.target.checked)}
-            style={{ marginRight: 6 }}
-          />
-          Include supps
-        </label>
         <label style={{ fontSize: 13 }}>
           Draws per month:
           <input
