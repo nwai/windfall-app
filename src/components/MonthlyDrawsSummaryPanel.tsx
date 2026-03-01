@@ -91,7 +91,7 @@ function buildRows(history: Draw[], drawsPerMonth: number): MonthRow[] {
       .sort((a, b) => a.n - b.n);
 
     const frequencyCountsMap = counts.reduce<Map<number, number>>((acc, c) => {
-      if (c > 0) acc.set(c, (acc.get(c) || 0) + 1);
+      if (c > 0) acc.set(c, (acc.get(c) || 0) + c);
       return acc;
     }, new Map<number, number>());
 
