@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useMemo, useState, useEffect, useRef } from "react";
 import type { Draw } from "../types";
 export interface MonthlyFrequencyConstraints {
   undrawn: number;
@@ -222,8 +222,11 @@ export const MonthlyDrawsSummaryPanel: React.FC<{
     times8: Array.from(bucketSets.times8).sort((a, b) => a - b),
   }), [bucketSets]);
 
+  const onBucketInfoChangeRef = useRef(onBucketInfoChange);
+  onBucketInfoChangeRef.current = onBucketInfoChange;
+
   useEffect(() => {
-    if (!onBucketInfoChange) return;
+    if (!onBucketInfoChangeRef.current) return;
     const labels: Record<number, string> = {};
     for (let n = 1; n <= 45; n++) {
       if (bucketSets.undrawn.has(n)) labels[n] = "Undrawn";
@@ -236,8 +239,8 @@ export const MonthlyDrawsSummaryPanel: React.FC<{
       else if (bucketSets.times2.has(n)) labels[n] = "2x";
       else if (bucketSets.times1.has(n)) labels[n] = "1x";
     }
-    onBucketInfoChange({ labels });
-  }, [bucketSets, onBucketInfoChange]);
+    onBucketInfoChangeRef.current({ labels });
+  }, [bucketSets]);
 
   const avgFrequencyCounts = useMemo(() => {
     const eligible = rows.filter((r) => r.monthLabel !== currentMonthKey);
