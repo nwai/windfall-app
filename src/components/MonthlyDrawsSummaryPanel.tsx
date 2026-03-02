@@ -408,7 +408,7 @@ export const MonthlyDrawsSummaryPanel: React.FC<{
                     )}
                   </td>
                   <td style={{ padding: "6px 8px", textAlign: "center", fontWeight: 700 }}>
-                    {r.frequencyCounts.reduce((sum, f) => sum + f.count, 0)}
+                    {r.frequencyCounts.reduce((totalCount, frequencyEntry) => totalCount + frequencyEntry.count, 0)}
                   </td>
                   <td style={{ padding: "6px 8px", color: "#2d3748" }}>
                     {r.undrawn.length ? r.undrawn.length : "—"}
@@ -467,7 +467,7 @@ export const MonthlyDrawsSummaryPanel: React.FC<{
                     )}
                   </td>
                   <td style={{ padding: "6px 8px", textAlign: "center", fontWeight: 700 }}>
-                    {avgFrequencyCounts.length ? avgFrequencyCounts.reduce((sum, f) => sum + f.avg, 0).toFixed(1) : "—"}
+                    {avgFrequencyCounts.length ? avgFrequencyCounts.reduce((totalAverage, frequencyEntry) => totalAverage + frequencyEntry.avg, 0).toFixed(1) : "—"}
                   </td>
                   <td style={{ padding: "6px 8px" }} />
                 </tr>
