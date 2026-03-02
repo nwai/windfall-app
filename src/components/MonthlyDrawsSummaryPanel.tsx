@@ -91,7 +91,7 @@ function buildRows(history: Draw[], drawsPerMonth: number): MonthRow[] {
       .sort((a, b) => a.n - b.n);
 
     const frequencyCountsMap = counts.reduce<Map<number, number>>((acc, c) => {
-      if (c > 0) acc.set(c, (acc.get(c) || 0) + 1);
+      if (c > 0) acc.set(c, (acc.get(c) || 0) + c);
       return acc;
     }, new Map<number, number>());
 
@@ -346,6 +346,7 @@ export const MonthlyDrawsSummaryPanel: React.FC<{
                 <th style={{ textAlign: "left", padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>Numbers (count)</th>
                 <th style={{ textAlign: "center", padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>Draws</th>
                 <th style={{ textAlign: "left", padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>Frequency counts</th>
+                <th style={{ textAlign: "center", padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>1x+ sum</th>
                 <th style={{ textAlign: "left", padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>Undrawn (count)</th>
               </tr>
             </thead>
@@ -406,6 +407,9 @@ export const MonthlyDrawsSummaryPanel: React.FC<{
                       </span>
                     )}
                   </td>
+                  <td style={{ padding: "6px 8px", textAlign: "center", fontWeight: 700 }}>
+                    {r.frequencyCounts.reduce((totalCount, frequencyEntry) => totalCount + frequencyEntry.count, 0)}
+                  </td>
                   <td style={{ padding: "6px 8px", color: "#2d3748" }}>
                     {r.undrawn.length ? r.undrawn.length : "—"}
                   </td>
@@ -415,7 +419,7 @@ export const MonthlyDrawsSummaryPanel: React.FC<{
             {hasData && (
               <tfoot>
                 <tr>
-                  <td colSpan={5} style={{ padding: 0, height: 12 }} />
+                  <td colSpan={6} style={{ padding: 0, height: 12 }} />
                 </tr>
                 <tr style={{ background: "#f8fafc", borderTop: "1px solid #e2e8f0" }}>
                   <td style={{ padding: "6px 8px", fontWeight: 700 }}>Average</td>
@@ -462,11 +466,14 @@ export const MonthlyDrawsSummaryPanel: React.FC<{
                       </span>
                     )}
                   </td>
+                  <td style={{ padding: "6px 8px", textAlign: "center", fontWeight: 700 }}>
+                    {avgFrequencyCounts.length ? avgFrequencyCounts.reduce((totalAverage, frequencyEntry) => totalAverage + frequencyEntry.avg, 0).toFixed(1) : "—"}
+                  </td>
                   <td style={{ padding: "6px 8px" }} />
                 </tr>
                 <tr style={{ background: "#eef2f7", borderTop: "1px solid #e2e8f0" }}>
                   <td style={{ padding: "6px 8px", fontWeight: 700 }}>Acceptance needs</td>
-                  <td colSpan={4} style={{ padding: "8px", color: "#2d3748" }}>
+                  <td colSpan={5} style={{ padding: "8px", color: "#2d3748" }}>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
                       {([
                         { key: "undrawn", label: "Undrawn" },
