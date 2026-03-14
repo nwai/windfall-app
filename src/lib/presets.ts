@@ -97,6 +97,12 @@ export interface AppPresetSnapshot {
   // Attempt budget multiplier
   attemptMultiplier?: number;
 
+  // Over-generation pool multiplier (pool = Count × overgenFactor)
+  overgenFactor?: number;
+
+  // MiAN hard-exclusion toggle
+  acceptanceNeedsHardExclude?: boolean;
+
   // Generation-time boost for user selected numbers
   selectedBoostEnabled?: boolean;
   selectedBoostFactor?: number;
@@ -124,6 +130,8 @@ export interface AppPresetSnapshot {
   ogaPreferredBand?: "auto" | "low" | "mid" | "high";
   ogaPreferredDeciles?: { index: number; weight: number }[];
   traceVerbose?: boolean;
+  // Readiness (Rdy) score weights
+  rdyWeights?: { idm: number; conv: number; oga: number };
 }
 
 const KEY = "app:presets:v1";

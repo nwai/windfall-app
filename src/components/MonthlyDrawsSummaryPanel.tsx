@@ -24,6 +24,7 @@ export interface MonthlyConstraintPayload {
     times7: Set<number>;
     times8: Set<number>;
   };
+  boostPenalize?: boolean;
 }
 
 interface MonthRow {
@@ -91,7 +92,7 @@ function buildRows(history: Draw[], drawsPerMonth: number): MonthRow[] {
       .sort((a, b) => a.n - b.n);
 
     const frequencyCountsMap = counts.reduce<Map<number, number>>((acc, c) => {
-      if (c > 0) acc.set(c, (acc.get(c) || 0) + c);
+      if (c > 0) acc.set(c, (acc.get(c) || 0) + 1);
       return acc;
     }, new Map<number, number>());
 
@@ -121,6 +122,20 @@ interface NumberSelectionState {
   times8: number[];
 }
 
+export type MonthlyBucketSets = {
+  undrawn: Set<number>;
+  times1: Set<number>;
+  times2: Set<number>;
+  times3: Set<number>;
+  times4: Set<number>;
+  times5: Set<number>;
+  times6: Set<number>;
+  times7: Set<number>;
+  times8: Set<number>;
+};
+
+export type AvgBucketEntry = { times: number; avg: number };
+
 export const MonthlyDrawsSummaryPanel: React.FC<{
   history: Draw[];
   onConstraintsChange?: (payload: MonthlyConstraintPayload | null) => void;
@@ -128,7 +143,9 @@ export const MonthlyDrawsSummaryPanel: React.FC<{
   constructiveFillEnabled?: boolean;
   onConstructiveFillChange?: (enabled: boolean) => void;
   onBucketInfoChange?: (info: { labels: Record<number, string> }) => void;
-}> = ({ history, onConstraintsChange, onUseSelectedNumbers, constructiveFillEnabled = false, onConstructiveFillChange, onBucketInfoChange }) => {
+  onBucketSetsChange?: (buckets: MonthlyBucketSets) => void;
+  onAvgBucketsChange?: (avgBuckets: AvgBucketEntry[]) => void;
+}> = ({ history, onConstraintsChange, onUseSelectedNumbers, constructiveFillEnabled = false, onConstructiveFillChange, onBucketInfoChange, onBucketSetsChange, onAvgBucketsChange }) => {
   const [drawsPerMonth, setDrawsPerMonth] = useState<number>(12);
   const [constraints, setConstraints] = useState<MonthlyFrequencyConstraints>({
     undrawn: 0,
@@ -172,6 +189,7 @@ export const MonthlyDrawsSummaryPanel: React.FC<{
   const rows = useMemo(() => buildRows(history, safeDrawsPerMonth), [history, safeDrawsPerMonth]);
   const hasData = rows.length > 0;
   const currentMonthKey = useMemo(() => getMonthKey(new Date()), []);
+  // Use the most recent month (including the current partial month) for bucket assignments.
   const latestRow = useMemo(() => (rows.length ? rows[rows.length - 1] : null), [rows]);
   const bucketSets = useMemo(() => {
     const empty = {
@@ -242,26 +260,125 @@ export const MonthlyDrawsSummaryPanel: React.FC<{
     onBucketInfoChangeRef.current({ labels });
   }, [bucketSets]);
 
+  const onBucketSetsChangeRef = useRef(onBucketSetsChange);
+  onBucketSetsChangeRef.current = onBucketSetsChange;
+
+  useEffect(() => {
+    onBucketSetsChangeRef.current?.(bucketSets);
+  }, [bucketSets]);
+
+  // Only include complete months (those with at least drawsPerMonth draws)
+  // to keep averages honest. E.g., 2024-05 has only 6 draws — excluded when drawsPerMonth > 6.
+  const eligibleForAvg = useMemo(() => {
+    return rows.filter((r) => r.monthLabel !== currentMonthKey && r.drawCount >= safeDrawsPerMonth);
+  }, [rows, currentMonthKey, safeDrawsPerMonth]);
+
+  const excludedMonthCount = useMemo(() => {
+    const allPast = rows.filter((r) => r.monthLabel !== currentMonthKey);
+    return allPast.length - eligibleForAvg.length;
+  }, [rows, currentMonthKey, eligibleForAvg]);
+
   const avgFrequencyCounts = useMemo(() => {
-    const eligible = rows.filter((r) => r.monthLabel !== currentMonthKey);
-    if (!eligible.length) return [] as { times: number; avg: number }[];
+    if (!eligibleForAvg.length) return [] as { times: number; avg: number }[];
     const totals = new Map<number, number>();
-    eligible.forEach((r) => {
+    eligibleForAvg.forEach((r) => {
       r.frequencyCounts.forEach((f) => {
         totals.set(f.times, (totals.get(f.times) || 0) + f.count);
       });
     });
     return Array.from(totals.entries())
-      .map(([times, total]) => ({ times, avg: total / eligible.length }))
+      .map(([times, total]) => ({ times, avg: total / eligibleForAvg.length }))
       .sort((a, b) => a.times - b.times);
-  }, [rows, currentMonthKey]);
+  }, [eligibleForAvg]);
 
   const avgUndrawnCount = useMemo(() => {
-    const eligible = rows.filter((r) => r.monthLabel !== currentMonthKey);
-    if (!eligible.length) return null as number | null;
-    const totalUndrawn = eligible.reduce((sum, r) => sum + r.undrawn.length, 0);
-    return totalUndrawn / eligible.length;
-  }, [rows, currentMonthKey]);
+    if (!eligibleForAvg.length) return null as number | null;
+    const totalUndrawn = eligibleForAvg.reduce((sum, r) => sum + r.undrawn.length, 0);
+    return totalUndrawn / eligibleForAvg.length;
+  }, [eligibleForAvg]);
+
+  // Compute "Needed" delta: raw gap (target − current) per bucket.
+  // Also compute "Ideal draw": the best composition of 8 numbers to draw
+  // from each bucket, accounting for draw mechanics (drawing from bucket N
+  // removes 1 from N and adds 1 to N+1).
+  const { neededDelta, idealDraw } = useMemo(() => {
+    if (!latestRow || !avgFrequencyCounts.length) return { neededDelta: null, idealDraw: null };
+
+    // Build current distribution (bucket → count of numbers)
+    const maxBucket = 8;
+    const currentDist = new Array(maxBucket + 1).fill(0);
+    currentDist[0] = latestRow.undrawn.length;
+    latestRow.numbers.forEach(({ c }) => {
+      const b = Math.min(c, maxBucket);
+      currentDist[b] += 1;
+    });
+
+    // Build target from averages (rounded)
+    const targetDist = new Array(maxBucket + 1).fill(0);
+    if (avgUndrawnCount !== null) targetDist[0] = Math.round(avgUndrawnCount);
+    avgFrequencyCounts.forEach((f) => {
+      const b = Math.min(f.times, maxBucket);
+      targetDist[b] = Math.round(f.avg);
+    });
+
+    // Raw gap: target − current
+    const deltas: { times: number; delta: number }[] = [];
+    for (let b = 0; b <= maxBucket; b++) {
+      deltas.push({ times: b, delta: targetDist[b] - currentDist[b] });
+    }
+
+    // Ideal draw: greedily pick 8 draws from buckets to minimise SSD.
+    // Drawing from bucket b: dist[b] -= 1, dist[min(b+1, maxBucket)] += 1.
+    const simDist = [...currentDist];
+    const drawFrom = new Array(maxBucket + 1).fill(0);
+
+    for (let pick = 0; pick < 8; pick++) {
+      let bestBucket = -1;
+      let bestImprovement = -Infinity;
+      for (let b = 0; b <= maxBucket; b++) {
+        if (simDist[b] <= 0) continue; // no numbers available in this bucket
+        // Simulate drawing one number from bucket b
+        const dest = Math.min(b + 1, maxBucket);
+        const oldSrcGap = (simDist[b] - targetDist[b]) ** 2;
+        const newSrcGap = (simDist[b] - 1 - targetDist[b]) ** 2;
+        const oldDestGap = (simDist[dest] - targetDist[dest]) ** 2;
+        const newDestGap = (simDist[dest] + 1 - targetDist[dest]) ** 2;
+        // If src === dest (8x+ → 8x+), only count once
+        const improvement = b === maxBucket
+          ? 0  // drawing from 8x+ stays in 8x+, no change
+          : (oldSrcGap - newSrcGap) + (oldDestGap - newDestGap);
+        if (improvement > bestImprovement) {
+          bestImprovement = improvement;
+          bestBucket = b;
+        }
+      }
+      if (bestBucket < 0) break;
+      const dest = Math.min(bestBucket + 1, maxBucket);
+      simDist[bestBucket] -= 1;
+      simDist[dest] += 1;
+      drawFrom[bestBucket] += 1;
+    }
+
+    // Build ideal draw entries (only non-zero)
+    const ideal: { times: number; count: number }[] = [];
+    for (let b = 0; b <= maxBucket; b++) {
+      ideal.push({ times: b, count: drawFrom[b] });
+    }
+
+    return { neededDelta: deltas, idealDraw: ideal };
+  }, [latestRow, avgFrequencyCounts, avgUndrawnCount]);
+
+  // Emit combined avg buckets (including 0x/undrawn) to parent
+  const onAvgBucketsChangeRef = useRef(onAvgBucketsChange);
+  onAvgBucketsChangeRef.current = onAvgBucketsChange;
+
+  useEffect(() => {
+    const combined: AvgBucketEntry[] = [
+      ...(avgUndrawnCount !== null ? [{ times: 0, avg: avgUndrawnCount }] : []),
+      ...avgFrequencyCounts,
+    ].sort((a, b) => a.times - b.times);
+    onAvgBucketsChangeRef.current?.(combined);
+  }, [avgFrequencyCounts, avgUndrawnCount]);
 
   const handleSelectChange = (bucketKey: keyof NumberSelectionState, values: string[]) => {
     const nums = values.map((v) => Number(v)).filter((n) => Number.isFinite(n));
@@ -422,8 +539,19 @@ export const MonthlyDrawsSummaryPanel: React.FC<{
                   <td colSpan={6} style={{ padding: 0, height: 12 }} />
                 </tr>
                 <tr style={{ background: "#f8fafc", borderTop: "1px solid #e2e8f0" }}>
-                  <td style={{ padding: "6px 8px", fontWeight: 700 }}>Average</td>
-                  <td style={{ padding: "6px 8px" }} />
+                  <td style={{ padding: "6px 8px", fontWeight: 700 }}>
+                    Average
+                    <div style={{ fontSize: 10, fontWeight: 400, color: "#64748b" }}>
+                      {eligibleForAvg.length} month{eligibleForAvg.length !== 1 ? "s" : ""}
+                    </div>
+                  </td>
+                  <td style={{ padding: "6px 8px", fontSize: 10, color: "#64748b" }}>
+                    {excludedMonthCount > 0 && (
+                      <span style={{ color: "#dc2626", fontWeight: 600 }}>
+                        ⚠️ {excludedMonthCount} month{excludedMonthCount !== 1 ? "s" : ""} excluded (&lt;{safeDrawsPerMonth} draws)
+                      </span>
+                    )}
+                  </td>
                   <td style={{ padding: "6px 8px" }} />
                   <td style={{ padding: "6px 8px", color: "#2d3748" }}>
                     {avgFrequencyCounts.length
@@ -471,6 +599,103 @@ export const MonthlyDrawsSummaryPanel: React.FC<{
                   </td>
                   <td style={{ padding: "6px 8px" }} />
                 </tr>
+                {neededDelta && (
+                  <tr style={{ background: "#fffbeb", borderTop: "1px solid #e2e8f0" }}>
+                    <td style={{ padding: "6px 8px", fontWeight: 700, color: "#92400e" }}>
+                      Needed
+                      <div style={{ fontSize: 10, fontWeight: 400, color: "#92400e" }}>gap to avg</div>
+                    </td>
+                    <td style={{ padding: "6px 8px" }} />
+                    <td style={{ padding: "6px 8px" }} />
+                    <td style={{ padding: "6px 8px", color: "#2d3748" }}>
+                      {neededDelta.map((d) => {
+                        const color = d.delta > 0 ? "#2563eb" : d.delta < 0 ? "#dc2626" : "#16a34a";
+                        const prefix = d.delta > 0 ? "+" : "";
+                        return (
+                          <span
+                            key={`needed-${d.times}`}
+                            style={{
+                              display: "inline-block",
+                              marginRight: 8,
+                              marginBottom: 4,
+                              padding: "2px 6px",
+                              borderRadius: 6,
+                              background: colorForTimes(d.times),
+                              color: "#fff",
+                              fontWeight: 600,
+                              fontVariantNumeric: "tabular-nums",
+                            }}
+                          >
+                            <span style={{ color: "#fff" }}>{d.times}x:</span>{" "}
+                            <span style={{ color, fontWeight: 800 }}>{prefix}{d.delta}</span>
+                          </span>
+                        );
+                      })}
+                    </td>
+                    <td style={{ padding: "6px 8px", textAlign: "center", fontWeight: 700, color: "#92400e", fontSize: 11 }}>
+                      target − current
+                    </td>
+                    <td style={{ padding: "6px 8px" }} />
+                  </tr>
+                )}
+                {idealDraw && (
+                  <tr style={{ background: "#f0fdf4", borderTop: "1px solid #bbf7d0" }}>
+                    <td style={{ padding: "6px 8px", fontWeight: 700, color: "#166534" }}>
+                      Ideal draw
+                      <div style={{ fontSize: 10, fontWeight: 400, color: "#166534" }}>draw 8 from</div>
+                    </td>
+                    <td style={{ padding: "6px 8px" }} />
+                    <td style={{ padding: "6px 8px" }} />
+                    <td style={{ padding: "6px 8px", color: "#2d3748" }}>
+                      {idealDraw.map((d) => {
+                        if (d.count === 0) return (
+                          <span
+                            key={`ideal-${d.times}`}
+                            style={{
+                              display: "inline-block",
+                              marginRight: 8,
+                              marginBottom: 4,
+                              padding: "2px 6px",
+                              borderRadius: 6,
+                              background: colorForTimes(d.times),
+                              opacity: 0.3,
+                              color: "#fff",
+                              fontWeight: 600,
+                              fontVariantNumeric: "tabular-nums",
+                            }}
+                          >
+                            <span style={{ color: "#fff" }}>{d.times}x:</span>{" "}
+                            <span style={{ color: "#999" }}>0</span>
+                          </span>
+                        );
+                        return (
+                          <span
+                            key={`ideal-${d.times}`}
+                            style={{
+                              display: "inline-block",
+                              marginRight: 8,
+                              marginBottom: 4,
+                              padding: "2px 6px",
+                              borderRadius: 6,
+                              background: colorForTimes(d.times),
+                              color: "#fff",
+                              fontWeight: 700,
+                              fontVariantNumeric: "tabular-nums",
+                              border: "2px solid #166534",
+                            }}
+                          >
+                            <span style={{ color: "#fff" }}>{d.times}x:</span>{" "}
+                            <span style={{ color: "#000", fontWeight: 900 }}>{d.count}</span>
+                          </span>
+                        );
+                      })}
+                    </td>
+                    <td style={{ padding: "6px 8px", textAlign: "center", fontWeight: 700, color: "#166534" }}>
+                      {idealDraw.reduce((s, d) => s + d.count, 0)} of 8
+                    </td>
+                    <td style={{ padding: "6px 8px" }} />
+                  </tr>
+                )}
                 <tr style={{ background: "#eef2f7", borderTop: "1px solid #e2e8f0" }}>
                   <td style={{ padding: "6px 8px", fontWeight: 700 }}>Acceptance needs</td>
                   <td colSpan={5} style={{ padding: "8px", color: "#2d3748" }}>

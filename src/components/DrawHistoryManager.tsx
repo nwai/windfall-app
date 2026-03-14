@@ -40,6 +40,9 @@ export default function DrawHistoryManager({
 }: Props) {
   const [fileHandle, setFileHandle] = useState<CsvFileHandle | null>(null);
   const [lastFileName, setLastFileName] = useState<string | null>(null);
+  const [csvText, setCsvText] = useState<string | null>(null);
+  const fallbackFileInputRef = useRef<HTMLInputElement | null>(null);
+  const supportsFileSystemAccess = typeof window !== "undefined" && "showOpenFilePicker" in window;
 
   const [isEntryOpen, setIsEntryOpen] = useState(false);
   const [date, setDate] = useState(() => new Date().toISOString().slice(0,10));
@@ -50,18 +53,40 @@ export default function DrawHistoryManager({
   const [status, setStatus] = useState<string | null>(null);
   const busyRef = useRef(false);
 
+  const handleFallbackFilePicked = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    try {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      const content = await file.text();
+      setCsvText(content);
+      setLastFileName(file.name);
+      setStatus(`Selected file: ${file.name}`);
+      setError(null);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message);
+    } finally {
+      event.target.value = "";
+    }
+  }, []);
+
   const pickFile = useCallback(async () => {
     try {
+      if (!supportsFileSystemAccess) {
+        fallbackFileInputRef.current?.click();
+        return;
+      }
       const handle = await pickCsvFile(fileHandle ?? undefined);
       setFileHandle(handle);
       const name = (await handle.getFile()).name;
       setLastFileName(name);
       setStatus(`Selected file: ${name}`);
       setError(null);
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message);
     }
-  }, [fileHandle]);
+  }, [fileHandle, supportsFileSystemAccess]);
 
   const openEntry = useCallback(() => {
     setIsEntryOpen(true);
@@ -114,39 +139,62 @@ export default function DrawHistoryManager({
     busyRef.current = true;
     try {
       let handle = fileHandle;
-      if (!handle) {
-        handle = await pickCsvFile();
-        setFileHandle(handle);
-        const name = (await handle.getFile()).name;
-        setLastFileName(name);
-      }
       let existing = "";
-      try {
-        existing = await readCsvFromHandle(handle!);
-      } catch {
-        existing = "";
+      if (supportsFileSystemAccess) {
+        if (!handle) {
+          handle = await pickCsvFile();
+          setFileHandle(handle);
+          const name = (await handle.getFile()).name;
+          setLastFileName(name);
+        }
+        try {
+          existing = await readCsvFromHandle(handle!);
+        } catch {
+          existing = "";
+        }
+      } else {
+        if (!csvText) {
+          setError("Select CSV file first (Safari uses a file picker + download). ");
+          return;
+        }
+        existing = csvText;
       }
       const updatedCsv = prependRowToCsv(existing, v.row);
-      try {
-        await writeCsvToHandle(handle!, updatedCsv);
-        setStatus(`Saved to ${lastFileName ?? "selected file"}.`);
-      } catch (writeErr: any) {
-        setStatus(`Write not permitted. Offered download instead.`);
-        downloadCsvFallback("windfall_history_lottolyzer.csv", updatedCsv);
+      if (supportsFileSystemAccess && handle) {
+        try {
+          await writeCsvToHandle(handle, updatedCsv);
+          setStatus(`Saved to ${lastFileName ?? "selected file"}.`);
+        } catch (writeErr: unknown) {
+          setStatus("Write not permitted. Offered download instead.");
+          downloadCsvFallback(lastFileName ?? "windfall_history_lottolyzer.csv", updatedCsv);
+        }
+      } else {
+        const fallbackName = lastFileName ?? "windfall_history_lottolyzer.csv";
+        downloadCsvFallback(fallbackName, updatedCsv);
+        setStatus(`Downloaded updated CSV: ${fallbackName}`);
+        setCsvText(updatedCsv);
       }
       const { rows } = parseCsv(updatedCsv);
       onDrawsUpdated?.(rows);
       broadcastDrawHistoryUpdated({ rows, added: v.row });
       resetEntry();
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message);
     } finally {
       busyRef.current = false;
     }
-  }, [fileHandle, lastFileName, onDrawsUpdated, resetEntry]);
+  }, [fileHandle, lastFileName, onDrawsUpdated, resetEntry, supportsFileSystemAccess, csvText]);
 
   return (
     <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12, margin: "8px 0" }}>
+      <input
+        ref={fallbackFileInputRef}
+        type="file"
+        accept=".csv,text/csv"
+        style={{ display: "none" }}
+        onChange={handleFallbackFilePicked}
+      />
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <button type="button" onClick={openEntry}>Load Next Draw</button>
         <button type="button" onClick={saveNewDraw}>Save New Draw</button>

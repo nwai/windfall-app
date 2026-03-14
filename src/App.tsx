@@ -1,4 +1,4 @@
-// NOTE: Step-3 consolidated updates and fixes:
+1// NOTE: Step-3 consolidated updates and fixes:
 // - Pass only user exclusions to generator (fix trace "User excluded").
 // - WFMQY: add user exclusion checkboxes (1–45) in a single horizontal line.
 // - Unified status badges (adds OGA + core threshold switches).
@@ -6,7 +6,7 @@
 // - Trace: append a concise block for factors affecting generation.
 //
 // Keep existing imports; removed unused ones previously.
-import React, { useState, useRef, useEffect, useMemo } from "react";
+import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import "./App.css";
 
 import { ForcedNumbersProvider } from "./context/ForcedNumbersContext";
@@ -78,16 +78,19 @@ import {
 } from "./lib/presets";
 import type { WindowPattern } from "./components/WindowStatsPanel";
 import { generateCandidates } from "./generateCandidates";
+import { useGenerateWorker, serializeMonthlyBuckets, serializeTrendMap } from "./hooks/useGenerateWorker";
+import type { GenerateWorkerArgs } from "./workers/generateWorker";
 import { ModulationDiagnosticsPanel } from "./components/ModulationDiagnosticsPanel";
 import { SelectionInsightsPanel } from "./components/SelectionInsightsPanel";
 import { CollapsibleSection } from "./components/shared/CollapsibleSection";
 import { NextDrawProbabilitiesPanel } from "./components/NextDrawProbabilitiesPanel";
 import { forecastOGA } from "./lib/ogaForecast";
 import { MostLikelyNotDrawnPanel } from "./components/MostLikelyNotDrawnPanel";
+import { BacktestPanel } from "./components/BacktestPanel";
 import { NextHotBlocksPanel } from "./components/NextHotBlocksPanel";
 import UndrawnPatternsPanel from "./components/UndrawnPatternsPanel";
 import MonthlyOverlapPanel from "./components/MonthlyOverlapPanel";
-import MonthlyDrawsSummaryPanel, { type MonthlyConstraintPayload } from "./components/MonthlyDrawsSummaryPanel";
+import MonthlyDrawsSummaryPanel, { type MonthlyConstraintPayload, type MonthlyFrequencyConstraints, type MonthlyBucketSets } from "./components/MonthlyDrawsSummaryPanel";
 import { AdjacentCombosPanel } from "./components/AdjacentCombosPanel";
 import { applyOctagonalPostProcess } from "./octagonal";
 import { PickSixPanel, type PickSixSource } from "./components/PickSixPanel";
@@ -217,6 +220,7 @@ function rowsToDraws(rows: DrawRow[]): Draw[] {
 }
 
 function AppInner(): JSX.Element {
+  const { runGenerate } = useGenerateWorker();
   const [history, setHistory] = useState<Draw[]>([]);
   const [windowMode, setWindowMode] = useState<"W" | "F" | "M" | "Q" | "Y" | "H" | "Custom">("H");
   const [customDrawCount, setCustomDrawCount] = useState<number>(1);
@@ -261,7 +265,13 @@ function AppInner(): JSX.Element {
   const [jaccardThreshold, setJaccardThreshold] = useState<number>(0.5);
   const [requireDiv5, setRequireDiv5] = useState<boolean>(false);
   const [maxDiv5, setMaxDiv5] = useState<number>(8);
+  const [acceptanceNeedsEnabled, setAcceptanceNeedsEnabled] = useState<boolean>(false);
+  const [acceptanceNeedsCounts, setAcceptanceNeedsCounts] = useState<MonthlyFrequencyConstraints>({
+    undrawn: 0, times1: 0, times2: 0, times3: 0, times4: 0, times5: 0, times6: 0, times7: 0, times8: 0,
+  });
+  const [acceptanceNeedsHardExclude, setAcceptanceNeedsHardExclude] = useState<boolean>(false);
   const [attemptMultiplier, setAttemptMultiplier] = useState<number>(DEFAULT_ATTEMPT_MULTIPLIER);
+  const [overgenFactor, setOvergenFactor] = useState<number>(50);
 
   // Sum range filter state used in Candidate Generation Influences
   const [sumFilter, setSumFilter] = useState<{ enabled: boolean; min: number; max: number; includeSupp: boolean }>({
@@ -282,12 +292,12 @@ function AppInner(): JSX.Element {
   // Trace verbosity toggle (default ON)
   const [traceVerbose, setTraceVerbose] = useState<boolean>(true);
   // Conditional trace dispatcher passed to helpers
-  const setTraceMaybe: React.Dispatch<React.SetStateAction<string[]>> = (updater) => {
+  const setTraceMaybe = useCallback<React.Dispatch<React.SetStateAction<string[]>>>((updater) => {
     if (!traceVerbose) return;
     // Forward either function or direct array value
     // @ts-ignore
     setTrace(updater);
-  };
+  }, [traceVerbose]);
   const [numCandidates, setNumCandidates] = useState<number>(8);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [octagonalTop, setOctagonalTop] = useState<number>(defaultKnobs.octagonal_top);
@@ -302,43 +312,33 @@ function AppInner(): JSX.Element {
   const [batchSessionProgress, setBatchSessionProgress] = useState<number>(0);
   const [batchSessionTopSeries, setBatchSessionTopSeries] = useState<{ run: number; tops: { n: number; count: number }[] }[]>([]);
   const [batchSessionAggregate, setBatchSessionAggregate] = useState<{ n: number; count: number }[]>([]);
-  const monthlyAvgBuckets = useMemo(() => {
-    if (!history.length) return [] as { times: number; avg: number }[];
-    const monthCounts = new Map<string, number[]>();
-    let latestKey = "";
-    let latestTime = -Infinity;
-    history.forEach((d) => {
-      const t = Date.parse(d.date || "");
-      if (Number.isNaN(t)) return;
-      const dt = new Date(t);
-      const key = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}`;
-      if (t > latestTime) { latestTime = t; latestKey = key; }
-      if (!monthCounts.has(key)) monthCounts.set(key, Array(45).fill(0));
-      const counts = monthCounts.get(key)!;
-      d.main.forEach((n) => { if (n >= 1 && n <= 45) counts[n - 1] += 1; });
-      // Panel default excludes supps; stay consistent unless later wired in.
-    });
-    const totals = new Map<number, number>();
-    let monthTotal = 0;
-    monthCounts.forEach((counts, key) => {
-      if (key === latestKey) return; // exclude current month like panel averages
-      monthTotal += 1;
-      const freqMap = counts.reduce<Map<number, number>>((acc, c) => {
-        if (c > 0) acc.set(c, (acc.get(c) || 0) + 1);
-        return acc;
-      }, new Map());
-      freqMap.forEach((count, times) => {
-        totals.set(times, (totals.get(times) || 0) + count);
-      });
-    });
-    if (monthTotal === 0) return [] as { times: number; avg: number }[];
-    return Array.from(totals.entries())
-      .map(([times, total]) => ({ times, avg: total / monthTotal }))
-      .sort((a, b) => a.times - b.times);
-  }, [history]);
+  // Panel-driven avg buckets — updated whenever MonthlyDrawsSummaryPanel's avgFrequencyCounts changes
+  // (respects the panel's "Draws per month" setting).
+  const [monthlyAvgBuckets, setMonthlyAvgBuckets] = useState<{ times: number; avg: number }[]>([]);
   const [monthlyBucketLabels, setMonthlyBucketLabels] = useState<Record<number, string>>({});
   const [monthlyConstraintPayload, setMonthlyConstraintPayload] = useState<MonthlyConstraintPayload | null>(null);
   const [monthlyConstructiveEnabled, setMonthlyConstructiveEnabled] = useState<boolean>(false);
+  const [monthlyBucketSetsAlways, setMonthlyBucketSetsAlways] = useState<MonthlyBucketSets | null>(null);
+
+  // Readiness (Rdy) score weights — user-configurable in Candidate Generation Influences
+  const [rdyWeights, setRdyWeights] = useState<{ idm: number; conv: number; oga: number }>({ idm: 0.50, conv: 0.30, oga: 0.20 });
+
+  // Sync acceptance-needs defaults from the bucket sizes in the payload
+  useEffect(() => {
+    if (!monthlyConstraintPayload) return;
+    const b = monthlyConstraintPayload.buckets;
+    setAcceptanceNeedsCounts({
+      undrawn: b.undrawn.size,
+      times1: b.times1.size,
+      times2: b.times2.size,
+      times3: b.times3.size,
+      times4: b.times4.size,
+      times5: b.times5.size,
+      times6: b.times6.size,
+      times7: b.times7.size,
+      times8: b.times8.size,
+    });
+  }, [monthlyConstraintPayload]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -393,6 +393,26 @@ function AppInner(): JSX.Element {
 
   const { zoneGamma, setZoneGamma } = useZPASettings();
 
+  // ──── Auto-save / auto-restore settings ────
+  // Restore saved settings on mount (before first render with defaults)
+  const hasRestoredRef = useRef(false);
+  useEffect(() => {
+    if (hasRestoredRef.current) return;
+    hasRestoredRef.current = true;
+    try {
+      const raw = localStorage.getItem("app:autosave:v1");
+      if (!raw) return;
+      const snapshot = JSON.parse(raw) as AppPresetSnapshot;
+      // Defer apply so all state initializers finish first
+      setTimeout(() => applySnapshot(snapshot), 0);
+    } catch {
+      // Silently ignore corrupt autosave
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Auto-save dirty flag ref (used by the interval below)
+  
   const [survivalOut, setSurvivalOut] = useState<{ number: number; baseProb?: number; biasedProb?: number }[] | undefined>(undefined);
   const [churnOut, setChurnOut] = useState<{ number: number; pChurn: number }[] | undefined>(undefined);
   const [returnOut, setReturnOut] = useState<{ number: number; pReturn: number }[] | undefined>(undefined);
@@ -405,6 +425,27 @@ function AppInner(): JSX.Element {
     setTraceMaybe(t => [...t, insightsEnabled ? "[TRACE] Selection Insights: ON" : "[TRACE] Selection Insights: OFF"]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [insightsEnabled]);
+
+  // ──── Debounced auto-save: persist settings to localStorage ────
+  // Uses an interval that checks a dirty flag. Any state change marks dirty,
+  // and the next interval tick saves the snapshot.
+  const autoSaveDirtyRef = useRef(false);
+  // Mark dirty on every render (cheap – just a ref assignment)
+  autoSaveDirtyRef.current = true;
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (!autoSaveDirtyRef.current) return;
+      autoSaveDirtyRef.current = false;
+      try {
+        const snapshot = buildSnapshot();
+        localStorage.setItem("app:autosave:v1", JSON.stringify(snapshot));
+      } catch {
+        // Silently ignore quota errors
+      }
+    }, 2000); // check every 2 seconds
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     fetchDraws({
@@ -447,6 +488,13 @@ function AppInner(): JSX.Element {
 
   const activeWindowSize = filteredHistory.length;
 
+  // Sync repeat window W to the WFMQYH window size when it changes
+  useEffect(() => {
+    if (activeWindowSize > 0) {
+      setRepeatWindowSizeW(activeWindowSize);
+    }
+  }, [activeWindowSize]);
+
   const sde1Exclusions = knobs.enableSDE1 ? getSDE1FilteredPool(filteredHistory).excludedNumbers : [];
   let hc3Exclusions: number[] = [];
   if (knobs.enableHC3 && filteredHistory.length >= 2) {
@@ -479,6 +527,22 @@ function AppInner(): JSX.Element {
   const [simSource, setSimSource] = useState<'none' | 'user' | 'candidate'>('none');
   const [simCandidateIdx, setSimCandidateIdx] = useState<number | null>(null);
 
+  // Ref for scrolling to DGA grid after simulate, and back-navigation
+  const dgaGridRef = useRef<HTMLDivElement>(null);
+  const [simScrollOriginY, setSimScrollOriginY] = useState<number | null>(null);
+  const scrollToDGA = useCallback(() => {
+    setSimScrollOriginY(window.scrollY);
+    requestAnimationFrame(() => {
+      dgaGridRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }, []);
+  const scrollBackToOrigin = useCallback(() => {
+    if (simScrollOriginY !== null) {
+      window.scrollTo({ top: simScrollOriginY, behavior: "smooth" });
+      setSimScrollOriginY(null);
+    }
+  }, [simScrollOriginY]);
+
   // Manual simulation (heatmap/NextHotBlocks overlay only)
   const [manualSimSelected, setManualSimSelected] = useState<number[]>([]);
   const [pickSixSource, setPickSixSource] = useState<PickSixSource>("manual");
@@ -501,6 +565,7 @@ function AppInner(): JSX.Element {
     } as any);
     setSimSource('candidate');
     setSimCandidateIdx(idx);
+    scrollToDGA();
   };
 
   const handleSimulatePickSixManual = (nums: number[]) => {
@@ -510,6 +575,7 @@ function AppInner(): JSX.Element {
     setSimulatedDraw({ main, supp, date: "PickSixManual", isSimulated: true } as any);
     setSimSource('user');
     setSimCandidateIdx(null);
+    scrollToDGA();
   };
 
   const activeSimulatedDraw = simulatedDraw;
@@ -618,12 +684,28 @@ function AppInner(): JSX.Element {
     [filteredHistory, temperatureSignal]
   );
 
+  // Minimum number of prior draws required for a stable OGA baseline.
+  // Draws computed against fewer than this many draws produce unreliable scores
+  // that pollute the percentile distribution — especially under small WFMQYH windows.
+  const MIN_OGA_BASELINE = 10;
+
   const pastOGAScores = useMemo(
     () =>
       filteredHistory.map((draw, idx, arr) =>
         computeOGA([...draw.main, ...draw.supp], arr.slice(0, idx) || [], ogaSpokeCount)
       ),
     [filteredHistory, ogaSpokeCount]
+  );
+
+  // Stable subset: only scores computed with >= MIN_OGA_BASELINE draws of history.
+  // Used for percentile calculations so early unreliable scores don't skew the distribution.
+  // Falls back to all scores when the window is too small for the baseline threshold.
+  const stableOGAScores = useMemo(
+    () => {
+      const stable = pastOGAScores.slice(MIN_OGA_BASELINE);
+      return stable.length > 0 ? stable : pastOGAScores;
+    },
+    [pastOGAScores]
   );
 
   // Reference mode for OGA percentiles and histogram
@@ -701,22 +783,29 @@ function AppInner(): JSX.Element {
     return base
       .map((c: any) => {
         const nums = [...c.main, ...c.supp];
-        const ogaScore = c.ogaScore ?? computeOGA(nums, filteredHistory, ogaSpokeCount);
-        const ogaPercentile = c.ogaPercentile ?? getOGAPercentile(ogaScore, pastOGAScores);
+        // Skip expensive OGA computation when OGA is toggled off
+        const ogaScore = knobs.enableOGA
+          ? (c.ogaScore ?? computeOGA(nums, filteredHistory, ogaSpokeCount))
+          : 0;
+        const ogaPercentile = knobs.enableOGA
+          ? (c.ogaPercentile ?? getOGAPercentile(ogaScore, stableOGAScores))
+          : 0;
         const selHits = nums.filter(n => selectedSet.has(n)).length;
         const recentHits = recentSet ? nums.filter(n => recentSet.has(n)).length : 0;
-        const ogaNorm = Math.max(0, Math.min(1, ogaPercentile / 100));
+        const ogaNorm = knobs.enableOGA ? Math.max(0, Math.min(1, ogaPercentile / 100)) : 0;
         const finalComposite = wOGA * ogaNorm + wSel * (selHits / 8) + wRecent * (recentHits / 8);
         const { label: prizeLabel, rank: prizeRank } = computePrize(c.main, c.supp);
         return { ...c, ogaScore, ogaPercentile, selHits, recentHits, finalCompositeAdj: finalComposite, prizeLabel, prizeRank };
       })
       .sort((a: any, b: any) => {
-        const prizeDiff = a.prizeRank - b.prizeRank;
-        if (prizeDiff !== 0) return prizeDiff;
-        if (b.selHits !== a.selHits) return b.selHits - a.selHits;
+        // Sort by statistical quality only. Prize is a display/evaluation metric
+        // and must NOT influence pool ranking (otherwise Manual Simulation
+        // changes which candidates survive the over-generation slice).
         if (b.finalCompositeAdj !== a.finalCompositeAdj) return b.finalCompositeAdj - a.finalCompositeAdj;
+        if (b.selHits !== a.selHits) return b.selHits - a.selHits;
         if (b.recentHits !== a.recentHits) return b.recentHits - a.recentHits;
-        if (b.ogaPercentile !== a.ogaPercentile) return b.ogaPercentile - a.ogaPercentile;
+        // Skip OGA tiebreaker when disabled
+        if (knobs.enableOGA && b.ogaPercentile !== a.ogaPercentile) return b.ogaPercentile - a.ogaPercentile;
         return 0;
       });
    }
@@ -750,6 +839,52 @@ function AppInner(): JSX.Element {
     );
   }
 
+  function meetsAcceptanceNeeds(candidate: CandidateSet): boolean {
+    if (!acceptanceNeedsEnabled) return true;
+    const buckets = monthlyBucketSetsAlways ?? monthlyConstraintPayload?.buckets ?? null;
+    if (!buckets) return true; // no bucket data available — skip filter
+    const nums = [...candidate.main, ...candidate.supp];
+    const counts = { undrawn: 0, times1: 0, times2: 0, times3: 0, times4: 0, times5: 0, times6: 0, times7: 0, times8: 0 };
+    for (const n of nums) {
+      if (buckets.undrawn.has(n)) counts.undrawn += 1;
+      if (buckets.times1.has(n)) counts.times1 += 1;
+      if (buckets.times2.has(n)) counts.times2 += 1;
+      if (buckets.times3.has(n)) counts.times3 += 1;
+      if (buckets.times4.has(n)) counts.times4 += 1;
+      if (buckets.times5.has(n)) counts.times5 += 1;
+      if (buckets.times6.has(n)) counts.times6 += 1;
+      if (buckets.times7.has(n)) counts.times7 += 1;
+      if (buckets.times8.has(n)) counts.times8 += 1;
+    }
+    return (
+      counts.undrawn >= acceptanceNeedsCounts.undrawn &&
+      counts.times1 >= acceptanceNeedsCounts.times1 &&
+      counts.times2 >= acceptanceNeedsCounts.times2 &&
+      counts.times3 >= acceptanceNeedsCounts.times3 &&
+      counts.times4 >= acceptanceNeedsCounts.times4 &&
+      counts.times5 >= acceptanceNeedsCounts.times5 &&
+      counts.times6 >= acceptanceNeedsCounts.times6 &&
+      counts.times7 >= acceptanceNeedsCounts.times7 &&
+      counts.times8 >= acceptanceNeedsCounts.times8
+    );
+  }
+
+  /** Compute hard-exclusion numbers for MiAN: numbers in buckets where required count is 0 */
+  function getMianHardExclusions(): number[] {
+    if (!acceptanceNeedsEnabled || !acceptanceNeedsHardExclude) return [];
+    const buckets = monthlyBucketSetsAlways ?? monthlyConstraintPayload?.buckets ?? null;
+    if (!buckets) return [];
+    const excluded: number[] = [];
+    const bucketKeys: (keyof typeof buckets)[] = ['undrawn', 'times1', 'times2', 'times3', 'times4', 'times5', 'times6', 'times7', 'times8'];
+    const countKeys: (keyof MonthlyFrequencyConstraints)[] = ['undrawn', 'times1', 'times2', 'times3', 'times4', 'times5', 'times6', 'times7', 'times8'];
+    for (let i = 0; i < bucketKeys.length; i++) {
+      if (acceptanceNeedsCounts[countKeys[i]] === 0) {
+        for (const n of buckets[bucketKeys[i]]) excluded.push(n);
+      }
+    }
+    return excluded;
+  }
+
   const buildMonthlyTrace = () => {
     if (!monthlyConstraintPayload) return null;
     const { buckets, constraints } = monthlyConstraintPayload;
@@ -774,7 +909,7 @@ function AppInner(): JSX.Element {
       const cleared = prev.map(c => ({ ...c, ogaScore: undefined, ogaPercentile: undefined }));
       return recomputeCompositeRanking(cleared);
     });
-  }, [rankingWeights, userSelectedNumbers, filteredHistory, pastOGAScores, ogaSpokeCount]);
+  }, [rankingWeights, userSelectedNumbers, filteredHistory, stableOGAScores, ogaSpokeCount]);
 
   function withinSumRange(candidate: CandidateSet): boolean {
     // Hook for sum filter if you enable it later
@@ -805,113 +940,165 @@ function AppInner(): JSX.Element {
       constraints: monthlyConstraintPayload.constraints,
       buckets: monthlyConstraintPayload.buckets,
       allowShortfall: true,
+      boostPenalize: monthlyConstraintPayload.boostPenalize ?? false,
     } : undefined;
 
-    // Route traces through the verbose-aware dispatcher
-    const traceDispatch: React.Dispatch<React.SetStateAction<string[]>> = setTraceMaybe;
+    // Over-generate: request a larger pool so post-generation filters (MiAN, monthly, prize, OGA)
+    // have more candidates to work with. Controlled by user-configurable overgenFactor.
+    const poolSize = numCandidates * Math.max(1, overgenFactor);
+
+    // MiAN hard exclusions: exclude numbers from zero-count MiAN buckets
+    const mianExcl = getMianHardExclusions();
+    const excludedWithMiAN = mianExcl.length > 0
+      ? Array.from(new Set([...effectiveExcludedNumbers, ...mianExcl]))
+      : effectiveExcludedNumbers;
+    if (mianExcl.length > 0) {
+      setTraceMaybe((t) => [...t, `[TRACE] MiAN hard-exclude: removed ${mianExcl.length} numbers from zero-count buckets`]);
+    }
 
     const t0 = performance.now();
-    const result = generateCandidates(
-      numCandidates,
-      filteredHistory,
-      effectiveKnobsForGen,
-      traceDispatch,
-      effectiveExcludedNumbers,
-      selectedRatios,
+
+    // Build worker-serializable args
+    const workerArgs: GenerateWorkerArgs = {
+      num: poolSize,
+      history: filteredHistory,
+      knobs: effectiveKnobsForGen,
+      excludedNumbers: excludedWithMiAN,
+      selectedOddEvenRatios: selectedRatios,
       useTrickyRule,
-      0, // minOGAPercentile not used here
-      pastOGAScores as any,
-      trendSelectedNumbers,
-      userSelectedNumbers,
-      { enabled: selectedBoostEnabled, factor: selectedBoostFactor },
-      entropyThresholdEff,
-      hammingThresholdEff,
-      jaccardThresholdEff,
-      lambdaEnabled ? lambda : 0.0,
+      minOGAPercentile: 0,
+      pastOGAScores: stableOGAScores as any,
+      forcedNumbers: trendSelectedNumbers,
+      selectedNumbersForBoost: userSelectedNumbers,
+      selectedBoostOptions: { enabled: selectedBoostEnabled, factor: selectedBoostFactor },
+      entropyThreshold: entropyThresholdEff,
+      hammingThreshold: hammingThresholdEff,
+      jaccardThreshold: jaccardThresholdEff,
+      lambda: lambdaEnabled ? lambda : 0.0,
       ratioOptions,
       minRecentMatches,
       recentMatchBias,
       repeatWindowSizeW,
       minFromRecentUnionM,
-      undefined,
-      undefined,
-      { enabled: false, min: 0, max: 0, includeSupp: true },
-      {
+      trendMapEntries: undefined,
+      allowedTrendRatios: undefined,
+      sumFilter: { enabled: false, min: 0, max: 0, includeSupp: true },
+      patternOptions: {
         constraints: selectedWindowPatterns,
         mode: patternConstraintMode,
         boostFactor: patternBoostFactor,
         sumTolerance: patternSumTolerance,
       },
-      {
+      ogaBiasOptions: {
         enabled: enableOGAForecastBias,
         preferredBand: ogaPreferredBand,
         bands: ogaStats.bands,
         deciles: ogaStats.deciles,
         preferredDeciles: ogaPreferredDeciles,
       },
-      {
-        requireOne: requireDiv5,
-        maxAllowed: maxDiv5
-      },
-      monthlyBucketOptions,
+      div5Options: { requireOne: requireDiv5, maxAllowed: maxDiv5 },
+      monthlyBucketOptions: serializeMonthlyBuckets(monthlyBucketOptions),
       attemptMultiplier,
-      ogaSpokeCount
-    );
+      ogaSpokeCount,
+    };
 
-    const monthlyTrace = buildMonthlyTrace();
-    setTraceMaybe((t) => [
-      ...t,
-      `[TRACE] Monthly acceptance toggle: ${monthlyConstraintPayload ? "ON" : "OFF"} (constructive fill: ${monthlyConstructiveEnabled ? "ON" : "OFF"})`,
-    ]);
-    if (monthlyTrace) {
-      setTraceMaybe((t) => [...t, `[TRACE] ${monthlyTrace}`]);
-    }
+    // Trace callback: appends messages as they arrive from the worker
+    const onTrace = (msg: string) => setTraceMaybe((t) => [...t, msg]);
 
-    let processedCandidates = [...result.candidates];
-    let monthlyRejects = 0;
-    if (monthlyConstraintPayload) {
-      processedCandidates = processedCandidates.filter((c) => {
-        const ok = meetsMonthlyConstraints(c);
-        if (!ok) monthlyRejects += 1;
-        return ok;
-      });
-    }
-    processedCandidates = recomputeCompositeRanking(processedCandidates);
-    let prizeRejects = 0;
-    if (manualSimSelected.length >= 8) {
-      const before = processedCandidates.length;
-      processedCandidates = processedCandidates.filter((c: any) => c.prizeLabel && c.prizeLabel !== "—");
-      prizeRejects = before - processedCandidates.length;
-    }
-    let capRejects = 0;
-    if (knobs.enableOGA && typeof knobs.octagonal_top === "number" && processedCandidates.length > 0) {
-      const cap = Math.max(1, Math.floor(knobs.octagonal_top));
-      const before = processedCandidates.length;
-      processedCandidates = applyOctagonalPostProcess(
-        processedCandidates,
-        filteredHistory.length ? filteredHistory : history,
-        cap,
-        ogaSpokeCount
-      );
-      capRejects = before - processedCandidates.length;
-      // Re-rank after OGA post-process to restore prize/composite ordering
+    // Result callback: post-processing on main thread (fast)
+    const onResult = (result: import("./generateCandidates").GenerateCandidatesResult) => {
+      const monthlyTrace = buildMonthlyTrace();
+      setTraceMaybe((t) => [
+        ...t,
+        `[TRACE] Monthly acceptance toggle: ${monthlyConstraintPayload ? "ON" : "OFF"} (constructive fill: ${monthlyConstructiveEnabled ? "ON" : "OFF"})`,
+      ]);
+      if (monthlyTrace) {
+        setTraceMaybe((t) => [...t, `[TRACE] ${monthlyTrace}`]);
+      }
+
+      let processedCandidates = [...result.candidates];
+      let monthlyRejects = 0;
+      if (monthlyConstraintPayload) {
+        processedCandidates = processedCandidates.filter((c) => {
+          const ok = meetsMonthlyConstraints(c);
+          if (!ok) monthlyRejects += 1;
+          return ok;
+        });
+      }
+      let acceptanceNeedsRejects = 0;
+      const mianBuckets = monthlyBucketSetsAlways ?? monthlyConstraintPayload?.buckets ?? null;
+      if (acceptanceNeedsEnabled) {
+        if (!mianBuckets) {
+          setTraceMaybe((t) => [...t, `[TRACE] ⚠️ MiAN enabled but no monthly bucket data available — filter skipped. Open Monthly Draws Summary panel to populate bucket data.`]);
+        } else {
+          const beforeMiAN = processedCandidates.length;
+          processedCandidates = processedCandidates.filter((c) => {
+            const ok = meetsAcceptanceNeeds(c);
+            if (!ok) acceptanceNeedsRejects += 1;
+            return ok;
+          });
+          const ac = acceptanceNeedsCounts;
+          setTraceMaybe((t) => [...t, `[TRACE] MiAN required: 0x≥${ac.undrawn} 1x≥${ac.times1} 2x≥${ac.times2} 3x≥${ac.times3} 4x≥${ac.times4} 5x≥${ac.times5} 6x≥${ac.times6} 7x≥${ac.times7} 8x+≥${ac.times8} | rejected ${acceptanceNeedsRejects} of ${beforeMiAN} candidates${acceptanceNeedsHardExclude ? " (hard-exclude ON)" : ""}`]);
+        }
+      }
+      // Score candidates (OGA, selHits, composite) but WITHOUT prize-based sorting.
+      // Prize ranking must not influence which candidates survive the pool slice,
+      // otherwise Manual Simulation numbers would change the final candidate set.
       processedCandidates = recomputeCompositeRanking(processedCandidates);
-    }
-     processedCandidates = processedCandidates.filter(withinSumRange);
+      const prizeRejects = 0;
+      let capRejects = 0;
+      if (knobs.enableOGA && typeof knobs.octagonal_top === "number" && processedCandidates.length > 0) {
+        const cap = Math.max(1, Math.floor(knobs.octagonal_top));
+        const before = processedCandidates.length;
+        processedCandidates = applyOctagonalPostProcess(
+          processedCandidates,
+          filteredHistory.length ? filteredHistory : history,
+          cap,
+          ogaSpokeCount
+        );
+        capRejects = before - processedCandidates.length;
+        processedCandidates = recomputeCompositeRanking(processedCandidates);
+      }
+      processedCandidates = processedCandidates.filter(withinSumRange);
 
-    setCandidates(processedCandidates);
-    setRatioSummary(result.ratioSummary);
-    setQuotaWarning(result.quotaWarning);
-    setSelectedCandidateIdx(0);
+      // Slice over-generated pool down to the requested count.
+      // Sort by composite score ONLY (prize-agnostic) so Manual Simulation
+      // does not influence which candidates are kept.
+      const poolBeforeSlice = processedCandidates.length;
+      if (processedCandidates.length > numCandidates) {
+        processedCandidates.sort((a: any, b: any) => {
+          if (b.finalCompositeAdj !== a.finalCompositeAdj) return b.finalCompositeAdj - a.finalCompositeAdj;
+          if (knobs.enableOGA && b.ogaPercentile !== a.ogaPercentile) return b.ogaPercentile - a.ogaPercentile;
+          return 0;
+        });
+        processedCandidates = processedCandidates.slice(0, numCandidates);
+      }
 
-    const dt = Math.round(performance.now() - t0);
-    const st = result.rejectionStats;
-    setTraceMaybe((t) => [
-      ...t,
-      `[TRACE] Generation: requested ${numCandidates}, generated ${processedCandidates.length} (accepted ${st.accepted}/${st.totalAttempts} attempts) in ${dt}ms; rejects — excl:${st.exclusions} sum:${st.sumRange} div5:${st.div5} oddEven:${st.oddEven} tricky:${st.tricky} repeat:${st.repeatUnion} recMin:${st.minRecent} recBias:${st.recentBias} trend:${st.trendRatio} pattern:${st.patternConstraint} ent:${st.entropy} ham:${st.hamming} jac:${st.jaccard} ogaBias:${st.ogaBias} monthly:${monthlyRejects} prize:${prizeRejects} cap:${capRejects}`,
-    ]);
+      // Now apply final ranking with prize labels for display
+      processedCandidates = recomputeCompositeRanking(processedCandidates);
 
-    setIsGenerating(false);
+      setCandidates(processedCandidates);
+      setRatioSummary(result.ratioSummary);
+      setQuotaWarning(result.quotaWarning);
+      setSelectedCandidateIdx(0);
+
+      const dt = Math.round(performance.now() - t0);
+      const st = result.rejectionStats;
+      setTraceMaybe((t) => [
+        ...t,
+        `[TRACE] Generation: requested ${numCandidates}, pool ${poolSize} (overgen ${overgenFactor}×) → filtered ${poolBeforeSlice} → kept ${processedCandidates.length} (accepted ${st.accepted}/${st.totalAttempts} attempts, budget ${poolSize * attemptMultiplier}) in ${dt}ms; rejects — excl:${st.exclusions} sum:${st.sumRange} div5:${st.div5} oddEven:${st.oddEven} tricky:${st.tricky} repeat:${st.repeatUnion} recMin:${st.minRecent} recBias:${st.recentBias} trend:${st.trendRatio} pattern:${st.patternConstraint} ent:${st.entropy} ham:${st.hamming} jac:${st.jaccard} ogaBias:${st.ogaBias} monthly:${monthlyRejects} prize:${prizeRejects} cap:${capRejects}`,
+      ]);
+
+      setIsGenerating(false);
+    };
+
+    const onError = (err: string) => {
+      setTraceMaybe((t) => [...t, `[TRACE] ❌ Generation failed: ${err}`]);
+      setIsGenerating(false);
+    };
+
+    // Dispatch to Web Worker (or fallback to async main-thread)
+    runGenerate(workerArgs, onTrace, onResult, onError);
   };
 
   const runBatch = (target: number, traceLabel: string) => {
@@ -934,19 +1121,29 @@ function AppInner(): JSX.Element {
       constraints: monthlyConstraintPayload.constraints,
       buckets: monthlyConstraintPayload.buckets,
       allowShortfall: true,
+      boostPenalize: monthlyConstraintPayload.boostPenalize ?? false,
     } : undefined;
+
+    // MiAN hard exclusions for batch
+    const mianExclBatch = getMianHardExclusions();
+    const excludedWithMiANBatch = mianExclBatch.length > 0
+      ? Array.from(new Set([...effectiveExcludedNumbers, ...mianExclBatch]))
+      : effectiveExcludedNumbers;
+    if (mianExclBatch.length > 0) {
+      setTraceMaybe((t) => [...t, `[TRACE] MiAN hard-exclude: removed ${mianExclBatch.length} numbers from zero-count buckets`]);
+    }
 
     const t0 = performance.now();
     const result = generateCandidates(
       target,
       filteredHistory,
       effectiveKnobsForGen,
-      setTraceMaybe,
-      effectiveExcludedNumbers,
+      (msg: string) => setTraceMaybe((t) => [...t, msg]),
+      excludedWithMiANBatch,
       selectedRatios,
       useTrickyRule,
       0,
-      pastOGAScores as any,
+      stableOGAScores as any,
       trendSelectedNumbers,
       userSelectedNumbers,
       { enabled: selectedBoostEnabled, factor: selectedBoostFactor },
@@ -1002,14 +1199,25 @@ function AppInner(): JSX.Element {
         return ok;
       });
     }
+    let acceptanceNeedsRejects2 = 0;
+    const mianBuckets2 = monthlyBucketSetsAlways ?? monthlyConstraintPayload?.buckets ?? null;
+    if (acceptanceNeedsEnabled) {
+      if (!mianBuckets2) {
+        setTraceMaybe((t) => [...t, `[TRACE] ⚠️ MiAN enabled but no monthly bucket data available — filter skipped. Open Monthly Draws Summary panel to populate bucket data.`]);
+      } else {
+        const beforeMiAN2 = processed.length;
+        processed = processed.filter((c) => {
+          const ok = meetsAcceptanceNeeds(c);
+          if (!ok) acceptanceNeedsRejects2 += 1;
+          return ok;
+        });
+        const ac = acceptanceNeedsCounts;
+        setTraceMaybe((t) => [...t, `[TRACE] MiAN required: 0x≥${ac.undrawn} 1x≥${ac.times1} 2x≥${ac.times2} 3x≥${ac.times3} 4x≥${ac.times4} 5x≥${ac.times5} 6x≥${ac.times6} 7x≥${ac.times7} 8x+≥${ac.times8} | rejected ${acceptanceNeedsRejects2} of ${beforeMiAN2} candidates${acceptanceNeedsHardExclude ? " (hard-exclude ON)" : ""}`]);
+      }
+    }
     processed = processed.filter(withinSumRange);
 
-    let prizeRejects = 0;
-    if (manualSimSelected.length >= 8) {
-      const before = processed.length;
-      processed = processed.filter((c: any) => c.prizeLabel && c.prizeLabel !== "—");
-      prizeRejects = before - processed.length;
-    }
+    const prizeRejects = 0;
 
     let capRejects = 0;
     if (knobs.enableOGA && typeof knobs.octagonal_top === "number" && processed.length > 0) {
@@ -1557,6 +1765,11 @@ function AppInner(): JSX.Element {
         <MostLikelyNotDrawnPanel history={filteredHistory} title="Most Likely NOT Drawn" />
       </CollapsibleSection>
 
+      {/* [ORDER-ANCHOR] 07.2 Backtest Validation Dashboard */}
+      <CollapsibleSection title={<b>Backtest Validation</b>} defaultOpen={false}>
+        <BacktestPanel history={filteredHistory} />
+      </CollapsibleSection>
+
       {/* [ORDER-ANCHOR] 08 Trend Ratio History */}
       <CollapsibleSection title={<b>Trend Ratio History</b>} defaultOpen={false}>
         <TrendRatioHistoryPanel
@@ -1783,6 +1996,8 @@ function AppInner(): JSX.Element {
           constructiveFillEnabled={monthlyConstructiveEnabled}
           onConstructiveFillChange={setMonthlyConstructiveEnabled}
           onBucketInfoChange={(info) => setMonthlyBucketLabels(info.labels)}
+          onBucketSetsChange={setMonthlyBucketSetsAlways}
+          onAvgBucketsChange={setMonthlyAvgBuckets}
         />
       </CollapsibleSection>
 
@@ -1805,6 +2020,7 @@ function AppInner(): JSX.Element {
             setSimulatedDraw({ main, supp, date: "UserSim", isSimulated: true } as any);
             setSimSource('user');
             setSimCandidateIdx(null);
+            scrollToDGA();
           }}
           onClear={() => {
             setSimulatedDraw(null);
@@ -1959,10 +2175,16 @@ function AppInner(): JSX.Element {
             batchSessionAggregate={batchSessionAggregate}
             onSimulateNumbers={handleSimulatePickSixManual}
             monthlyAvgBuckets={monthlyAvgBuckets}
-            monthlyBuckets={monthlyConstraintPayload?.buckets}
+            monthlyBuckets={monthlyBucketSetsAlways ?? monthlyConstraintPayload?.buckets}
             historyForOGA={filteredHistory}
             ogaRefScores={pastOGAScoresRef}
             ogaSpokeCount={ogaSpokeCount}
+            attemptMultiplier={attemptMultiplier}
+            onAttemptMultiplierChange={setAttemptMultiplier}
+            overgenFactor={overgenFactor}
+            onOvergenFactorChange={setOvergenFactor}
+            rdyWeights={rdyWeights}
+            enableOGA={knobs.enableOGA}
           />
 
           {/* Candidate Generation Influences moved here */}
@@ -2004,24 +2226,53 @@ function AppInner(): JSX.Element {
                       <input type="number" min={0} max={8} value={maxDiv5} onChange={(e) => setMaxDiv5(Number(e.target.value))} style={{ width: 70, marginLeft: 6 }} />
                     </label>
                   </div>
-                  <div style={{ marginLeft: 18, marginTop: 4 }}>
-                    <label title="Attempt budget = Count × multiplier; increase if constraints are tight">
-                      Attempt multiplier:
-                      <input
-                        type="number"
-                        min={50}
-                        max={10000}
-                        step={10}
-                        value={attemptMultiplier}
-                        onChange={(e) => {
-                          const next = Number(e.target.value) || DEFAULT_ATTEMPT_MULTIPLIER;
-                          const clamped = Math.max(50, Math.min(10000, next));
-                          setAttemptMultiplier(clamped);
-                        }}
-                        style={{ width: 90, marginLeft: 6 }}
-                      />
-                    </label>
-                  </div>
+                </div>
+
+                <div style={{ marginTop: 8 }}>
+                  <label title="Require generated candidates to include a minimum number of numbers from each monthly frequency bucket">
+                    <input type="checkbox" checked={acceptanceNeedsEnabled} onChange={(e) => setAcceptanceNeedsEnabled(e.target.checked)} style={{ marginRight: 6 }} />
+                    Must include from Acceptance needs
+                  </label>
+                  {acceptanceNeedsEnabled && (
+                    <div style={{ marginLeft: 18, marginTop: 4, display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "4px 10px", fontSize: 12 }}>
+                      {([
+                        { key: "undrawn" as const, label: "Undrawn" },
+                        { key: "times1" as const, label: "Drawn 1x" },
+                        { key: "times2" as const, label: "Drawn 2x" },
+                        { key: "times3" as const, label: "Drawn 3x" },
+                        { key: "times4" as const, label: "Drawn 4x" },
+                        { key: "times5" as const, label: "Drawn 5x" },
+                        { key: "times6" as const, label: "Drawn 6x" },
+                        { key: "times7" as const, label: "Drawn 7x" },
+                        { key: "times8" as const, label: "Drawn 8x+" },
+                      ]).map((item) => (
+                        <label key={item.key} style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 3 }}>
+                          {item.label}:
+                          <input
+                            type="number"
+                            min={0}
+                            max={8}
+                            value={acceptanceNeedsCounts[item.key]}
+                            onChange={(e) => setAcceptanceNeedsCounts(prev => ({ ...prev, [item.key]: Math.max(0, Number(e.target.value) || 0) }))}
+                            style={{ width: 50 }}
+                          />
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  {acceptanceNeedsEnabled && (
+                    <div style={{ marginLeft: 18, marginTop: 6 }}>
+                      <label title="When enabled, numbers from buckets with a required count of 0 are excluded from the candidate pool entirely">
+                        <input type="checkbox" checked={acceptanceNeedsHardExclude} onChange={(e) => setAcceptanceNeedsHardExclude(e.target.checked)} style={{ marginRight: 6 }} />
+                        Hard exclude zero-count buckets
+                      </label>
+                      {!monthlyBucketSetsAlways && !monthlyConstraintPayload && (
+                        <div style={{ color: "#d32f2f", fontSize: 11, marginTop: 2 }}>
+                          ⚠️ No monthly bucket data — open Monthly Draws Summary to populate.
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -2141,6 +2392,55 @@ function AppInner(): JSX.Element {
                       </div>
                     );
                   })()}
+                </div>
+              </div>
+
+              {/* Column 3: Readiness Scoring */}
+              <div style={{ border: "1px solid #eee", borderRadius: 6, padding: 10 }}>
+                <div style={{ fontWeight: 700, marginBottom: 6 }}>Readiness (Rdy) Scoring</div>
+                <div style={{ fontSize: 12, color: "#555", marginBottom: 10, lineHeight: 1.5 }}>
+                  The <b>Rdy</b> column in Generated Candidates ranks each candidate by a weighted composite of three signals.
+                  Use these sliders to emphasise the factors most important to your strategy. Weights are normalised (they always sum to 100%).
+                </div>
+
+                <div style={{ marginBottom: 10 }}>
+                  <label style={{ display: "block", marginBottom: 2, fontSize: 12 }} title="Ideal Draw Match: How closely the candidate's bucket composition (0x, 1x, 2x…) matches the statistically optimal draw from the Ideal draw row in Monthly Draws Summary. High IDM = numbers drawn from the right frequency buckets.">
+                    <b>IDM</b> — Ideal Draw Match: <b>{Math.round(rdyWeights.idm / (rdyWeights.idm + rdyWeights.conv + rdyWeights.oga || 1) * 100)}%</b>
+                  </label>
+                  <input type="range" min={0} max={1} step={0.05} value={rdyWeights.idm}
+                    onChange={(e) => setRdyWeights(prev => ({ ...prev, idm: Number(e.target.value) }))}
+                    style={{ width: "100%" }} />
+                  <div style={{ fontSize: 11, color: "#888" }}>
+                    Measures bucket composition similarity to the optimal draw. Higher = candidate draws from the "right" frequency buckets to bring the month closer to the historical average.
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: 10 }}>
+                  <label style={{ display: "block", marginBottom: 2, fontSize: 12 }} title="Convergence: How much this candidate moves the current month's frequency distribution toward the historical average (SSD reduction). High Conv = more convergent toward balance.">
+                    <b>Conv</b> — Convergence: <b>{Math.round(rdyWeights.conv / (rdyWeights.idm + rdyWeights.conv + rdyWeights.oga || 1) * 100)}%</b>
+                  </label>
+                  <input type="range" min={0} max={1} step={0.05} value={rdyWeights.conv}
+                    onChange={(e) => setRdyWeights(prev => ({ ...prev, conv: Number(e.target.value) }))}
+                    style={{ width: "100%" }} />
+                  <div style={{ fontSize: 11, color: "#888" }}>
+                    Measures the SSD (sum of squared differences) reduction between the current and target distributions. Related to IDM but accounts for the magnitude of each bucket's over/under-representation.
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: 10 }}>
+                  <label style={{ display: "block", marginBottom: 2, fontSize: 12 }} title="OGA (Octagonal Geometry Alignment): The candidate's OGA percentile relative to all historical draws. High OGA% = numbers that form geometrically balanced patterns on the DGA grid.">
+                    <b>OGA</b> — Geometry Alignment: <b>{Math.round(rdyWeights.oga / (rdyWeights.idm + rdyWeights.conv + rdyWeights.oga || 1) * 100)}%</b>
+                  </label>
+                  <input type="range" min={0} max={1} step={0.05} value={rdyWeights.oga}
+                    onChange={(e) => setRdyWeights(prev => ({ ...prev, oga: Number(e.target.value) }))}
+                    style={{ width: "100%" }} />
+                  <div style={{ fontSize: 11, color: "#888" }}>
+                    Uses the OGA percentile to favour candidates whose numbers form geometrically aligned patterns. Independent of monthly frequency analysis.
+                  </div>
+                </div>
+
+                <div style={{ fontSize: 12, color: "#1565c0", background: "#e3f2fd", borderRadius: 4, padding: 8 }}>
+                  <b>Effective weights:</b> IDM {Math.round(rdyWeights.idm / (rdyWeights.idm + rdyWeights.conv + rdyWeights.oga || 1) * 100)}% · Conv {Math.round(rdyWeights.conv / (rdyWeights.idm + rdyWeights.conv + rdyWeights.oga || 1) * 100)}% · OGA {Math.round(rdyWeights.oga / (rdyWeights.idm + rdyWeights.conv + rdyWeights.oga || 1) * 100)}%
                 </div>
               </div>
             </div>
@@ -2285,6 +2585,28 @@ function AppInner(): JSX.Element {
             <div style={{ color: "#c00", marginTop: 10, marginBottom: 12 }}>{highlightMsg}</div>
           )}
 
+          <div ref={dgaGridRef} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+            {simScrollOriginY !== null && (
+              <button
+                type="button"
+                onClick={scrollBackToOrigin}
+                style={{
+                  padding: "4px 10px",
+                  borderRadius: 4,
+                  border: "1px solid #1976d2",
+                  background: "#e3f2fd",
+                  color: "#1976d2",
+                  cursor: "pointer",
+                  fontSize: 12,
+                  fontWeight: 600,
+                }}
+                title="Return to where you pressed Simulate"
+              >
+                ↑ Back
+              </button>
+            )}
+          </div>
+
           {dgaGrid.length > 0 ? (
             <div style={{ position: "relative", width: "100%" }}>
               <DGAVisualizer
@@ -2376,6 +2698,8 @@ function AppInner(): JSX.Element {
       requireDiv5,
       maxDiv5,
       attemptMultiplier,
+      overgenFactor,
+      acceptanceNeedsHardExclude,
       selectedBoostEnabled,
       selectedBoostFactor,
       ogaSpokeCount,
@@ -2400,6 +2724,7 @@ function AppInner(): JSX.Element {
       ogaPreferredBand,
       ogaPreferredDeciles: [...ogaPreferredDeciles],
       traceVerbose,
+      rdyWeights: { ...rdyWeights },
     };
   }
 
@@ -2440,6 +2765,8 @@ function AppInner(): JSX.Element {
     setRequireDiv5(s.requireDiv5 ?? false);
     setMaxDiv5(s.maxDiv5 ?? 8);
     setAttemptMultiplier(s.attemptMultiplier ?? DEFAULT_ATTEMPT_MULTIPLIER);
+    setOvergenFactor((s as any).overgenFactor ?? 50);
+    setAcceptanceNeedsHardExclude(!!(s as any).acceptanceNeedsHardExclude);
     setSelectedBoostEnabled(s.selectedBoostEnabled ?? false);
     setSelectedBoostFactor(s.selectedBoostFactor ?? 2);
     setOgaSpokeCount(s.ogaSpokeCount ?? 9);
@@ -2464,8 +2791,9 @@ function AppInner(): JSX.Element {
     setOGAPreferredBand(s.ogaPreferredBand ?? 'auto');
     setOGAPreferredDeciles(s.ogaPreferredDeciles ?? []);
     setTraceVerbose(s.traceVerbose ?? true);
-    }
- }
+    setRdyWeights(s.rdyWeights ?? { idm: 0.50, conv: 0.30, oga: 0.20 });
+  }
+}
 
 // UserExclusionsStrip component (kept local)
 type Orientation = "horizontal" | "vertical";

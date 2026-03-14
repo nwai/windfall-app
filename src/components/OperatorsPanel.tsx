@@ -251,17 +251,25 @@ export function OperatorsPanel(props: OperatorsPanelProps) {
             preview={`Scale: ${gpwf_scale_multiplier}`}
             disabled={!gpwfEnabled}
           />
-          {/* NEW: OGA Top control */}
-          <OperatorSlider
-            label="OGA Top (Octagonal)"
-            min={1}
-            max={45}
-            step={1}
-            value={octagonal_top}
-            onChange={setOctagonalTop}
-            tooltip="Post-process: keep top-N by OGA (applied when OGA is enabled)."
-            preview={`Top: ${octagonal_top}`}
-          />
+          {/* NEW: OGA Top control — no upper limit */}
+          <div style={{ marginBottom: 8 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}
+              title="Post-process: keep top-N by OGA (applied when OGA is enabled). No maximum — set to any value.">
+              OGA Top (Octagonal):
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={octagonal_top}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  if (Number.isFinite(v) && v >= 1) setOctagonalTop(Math.floor(v));
+                }}
+                style={{ width: 80, padding: "4px 6px", borderRadius: 4, border: "1px solid #ccc", textAlign: "center" }}
+              />
+              <span style={{ fontSize: 12, color: "#888" }}>Top: {octagonal_top}</span>
+            </label>
+          </div>
         </div>
       </div>
     </section>

@@ -17,13 +17,16 @@ function clampNumber(n: number): number {
   return Math.max(1, Math.min(45, Math.round(n)));
 }
 
-function generateCombos(nums: number[]): number[][] {
+function generateCombos(nums: number[]): { main: number[]; supp: number[] }[] {
   if (nums.length !== 8) return [];
   const sorted = [...nums].sort((a, b) => a - b);
-  const combos: number[][] = [];
+  const combos: { main: number[]; supp: number[] }[] = [];
   for (let i = 0; i < 7; i++) {
     for (let j = i + 1; j < 8; j++) {
-      combos.push(sorted.filter((_, idx) => idx !== i && idx !== j));
+      combos.push({
+        main: sorted.filter((_, idx) => idx !== i && idx !== j),
+        supp: [sorted[i], sorted[j]],
+      });
     }
   }
   return combos;
@@ -149,11 +152,30 @@ export const PickSixPanel: React.FC<PickSixPanelProps> = ({
             <div style={{ marginBottom: 6, color: "#444" }}>
               Showing all 28 combos of 6 from 8 (ordered lexicographically).
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 6 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 6 }}>
               {combos.map((combo, idx) => (
-                <div key={idx} style={{ border: "1px solid #eee", borderRadius: 6, padding: "6px 8px", background: "#fafafa", fontVariantNumeric: "tabular-nums" }}>
-                  <span style={{ color: "#1976d2", marginRight: 6 }}>C{(idx + 1).toString().padStart(2, "0")}:</span>
-                  {formatCombo(combo)}
+                <div key={idx} style={{ border: "1px solid #eee", borderRadius: 6, padding: "6px 8px", background: "#fafafa", fontVariantNumeric: "tabular-nums", display: "flex", alignItems: "center" }}>
+                  <button
+                    type="button"
+                    onClick={() => onSimulateManual([...combo.main, ...combo.supp])}
+                    style={{
+                      background: "#1976d2",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: 4,
+                      padding: "2px 6px",
+                      cursor: "pointer",
+                      fontWeight: 600,
+                      fontSize: 12,
+                      marginRight: 6,
+                      fontFamily: "monospace",
+                    }}
+                    title={`Simulate: Main [${combo.main.join(", ")}] Supp [${combo.supp.join(", ")}]`}
+                  >
+                    C{(idx + 1).toString().padStart(2, "0")}
+                  </button>
+                  <span>{formatCombo(combo.main)}</span>
+                  <span style={{ color: "#888", marginLeft: 6, fontSize: 11 }}>supp: {combo.supp.join(", ")}</span>
                 </div>
               ))}
             </div>

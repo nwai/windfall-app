@@ -75,7 +75,7 @@ export function generateCandidates(
   num: number,
   history: Draw[],
   knobs: Knobs,
-  traceSetter: React.Dispatch<React.SetStateAction<string[]>>,
+  traceSetter: (msg: string) => void,
   excludedNumbers: number[],
   selectedOddEvenRatios: string[],
   useTrickyRule: boolean,
@@ -123,6 +123,8 @@ export function generateCandidates(
     constraints: { undrawn: number; times1: number; times2: number; times3: number; times4: number; times5: number; times6: number; times7: number; times8: number };
     buckets: { undrawn: Set<number>; times1: Set<number>; times2: Set<number>; times3: Set<number>; times4: Set<number>; times5: Set<number>; times6: Set<number>; times7: Set<number>; times8: Set<number> };
     allowShortfall?: boolean;
+    /** When true, exclude undrawn numbers and boost drawn numbers' weights */
+    boostPenalize?: boolean;
   },
   attemptMultiplier?: number,
   ogaSpokeCount?: number
@@ -195,7 +197,7 @@ export function generateCandidates(
     for (const d of slice) {
       [...d.main, ...d.supp].forEach(n => recentUnion!.add(n));
     }
-    traceSetter(t => [...t, `[TRACE] Repeat-mode W=${W} unionSize=${recentUnion!.size}`]);
+    traceSetter(`[TRACE] Repeat-mode W=${W} unionSize=${recentUnion!.size}`);
   }
 
   // HC3 overlap (numbers that appear in both last two draws)
@@ -206,7 +208,7 @@ export function generateCandidates(
     const lastAll = [...lastDraw.main, ...lastDraw.supp];
     const prevAll = [...prevDraw.main, ...prevDraw.supp];
     hc3Numbers = lastAll.filter(n => prevAll.includes(n));
-    traceSetter(t => [...t, `[TRACE] HC3 enabled: overlap with last two draws -> count=${hc3Numbers.length}${hc3Numbers.length > 0 ? ` [${hc3Numbers.join(", ")}]` : ""}`]);
+    traceSetter(`[TRACE] HC3 enabled: overlap with last two draws -> count=${hc3Numbers.length}${hc3Numbers.length > 0 ? ` [${hc3Numbers.join(", ")}]` : ""}`);
   }
 
   // SDE1 filtering (primary pool & SDE1 exclusions)
@@ -216,7 +218,7 @@ export function generateCandidates(
     const { pool, trace, excludedNumbers: sdeExcl } = getSDE1FilteredPool(history);
     mainPool = pool;
     sde1ExcludedNumbers = sdeExcl;
-    traceSetter(t => [...t, `[TRACE] ${trace}`]);
+    traceSetter(`[TRACE] ${trace}`);
   }
 
   // Combine all exclusions (user + SDE1 + HC3)
@@ -231,11 +233,43 @@ export function generateCandidates(
   if (sde1ExcludedNumbers.length > 0) exclusionSources.push(`SDE1=${sde1ExcludedNumbers.length}`);
   if (hc3Numbers.length > 0) exclusionSources.push(`HC3=${hc3Numbers.length}`);
   if (fullExcludedNumbers.length > 0) {
-    traceSetter(t => [...t, `[TRACE] Combined exclusions: ${exclusionSources.join(" + ")} -> total=${fullExcludedNumbers.length} [${fullExcludedNumbers.join(", ")}]`]);
+    traceSetter(`[TRACE] Combined exclusions: ${exclusionSources.join(" + ")} -> total=${fullExcludedNumbers.length} [${fullExcludedNumbers.join(", ")}]`);
   }
 
   // Filter mainPool accordingly
   mainPool = mainPool.filter(n => !fullExcludedSet.has(n));
+
+  // Monthly bucket boost/penalize: exclude undrawn numbers, boost drawn numbers
+  const monthlyBoostMap = new Map<number, number>(); // number -> boost multiplier
+  if (monthlyBucketOptions?.boostPenalize && monthlyBucketOptions.buckets) {
+    const { buckets } = monthlyBucketOptions;
+    // Exclude undrawn numbers from mainPool
+    const undrawnSet = buckets.undrawn;
+    const beforeSize = mainPool.length;
+    mainPool = mainPool.filter(n => !undrawnSet.has(n));
+    const excluded = beforeSize - mainPool.length;
+    if (excluded > 0) {
+      traceSetter(`[TRACE] Monthly boost/penalize: excluded ${excluded} undrawn numbers from pool`);
+    }
+    // Assign boost multipliers based on bucket frequency (higher frequency = stronger boost)
+    // times1 → 1.2x, times2 → 1.4x, times3 → 1.6x, ... times8 → 2.0x
+    const boostTiers: [keyof typeof buckets, number][] = [
+      ['times1', 1.2], ['times2', 1.4], ['times3', 1.6], ['times4', 1.8],
+      ['times5', 2.0], ['times6', 2.2], ['times7', 2.4], ['times8', 2.6],
+    ];
+    let boostedCount = 0;
+    for (const [key, mult] of boostTiers) {
+      for (const n of buckets[key]) {
+        if (!fullExcludedSet.has(n)) {
+          monthlyBoostMap.set(n, mult);
+          boostedCount++;
+        }
+      }
+    }
+    if (boostedCount > 0) {
+      traceSetter(`[TRACE] Monthly boost/penalize: boosted ${boostedCount} drawn numbers (1.2x–2.6x by frequency tier)`);
+    }
+  }
 
   // Recency weighting (lambda): more recent appearances get higher weight
   const recencyScores = Array(46).fill(0);
@@ -250,9 +284,9 @@ export function generateCandidates(
   }
   const maxRecency = Math.max(...recencyScores);
   if (lambda > 0 && history.length) {
-    traceSetter(t => [...t, `[TRACE] Lambda weighting enabled: λ=${lambda.toFixed(2)} maxWeight=${maxRecency.toFixed(2)} (recent numbers get higher sampling weight)`]);
+    traceSetter(`[TRACE] Lambda weighting enabled: λ=${lambda.toFixed(2)} maxWeight=${maxRecency.toFixed(2)} (recent numbers get higher sampling weight)`);
   } else {
-    traceSetter(t => [...t, `[TRACE] Lambda weighting disabled or no history; sampling is uniform aside from boosts.`]);
+    traceSetter(`[TRACE] Lambda weighting disabled or no history; sampling is uniform aside from boosts.`);
   }
   const recencyFactor = (n: number) => {
     if (maxRecency <= 0) return 1;
@@ -267,10 +301,42 @@ export function generateCandidates(
       if (fullExcludedSet.has(n)) selectedBoostSet.delete(n);
     }
     if (selectedBoostSet.size === 0) {
-      traceSetter(t => [...t, "[TRACE] Selected boost disabled: all selected numbers are excluded."]);
+      traceSetter("[TRACE] Selected boost disabled: all selected numbers are excluded.");
     } else {
-      traceSetter(t => [...t, `[TRACE] Selected boost enabled: factor ${boostFactor} on ${selectedBoostSet.size} numbers`]);
+      traceSetter(`[TRACE] Selected boost enabled: factor ${boostFactor} on ${selectedBoostSet.size} numbers`);
     }
+  }
+
+  // Prevent forced numbers from re-introducing excluded numbers
+  const forcedClean = forcedNumbers.filter(n => !fullExcludedSet.has(n));
+  if (forcedClean.length !== forcedNumbers.length) {
+    const removed = forcedNumbers.filter(n => fullExcludedSet.has(n));
+    traceSetter(`[TRACE] Forced numbers intersected exclusions; removed: [${removed.join(", ")}]`);
+  }
+
+  // Pre-calc last draw for quick overlap metrics
+  const lastDraw = history.length ? history[history.length - 1] : null;
+  const lastDrawSet = lastDraw
+    ? new Set([...lastDraw.main, ...lastDraw.supp])
+    : null;
+
+  // Hostile penalty for recent draw numbers: when minRecentMatches === 0 and
+  // recentMatchBias > 0, penalise numbers from the most recent draw during
+  // weighted pool construction (reduce their sampling weight, but never fully
+  // exclude them).  Penalty factor = 1 / (1 + recentMatchBias), e.g.
+  //   bias 0   → factor 1.0  (no penalty)
+  //   bias 0.5 → factor 0.67
+  //   bias 1   → factor 0.50
+  //   bias 5   → factor 0.17
+  const hostileRecent =
+    minRecentMatches === 0 && recentMatchBias > 0 && lastDrawSet != null;
+  const hostilePenalty = hostileRecent ? 1 / (1 + recentMatchBias) : 1;
+
+  if (hostileRecent) {
+    traceSetter(
+      `[TRACE] Hostile-recent enabled: recentMatchBias=${recentMatchBias}, ` +
+        `penalty factor=${hostilePenalty.toFixed(3)} applied to ${lastDrawSet!.size} last-draw numbers`
+    );
   }
 
   const buildWeightedPool = (pool: number[]) => {
@@ -280,8 +346,24 @@ export function generateCandidates(
       if (boostEnabled && selectedBoostSet.has(n)) {
         factor *= Math.max(1, boostFactor);
       }
-      const reps = Math.max(1, Math.round(factor));
-      for (let i = 0; i < reps; i++) out.push(n);
+      // Monthly bucket boost (drawn numbers get frequency-tier boost)
+      const monthlyMult = monthlyBoostMap.get(n);
+      if (monthlyMult) {
+        factor *= monthlyMult;
+      }
+      // Hostile penalty: reduce weight of numbers from the most recent draw.
+      // When the factor drops below 1.0 use fractional probability so the
+      // number is sometimes omitted entirely (but never force-excluded).
+      if (hostileRecent && lastDrawSet!.has(n)) {
+        factor *= hostilePenalty;
+      }
+      if (factor < 1) {
+        // Probabilistic inclusion: e.g. factor=0.3 → 30 % chance of 1 rep
+        if (Math.random() < factor) out.push(n);
+      } else {
+        const reps = Math.max(1, Math.round(factor));
+        for (let i = 0; i < reps; i++) out.push(n);
+      }
     }
     return out;
   };
@@ -312,25 +394,11 @@ export function generateCandidates(
     return res;
   };
 
-  // Prevent forced numbers from re-introducing excluded numbers
-  const forcedClean = forcedNumbers.filter(n => !fullExcludedSet.has(n));
-  if (forcedClean.length !== forcedNumbers.length) {
-    const removed = forcedNumbers.filter(n => fullExcludedSet.has(n));
-    traceSetter(t => [
-      ...t,
-      `[TRACE] Forced numbers intersected exclusions; removed: [${removed.join(", ")}]`
-    ]);
-  }
-
-  // Pre-calc last draw for quick overlap metrics
-  const lastDraw = history.length ? history[history.length - 1] : null;
-  const lastDrawSet = lastDraw
-    ? new Set([...lastDraw.main, ...lastDraw.supp])
-    : null;
-
   // Pre-compute supp base pool: 1-45 minus static exclusions (constant across iterations)
+  // Also exclude monthly-undrawn numbers when boostPenalize is active
+  const monthlyUndrawnSet = monthlyBucketOptions?.boostPenalize ? monthlyBucketOptions.buckets.undrawn : null;
   const suppBasePool = Array.from({ length: 45 }, (_, i) => i + 1)
-    .filter(n => !fullExcludedSet.has(n));
+    .filter(n => !fullExcludedSet.has(n) && !(monthlyUndrawnSet?.has(n)));
 
   // Pre-compute history bitmasks for fast Hamming/Jaccard checks in the hot loop
   const histBitmasks = precomputeHistoryBitmasks(history);
@@ -444,8 +512,17 @@ export function generateCandidates(
       if (minRecentMatches > 0 && matches < minRecentMatches) {
         stats.minRecent++; continue;
       }
-      if (recentMatchBias > 0) {
-        const prob = Math.min(1, recentMatchBias * (matches / 8));
+      // Pro-recency soft filter: only when minRecentMatches > 0 (user wants
+      // recent overlap).  When minRecentMatches === 0 the hostile penalty in
+      // buildWeightedPool already discourages recent-draw numbers, so the
+      // pro-recency filter is skipped to avoid contradiction.
+      //
+      // Formula: prob = (1 - bias) + bias * (matches / 8)
+      //   bias=0 → prob=1 for all candidates (no filtering beyond minRecentMatches)
+      //   bias=1 → prob scales linearly with overlap (strong preference)
+      //   bias=0.1 → very mild preference (mostly uniform acceptance)
+      if (recentMatchBias > 0 && minRecentMatches > 0) {
+        const prob = Math.min(1, (1 - recentMatchBias) + recentMatchBias * (matches / 8));
         if (Math.random() > prob) { stats.recentBias++; continue; }
       }
     }
@@ -500,7 +577,7 @@ if (patternOptions?.constraints?.length && patternOptions?.mode === 'restrict') 
         if (Math.random() <= prob) acceptedByDecile = true;
 
         const selList = (ogaBiasOptions.preferredDeciles ?? []).map(d=>`D${d.index}x${d.weight}`).join(', ');
-        traceSetter(t => [...t, `[TRACE] OGA decile check: OGA=${candidateOGA.toFixed(2)} → D${idx} weight=${w} prob=${prob.toFixed(2)} sel=${selList}`]);
+        traceSetter(`[TRACE] OGA decile check: OGA=${candidateOGA.toFixed(2)} → D${idx} weight=${w} prob=${prob.toFixed(2)} sel=${selList}`);
       }
       if (!acceptedByDecile) {
         // Fallback to low/mid/high deterministic band matching or probabilistic acceptance
@@ -546,7 +623,7 @@ if (patternOptions?.constraints?.length && patternOptions?.mode === 'restrict') 
  
    // Trace div5 enforcement summary for debugging/visibility
    if (div5Options) {
-    traceSetter(t => [...t, `[TRACE] Divisible-by-5 rule: requireOne=${!!div5Options.requireOne} maxAllowed=${div5Options.maxAllowed ?? '∞'} rejects=${stats.div5}`]);
+    traceSetter(`[TRACE] Divisible-by-5 rule: requireOne=${!!div5Options.requireOne} maxAllowed=${div5Options.maxAllowed ?? '∞'} rejects=${stats.div5}`);
   }
 
   if (DEBUG) {
