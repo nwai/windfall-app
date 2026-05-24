@@ -27,6 +27,21 @@ interface SerializedMonthlyBucketOptions {
   boostPenalize?: boolean;
 }
 
+interface MainDigitConstraintOptions {
+  maxCount?: number;
+  boost?: number;
+  singleDigitBoost?: number;
+  twoDigitBoost?: number;
+}
+
+type MainDecadeBiases = Partial<Record<"decade0x" | "decade1x" | "decade2x" | "decade3x" | "decade4x", number>>;
+
+interface DigitWidthConstraintOptions {
+  enabled?: boolean;
+  singleDigitPercent?: number;
+  scope?: "main" | "mainAndSupp";
+}
+
 export interface GenerateWorkerArgs {
   num: number;
   history: any[];
@@ -53,10 +68,25 @@ export interface GenerateWorkerArgs {
   sumFilter?: { enabled?: boolean; min?: number; max?: number; includeSupp?: boolean };
   patternOptions?: any;
   ogaBiasOptions?: any;
-  div5Options?: { requireOne?: boolean; maxAllowed?: number };
+  div5Options?: { maxMainCount?: number };
+  mainZeroOptions?: MainDigitConstraintOptions;
+  mainFiveOptions?: MainDigitConstraintOptions;
+  mainOneOptions?: MainDigitConstraintOptions;
+  mainTwoOptions?: MainDigitConstraintOptions;
+  mainThreeOptions?: MainDigitConstraintOptions;
+  mainFourOptions?: MainDigitConstraintOptions;
+  mainSixOptions?: MainDigitConstraintOptions;
+  mainSevenOptions?: MainDigitConstraintOptions;
+  mainEightOptions?: MainDigitConstraintOptions;
+  mainNineOptions?: MainDigitConstraintOptions;
+  mainDecadeBiases?: MainDecadeBiases;
+  digitWidthConstraint?: DigitWidthConstraintOptions;
   monthlyBucketOptions?: SerializedMonthlyBucketOptions;
   attemptMultiplier?: number;
   ogaSpokeCount?: number;
+  maxLastDrawMatches?: number;
+  /** Per-number boost from monthly repeat bias; plain object (numeric keys). */
+  monthlyRepeatBiasWeights?: Record<number, number>;
 }
 
 function deserializeMonthlyBuckets(
@@ -134,9 +164,23 @@ ctx.addEventListener("message", (e: MessageEvent) => {
       args.patternOptions,
       args.ogaBiasOptions,
       args.div5Options,
+      args.mainZeroOptions,
+      args.mainFiveOptions,
+      args.mainOneOptions,
+      args.mainTwoOptions,
+      args.mainThreeOptions,
+      args.mainFourOptions,
+      args.mainSixOptions,
+      args.mainSevenOptions,
+      args.mainEightOptions,
+      args.mainNineOptions,
+      args.digitWidthConstraint,
       monthlyBucketOptions,
       args.attemptMultiplier,
-      args.ogaSpokeCount
+      args.ogaSpokeCount,
+      args.maxLastDrawMatches,
+      args.monthlyRepeatBiasWeights,
+      args.mainDecadeBiases
     );
 
     ctx.postMessage({ type: "result", id, result });

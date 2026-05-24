@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect, useRef } from "react";
+import React, { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import type { Draw } from "../types";
 export interface MonthlyFrequencyConstraints {
   undrawn: number;
@@ -30,9 +30,12 @@ export interface MonthlyConstraintPayload {
 interface MonthRow {
   monthLabel: string;
   drawCount: number;
+  totalDrawCount: number;
   numbers: { n: number; c: number }[];
   frequencyCounts: { times: number; count: number }[];
   undrawn: number[];
+  /** True when this row is a forward-looking placeholder (no draws yet this month) */
+  isPending?: boolean;
 }
 
 function parseDate(d: string): Date | null {
@@ -105,7 +108,7 @@ function buildRows(history: Draw[], drawsPerMonth: number): MonthRow[] {
       .filter((x) => x.c === 0)
       .map((x) => x.n);
 
-    rows.push({ monthLabel: month, drawCount: arr.length, numbers, frequencyCounts, undrawn });
+    rows.push({ monthLabel: month, drawCount: arr.length, totalDrawCount: arrFull.length, numbers, frequencyCounts, undrawn });
   }
   return rows;
 }
@@ -146,7 +149,8 @@ export const MonthlyDrawsSummaryPanel: React.FC<{
   onBucketSetsChange?: (buckets: MonthlyBucketSets) => void;
   onAvgBucketsChange?: (avgBuckets: AvgBucketEntry[]) => void;
 }> = ({ history, onConstraintsChange, onUseSelectedNumbers, constructiveFillEnabled = false, onConstructiveFillChange, onBucketInfoChange, onBucketSetsChange, onAvgBucketsChange }) => {
-  const [drawsPerMonth, setDrawsPerMonth] = useState<number>(12);
+  const [drawsPerMonth, setDrawsPerMonth] = useState<number>(Infinity);
+  const [avgDrawsFilter, setAvgDrawsFilter] = useState<number>(Infinity);
   const [constraints, setConstraints] = useState<MonthlyFrequencyConstraints>({
     undrawn: 0,
     times1: 0,
@@ -169,6 +173,7 @@ export const MonthlyDrawsSummaryPanel: React.FC<{
     times7: [],
     times8: [],
   });
+  const [simulateResult, setSimulateResult] = useState<number[] | null>(null);
   const maxDrawsPerMonth = useMemo(() => {
     if (!history.length) return 12;
     const counts = new Map<string, number>();
@@ -186,7 +191,51 @@ export const MonthlyDrawsSummaryPanel: React.FC<{
   // Clamp drawsPerMonth to available max to avoid empty rows when user enters large numbers
   const safeDrawsPerMonth = Math.min(Math.max(1, drawsPerMonth), maxDrawsPerMonth);
 
-  const rows = useMemo(() => buildRows(history, safeDrawsPerMonth), [history, safeDrawsPerMonth]);
+  const rows = useMemo(() => {
+    const built = buildRows(history, safeDrawsPerMonth);
+    const today = new Date();
+    const currentKey = getMonthKey(today);
+    const latestKey = built.length ? built[built.length - 1].monthLabel : null;
+    if (!latestKey) return built;
+
+    // Helper: month key immediately after a given YYYY-MM string
+    const nextMonthKey = (key: string) => {
+      const [y, m] = key.split('-').map(Number);
+      return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
+    };
+
+    let pendingKey: string | null = null;
+
+    if (currentKey > latestKey) {
+      // Today is already in a later calendar month — show it as the pending row.
+      pendingKey = currentKey;
+    } else if (currentKey === latestKey) {
+      // Today is still within the same month as the last draw.
+      // If that month's draw count has reached maxDrawsPerMonth the month is
+      // "complete" — show next month as pending so the user can plan ahead.
+      const latestBuiltRow = built[built.length - 1];
+      if (latestBuiltRow.totalDrawCount >= maxDrawsPerMonth) {
+        const nk = nextMonthKey(latestKey);
+        if (!built.find(r => r.monthLabel === nk)) {
+          pendingKey = nk;
+        }
+      }
+    }
+
+    if (pendingKey) {
+      const allUndrawn = Array.from({ length: 45 }, (_, i) => i + 1);
+      built.push({
+        monthLabel: pendingKey,
+        drawCount: 0,
+        totalDrawCount: 0,
+        numbers: [],
+        frequencyCounts: [],
+        undrawn: allUndrawn,
+        isPending: true,
+      });
+    }
+    return built;
+  }, [history, safeDrawsPerMonth, maxDrawsPerMonth]);
   const hasData = rows.length > 0;
   const currentMonthKey = useMemo(() => getMonthKey(new Date()), []);
   // Use the most recent month (including the current partial month) for bucket assignments.
@@ -267,14 +316,20 @@ export const MonthlyDrawsSummaryPanel: React.FC<{
     onBucketSetsChangeRef.current?.(bucketSets);
   }, [bucketSets]);
 
-  // Only include complete months (those with at least drawsPerMonth draws)
-  // to keep averages honest. E.g., 2024-05 has only 6 draws — excluded when drawsPerMonth > 6.
+  // Only include past months whose ACTUAL draw count matches the avgDrawsFilter selection.
+  // When avgDrawsFilter is Infinity ("All"), include all past months.
+  // When set to a specific count (12/13/14), only include months with exactly that many draws.
   const eligibleForAvg = useMemo(() => {
-    return rows.filter((r) => r.monthLabel !== currentMonthKey && r.drawCount >= safeDrawsPerMonth);
-  }, [rows, currentMonthKey, safeDrawsPerMonth]);
+    return rows.filter(
+      (r) =>
+        !r.isPending &&
+        r.monthLabel !== currentMonthKey &&
+        (avgDrawsFilter === Infinity || r.totalDrawCount === avgDrawsFilter)
+    );
+  }, [rows, currentMonthKey, avgDrawsFilter]);
 
   const excludedMonthCount = useMemo(() => {
-    const allPast = rows.filter((r) => r.monthLabel !== currentMonthKey);
+    const allPast = rows.filter((r) => !r.isPending && r.monthLabel !== currentMonthKey);
     return allPast.length - eligibleForAvg.length;
   }, [rows, currentMonthKey, eligibleForAvg]);
 
@@ -283,7 +338,11 @@ export const MonthlyDrawsSummaryPanel: React.FC<{
     const totals = new Map<number, number>();
     eligibleForAvg.forEach((r) => {
       r.frequencyCounts.forEach((f) => {
-        totals.set(f.times, (totals.get(f.times) || 0) + f.count);
+        // Cap at 8x+ so all high-frequency entries are merged into one bucket.
+        // Without this cap, drawsPerMonth > 8 produces separate entries for
+        // times=9, 10, … which overwrite each other in targetDist (see below).
+        const b = Math.min(f.times, 8);
+        totals.set(b, (totals.get(b) || 0) + f.count);
       });
     });
     return Array.from(totals.entries())
@@ -297,12 +356,21 @@ export const MonthlyDrawsSummaryPanel: React.FC<{
     return totalUndrawn / eligibleForAvg.length;
   }, [eligibleForAvg]);
 
+  // Undrawn count from the draw period immediately before the latest row
+  const prevLatestUndrawnRef = useRef<number | null>(null);
+  const prevMonthUndrawnCount = useMemo(() => {
+    // Skip pending rows when looking for the previous real draw period
+    const realRows = rows.filter((r) => !r.isPending);
+    if (realRows.length < 2) return null as number | null;
+    return realRows[realRows.length - 2].undrawn.length;
+  }, [rows]);
+
   // Compute "Needed" delta: raw gap (target − current) per bucket.
   // Also compute "Ideal draw": the best composition of 8 numbers to draw
   // from each bucket, accounting for draw mechanics (drawing from bucket N
   // removes 1 from N and adds 1 to N+1).
-  const { neededDelta, idealDraw } = useMemo(() => {
-    if (!latestRow || !avgFrequencyCounts.length) return { neededDelta: null, idealDraw: null };
+  const { neededDelta, idealDraw, idealFreePicks } = useMemo(() => {
+    if (!latestRow || !avgFrequencyCounts.length) return { neededDelta: null, idealDraw: null, idealFreePicks: null };
 
     // Build current distribution (bucket → count of numbers)
     const maxBucket = 8;
@@ -313,13 +381,17 @@ export const MonthlyDrawsSummaryPanel: React.FC<{
       currentDist[b] += 1;
     });
 
-    // Build target from averages (rounded)
-    const targetDist = new Array(maxBucket + 1).fill(0);
-    if (avgUndrawnCount !== null) targetDist[0] = Math.round(avgUndrawnCount);
+    // Build target from averages.
+    // Accumulate raw averages into each bucket first, THEN round — this correctly
+    // merges any 8x+ entries (times ≥ 8 all map to maxBucket) rather than
+    // overwriting each other with a bare "= Math.round(f.avg)".
+    const rawTarget = new Array(maxBucket + 1).fill(0);
+    if (avgUndrawnCount !== null) rawTarget[0] = avgUndrawnCount;
     avgFrequencyCounts.forEach((f) => {
       const b = Math.min(f.times, maxBucket);
-      targetDist[b] = Math.round(f.avg);
+      rawTarget[b] += f.avg;
     });
+    const targetDist = rawTarget.map((v) => Math.round(v));
 
     // Raw gap: target − current
     const deltas: { times: number; delta: number }[] = [];
@@ -327,45 +399,73 @@ export const MonthlyDrawsSummaryPanel: React.FC<{
       deltas.push({ times: b, delta: targetDist[b] - currentDist[b] });
     }
 
-    // Ideal draw: greedily pick 8 draws from buckets to minimise SSD.
-    // Drawing from bucket b: dist[b] -= 1, dist[min(b+1, maxBucket)] += 1.
-    const simDist = [...currentDist];
-    const drawFrom = new Array(maxBucket + 1).fill(0);
+    // Ideal draw: exhaustive search over all ways to allocate 8 draws across
+    // buckets 0..maxBucket-1, bounded by available counts per bucket.
+    // Drawing from bucket b: dist[b] -= 1, dist[b+1] += 1 (cascading).
+    // Objective: minimise SSD vs targetDist; break ties by maximising the
+    // number of buckets that land exactly on target.
+    // Complexity: at most C(8+8,8) ≈ 6435 leaf evaluations — negligible.
+    const TOTAL_DRAWS = 8;
+    const searchBuf = new Array(maxBucket + 1).fill(0) as number[];
+    let bestDrawBuf = new Array(maxBucket + 1).fill(0) as number[];
+    let bestSSD = Infinity;
+    let bestExactHits = -1;
 
-    for (let pick = 0; pick < 8; pick++) {
-      let bestBucket = -1;
-      let bestImprovement = -Infinity;
-      for (let b = 0; b <= maxBucket; b++) {
-        if (simDist[b] <= 0) continue; // no numbers available in this bucket
-        // Simulate drawing one number from bucket b
-        const dest = Math.min(b + 1, maxBucket);
-        const oldSrcGap = (simDist[b] - targetDist[b]) ** 2;
-        const newSrcGap = (simDist[b] - 1 - targetDist[b]) ** 2;
-        const oldDestGap = (simDist[dest] - targetDist[dest]) ** 2;
-        const newDestGap = (simDist[dest] + 1 - targetDist[dest]) ** 2;
-        // If src === dest (8x+ → 8x+), only count once
-        const improvement = b === maxBucket
-          ? 0  // drawing from 8x+ stays in 8x+, no change
-          : (oldSrcGap - newSrcGap) + (oldDestGap - newDestGap);
-        if (improvement > bestImprovement) {
-          bestImprovement = improvement;
-          bestBucket = b;
-        }
+    const evalCandidate = () => {
+      const sim = [...currentDist];
+      for (let b = 0; b < maxBucket; b++) {
+        if (searchBuf[b] === 0) continue;
+        sim[b] -= searchBuf[b];
+        sim[b + 1] += searchBuf[b];
       }
-      if (bestBucket < 0) break;
-      const dest = Math.min(bestBucket + 1, maxBucket);
-      simDist[bestBucket] -= 1;
-      simDist[dest] += 1;
-      drawFrom[bestBucket] += 1;
-    }
+      let ssd = 0;
+      let hits = 0;
+      for (let b = 0; b <= maxBucket; b++) {
+        const gap = sim[b] - targetDist[b];
+        ssd += gap * gap;
+        if (gap === 0) hits++;
+      }
+      if (ssd < bestSSD || (ssd === bestSSD && hits > bestExactHits)) {
+        bestSSD = ssd;
+        bestExactHits = hits;
+        bestDrawBuf = [...searchBuf];
+      }
+    };
 
-    // Build ideal draw entries (only non-zero)
+    const searchIdeal = (b: number, remaining: number) => {
+      if (remaining === 0) { evalCandidate(); return; }
+      if (b === maxBucket) {
+        // Route remaining draws to 8x+ only up to available count.
+        // Any draws beyond that are "free picks" — distribution is already optimal
+        // and remaining slots can go anywhere. We evaluate once per valid allocation.
+        const maxD = Math.min(remaining, currentDist[maxBucket]);
+        for (let d = 0; d <= maxD; d++) {
+          searchBuf[maxBucket] = d;
+          evalCandidate(); // remaining-d draws are free (unplaceable), don't affect SSD
+        }
+        searchBuf[maxBucket] = 0;
+        return;
+      }
+      if (b > maxBucket) return; // safety
+      const maxD = Math.min(remaining, currentDist[b]);
+      for (let d = 0; d <= maxD; d++) {
+        searchBuf[b] = d;
+        searchIdeal(b + 1, remaining - d);
+      }
+      searchBuf[b] = 0;
+    };
+
+    searchIdeal(0, TOTAL_DRAWS);
+
     const ideal: { times: number; count: number }[] = [];
     for (let b = 0; b <= maxBucket; b++) {
-      ideal.push({ times: b, count: drawFrom[b] });
+      ideal.push({ times: b, count: bestDrawBuf[b] });
     }
+    // Any difference between TOTAL_DRAWS and actually placed draws are "free picks":
+    // the distribution is already at target and these slots can go on any number.
+    const idealFreePicks = TOTAL_DRAWS - bestDrawBuf.reduce((s, v) => s + v, 0);
 
-    return { neededDelta: deltas, idealDraw: ideal };
+    return { neededDelta: deltas, idealDraw: ideal, idealFreePicks };
   }, [latestRow, avgFrequencyCounts, avgUndrawnCount]);
 
   // Emit combined avg buckets (including 0x/undrawn) to parent
@@ -422,6 +522,25 @@ export const MonthlyDrawsSummaryPanel: React.FC<{
     onUseSelectedNumbers(Array.from(all).sort((a, b) => a - b));
   };
 
+  const allSelected = useMemo(() => {
+    const all: number[] = [];
+    (Object.keys(selectedByBucket) as (keyof NumberSelectionState)[]).forEach((k) => {
+      selectedByBucket[k].forEach((n) => all.push(n));
+    });
+    return all.sort((a, b) => a - b);
+  }, [selectedByBucket]);
+
+  const handleSimulate = useCallback(() => {
+    if (allSelected.length < 1) return;
+    const pool = [...allSelected];
+    // Fisher-Yates shuffle, then take first 8 (or all if fewer)
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    setSimulateResult(pool.slice(0, 8).sort((a, b) => a - b));
+  }, [allSelected]);
+
   useEffect(() => {
     if (!constructiveFillEnabled) {
       onConstraintsChange?.(null);
@@ -460,8 +579,8 @@ export const MonthlyDrawsSummaryPanel: React.FC<{
             <thead>
               <tr style={{ background: "f4f6fb" }}>
                 <th style={{ textAlign: "left", padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>Month</th>
+                <th style={{ textAlign: "center", padding: "6px 4px", borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap", width: 1 }}>Draws</th>
                 <th style={{ textAlign: "left", padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>Numbers (count)</th>
-                <th style={{ textAlign: "center", padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>Draws</th>
                 <th style={{ textAlign: "left", padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>Frequency counts</th>
                 <th style={{ textAlign: "center", padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>1x+ sum</th>
                 <th style={{ textAlign: "left", padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>Undrawn (count)</th>
@@ -469,10 +588,28 @@ export const MonthlyDrawsSummaryPanel: React.FC<{
             </thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r.monthLabel} style={{ borderBottom: "1px solid #edf2f7" }}>
-                  <td style={{ padding: "6px 8px", fontWeight: 700 }}>{r.monthLabel}</td>
+                <tr
+                  key={r.monthLabel}
+                  style={{
+                    borderBottom: "1px solid #edf2f7",
+                    background: r.isPending ? "#f0f9ff" : undefined,
+                  }}
+                >
+                  <td style={{ padding: "6px 8px", fontWeight: 700 }}>
+                    {r.monthLabel}
+                    {r.isPending && (
+                      <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 400, color: "#0369a1", background: "#e0f2fe", borderRadius: 4, padding: "1px 6px" }}>
+                        upcoming
+                      </span>
+                    )}
+                  </td>
+                  <td style={{ padding: "6px 4px", textAlign: "center", fontWeight: 700, whiteSpace: "nowrap" }}>
+                    {r.isPending ? "—" : r.totalDrawCount}
+                  </td>
                   <td style={{ padding: "6px 8px", color: "#2d3748" }}>
-                    {r.numbers.length === 0
+                    {r.isPending
+                      ? <span style={{ color: "#64748b", fontStyle: "italic" }}>Awaiting first draw</span>
+                      : r.numbers.length === 0
                       ? "—"
                       : r.numbers.map((x, idx) => (
                           <span key={`${r.monthLabel}-num-${x.n}`}>
@@ -482,9 +619,10 @@ export const MonthlyDrawsSummaryPanel: React.FC<{
                           </span>
                         ))}
                   </td>
-                  <td style={{ padding: "6px 8px", textAlign: "center", fontWeight: 700 }}>{r.drawCount}</td>
                   <td style={{ padding: "6px 8px", color: "#2d3748" }}>
-                    {r.frequencyCounts.length
+                    {r.isPending
+                      ? "—"
+                      : r.frequencyCounts.length
                       ? r.frequencyCounts.map((f, idx) => (
                           <span
                             key={`${r.monthLabel}-freq-${f.times}-${idx}`}
@@ -505,7 +643,7 @@ export const MonthlyDrawsSummaryPanel: React.FC<{
                           </span>
                         ))
                       : "—"}
-                    {(
+                    {!r.isPending && (
                       <span
                         style={{
                           display: "inline-block",
@@ -525,10 +663,10 @@ export const MonthlyDrawsSummaryPanel: React.FC<{
                     )}
                   </td>
                   <td style={{ padding: "6px 8px", textAlign: "center", fontWeight: 700 }}>
-                    {r.frequencyCounts.reduce((totalCount, frequencyEntry) => totalCount + frequencyEntry.count, 0)}
+                    {r.isPending ? "—" : r.frequencyCounts.reduce((totalCount, frequencyEntry) => totalCount + frequencyEntry.count, 0)}
                   </td>
                   <td style={{ padding: "6px 8px", color: "#2d3748" }}>
-                    {r.undrawn.length ? r.undrawn.length : "—"}
+                    {r.isPending ? <span style={{ color: "#0369a1" }}>45</span> : r.undrawn.length ? r.undrawn.length : "—"}
                   </td>
                 </tr>
               ))}
@@ -540,19 +678,44 @@ export const MonthlyDrawsSummaryPanel: React.FC<{
                 </tr>
                 <tr style={{ background: "#f8fafc", borderTop: "1px solid #e2e8f0" }}>
                   <td style={{ padding: "6px 8px", fontWeight: 700 }}>
-                    Average
+                    <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
+                      <span>Average for</span>
+                      <select
+                        value={avgDrawsFilter === Infinity ? "all" : String(avgDrawsFilter)}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setAvgDrawsFilter(v === "all" ? Infinity : Number(v));
+                        }}
+                        style={{
+                          fontSize: 11,
+                          padding: "1px 4px",
+                          borderRadius: 4,
+                          border: "1px solid #cbd5e1",
+                          background: "#fff",
+                          cursor: "pointer",
+                          fontWeight: 600,
+                        }}
+                        title="Filter average row to months with this many draws"
+                      >
+                        <option value="12">12 draws</option>
+                        <option value="13">13 draws</option>
+                        <option value="14">14 draws</option>
+                        <option value="all">All</option>
+                      </select>
+                    </div>
                     <div style={{ fontSize: 10, fontWeight: 400, color: "#64748b" }}>
                       {eligibleForAvg.length} month{eligibleForAvg.length !== 1 ? "s" : ""}
                     </div>
                   </td>
+                  <td style={{ padding: "6px 8px" }} />
                   <td style={{ padding: "6px 8px", fontSize: 10, color: "#64748b" }}>
                     {excludedMonthCount > 0 && (
                       <span style={{ color: "#dc2626", fontWeight: 600 }}>
-                        ⚠️ {excludedMonthCount} month{excludedMonthCount !== 1 ? "s" : ""} excluded (&lt;{safeDrawsPerMonth} draws)
+                        ⚠️ {excludedMonthCount} month{excludedMonthCount !== 1 ? "s" : ""} excluded
+                        {avgDrawsFilter !== Infinity ? ` (≠ ${avgDrawsFilter} draws)` : ""}
                       </span>
                     )}
                   </td>
-                  <td style={{ padding: "6px 8px" }} />
                   <td style={{ padding: "6px 8px", color: "#2d3748" }}>
                     {avgFrequencyCounts.length
                       ? avgFrequencyCounts.map((f) => (
@@ -597,7 +760,19 @@ export const MonthlyDrawsSummaryPanel: React.FC<{
                   <td style={{ padding: "6px 8px", textAlign: "center", fontWeight: 700 }}>
                     {avgFrequencyCounts.length ? avgFrequencyCounts.reduce((totalAverage, frequencyEntry) => totalAverage + frequencyEntry.avg, 0).toFixed(1) : "—"}
                   </td>
-                  <td style={{ padding: "6px 8px" }} />
+                  <td style={{ padding: "6px 8px", color: "#2d3748" }}>
+                    {avgUndrawnCount !== null ? (
+                      <>
+                        {avgUndrawnCount.toFixed(1)}{" "}
+                        <span style={{ color: "#64748b", fontWeight: 400 }}>
+                          ({Math.round(avgUndrawnCount)}
+                          {prevMonthUndrawnCount !== null && (
+                            <> | prev: {prevMonthUndrawnCount}</>
+                          )})
+                        </span>
+                      </>
+                    ) : "—"}
+                  </td>
                 </tr>
                 {neededDelta && (
                   <tr style={{ background: "#fffbeb", borderTop: "1px solid #e2e8f0" }}>
@@ -689,9 +864,36 @@ export const MonthlyDrawsSummaryPanel: React.FC<{
                           </span>
                         );
                       })}
+                      {/* Free picks chip — shown when distribution hits target before 8 draws */}
+                      {!!idealFreePicks && idealFreePicks > 0 && (
+                        <span
+                          title={`${idealFreePicks} pick${idealFreePicks !== 1 ? "s" : ""} are unconstrained — the distribution already reaches target with the ${8 - idealFreePicks} draws above`}
+                          style={{
+                            display: "inline-block",
+                            marginRight: 8,
+                            marginBottom: 4,
+                            padding: "2px 6px",
+                            borderRadius: 6,
+                            background: "#94a3b8",
+                            color: "#fff",
+                            fontWeight: 700,
+                            fontVariantNumeric: "tabular-nums",
+                            border: "2px dashed #475569",
+                            cursor: "help",
+                          }}
+                        >
+                          <span style={{ color: "#fff" }}>free:</span>{" "}
+                          <span style={{ color: "#000", fontWeight: 900 }}>{idealFreePicks}</span>
+                        </span>
+                      )}
                     </td>
                     <td style={{ padding: "6px 8px", textAlign: "center", fontWeight: 700, color: "#166534" }}>
                       {idealDraw.reduce((s, d) => s + d.count, 0)} of 8
+                      {!!idealFreePicks && idealFreePicks > 0 && (
+                        <div style={{ fontSize: 10, fontWeight: 400, color: "#475569" }}>
+                          +{idealFreePicks} free
+                        </div>
+                      )}
                     </td>
                     <td style={{ padding: "6px 8px" }} />
                   </tr>
@@ -804,12 +1006,56 @@ export const MonthlyDrawsSummaryPanel: React.FC<{
                         </button>
                         <button
                           type="button"
-                          onClick={() => setSelectedByBucket({
-                            undrawn: [], times1: [], times2: [], times3: [], times4: [], times5: [], times6: [], times7: [], times8: [],
-                          })}
+                          onClick={() => {
+                            setSelectedByBucket({
+                              undrawn: [], times1: [], times2: [], times3: [], times4: [], times5: [], times6: [], times7: [], times8: [],
+                            });
+                            setSimulateResult(null);
+                          }}
                         >
                           Clear selections
                         </button>
+                        {allSelected.length > 6 && (
+                          <button
+                            type="button"
+                            onClick={handleSimulate}
+                            style={{
+                              background: "#166534",
+                              color: "#fff",
+                              border: "none",
+                              borderRadius: 6,
+                              padding: "4px 12px",
+                              cursor: "pointer",
+                              fontWeight: 600,
+                              fontSize: 12,
+                            }}
+                            title={`Randomly simulate a draw of 8 from your ${allSelected.length} selected numbers`}
+                          >
+                            🎲 Simulate draw
+                          </button>
+                        )}
+                        {simulateResult && (
+                          <span style={{ fontSize: 12, color: "#166534", fontWeight: 600 }}>
+                            Result:{" "}
+                            {simulateResult.map((n, i) => (
+                              <span
+                                key={n}
+                                style={{
+                                  display: "inline-block",
+                                  marginRight: 4,
+                                  padding: "2px 7px",
+                                  borderRadius: 12,
+                                  background: "#dcfce7",
+                                  border: "1px solid #86efac",
+                                  color: "#166534",
+                                  fontVariantNumeric: "tabular-nums",
+                                }}
+                              >
+                                {n}
+                              </span>
+                            ))}
+                          </span>
+                        )}
                         <span style={{ fontSize: 11, color: "#555" }}>Click numbers to toggle; counts above update automatically.</span>
                       </div>
                     </div>
