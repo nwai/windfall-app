@@ -3,6 +3,13 @@
 
 export type UUID = string;
 export type PresetVersion = 1;
+type MainEndingDigitBucketKey = "main0" | "main1" | "main2" | "main3" | "main4" | "main5" | "main6" | "main7" | "main8" | "main9";
+type MainDecadeBucketKey = "decade0x" | "decade1x" | "decade2x" | "decade3x" | "decade4x";
+
+interface MainBucketBoostSnapshot {
+  singleDigit?: number;
+  twoDigit?: number;
+}
 
 export interface AppPreset {
   id: UUID;
@@ -90,12 +97,46 @@ export interface AppPresetSnapshot {
     bootstrapIters?: number;
   };
 
-  // Divisible-by-5 constraints
+  // Main ending-digit constraints
+  mainZeroSetEnabled?: boolean;
+  mainZeroSetCount?: number;
+  mainFiveSetEnabled?: boolean;
+  mainFiveSetCount?: number;
+  mainDiv5Enabled?: boolean;
+  mainDiv5Count?: number;
+  mainOneSetEnabled?: boolean;
+  mainOneSetCount?: number;
+  mainTwoSetEnabled?: boolean;
+  mainTwoSetCount?: number;
+  mainThreeSetEnabled?: boolean;
+  mainThreeSetCount?: number;
+  mainFourSetEnabled?: boolean;
+  mainFourSetCount?: number;
+  mainSixSetEnabled?: boolean;
+  mainSixSetCount?: number;
+  mainSevenSetEnabled?: boolean;
+  mainSevenSetCount?: number;
+  mainEightSetEnabled?: boolean;
+  mainEightSetCount?: number;
+  mainNineSetEnabled?: boolean;
+  mainNineSetCount?: number;
+  mainBucketBoosts?: Partial<Record<MainEndingDigitBucketKey, number | MainBucketBoostSnapshot>>;
+  mainDecadeBiases?: Partial<Record<MainDecadeBucketKey, number>>;
+  digitWidthConstraintEnabled?: boolean;
+  digitWidthSingleDigitPercent?: number;
+  digitWidthScope?: "main" | "mainAndSupp";
+  // Legacy fields kept for backward-compatible imports
   requireDiv5?: boolean;
   maxDiv5?: number;
 
   // Attempt budget multiplier
   attemptMultiplier?: number;
+
+  // Over-generation pool multiplier (pool = Count × overgenFactor)
+  overgenFactor?: number;
+
+  // MiAN hard-exclusion toggle
+  acceptanceNeedsHardExclude?: boolean;
 
   // Generation-time boost for user selected numbers
   selectedBoostEnabled?: boolean;
@@ -108,6 +149,8 @@ export interface AppPresetSnapshot {
   manualSimSelected?: number[];
   minRecentMatches?: number;
   recentMatchBias?: number;
+  maxLastDrawMatchesEnabled?: boolean;
+  maxLastDrawMatchesValue?: number;
   repeatWindowSizeW?: number;
   minFromRecentUnionM?: number;
   sumFilter?: { enabled: boolean; min: number; max: number; includeSupp: boolean };
@@ -124,6 +167,8 @@ export interface AppPresetSnapshot {
   ogaPreferredBand?: "auto" | "low" | "mid" | "high";
   ogaPreferredDeciles?: { index: number; weight: number }[];
   traceVerbose?: boolean;
+  // Readiness (Rdy) score weights
+  rdyWeights?: { idm: number; conv: number; oga: number };
 }
 
 const KEY = "app:presets:v1";

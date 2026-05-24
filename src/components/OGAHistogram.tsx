@@ -10,8 +10,6 @@ export function OGAHistogram({
   candidateOGA?: number;
   candidatePercentile?: number;
 }) {
-  console.log("Rendering NIVO OGAHistogram");
-
   if (!ogaScores.length) return null;
 
   // Bin data
