@@ -37,41 +37,24 @@ describe("generateCandidates OGA bias decile acceptance", () => {
         trace.splice(0, trace.length, ...next);
       }
     };
-    const res = generateCandidates(
-      5,
+    const res = generateCandidates({
+      num: 5,
       history,
       knobs,
-      appendTrace,
-      [],
-      [],
-      false,
-      0,
-      [],
-      [],
-      0,
-      0,
-      1,
-      0,
-      [],
-      0,
-      0,
-      0,
-      0,
-      undefined,
-      undefined,
-      undefined,
-      {
+      traceSetter: appendTrace,
+      jaccardThreshold: 1,
+      ogaBiasOptions: {
         enabled: true,
         preferredBand: 'mid',
         bands: { low: 0.2, mid: 0.6, high: 0.2 },
         deciles: { thresholds: [0,1,2,3,4,5,6,7,8], probs: Array(10).fill(0.1) },
         preferredDeciles: [{ index: 5, weight: 1 }, { index: 6, weight: 1 }]
       },
-      {
+      div5Options: {
         requireOne: false,
         maxAllowed: 8,
       }
-    );
+    });
     const hasTrace = trace.some(l => l.includes("OGA decile") || l.includes("OGA band"));
     const hasBiasCount = (res.rejectionStats as any).ogaBias >= 0;
     expect(hasTrace || hasBiasCount).toBe(true);

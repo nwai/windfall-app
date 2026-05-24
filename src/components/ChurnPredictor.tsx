@@ -128,6 +128,9 @@ export const ChurnPredictor: React.FC<Props> = ({
   return (
     <section style={{ border: "1px solid #ccc", borderRadius: 8, padding: 12, marginTop: 10 }}>
       <h4>Churn Predictor ({canRF ? "rf" : "logreg"})</h4>
+      <div style={{ color: "#555", marginBottom: 6, fontSize: 13 }}>
+        Experimental current-state classifier; metrics are a per-number holdout, not a validated next-draw forecast.
+      </div>
       {wantRF && !rfAvailable && (
         <div style={{ color: "#b26a00", marginBottom: 6, fontSize: 13 }}>
           Random Forest not available; falling back to logistic regression.

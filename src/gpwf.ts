@@ -8,19 +8,21 @@ export function gpwfScore(candidate: CandidateSet, history: Draw[], knobs: Knobs
   const floor = knobs.gpwf_floor;
   const scale = knobs.gpwf_scale_multiplier;
 
-  // Count how many times each number from candidate appears in last {window} draws
+  // Count how many times each number from candidate appears in the most recent {window} draws.
   const freqMap = new Map<number, number>();
-  for (let i = 0; i < window; ++i) {
-    for (const n of history[i].main) {
+  const recent = history.slice(-window);
+  for (const draw of recent) {
+    for (const n of [...draw.main, ...draw.supp]) {
       freqMap.set(n, (freqMap.get(n) || 0) + 1);
     }
   }
   // Score = sum of frequencies, normalized and scaled
   let freqSum = 0;
-  for (const n of candidate.main) {
+  const nums = [...candidate.main, ...candidate.supp];
+  for (const n of nums) {
     freqSum += freqMap.get(n) || 0;
   }
-  const maxFreq = window * candidate.main.length;
+  const maxFreq = window * Math.max(1, nums.length);
   let score = floor + scale * (freqSum / maxFreq + bias);
   if (score > 1) score = 1;
   return score;

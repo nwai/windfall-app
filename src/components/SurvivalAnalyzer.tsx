@@ -668,7 +668,7 @@ export const SurvivalAnalyzer: React.FC<{
           )}
 
           <div style={{ fontSize: 12, color: "#888", marginTop: 8 }}>
-            Base = Kaplan–Meier probability. Biased = Base × (combined bias)^γ × (ZPA weight)^γ.
+            Base = simplified recurrence estimate from historical gaps. Biased = Base × (combined bias)^γ × (ZPA weight)^γ.
             {patternBiasWeights && <> Pattern column shows per-number smoothed pattern ratio weight.</>}
           </div>
         </div>

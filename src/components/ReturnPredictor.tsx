@@ -9,6 +9,10 @@ type Props = {
   minDraws?: number;     // default 36
 };
 
+export function hasTrainableReturnLabels(dataset: NumberExample[]): boolean {
+  return dataset.some((d) => d.churnLabel === 1 && d.returnLabel != null);
+}
+
 export const ReturnPredictor: React.FC<Props> = ({
   dataset,
   onPredictions,
@@ -25,6 +29,7 @@ export const ReturnPredictor: React.FC<Props> = ({
     () => dataset.filter(d => d.churnLabel === 1 && d.returnLabel != null),
     [dataset]
   );
+  const hasReturnLabels = hasTrainableReturnLabels(dataset);
   const hasEnough = (totalDraws ?? 0) >= (minDraws ?? 36);
   const wantRF = modelType === "rf";
   const canRF = wantRF && rfAvailable;
@@ -121,7 +126,12 @@ export const ReturnPredictor: React.FC<Props> = ({
           Need at least {minDraws} draws (have {totalDraws}) to train reliably.
         </div>
       )}
-      <button onClick={trainAndPredict} disabled={busy || !hasEnough}>
+      {!hasReturnLabels && (
+        <div style={{ color: "#b26a00", marginBottom: 6, fontSize: 13 }}>
+          Return labels are not computed yet, so this predictor is disabled rather than presenting placeholder probabilities.
+        </div>
+      )}
+      <button onClick={trainAndPredict} disabled={busy || !hasEnough || !hasReturnLabels}>
         {busy ? "Training…" : "Train & Predict"}
       </button>
       {metrics && (
