@@ -87,21 +87,21 @@ export function fingerprint(candidate: CandidateSet): string {
 }
 
 // --- Bitmask helpers for hot-path Hamming / Jaccard ---
-// Numbers 1-45 each map to a single bit in a JS number (safe up to 2^53).
+// Use BigInt: JavaScript number bitwise operators are 32-bit and would wrap
+// values such as 33 onto 1, corrupting lottery-number similarity checks.
 
 /** Convert an array of numbers (1-45) to a bitmask. */
-export function toBitmask(nums: number[]): number {
-  let mask = 0;
-  for (const n of nums) mask |= (1 << n);
+export function toBitmask(nums: number[]): bigint {
+  let mask = 0n;
+  for (const n of nums) mask |= 1n << BigInt(n);
   return mask;
 }
 
 /** Count set bits (popcount) using Brian Kernighan's algorithm. */
-function popcount(v: number): number {
-  // For values > 2^30 we need to handle sign bit; split into two 16-bit halves.
+function popcount(v: bigint): number {
   let count = 0;
-  while (v) {
-    v &= v - 1;
+  while (v !== 0n) {
+    v &= v - 1n;
     count++;
   }
   return count;
@@ -110,14 +110,14 @@ function popcount(v: number): number {
 /** Pre-computed bitmask data for a set of history draws. */
 export interface HistoryBitmasks {
   /** Bitmask of each draw's main numbers. */
-  mainMasks: number[];
+  mainMasks: bigint[];
   /** Size of each draw's main array (typically 6). */
   mainSizes: number[];
 }
 
 /** Pre-compute bitmasks for all history draws (call once before the generation loop). */
 export function precomputeHistoryBitmasks(history: Draw[]): HistoryBitmasks {
-  const mainMasks: number[] = new Array(history.length);
+  const mainMasks: bigint[] = new Array(history.length);
   const mainSizes: number[] = new Array(history.length);
   for (let i = 0; i < history.length; i++) {
     mainMasks[i] = toBitmask(history[i].main);
@@ -130,7 +130,7 @@ export function precomputeHistoryBitmasks(history: Draw[]): HistoryBitmasks {
  * Bitset-optimized minHamming using pre-computed history bitmasks.
  * Distance per draw = candidateMainSize - |intersection|
  */
-export function minHammingBit(candidateMainMask: number, candidateMainSize: number, hb: HistoryBitmasks): number {
+export function minHammingBit(candidateMainMask: bigint, candidateMainSize: number, hb: HistoryBitmasks): number {
   let best = candidateMainSize;
   for (let i = 0; i < hb.mainMasks.length; i++) {
     const overlap = popcount(candidateMainMask & hb.mainMasks[i]);
@@ -145,7 +145,7 @@ export function minHammingBit(candidateMainMask: number, candidateMainSize: numb
  * Bitset-optimized maxJaccard using pre-computed history bitmasks.
  * J(A,B) = |A ∩ B| / |A ∪ B| = popcount(a&b) / (|A| + |B| - popcount(a&b))
  */
-export function maxJaccardBit(candidateMainMask: number, candidateMainSize: number, hb: HistoryBitmasks): number {
+export function maxJaccardBit(candidateMainMask: bigint, candidateMainSize: number, hb: HistoryBitmasks): number {
   let max = 0;
   for (let i = 0; i < hb.mainMasks.length; i++) {
     const inter = popcount(candidateMainMask & hb.mainMasks[i]);

@@ -21,6 +21,28 @@ export type FetchDrawsParams = {
   strictValidateDraws: (draws: Draw[]) => Draw[];
 };
 
+export function buildDemoDrawHistory(
+  count: number,
+  numMains: number,
+  mainMin: number,
+  mainMax: number,
+  rng: FetchDrawsParams["rng"],
+  now: number = Date.now()
+): Draw[] {
+  const rows: Draw[] = [];
+  for (let i = 0; i < count; i++) {
+    const main = rng(numMains, mainMin, mainMax);
+    const supp = rng(2, mainMin, mainMax, main);
+    rows.push({
+      main,
+      supp,
+      date: new Date(now - (count - 1 - i) * 86400 * 1000).toISOString().slice(0, 10),
+      isSimulated: true,
+    });
+  }
+  return rows;
+}
+
 // Local date parser tolerant to ISO and M/D/YY formats
 function parseCsvDateToEpoch(s: string): number {
   if (!s) return 0;
@@ -112,17 +134,10 @@ export async function fetchDraws({
     if (ok) return;
   }
 
-  // Stub fallback
-  const stub: Draw[] = [];
-  const now = Date.now();
-  for (let i = 0; i < minValidDraws; i++) {
-    stub.push({
-      main: rng(numMains, mainMin, mainMax),
-      supp: rng(2, mainMin, mainMax),
-      date: new Date(now - (minValidDraws - 1 - i) * 86400 * 1000).toISOString().slice(0, 10),
-    });
-  }
+  // Last-resort demo fallback. Keep it explicit and mark rows simulated so
+  // downstream panels can avoid mistaking synthetic history for real draws.
+  const stub = buildDemoDrawHistory(minValidDraws, numMains, mainMin, mainMax, rng);
   setHistory(stub);
   setHighlights([]);
-  setTrace(t => [...t, `[TRACE] Stub history of ${stub.length} draws generated.`]);
+  setTrace(t => [...t, `[TRACE] DEMO MODE: generated ${stub.length} simulated fallback draws because no real history source was available.`]);
 }

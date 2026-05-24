@@ -446,6 +446,7 @@ function AppInner(): JSX.Element {
   }, [history, drawWindowMode, rangeFrom, rangeTo, windowEnabled, windowMode, customDrawCount]);
 
   const activeWindowSize = filteredHistory.length;
+  const demoModeActive = useMemo(() => history.some((draw) => draw.isSimulated), [history]);
 
   const sde1Exclusions = knobs.enableSDE1 ? getSDE1FilteredPool(filteredHistory).excludedNumbers : [];
   let hc3Exclusions: number[] = [];
@@ -811,52 +812,50 @@ function AppInner(): JSX.Element {
     const traceDispatch: React.Dispatch<React.SetStateAction<string[]>> = setTraceMaybe;
 
     const t0 = performance.now();
-    const result = generateCandidates(
-      numCandidates,
-      filteredHistory,
-      effectiveKnobsForGen,
-      traceDispatch,
-      effectiveExcludedNumbers,
-      selectedRatios,
+    const result = generateCandidates({
+      num: numCandidates,
+      history: filteredHistory,
+      knobs: effectiveKnobsForGen,
+      traceSetter: traceDispatch,
+      excludedNumbers: effectiveExcludedNumbers,
+      selectedOddEvenRatios: selectedRatios,
       useTrickyRule,
-      0, // minOGAPercentile not used here
-      pastOGAScores as any,
-      trendSelectedNumbers,
-      userSelectedNumbers,
-      { enabled: selectedBoostEnabled, factor: selectedBoostFactor },
-      entropyThresholdEff,
-      hammingThresholdEff,
-      jaccardThresholdEff,
-      lambdaEnabled ? lambda : 0.0,
+      minOGAPercentile: 0,
+      pastOGAScores: pastOGAScores as any,
+      forcedNumbers: trendSelectedNumbers,
+      selectedNumbersForBoost: userSelectedNumbers,
+      selectedBoostOptions: { enabled: selectedBoostEnabled, factor: selectedBoostFactor },
+      entropyThreshold: entropyThresholdEff,
+      hammingThreshold: hammingThresholdEff,
+      jaccardThreshold: jaccardThresholdEff,
+      lambda: lambdaEnabled ? lambda : 0.0,
       ratioOptions,
       minRecentMatches,
       recentMatchBias,
       repeatWindowSizeW,
       minFromRecentUnionM,
-      undefined,
-      undefined,
-      { enabled: false, min: 0, max: 0, includeSupp: true },
-      {
+      sumFilter,
+      patternOptions: {
         constraints: selectedWindowPatterns,
         mode: patternConstraintMode,
         boostFactor: patternBoostFactor,
         sumTolerance: patternSumTolerance,
       },
-      {
+      ogaBiasOptions: {
         enabled: enableOGAForecastBias,
         preferredBand: ogaPreferredBand,
         bands: ogaStats.bands,
         deciles: ogaStats.deciles,
         preferredDeciles: ogaPreferredDeciles,
       },
-      {
+      div5Options: {
         requireOne: requireDiv5,
         maxAllowed: maxDiv5
       },
       monthlyBucketOptions,
       attemptMultiplier,
-      ogaSpokeCount
-    );
+      ogaSpokeCount,
+    });
 
     const monthlyTrace = buildMonthlyTrace();
     setTraceMaybe((t) => [
@@ -937,52 +936,50 @@ function AppInner(): JSX.Element {
     } : undefined;
 
     const t0 = performance.now();
-    const result = generateCandidates(
-      target,
-      filteredHistory,
-      effectiveKnobsForGen,
-      setTraceMaybe,
-      effectiveExcludedNumbers,
-      selectedRatios,
+    const result = generateCandidates({
+      num: target,
+      history: filteredHistory,
+      knobs: effectiveKnobsForGen,
+      traceSetter: setTraceMaybe,
+      excludedNumbers: effectiveExcludedNumbers,
+      selectedOddEvenRatios: selectedRatios,
       useTrickyRule,
-      0,
-      pastOGAScores as any,
-      trendSelectedNumbers,
-      userSelectedNumbers,
-      { enabled: selectedBoostEnabled, factor: selectedBoostFactor },
-      entropyThresholdEff,
-      hammingThresholdEff,
-      jaccardThresholdEff,
-      lambdaEnabled ? lambda : 0.0,
+      minOGAPercentile: 0,
+      pastOGAScores: pastOGAScores as any,
+      forcedNumbers: trendSelectedNumbers,
+      selectedNumbersForBoost: userSelectedNumbers,
+      selectedBoostOptions: { enabled: selectedBoostEnabled, factor: selectedBoostFactor },
+      entropyThreshold: entropyThresholdEff,
+      hammingThreshold: hammingThresholdEff,
+      jaccardThreshold: jaccardThresholdEff,
+      lambda: lambdaEnabled ? lambda : 0.0,
       ratioOptions,
       minRecentMatches,
       recentMatchBias,
       repeatWindowSizeW,
       minFromRecentUnionM,
-      undefined,
-      undefined,
-      { enabled: false, min: 0, max: 0, includeSupp: true },
-      {
+      sumFilter,
+      patternOptions: {
         constraints: selectedWindowPatterns,
         mode: patternConstraintMode,
         boostFactor: patternBoostFactor,
         sumTolerance: patternSumTolerance,
       },
-      {
+      ogaBiasOptions: {
         enabled: enableOGAForecastBias,
         preferredBand: ogaPreferredBand,
         bands: ogaStats.bands,
         deciles: ogaStats.deciles,
         preferredDeciles: ogaPreferredDeciles,
       },
-      {
+      div5Options: {
         requireOne: requireDiv5,
         maxAllowed: maxDiv5,
       },
       monthlyBucketOptions,
       attemptMultiplier,
-      ogaSpokeCount
-    );
+      ogaSpokeCount,
+    });
 
     const monthlyTrace = buildMonthlyTrace();
     setTraceMaybe((t) => [
@@ -1173,6 +1170,11 @@ function AppInner(): JSX.Element {
           Trace verbose
         </label>
       </h2>
+      {demoModeActive && (
+        <div style={{ margin: "8px 0 12px", padding: 10, border: "1px solid #f0c36d", borderRadius: 6, background: "#fff8e1", color: "#6f4e00", fontSize: 13 }}>
+          Demo mode: synthetic fallback draw history is loaded because no real history source was available. Do not treat analysis from this data as historical evidence.
+        </div>
+      )}
 
       {/* [ORDER-ANCHOR] 01 Number Trends Table */}
       <CollapsibleSection title={<b>Number Trends Table</b>} summaryHint="Click a number to mark for forced inclusion" defaultOpen={false}>
@@ -1503,7 +1505,7 @@ function AppInner(): JSX.Element {
         <SurvivalAnalyzer
           history={filteredHistory}
           excludedNumbers={allExclusions}
-          probabilityHeading="Probability of Appearance in Next Draw (Per Number):"
+          probabilityHeading="Exploratory Recurrence Score (Per Number):"
           trendWeights={trendWeights}
           externalWindowSize={activeWindowSize}
           enableSDE1Global={knobs.enableSDE1}
@@ -2030,7 +2032,7 @@ function AppInner(): JSX.Element {
                 <div style={{ fontWeight: 700, marginBottom: 6 }}>Composition & Recency</div>
                 <label>
                   <input type="checkbox" checked={useTrickyRule} onChange={(e) => setUseTrickyRule(e.target.checked)} style={{ marginRight: 6 }} />
-                  Tricky Rule (reject 0:8 and 8:0)
+                  Tricky Rule (4 odd/4 even + 3 prime/5 composite)
                 </label>
                 <div style={{ marginTop: 6 }}>
                   <b>Odd/Even ratios</b> (disable Tricky to use):

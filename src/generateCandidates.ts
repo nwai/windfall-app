@@ -1,8 +1,8 @@
 import { CandidateSet, Draw, Knobs } from "./types";
 import { entropy, precomputeHistoryBitmasks, minHammingBit, maxJaccardBit, toBitmask } from "./analytics";
-import { applyOctagonalPostProcess } from "./octagonal";
 import { getSDE1FilteredPool } from "./sde1";
 import { computeOGA, DEFAULT_OGA_SPOKES } from "./utils/oga";
+import { validateTrickyRule } from "./trickyRule";
 
 /** Trend classification union (avoid missing type) */
 export type TrendClass = 'UP' | 'DOWN' | 'FLAT';
@@ -31,7 +31,59 @@ export interface GenerateCandidatesResult {
   };
 }
 
+export interface GenerateCandidatesOptions {
+  num: number;
+  history: Draw[];
+  knobs: Knobs;
+  traceSetter?: React.Dispatch<React.SetStateAction<string[]>>;
+  excludedNumbers?: number[];
+  selectedOddEvenRatios?: string[];
+  useTrickyRule?: boolean;
+  minOGAPercentile?: number;
+  pastOGAScores?: number[];
+  forcedNumbers?: number[];
+  selectedNumbersForBoost?: number[];
+  selectedBoostOptions?: { enabled?: boolean; factor?: number };
+  entropyThreshold?: number;
+  hammingThreshold?: number;
+  jaccardThreshold?: number;
+  lambda?: number;
+  ratioOptions?: { ratio: string; count: number }[];
+  minRecentMatches?: number;
+  recentMatchBias?: number;
+  repeatWindowSizeW?: number;
+  minFromRecentUnionM?: number;
+  trendMap?: Map<number, TrendClass>;
+  allowedTrendRatios?: string[];
+  sumFilter?: { enabled?: boolean; min?: number; max?: number; includeSupp?: boolean };
+  patternOptions?: {
+    constraints?: { low: number; high: number; even: number; odd: number; sum: number }[];
+    mode?: 'boost' | 'restrict';
+    boostFactor?: number;
+    sumTolerance?: number;
+  };
+  ogaBiasOptions?: {
+    enabled?: boolean;
+    preferredBand?: 'auto' | 'low' | 'mid' | 'high';
+    bands?: { low: number; mid: number; high: number };
+    deciles?: { thresholds: number[]; probs: number[] };
+    preferredDeciles?: { index: number; weight: number }[];
+  };
+  div5Options?: {
+    requireOne?: boolean;
+    maxAllowed?: number;
+  };
+  monthlyBucketOptions?: {
+    constraints: { undrawn: number; times1: number; times2: number; times3: number; times4: number; times5: number; times6: number; times7: number; times8: number };
+    buckets: { undrawn: Set<number>; times1: Set<number>; times2: Set<number>; times3: Set<number>; times4: Set<number>; times5: Set<number>; times6: Set<number>; times7: Set<number>; times8: Set<number> };
+    allowShortfall?: boolean;
+  };
+  attemptMultiplier?: number;
+  ogaSpokeCount?: number;
+}
+
 const DEBUG = false;
+const noopTraceSetter: React.Dispatch<React.SetStateAction<string[]>> = () => undefined;
 
 /* ------------------------ Pattern helpers (top-level) ----------------------- */
 
@@ -71,6 +123,7 @@ function matchesAnyPattern(
 /**
  * Generate candidate draw sets with layered rejection filters.
  */
+export function generateCandidates(options: GenerateCandidatesOptions): GenerateCandidatesResult;
 export function generateCandidates(
   num: number,
   history: Draw[],
@@ -79,20 +132,20 @@ export function generateCandidates(
   excludedNumbers: number[],
   selectedOddEvenRatios: string[],
   useTrickyRule: boolean,
-  minOGAPercentile: number,          // currently unused in this function (left for future OGA filtering)
-  pastOGAScores: number[],           // currently unused here (OGA computed later post-process)
+  minOGAPercentile: number,
+  pastOGAScores: number[],
   forcedNumbers: number[],
   selectedNumbersForBoost: number[],
   selectedBoostOptions: { enabled?: boolean; factor?: number } | undefined,
   entropyThreshold: number,
   hammingThreshold: number,
   jaccardThreshold: number,
-  lambda: number,                    // currently not applied inside this function (placeholder for future weighting)
+  lambda: number,
   ratioOptions?: { ratio: string; count: number }[],
-  minRecentMatches: number = 0,
-  recentMatchBias: number = 0,
-  repeatWindowSizeW: number = 0,
-  minFromRecentUnionM: number = 0,
+  minRecentMatches?: number,
+  recentMatchBias?: number,
+  repeatWindowSizeW?: number,
+  minFromRecentUnionM?: number,
   trendMap?: Map<number, TrendClass>,
   allowedTrendRatios?: string[],
   // NEW: optional sum filter
@@ -126,7 +179,95 @@ export function generateCandidates(
   },
   attemptMultiplier?: number,
   ogaSpokeCount?: number
+): GenerateCandidatesResult;
+export function generateCandidates(
+  numOrOptions: number | GenerateCandidatesOptions,
+  history: Draw[] = [],
+  knobs?: Knobs,
+  traceSetter: React.Dispatch<React.SetStateAction<string[]>> = noopTraceSetter,
+  excludedNumbers: number[] = [],
+  selectedOddEvenRatios: string[] = [],
+  useTrickyRule: boolean = false,
+  _minOGAPercentile: number = 0,
+  _pastOGAScores: number[] = [],
+  forcedNumbers: number[] = [],
+  selectedNumbersForBoost: number[] = [],
+  selectedBoostOptions: { enabled?: boolean; factor?: number } | undefined = undefined,
+  entropyThreshold: number = 0,
+  hammingThreshold: number = 0,
+  jaccardThreshold: number = 1,
+  lambda: number = 0,
+  ratioOptions?: { ratio: string; count: number }[],
+  minRecentMatches: number = 0,
+  recentMatchBias: number = 0,
+  repeatWindowSizeW: number = 0,
+  minFromRecentUnionM: number = 0,
+  trendMap?: Map<number, TrendClass>,
+  allowedTrendRatios?: string[],
+  sumFilter?: { enabled?: boolean; min?: number; max?: number; includeSupp?: boolean },
+  patternOptions?: {
+    constraints?: { low: number; high: number; even: number; odd: number; sum: number }[];
+    mode?: 'boost' | 'restrict';
+    boostFactor?: number;
+    sumTolerance?: number;
+  },
+  ogaBiasOptions?: {
+    enabled?: boolean;
+    preferredBand?: 'auto' | 'low' | 'mid' | 'high';
+    bands?: { low: number; mid: number; high: number };
+    deciles?: { thresholds: number[]; probs: number[] };
+    preferredDeciles?: { index: number; weight: number }[];
+  },
+  div5Options?: {
+    requireOne?: boolean;
+    maxAllowed?: number;
+  },
+  monthlyBucketOptions?: {
+    constraints: { undrawn: number; times1: number; times2: number; times3: number; times4: number; times5: number; times6: number; times7: number; times8: number };
+    buckets: { undrawn: Set<number>; times1: Set<number>; times2: Set<number>; times3: Set<number>; times4: Set<number>; times5: Set<number>; times6: Set<number>; times7: Set<number>; times8: Set<number> };
+    allowShortfall?: boolean;
+  },
+  attemptMultiplier?: number,
+  ogaSpokeCount?: number
 ): GenerateCandidatesResult {
+  if (typeof numOrOptions === "object") {
+    const opts = numOrOptions;
+    return generateCandidates(
+      opts.num,
+      opts.history,
+      opts.knobs,
+      opts.traceSetter ?? noopTraceSetter,
+      opts.excludedNumbers ?? [],
+      opts.selectedOddEvenRatios ?? [],
+      opts.useTrickyRule ?? false,
+      opts.minOGAPercentile ?? 0,
+      opts.pastOGAScores ?? [],
+      opts.forcedNumbers ?? [],
+      opts.selectedNumbersForBoost ?? [],
+      opts.selectedBoostOptions,
+      opts.entropyThreshold ?? 0,
+      opts.hammingThreshold ?? 0,
+      opts.jaccardThreshold ?? 1,
+      opts.lambda ?? opts.knobs.lambda ?? 0,
+      opts.ratioOptions,
+      opts.minRecentMatches ?? 0,
+      opts.recentMatchBias ?? 0,
+      opts.repeatWindowSizeW ?? 0,
+      opts.minFromRecentUnionM ?? 0,
+      opts.trendMap,
+      opts.allowedTrendRatios,
+      opts.sumFilter,
+      opts.patternOptions,
+      opts.ogaBiasOptions,
+      opts.div5Options,
+      opts.monthlyBucketOptions,
+      opts.attemptMultiplier,
+      opts.ogaSpokeCount
+    );
+  }
+
+  const num = numOrOptions;
+  if (!knobs) throw new Error("generateCandidates requires knobs");
 
   if (DEBUG) {
     console.log('[generateCandidates] args snapshot', {
@@ -261,6 +402,24 @@ export function generateCandidates(
     return 0.5 + 0.5 * norm;
   };
 
+  const gpwfScores = Array(46).fill(1);
+  if (knobs.enableGPWF && history.length) {
+    const window = Math.max(1, Math.min(Math.floor(knobs.gpwf_window_size || history.length), history.length));
+    const recent = history.slice(-window);
+    const freq = Array(46).fill(0);
+    for (const draw of recent) {
+      for (const n of [...draw.main, ...draw.supp]) {
+        if (n >= 1 && n <= 45) freq[n] += 1;
+      }
+    }
+    for (let n = 1; n <= 45; n++) {
+      const raw = knobs.gpwf_floor + knobs.gpwf_scale_multiplier * (freq[n] / window + knobs.gpwf_bias_factor);
+      gpwfScores[n] = Math.max(0.01, Math.min(2, Number.isFinite(raw) ? raw : 1));
+    }
+    traceSetter(t => [...t, `[TRACE] GPWF enabled: recent window=${window}, floor=${knobs.gpwf_floor}, bias=${knobs.gpwf_bias_factor}, scale=${knobs.gpwf_scale_multiplier}`]);
+  }
+  const gpwfFactor = (n: number) => gpwfScores[n] ?? 1;
+
   // Remove excluded numbers from boost set (guardrail)
   if (boostEnabled) {
     for (const n of Array.from(selectedBoostSet)) {
@@ -274,14 +433,13 @@ export function generateCandidates(
   }
 
   const buildWeightedPool = (pool: number[]) => {
-    const out: number[] = [];
+    const out: { n: number; weight: number }[] = [];
     for (const n of pool) {
-      let factor = recencyFactor(n);
+      let factor = recencyFactor(n) * gpwfFactor(n);
       if (boostEnabled && selectedBoostSet.has(n)) {
         factor *= Math.max(1, boostFactor);
       }
-      const reps = Math.max(1, Math.round(factor));
-      for (let i = 0; i < reps; i++) out.push(n);
+      out.push({ n, weight: Math.max(0.001, factor) });
     }
     return out;
   };
@@ -292,11 +450,19 @@ export function generateCandidates(
     let weighted = buildWeightedPool(pool);
     const picked: number[] = [];
     while (picked.length < needed && weighted.length > 0) {
-      const idx = Math.floor(Math.random() * weighted.length);
-      const val = weighted[idx];
+      const totalWeight = weighted.reduce((sum, item) => sum + item.weight, 0);
+      let cursor = Math.random() * totalWeight;
+      let val = weighted[weighted.length - 1].n;
+      for (const item of weighted) {
+        cursor -= item.weight;
+        if (cursor <= 0) {
+          val = item.n;
+          break;
+        }
+      }
       picked.push(val);
       // remove all occurrences of val to enforce uniqueness
-      weighted = weighted.filter((n) => n !== val);
+      weighted = weighted.filter((item) => item.n !== val);
     }
     return picked;
   };
@@ -423,11 +589,10 @@ export function generateCandidates(
       if (!selectedOddEvenRatios.includes(ratio)) { stats.oddEven++; continue; }
     }
 
-    // Tricky rule (reject extreme all-odd/all-even patterns)
+    // Tricky rule: use the canonical validator, not only odd/even extremes.
     if (useTrickyRule) {
-      const odd = nums8.filter(n => n % 2 === 1).length;
-      const ratio = `${odd}:${8 - odd}`;
-      if (ratio === "0:8" || ratio === "8:0") { stats.tricky++; continue; }
+      const trickyCheck = validateTrickyRule(nums8);
+      if (!trickyCheck.valid) { stats.tricky++; continue; }
     }
 
     // Repeat-mode union minimum hits
@@ -479,7 +644,7 @@ if (patternOptions?.constraints?.length && patternOptions?.mode === 'restrict') 
 
     // Entropy / distance / similarity filters
     if (knobs.enableEntropy && entropy({ main, supp }) < entropyThreshold) { stats.entropy++; continue; }
-    const candidateMainMask = (knobs.enableHamming || knobs.enableJaccard) ? toBitmask(main) : 0;
+    const candidateMainMask = (knobs.enableHamming || knobs.enableJaccard) ? toBitmask(main) : 0n;
     if (knobs.enableHamming && minHammingBit(candidateMainMask, main.length, histBitmasks) < hammingThreshold) { stats.hamming++; continue; }
     if (knobs.enableJaccard && maxJaccardBit(candidateMainMask, main.length, histBitmasks) > jaccardThreshold) { stats.jaccard++; continue; }
 
