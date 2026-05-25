@@ -3,12 +3,15 @@ import { describe, expect, it } from "vitest";
 import type { Draw } from "../types";
 import {
   analyzeDrawBucketPatterns,
+  buildDrawBucketPatternLeaderboard,
   buildDrawMonthOptions,
   DEFAULT_DRAW_BUCKETS,
   formatDrawMonthLabel,
   getDrawMonthKey,
   selectDrawMonthDraws,
   selectComparableMonthDraws,
+  sortDrawBucketPatternStats,
+  type DrawBucketPatternStats,
 } from "./drawBucketPatterns";
 
 const history: Draw[] = [
@@ -16,6 +19,23 @@ const history: Draw[] = [
   { date: "2024-01-08", main: [15, 21, 22, 23, 24, 25], supp: [35, 31] },
   { date: "2024-01-15", main: [7, 8, 9, 12, 13, 14], supp: [20, 40] },
 ];
+
+const leaderboardFixture = (overrides: Partial<DrawBucketPatternStats> & Pick<DrawBucketPatternStats, "key" | "label">): DrawBucketPatternStats => ({
+  key: overrides.key,
+  label: overrides.label,
+  numbers: overrides.numbers ?? [],
+  description: overrides.description ?? "",
+  totalDraws: overrides.totalDraws ?? 12,
+  averageHits: overrides.averageHits ?? 0,
+  atLeastOneRate: overrides.atLeastOneRate ?? 0,
+  zeroRate: overrides.zeroRate ?? 0,
+  modeHits: overrides.modeHits ?? 0,
+  maxObservedHits: overrides.maxObservedHits ?? 0,
+  maxPossibleHits: overrides.maxPossibleHits ?? 3,
+  totalHits: overrides.totalHits ?? 0,
+  distribution: overrides.distribution ?? [],
+  recentHits: overrides.recentHits ?? [],
+});
 
 describe("analyzeDrawBucketPatterns", () => {
   it("computes per-draw distributions for divisible-by-5 buckets with main+supp", () => {
@@ -128,5 +148,60 @@ describe("analyzeDrawBucketPatterns", () => {
       "2024-03-01",
     ]);
     expect(selectDrawMonthDraws(monthHistory, null)).toEqual([]);
+  });
+
+  it("sorts bucket stats consistently for each supported sort mode", () => {
+    const stats: DrawBucketPatternStats[] = [
+      leaderboardFixture({ key: "alpha", label: "Alpha", averageHits: 1.1, atLeastOneRate: 70, zeroRate: 30, modeHits: 1, maxObservedHits: 2, totalHits: 22, recentHits: [1, 1, 1] }),
+      leaderboardFixture({ key: "beta", label: "Beta", averageHits: 1.4, atLeastOneRate: 60, zeroRate: 40, modeHits: 2, maxObservedHits: 3, totalHits: 28, recentHits: [2, 2, 1] }),
+      leaderboardFixture({ key: "gamma", label: "Gamma", averageHits: 0.9, atLeastOneRate: 90, zeroRate: 10, modeHits: 1, maxObservedHits: 1, totalHits: 18, recentHits: [0, 1, 0] }),
+    ];
+
+    expect(sortDrawBucketPatternStats(stats, "atLeastOne").map((stat) => stat.key)).toEqual(["gamma", "alpha", "beta"]);
+    expect(sortDrawBucketPatternStats(stats, "averageHits").map((stat) => stat.key)).toEqual(["beta", "alpha", "gamma"]);
+    expect(sortDrawBucketPatternStats(stats, "modeHits").map((stat) => stat.key)).toEqual(["beta", "gamma", "alpha"]);
+    expect(sortDrawBucketPatternStats(stats, "label").map((stat) => stat.key)).toEqual(["alpha", "beta", "gamma"]);
+  });
+
+  it("builds leaderboard rows with explicit per-metric positions", () => {
+    const stats: DrawBucketPatternStats[] = [
+      leaderboardFixture({ key: "alpha", label: "Alpha", averageHits: 1.1, atLeastOneRate: 70, zeroRate: 30, modeHits: 1, maxObservedHits: 2, totalHits: 22, recentHits: [1, 1, 1] }),
+      leaderboardFixture({ key: "beta", label: "Beta", averageHits: 1.4, atLeastOneRate: 60, zeroRate: 40, modeHits: 2, maxObservedHits: 3, totalHits: 28, recentHits: [2, 2, 1] }),
+      leaderboardFixture({ key: "gamma", label: "Gamma", averageHits: 0.9, atLeastOneRate: 90, zeroRate: 10, modeHits: 1, maxObservedHits: 1, totalHits: 18, recentHits: [0, 1, 0] }),
+    ];
+
+    const leaderboard = buildDrawBucketPatternLeaderboard(stats, "averageHits");
+
+    expect(leaderboard.map((row) => [row.selectedSortPosition, row.stat.key])).toEqual([
+      [1, "beta"],
+      [2, "alpha"],
+      [3, "gamma"],
+    ]);
+
+    expect(leaderboard[0]).toMatchObject({
+      stat: { key: "beta" },
+      selectedSortPosition: 1,
+      atLeastOnePosition: 3,
+      averageHitsPosition: 1,
+      modeHitsPosition: 1,
+      zeroRatePosition: 3,
+      maxObservedHitsPosition: 1,
+      totalHitsPosition: 1,
+      recentAveragePosition: 1,
+    });
+    expect(leaderboard[0].recentAverageHits).toBeCloseTo(5 / 3, 5);
+
+    expect(leaderboard[2]).toMatchObject({
+      stat: { key: "gamma" },
+      selectedSortPosition: 3,
+      atLeastOnePosition: 1,
+      averageHitsPosition: 3,
+      modeHitsPosition: 2,
+      zeroRatePosition: 1,
+      maxObservedHitsPosition: 3,
+      totalHitsPosition: 3,
+      recentAveragePosition: 3,
+    });
+    expect(leaderboard[2].recentAverageHits).toBeCloseTo(1 / 3, 5);
   });
 });

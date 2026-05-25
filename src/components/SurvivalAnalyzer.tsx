@@ -61,6 +61,11 @@ function kaplanMeier(times: number[], _window: number) {
   return { curve: km, probNext: 1 - (km[1] ?? 1) };
 }
 
+export function clampProbability(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(1, value));
+}
+
 export const SurvivalAnalyzer: React.FC<{
   history: Draw[];
   excludedNumbers: number[];
@@ -293,7 +298,7 @@ export const SurvivalAnalyzer: React.FC<{
       const biasW = combinedBiasWeights[r.number] ?? 1;
       const zpaW =
         zoneWeightingEnabled && savedZoneWeights ? savedZoneWeights[r.number] ?? 1 : 1;
-      const biased = r.probNext * Math.pow(biasW, gamma) * Math.pow(zpaW, zoneGamma);
+      const biased = clampProbability(r.probNext * Math.pow(biasW, gamma) * Math.pow(zpaW, zoneGamma));
       return { ...r, biasedProb: biased, baseProb: r.probNext };
     });
   }, [results, combinedBiasWeights, gamma, zoneWeightingEnabled, zoneGamma, savedZoneWeights]);

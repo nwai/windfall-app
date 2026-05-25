@@ -9,6 +9,10 @@ type Props = {
   minDraws?: number;     // default 36
 };
 
+export function hasTrainableReturnLabels(dataset: NumberExample[]): boolean {
+  return dataset.some((d) => d.churnLabel === 1 && d.returnLabel != null);
+}
+
 export const ReturnPredictor: React.FC<Props> = ({
   dataset,
   onPredictions,
@@ -20,6 +24,7 @@ export const ReturnPredictor: React.FC<Props> = ({
   const [metrics, setMetrics] = useState<{ acc?: number; prec?: number; rec?: number } | null>(null);
   const [rfAvailable, setRfAvailable] = useState(true);
 
+  const hasLabels = useMemo(() => hasTrainableReturnLabels(dataset), [dataset]);
   // Until returnLabel is computed, skip entries without labels
   const filtered = useMemo(
     () => dataset.filter(d => d.churnLabel === 1 && d.returnLabel != null),
@@ -44,6 +49,11 @@ export const ReturnPredictor: React.FC<Props> = ({
   async function trainAndPredict() {
     setBusy(true);
     try {
+      if (!hasLabels) {
+        setMetrics(null);
+        onPredictions?.([]);
+        return;
+      }
       const X = filtered.map(r => [
         r.freqFortnight, r.freqMonth, r.freqQuarter,
         r.tenure, r.timeSinceLast, r.zpaGroup,
@@ -121,7 +131,12 @@ export const ReturnPredictor: React.FC<Props> = ({
           Need at least {minDraws} draws (have {totalDraws}) to train reliably.
         </div>
       )}
-      <button onClick={trainAndPredict} disabled={busy || !hasEnough}>
+      {!hasLabels && (
+        <div style={{ color: "#b26a00", marginBottom: 6, fontSize: 13 }}>
+          Return labels are not computed yet, so this model is disabled rather than producing placeholder predictions.
+        </div>
+      )}
+      <button onClick={trainAndPredict} disabled={busy || !hasEnough || !hasLabels}>
         {busy ? "Training…" : "Train & Predict"}
       </button>
       {metrics && (

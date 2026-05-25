@@ -116,6 +116,11 @@ import {
   formatDigitWidthScopeLabel,
   type DigitWidthConstraintScope,
 } from "./lib/digitWidthConstraint";
+import {
+  computeWeekdayWindfallPrizeDivision,
+  rankWeekdayWindfallPrizeDivision,
+} from "./lib/prizeDivisions";
+import { ogaPercentileToSimilarity } from "./lib/ogaQuality";
 
 
 const custom: ZoneGroups = [
@@ -1383,15 +1388,8 @@ function AppInner(): JSX.Element {
     const manualSuppSet = new Set(manualSimSelected.slice(6, 8));
     const computePrize = (main: number[], supp: number[]) => {
       if (manualMainSet.size < 6 || manualSuppSet.size < 2) return { label: "—", rank: 99 };
-      const mainHits = main.filter((n) => manualMainSet.has(n)).length;
-      const suppHits = supp.filter((n) => manualSuppSet.has(n)).length;
-      if (mainHits === 6) return { label: "Div1", rank: 1 };
-      if (mainHits === 5 && suppHits >= 1) return { label: "Div2", rank: 2 };
-      if (mainHits === 5) return { label: "Div3", rank: 3 };
-      if (mainHits === 4) return { label: "Div4", rank: 4 };
-      if (mainHits === 3 && suppHits >= 1) return { label: "Div5", rank: 5 };
-      if (mainHits >= 1 && suppHits >= 2) return { label: "Div6", rank: 6 };
-      return { label: "—", rank: 99 };
+      const label = computeWeekdayWindfallPrizeDivision(main, supp, manualMainSet, manualSuppSet);
+      return { label, rank: rankWeekdayWindfallPrizeDivision(label) };
     };
      const recentDraw = filteredHistory[filteredHistory.length - 1];
      const recentSet = recentDraw ? new Set([...recentDraw.main, ...recentDraw.supp]) : null;
@@ -1415,7 +1413,7 @@ function AppInner(): JSX.Element {
           : 0;
         const selHits = nums.filter(n => selectedSet.has(n)).length;
         const recentHits = recentSet ? nums.filter(n => recentSet.has(n)).length : 0;
-        const ogaNorm = knobs.enableOGA ? Math.max(0, Math.min(1, ogaPercentile / 100)) : 0;
+        const ogaNorm = knobs.enableOGA ? ogaPercentileToSimilarity(ogaPercentile) : 0;
         const finalComposite = wOGA * ogaNorm + wSel * (selHits / 8) + wRecent * (recentHits / 8);
         const { label: prizeLabel, rank: prizeRank } = computePrize(c.main, c.supp);
         return { ...c, ogaScore, ogaPercentile, selHits, recentHits, finalCompositeAdj: finalComposite, prizeLabel, prizeRank };
@@ -1428,7 +1426,7 @@ function AppInner(): JSX.Element {
         if (b.selHits !== a.selHits) return b.selHits - a.selHits;
         if (b.recentHits !== a.recentHits) return b.recentHits - a.recentHits;
         // Skip OGA tiebreaker when disabled
-        if (knobs.enableOGA && b.ogaPercentile !== a.ogaPercentile) return b.ogaPercentile - a.ogaPercentile;
+        if (knobs.enableOGA && b.ogaPercentile !== a.ogaPercentile) return a.ogaPercentile - b.ogaPercentile;
         return 0;
       });
    }
@@ -1747,7 +1745,7 @@ function AppInner(): JSX.Element {
       if (processedCandidates.length > numCandidates) {
         processedCandidates.sort((a: any, b: any) => {
           if (b.finalCompositeAdj !== a.finalCompositeAdj) return b.finalCompositeAdj - a.finalCompositeAdj;
-          if (knobs.enableOGA && b.ogaPercentile !== a.ogaPercentile) return b.ogaPercentile - a.ogaPercentile;
+          if (knobs.enableOGA && b.ogaPercentile !== a.ogaPercentile) return a.ogaPercentile - b.ogaPercentile;
           return 0;
         });
         processedCandidates = processedCandidates.slice(0, numCandidates);
@@ -3937,14 +3935,14 @@ function AppInner(): JSX.Element {
                 </div>
 
                 <div style={{ marginBottom: 10 }}>
-                  <label style={{ display: "block", marginBottom: 2, fontSize: 12 }} title="OGA (Octagonal Geometry Alignment): The candidate's OGA percentile relative to all historical draws. High OGA% = numbers that form geometrically balanced patterns on the DGA grid.">
+                  <label style={{ display: "block", marginBottom: 2, fontSize: 12 }} title="OGA (Octagonal Geometry Alignment): lower raw OGA scores are closer to the historical spoke mix, so this component favours lower OGA percentiles.">
                     <b>OGA</b> — Geometry Alignment: <b>{Math.round(rdyWeights.oga / (rdyWeights.idm + rdyWeights.conv + rdyWeights.oga || 1) * 100)}%</b>
                   </label>
                   <input type="range" min={0} max={1} step={0.05} value={rdyWeights.oga}
                     onChange={(e) => setRdyWeights(prev => ({ ...prev, oga: Number(e.target.value) }))}
                     style={{ width: "100%" }} />
                   <div style={{ fontSize: 11, color: "#888" }}>
-                    Uses the OGA percentile to favour candidates whose numbers form geometrically aligned patterns. Independent of monthly frequency analysis.
+                    Uses inverse OGA percentile to favour candidates closer to the historical spoke mix. Independent of monthly frequency analysis.
                   </div>
                 </div>
 

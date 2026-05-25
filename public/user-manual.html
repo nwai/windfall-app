@@ -901,6 +901,25 @@
 
   <p>The forecast is designed for <em>bucket hit counts</em>, not exact future numbers. For example, it predicts how many hits a bucket such as <strong>Divisible by 5</strong> or <strong>Ending in 1</strong> is likely to have in the missing month slots.</p>
 
+  <h4>Detailed bucket leaderboard</h4>
+  <p>The <strong>Draw Bucket Pattern Explorer</strong> also includes a <strong>Detailed bucket leaderboard</strong> that ranks every bucket explicitly, so you can see each bucket’s current position at a glance instead of inferring it only from the card order.</p>
+
+  <ul>
+    <li><strong>Pos</strong> shows the bucket’s current leaderboard position under the active <strong>Sort by</strong> mode.</li>
+    <li>Each metric cell shows both the <strong>value</strong> and a small <strong>#position badge</strong> for that metric.</li>
+    <li><strong>≥1 hit</strong> ranks buckets by how often they appear in draws.</li>
+    <li><strong>Avg / draw</strong> ranks buckets by average hits per draw.</li>
+    <li><strong>Recent avg</strong> ranks buckets by their average hit count across the recent rhythm window shown in the cards.</li>
+    <li><strong>Mode</strong> ranks buckets by the most common per-draw hit count.</li>
+    <li><strong>0 hit (low)</strong> ranks buckets by absence rate, where a <em>lower</em> zero-hit percentage is stronger.</li>
+    <li><strong>Max seen</strong> ranks buckets by the highest single-draw hit count observed in the active window.</li>
+    <li><strong>Total hits</strong> ranks buckets by total hits across the full active analysis window.</li>
+  </ul>
+
+  <div class="note">
+    The large position pill shows the bucket’s current place under the selected sort mode. The smaller badges inside each metric column show where that same bucket stands on that specific measure.
+  </div>
+
   <h4>What the forecast uses</h4>
   <ul>
     <li><strong>Monthly Draws Summary</strong> style features such as how many numbers are still undrawn, drawn once, drawn twice, and so on in the current month so far.</li>

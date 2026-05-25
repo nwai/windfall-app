@@ -3,6 +3,11 @@ import { generateExhaustiveCombos } from "../../lib/exhaustiveGenerator";
 import { isDisplayedValueInRange } from "../../lib/generatedCandidateFilterUtils";
 import { computeOGA, getOGAPercentile } from "../../utils/oga";
 import { CandidateSet, Draw } from "../../types";
+import {
+  computeWeekdayWindfallPrizeDivision,
+  computeWeekdayWindfallPrizeScore,
+} from "../../lib/prizeDivisions";
+import { ogaPercentileToSimilarity } from "../../lib/ogaQuality";
 
 /** Settings snapshot captured at export time — written as ## comment rows in CSV */
 export interface ExportSettings {
@@ -725,7 +730,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
       const ogaPct = (c as any).ogaPercentile as number | undefined;
       if (idm === null) return null;
       const convNorm = conv !== null ? Math.abs(conv) / safeMaxAbsConv : 0;
-      const ogaNorm = enableOGA && ogaPct !== undefined ? ogaPct / 100 : 0;
+      const ogaNorm = enableOGA && ogaPct !== undefined ? ogaPercentileToSimilarity(ogaPct) : 0;
       return wIdm * idm + wConv * convNorm + wOga * ogaNorm;
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1397,35 +1402,14 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
    );
 
    function computePrizeDivision(main: number[], supp: number[], manualMain: Set<number>, manualSupp: Set<number>): string {
-     if (manualMain.size < 6 || manualSupp.size < 2) return "—";
-     const mainHits = main.filter((n) => manualMain.has(n)).length;
-     // suppHits: how many of the player's 6 MAIN numbers match the drawn supplementaries.
-     // In standard lottery play the player selects 6 numbers; supplementary credit comes
-     // from those 6 numbers appearing in the drawn supplementary pool — NOT from the
-     // candidate's own supp slot.
-     const suppHits = main.filter((n) => manualSupp.has(n)).length;
-     if (mainHits === 6) return "Div1";
-     if (mainHits === 5 && suppHits >= 1) return "Div2";
-     if (mainHits === 5) return "Div3";
-     if (mainHits === 4 && suppHits >= 1) return "Div4";
-     if (mainHits === 4) return "Div4";
-     if (mainHits === 3 && suppHits >= 1) return "Div5";
-     if (mainHits === 1 && suppHits === 2) return "Div6";
-     return "—";
+     return computeWeekdayWindfallPrizeDivision(main, supp, manualMain, manualSupp);
    }
 
    /** Composite prize sort score: division rank × 100 + mainHits × 10 + suppHits.
     *  Within the same division, candidates with more total hits sort higher.
     *  E.g., Div4 (4 main + 2 supp) = 462 > Div4 (4 main + 0 supp) = 440. */
    function computePrizeScore(main: number[], supp: number[], manualMain: Set<number>, manualSupp: Set<number>): number {
-     if (manualMain.size < 6 || manualSupp.size < 2) return 0;
-     const mainHits = main.filter((n) => manualMain.has(n)).length;
-     // Same correction: suppHits from candidate's main numbers, not candidate's supp
-     const suppHits = main.filter((n) => manualSupp.has(n)).length;
-     const divOrder: Record<string, number> = { "Div1": 7, "Div2": 6, "Div3": 5, "Div4": 4, "Div5": 3, "Div6": 2, "Div7": 1 };
-     const label = computePrizeDivision(main, supp, manualMain, manualSupp);
-     const rank = divOrder[label] ?? 0;
-     return rank * 100 + mainHits * 10 + suppHits;
+     return computeWeekdayWindfallPrizeScore(main, supp, manualMain, manualSupp);
    }
 
    const selHeader = forcedNumbers.length ? "Sel/Forced Hits" : "SelHits";

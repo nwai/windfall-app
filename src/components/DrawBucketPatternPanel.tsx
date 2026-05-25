@@ -3,17 +3,19 @@ import React, { useEffect, useMemo, useState } from "react";
 import type { Draw } from "../types";
 import {
   analyzeDrawBucketPatterns,
+  buildDrawBucketPatternLeaderboard,
   buildDrawMonthOptions,
   DEFAULT_RECENT_DRAW_BUCKET_WINDOW,
   formatDrawMonthLabel,
   getDrawMonthKey,
   selectDrawMonthDraws,
   type DrawBucketPatternDistributionBin,
+  type DrawBucketPatternLeaderboardRow,
+  type DrawBucketPatternSortMode,
   type DrawBucketPatternStats,
 } from "../lib/drawBucketPatterns";
 import { forecastDrawBucketMonth, type BucketHitForecast } from "../lib/drawBucketMonthForecast";
 
-type SortMode = "label" | "atLeastOne" | "averageHits" | "modeHits";
 type HeatmapTone = "past" | "current";
 type HeatmapAlign = "left" | "right";
 
@@ -432,9 +434,219 @@ const BucketCard: React.FC<{ stat: DrawBucketPatternStats }> = ({ stat }) => {
   );
 };
 
+const getPositionBadgeStyle = (position: number, compact = false): React.CSSProperties => {
+  if (position === 1) {
+    return {
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      minWidth: compact ? 34 : 46,
+      padding: compact ? "2px 7px" : "4px 10px",
+      borderRadius: 999,
+      background: "linear-gradient(135deg, #fff8e1 0%, #ffd54f 100%)",
+      border: "1px solid #fbc02d",
+      color: "#6d4c00",
+      fontWeight: 800,
+      fontSize: compact ? 10 : 12,
+      fontVariantNumeric: "tabular-nums",
+      whiteSpace: "nowrap",
+    };
+  }
+  if (position === 2) {
+    return {
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      minWidth: compact ? 34 : 46,
+      padding: compact ? "2px 7px" : "4px 10px",
+      borderRadius: 999,
+      background: "linear-gradient(135deg, #f8fafc 0%, #cfd8dc 100%)",
+      border: "1px solid #b0bec5",
+      color: "#455a64",
+      fontWeight: 800,
+      fontSize: compact ? 10 : 12,
+      fontVariantNumeric: "tabular-nums",
+      whiteSpace: "nowrap",
+    };
+  }
+  if (position === 3) {
+    return {
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      minWidth: compact ? 34 : 46,
+      padding: compact ? "2px 7px" : "4px 10px",
+      borderRadius: 999,
+      background: "linear-gradient(135deg, #fff3e0 0%, #ffcc80 100%)",
+      border: "1px solid #ffb74d",
+      color: "#7a3e00",
+      fontWeight: 800,
+      fontSize: compact ? 10 : 12,
+      fontVariantNumeric: "tabular-nums",
+      whiteSpace: "nowrap",
+    };
+  }
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: compact ? 34 : 46,
+    padding: compact ? "2px 7px" : "4px 10px",
+    borderRadius: 999,
+    background: "#f5f8fb",
+    border: "1px solid #d9e3ec",
+    color: "#546e7a",
+    fontWeight: 700,
+    fontSize: compact ? 10 : 12,
+    fontVariantNumeric: "tabular-nums",
+    whiteSpace: "nowrap",
+  };
+};
+
+const PositionBadge: React.FC<{ position: number; compact?: boolean }> = ({ position, compact = false }) => (
+  <span style={getPositionBadgeStyle(position, compact)}>#{position}</span>
+);
+
+const LeaderboardMetricCell: React.FC<{
+  value: string;
+  position: number;
+  title: string;
+}> = ({ value, position, title }) => (
+  <div title={title} style={{ display: "grid", gap: 5, justifyItems: "start" }}>
+    <span style={{ fontSize: 13, fontWeight: 700, color: "#263238", fontVariantNumeric: "tabular-nums" }}>{value}</span>
+    <PositionBadge position={position} compact />
+  </div>
+);
+
+const BucketLeaderboardTable: React.FC<{
+  rows: DrawBucketPatternLeaderboardRow[];
+  currentSortLabel: string;
+  recentWindowSize: number;
+}> = ({ rows, currentSortLabel, recentWindowSize }) => {
+  if (rows.length === 0) {
+    return null;
+  }
+
+  return (
+    <div style={{ marginBottom: 14, padding: 12, border: "1px solid #e6edf5", borderRadius: 8, background: "#fbfdff" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", marginBottom: 10 }}>
+        <div style={{ fontWeight: 700, color: "#223", fontSize: 14 }}>Detailed bucket leaderboard</div>
+        <span style={{ fontSize: 11, color: "#667" }}>
+          Current order follows <b>{currentSortLabel}</b>. Each metric also shows that bucket&apos;s own rank position.
+        </span>
+      </div>
+
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", minWidth: 1180, borderCollapse: "separate", borderSpacing: 0, background: "#fff", border: "1px solid #e3eaf2", borderRadius: 8, overflow: "hidden" }}>
+          <thead>
+            <tr style={{ background: "#f7fbff" }}>
+              {[
+                { label: "Pos", title: "Current position under the selected sort mode" },
+                { label: "Bucket", title: "Bucket label and description" },
+                { label: "Numbers", title: "Numbers tracked by this bucket" },
+                { label: "≥1 hit", title: "Value plus rank position for draws with at least one hit" },
+                { label: "Avg / draw", title: "Value plus rank position for average hits per draw" },
+                { label: `Recent avg (${recentWindowSize})`, title: "Average hits across the recent rhythm window shown in the cards" },
+                { label: "Mode", title: "Most common hit count per draw, plus rank position" },
+                { label: "0 hit (low)", title: "Zero-hit rate plus position, where a lower percentage ranks better" },
+                { label: "Max seen", title: "Highest single-draw hit count observed, plus rank position" },
+                { label: "Total hits", title: "Total hits across the active analysis window, plus rank position" },
+              ].map((column) => (
+                <th
+                  key={column.label}
+                  title={column.title}
+                  style={{
+                    textAlign: "left",
+                    padding: "10px 12px",
+                    fontSize: 11,
+                    textTransform: "uppercase",
+                    letterSpacing: 0.35,
+                    color: "#607d8b",
+                    borderBottom: "1px solid #e7edf3",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {column.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={`leaderboard-${row.stat.key}`} style={{ background: row.selectedSortPosition === 1 ? "#fcfeff" : "#fff" }}>
+                <td style={leaderboardCellStyle}>
+                  <PositionBadge position={row.selectedSortPosition} />
+                </td>
+                <td style={leaderboardCellStyle}>
+                  <div style={{ fontWeight: 700, color: "#223", fontSize: 13 }}>{row.stat.label}</div>
+                  <div style={{ marginTop: 4, fontSize: 11, color: "#667", lineHeight: 1.4 }}>{row.stat.description}</div>
+                </td>
+                <td style={leaderboardCellStyle}>
+                  <div style={{ fontSize: 12, color: "#1565c0", fontVariantNumeric: "tabular-nums", lineHeight: 1.5 }}>
+                    {row.stat.numbers.join(", ")}
+                  </div>
+                </td>
+                <td style={leaderboardCellStyle}>
+                  <LeaderboardMetricCell
+                    value={`${row.stat.atLeastOneRate.toFixed(1)}%`}
+                    position={row.atLeastOnePosition}
+                    title={`${row.stat.label}: ${row.stat.atLeastOneRate.toFixed(1)}% of draws had ≥1 hit • rank #${row.atLeastOnePosition}`}
+                  />
+                </td>
+                <td style={leaderboardCellStyle}>
+                  <LeaderboardMetricCell
+                    value={row.stat.averageHits.toFixed(2)}
+                    position={row.averageHitsPosition}
+                    title={`${row.stat.label}: ${row.stat.averageHits.toFixed(2)} average hits per draw • rank #${row.averageHitsPosition}`}
+                  />
+                </td>
+                <td style={leaderboardCellStyle}>
+                  <LeaderboardMetricCell
+                    value={row.recentAverageHits.toFixed(2)}
+                    position={row.recentAveragePosition}
+                    title={`${row.stat.label}: ${row.recentAverageHits.toFixed(2)} average hits across the recent window • rank #${row.recentAveragePosition}`}
+                  />
+                </td>
+                <td style={leaderboardCellStyle}>
+                  <LeaderboardMetricCell
+                    value={`${row.stat.modeHits}x`}
+                    position={row.modeHitsPosition}
+                    title={`${row.stat.label}: mode ${row.stat.modeHits}x • rank #${row.modeHitsPosition}`}
+                  />
+                </td>
+                <td style={leaderboardCellStyle}>
+                  <LeaderboardMetricCell
+                    value={`${row.stat.zeroRate.toFixed(1)}%`}
+                    position={row.zeroRatePosition}
+                    title={`${row.stat.label}: ${row.stat.zeroRate.toFixed(1)}% zero-hit draws • lower is stronger • rank #${row.zeroRatePosition}`}
+                  />
+                </td>
+                <td style={leaderboardCellStyle}>
+                  <LeaderboardMetricCell
+                    value={`${row.stat.maxObservedHits}x`}
+                    position={row.maxObservedHitsPosition}
+                    title={`${row.stat.label}: max observed ${row.stat.maxObservedHits}x • rank #${row.maxObservedHitsPosition}`}
+                  />
+                </td>
+                <td style={leaderboardCellStyle}>
+                  <LeaderboardMetricCell
+                    value={String(row.stat.totalHits)}
+                    position={row.totalHitsPosition}
+                    title={`${row.stat.label}: ${row.stat.totalHits} total hits • rank #${row.totalHitsPosition}`}
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
 export const DrawBucketPatternPanel: React.FC<DrawBucketPatternPanelProps> = ({ draws, allDraws = [] }) => {
   const [includeSupp, setIncludeSupp] = useState<boolean>(true);
-  const [sortMode, setSortMode] = useState<SortMode>("atLeastOne");
+  const [sortMode, setSortMode] = useState<DrawBucketPatternSortMode>("atLeastOne");
   const [selectedPastMonthKey, setSelectedPastMonthKey] = useState<string>("");
   const [showForecast, setShowForecast] = useState<boolean>(true);
 
@@ -519,20 +731,15 @@ export const DrawBucketPatternPanel: React.FC<DrawBucketPatternPanelProps> = ({ 
     [showForecast, currentHeatmapColumnCount, currentMonthDraws.length, latestAllHistoryMonthKey, comparisonHistory, includeSupp],
   );
 
-  const sortedStats = useMemo(() => {
-    const next = [...stats];
-    switch (sortMode) {
-      case "atLeastOne":
-        return next.sort((a, b) => b.atLeastOneRate - a.atLeastOneRate || b.averageHits - a.averageHits || a.label.localeCompare(b.label));
-      case "averageHits":
-        return next.sort((a, b) => b.averageHits - a.averageHits || b.atLeastOneRate - a.atLeastOneRate || a.label.localeCompare(b.label));
-      case "modeHits":
-        return next.sort((a, b) => b.modeHits - a.modeHits || b.atLeastOneRate - a.atLeastOneRate || a.label.localeCompare(b.label));
-      case "label":
-      default:
-        return next.sort((a, b) => a.label.localeCompare(b.label));
-    }
-  }, [sortMode, stats]);
+  const leaderboardRows = useMemo(
+    () => buildDrawBucketPatternLeaderboard(stats, sortMode),
+    [sortMode, stats],
+  );
+
+  const sortedStats = useMemo(
+    () => leaderboardRows.map((row) => row.stat),
+    [leaderboardRows],
+  );
 
   const currentHeatmapStatsByKey = useMemo(
     () => new Map(currentHeatmapStats.map((stat) => [stat.key, stat])),
@@ -578,12 +785,20 @@ export const DrawBucketPatternPanel: React.FC<DrawBucketPatternPanelProps> = ({ 
     return map;
   }, [alignedCurrentHeatmapStats, currentHeatmapSlots, currentMonthForecast]);
 
-  const strongestBucket = sortedStats[0] ?? null;
+  const strongestBucket = leaderboardRows[0]?.stat ?? null;
   const totalDraws = draws.length;
   const selectedPastMonthLabel = selectedPastMonthKey ? formatDrawMonthLabel(selectedPastMonthKey) : "None";
   const currentMonthLabel = latestAllHistoryMonthKey ? formatDrawMonthLabel(latestAllHistoryMonthKey) : "Current month";
   const currentMonthHasPendingSlots = currentHeatmapColumnCount > currentMonthDraws.length;
   const forecastedSlotCount = currentMonthForecast?.forecastSlotCount ?? 0;
+  const recentWindowSize = stats[0]?.recentHits.length ?? Math.min(DEFAULT_RECENT_DRAW_BUCKET_WINDOW, draws.length);
+  const currentSortLabel = sortMode === "atLeastOne"
+    ? "≥1 hit rate"
+    : sortMode === "averageHits"
+      ? "Average hits"
+      : sortMode === "modeHits"
+        ? "Mode hits"
+        : "Label";
 
   return (
     <section
@@ -615,7 +830,7 @@ export const DrawBucketPatternPanel: React.FC<DrawBucketPatternPanelProps> = ({ 
             Sort by:
             <select
               value={sortMode}
-              onChange={(e) => setSortMode(e.target.value as SortMode)}
+              onChange={(e) => setSortMode(e.target.value as DrawBucketPatternSortMode)}
               style={{ marginLeft: 6, fontSize: 12 }}
             >
               <option value="atLeastOne">≥1 hit rate</option>
@@ -674,6 +889,12 @@ export const DrawBucketPatternPanel: React.FC<DrawBucketPatternPanelProps> = ({ 
         <b> Divisible by 5</b> card peaks at <b>1x</b>, those draws most often contain exactly one number divisible by 5.
         A high <b>≥1 hit</b> rate means the bucket appears in most draws; a low <b>0 hit</b> rate means it is rarely absent.
       </div>
+
+      <BucketLeaderboardTable
+        rows={leaderboardRows}
+        currentSortLabel={currentSortLabel}
+        recentWindowSize={recentWindowSize}
+      />
 
       {sortedStats.length > 0 && (
         <div style={{ marginBottom: 14, padding: 12, border: "1px solid #e6edf5", borderRadius: 8, background: "#fbfdff" }}>
@@ -757,6 +978,12 @@ const summaryChip: React.CSSProperties = {
   background: "#f5f8fb",
   border: "1px solid #dde6ef",
   color: "#455a64",
+};
+
+const leaderboardCellStyle: React.CSSProperties = {
+  padding: "10px 12px",
+  borderBottom: "1px solid #eef2f6",
+  verticalAlign: "top",
 };
 
 const heatmapColumnTopBlock: React.CSSProperties = {

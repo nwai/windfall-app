@@ -410,6 +410,24 @@ export function generateCandidates(
     return 0.5 + 0.5 * norm;
   };
 
+  const gpwfFactors = Array(46).fill(1);
+  if (knobs.enableGPWF && history.length > 0) {
+    const gpwfWindow = Math.max(0, Math.min(knobs.gpwf_window_size, history.length));
+    const gpwfCounts = Array(46).fill(0);
+    for (const draw of history.slice(-gpwfWindow)) {
+      [...draw.main, ...draw.supp].forEach((n) => {
+        if (n >= 1 && n <= 45) gpwfCounts[n] += 1;
+      });
+    }
+    const maxGPWFCount = Math.max(...gpwfCounts);
+    for (let n = 1; n <= 45; n++) {
+      const norm = maxGPWFCount > 0 ? gpwfCounts[n] / maxGPWFCount : 0;
+      const raw = knobs.gpwf_floor + knobs.gpwf_scale_multiplier * (norm + knobs.gpwf_bias_factor);
+      gpwfFactors[n] = Math.max(0, Math.min(1, Number.isFinite(raw) ? raw : 1));
+    }
+    traceSetter(`[TRACE] GPWF weighting enabled: window=${gpwfWindow}, maxRecentFrequency=${maxGPWFCount}`);
+  }
+
   // Remove excluded numbers from boost set (guardrail)
   if (boostEnabled) {
     for (const n of Array.from(selectedBoostSet)) {
@@ -511,6 +529,7 @@ export function generateCandidates(
     const out: number[] = [];
     for (const n of pool) {
       let factor = recencyFactor(n);
+      factor *= gpwfFactors[n] ?? 1;
       if (applyMainDigitBoosts) {
         factor *= mainDigitBoostMultiplier(n);
         factor *= mainDecadeBiasMultiplier(n);
@@ -785,7 +804,7 @@ if (patternOptions?.constraints?.length && patternOptions?.mode === 'restrict') 
 
     // Entropy / distance / similarity filters
     if (knobs.enableEntropy && entropy({ main, supp }) < entropyThreshold) { stats.entropy++; continue; }
-    const candidateMainMask = (knobs.enableHamming || knobs.enableJaccard) ? toBitmask(main) : 0;
+    const candidateMainMask = (knobs.enableHamming || knobs.enableJaccard) ? toBitmask(main) : 0n;
     if (knobs.enableHamming && minHammingBit(candidateMainMask, main.length, histBitmasks) < hammingThreshold) { stats.hamming++; continue; }
     if (knobs.enableJaccard && maxJaccardBit(candidateMainMask, main.length, histBitmasks) > jaccardThreshold) { stats.jaccard++; continue; }
 
