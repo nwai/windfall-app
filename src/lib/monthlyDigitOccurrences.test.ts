@@ -127,4 +127,33 @@ describe("analyzeMonthlyDigitOccurrences", () => {
     expect(summary.recentBias.oneDigitBiasScore).toBe(0.5);
     expect(summary.recentBias.twoDigitBiasScore).toBe(-0.5);
   });
+
+  it("keeps the opening partial month visible but excludes it from month-based averages", () => {
+    const summary = analyzeMonthlyDigitOccurrences([
+      { date: "2024-05-10", main: [1, 2, 3, 4, 5, 6], supp: [7, 8] },
+      { date: "2024-06-07", main: [10, 11, 12, 13, 14, 15], supp: [16, 17] },
+      { date: "2024-07-05", main: [20, 21, 22, 23, 24, 25], supp: [26, 27] },
+    ], { includeSupp: false });
+
+    expect(summary.totalMonths).toBe(3);
+    expect(summary.averageMonthCount).toBe(2);
+    expect(summary.averageExcludedMonthLabels).toEqual(["2024-05"]);
+    expect(summary.avgOneDigitPerMonth).toBe(0);
+    expect(summary.avgTwoDigitPerMonth).toBe(6);
+  });
+
+  it("excludes the opening partial month from historical monthly bias averages", () => {
+    const summary = analyzeMonthlyDigitOccurrences([
+      { date: "2024-05-10", main: [1, 2, 3, 4, 5, 6], supp: [7, 8] },
+      { date: "2024-06-07", main: [10, 11, 12, 13, 14, 15], supp: [16, 17] },
+      { date: "2024-07-05", main: [1, 2, 3, 20, 21, 22], supp: [23, 24] },
+      { date: "2024-08-02", main: [4, 5, 6, 30, 31, 32], supp: [33, 34] },
+    ], { includeSupp: false });
+
+    expect(summary.recentBias.recentWindowMonths).toBe(2);
+    expect(summary.recentBias.historicalWindowMonths).toBe(1);
+    expect(summary.recentBias.historicalAvgOneDigitShare).toBe(0);
+    expect(summary.recentBias.recentAvgOneDigitShare).toBe(0.5);
+    expect(summary.recentBias.oneDigitBiasScore).toBe(0.5);
+  });
 });

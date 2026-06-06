@@ -496,6 +496,61 @@ describe("generateCandidates OGA bias decile acceptance", () => {
     });
   });
 
+  it("constructively fills an extreme main + supp single-digit share instead of relying on rejection luck", () => {
+    const candidates = withSeededRandom(202411, () =>
+      generateCandidates(
+        5,
+        [],
+        knobs,
+        () => {},
+        [],
+        [],
+        false,
+        0,
+        [],
+        [],
+        [],
+        undefined,
+        0,
+        0,
+        1,
+        0,
+        [],
+        0,
+        0,
+        0,
+        0,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { enabled: true, singleDigitPercent: 100, scope: "mainAndSupp" },
+        undefined,
+        20,
+      ).candidates
+    );
+
+    expect(candidates).toHaveLength(5);
+    candidates.forEach((candidate) => {
+      const allNumbers = [...candidate.main, ...candidate.supp];
+      expect(allNumbers).toHaveLength(8);
+      expect(new Set(allNumbers).size).toBe(8);
+      expect(allNumbers.every((n) => n >= 1 && n <= 9)).toBe(true);
+    });
+  });
+
   it("rejects a forced candidate that breaks the strict mains-only digit-width share", () => {
     const history: Draw[] = [
       draw([10, 11, 12, 13, 14, 15], [16, 17]),

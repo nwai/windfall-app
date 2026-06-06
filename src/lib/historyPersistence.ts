@@ -30,6 +30,7 @@ export function saveCachedDrawHistory(rows: DrawRow[]): void {
       date: row.date,
       mains: row.mains.slice(),
       supps: row.supps.slice(),
+      isSimulated: row.isSimulated,
     })),
     updatedAt: new Date().toISOString(),
   };

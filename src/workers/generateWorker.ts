@@ -10,7 +10,7 @@
  */
 
 import { generateCandidates } from "../generateCandidates";
-import type { GenerateCandidatesResult } from "../generateCandidates";
+import type { GenerateCandidateRatioOption, GenerateCandidatesResult } from "../generateCandidates";
 
 /** Monthly bucket options with arrays instead of Sets (for structured clone) */
 interface SerializedMonthlyBucketOptions {
@@ -25,6 +25,12 @@ interface SerializedMonthlyBucketOptions {
   };
   allowShortfall?: boolean;
   boostPenalize?: boolean;
+  selectedNumbersByBucket?: {
+    undrawn: number[]; times1: number[]; times2: number[]; times3: number[];
+    times4: number[]; times5: number[]; times6: number[]; times7: number[];
+    times8: number[];
+  };
+  selectedNumberBiasEnabled?: boolean;
 }
 
 interface MainDigitConstraintOptions {
@@ -58,7 +64,7 @@ export interface GenerateWorkerArgs {
   hammingThreshold: number;
   jaccardThreshold: number;
   lambda: number;
-  ratioOptions?: { ratio: string; count: number }[];
+  ratioOptions?: GenerateCandidateRatioOption[];
   minRecentMatches: number;
   recentMatchBias: number;
   repeatWindowSizeW: number;
@@ -87,6 +93,8 @@ export interface GenerateWorkerArgs {
   maxLastDrawMatches?: number;
   /** Per-number boost from monthly repeat bias; plain object (numeric keys). */
   monthlyRepeatBiasWeights?: Record<number, number>;
+  /** Per-number month-end carry-over weights for active early-month numbers. */
+  monthEndCarryOverWeights?: Record<number, number>;
 }
 
 function deserializeMonthlyBuckets(
@@ -108,6 +116,20 @@ function deserializeMonthlyBuckets(
     },
     allowShortfall: opts.allowShortfall,
     boostPenalize: opts.boostPenalize,
+    selectedNumbersByBucket: opts.selectedNumbersByBucket
+      ? {
+          undrawn: [...opts.selectedNumbersByBucket.undrawn],
+          times1: [...opts.selectedNumbersByBucket.times1],
+          times2: [...opts.selectedNumbersByBucket.times2],
+          times3: [...opts.selectedNumbersByBucket.times3],
+          times4: [...opts.selectedNumbersByBucket.times4],
+          times5: [...opts.selectedNumbersByBucket.times5],
+          times6: [...opts.selectedNumbersByBucket.times6],
+          times7: [...opts.selectedNumbersByBucket.times7],
+          times8: [...opts.selectedNumbersByBucket.times8],
+        }
+      : undefined,
+    selectedNumberBiasEnabled: opts.selectedNumberBiasEnabled,
   };
 }
 
@@ -180,7 +202,8 @@ ctx.addEventListener("message", (e: MessageEvent) => {
       args.ogaSpokeCount,
       args.maxLastDrawMatches,
       args.monthlyRepeatBiasWeights,
-      args.mainDecadeBiases
+      args.mainDecadeBiases,
+      args.monthEndCarryOverWeights
     );
 
     ctx.postMessage({ type: "result", id, result });

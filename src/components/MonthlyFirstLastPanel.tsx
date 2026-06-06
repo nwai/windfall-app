@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import type { Draw } from "../types";
+import { filterRowsForHistoryBaselines, getExcludedMonthLabelsForHistoryBaselines } from "../lib/monthlyAverageScope";
 
 /* ─────────────────────────────────────────────────────────────────────────── */
 /* Types                                                                        */
@@ -175,6 +176,22 @@ export const MonthlyFirstLastPanel: React.FC<{ history: Draw[] }> = ({ history }
   const crossRows = useMemo(() => buildCrossRows(history, includeSupp), [history, includeSupp]);
 
   const rows = mode === "intra" ? intraRows : crossRows;
+  const averageRows = useMemo(
+    () => (
+      mode === "intra"
+        ? filterRowsForHistoryBaselines(intraRows, (row) => row.monthLabel)
+        : filterRowsForHistoryBaselines(crossRows, (row) => row.monthLabel.split(" → ")[0] ?? row.monthLabel)
+    ),
+    [crossRows, intraRows, mode],
+  );
+  const averageExcludedMonthLabels = useMemo(
+    () => (
+      mode === "intra"
+        ? getExcludedMonthLabelsForHistoryBaselines(intraRows, (row) => row.monthLabel)
+        : getExcludedMonthLabelsForHistoryBaselines(crossRows, (row) => row.monthLabel.split(" → ")[0] ?? row.monthLabel)
+    ),
+    [crossRows, intraRows, mode],
+  );
 
   /* ── Aggregate hit counts across all rows ────────────────────────── */
   const hitCounts = useMemo(() => {
@@ -189,8 +206,8 @@ export const MonthlyFirstLastPanel: React.FC<{ history: Draw[] }> = ({ history }
     Array.from({ length: 45 }, (_, i) => i + 1).filter((n) => (hitCounts.get(n) ?? 0) > 0),
     [hitCounts]);
 
-  const avgHits = rows.length
-    ? (rows.reduce((s, r) => s + r.hits.length, 0) / rows.length).toFixed(2)
+  const avgHits = averageRows.length
+    ? (averageRows.reduce((s, r) => s + r.hits.length, 0) / averageRows.length).toFixed(2)
     : "—";
 
   const mostRecentRow = rows.length ? rows[rows.length - 1] : null;
@@ -350,18 +367,18 @@ export const MonthlyFirstLastPanel: React.FC<{ history: Draw[] }> = ({ history }
               })}
             </tbody>
             {/* Footer averages */}
-            {rows.length > 1 && (
+            {averageRows.length > 1 && (
               <tfoot>
                 <tr style={{ background: "#f8fafc", borderTop: "2px solid #e2e8f0", fontWeight: 700 }}>
                   <td style={{ padding: "6px 8px", color: "#475569" }} colSpan={3}>
-                    Average ({rows.length} comparisons)
+                    Average ({averageRows.length} comparison{averageRows.length === 1 ? "" : "s"}{averageExcludedMonthLabels.length ? `; excl. ${averageExcludedMonthLabels.join(", ")}` : ""})
                   </td>
                   <td style={{ padding: "6px 8px", textAlign: "center", color: "#0c4a6e", fontSize: 14 }}>
                     {avgHits}
                   </td>
                   <td style={{ padding: "6px 8px", fontSize: 11, color: "#64748b" }} colSpan={showNums ? 3 : 1}>
-                    Min: {Math.min(...rows.map((r) => r.hits.length))} · Max: {Math.max(...rows.map((r) => r.hits.length))}
-                    {" · "}0 hits: {rows.filter((r) => r.hits.length === 0).length} months
+                    Min: {Math.min(...averageRows.map((r) => r.hits.length))} · Max: {Math.max(...averageRows.map((r) => r.hits.length))}
+                    {" · "}0 hits: {averageRows.filter((r) => r.hits.length === 0).length} months
                   </td>
                 </tr>
               </tfoot>

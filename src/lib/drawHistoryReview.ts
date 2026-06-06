@@ -42,6 +42,15 @@ export interface DrawHistoryComparison {
   conflictingDates: DrawHistoryComparisonGroup[];
 }
 
+export interface MergeMissingSourceRowsResult {
+  rows: DrawRow[];
+  sourceRowCount: number;
+  addedRowCount: number;
+  missingDateCount: number;
+  conflictingDateCount: number;
+  extraLocalDateCount: number;
+}
+
 function pad2(value: number): string {
   return String(value).padStart(2, "0");
 }
@@ -148,6 +157,7 @@ export function rowsFromDraws(draws: Draw[]): DrawRow[] {
     date: draw.date,
     mains: draw.main.slice(),
     supps: draw.supp.slice(),
+    isSimulated: draw.isSimulated,
   }));
 }
 
@@ -156,6 +166,7 @@ export function drawsFromRows(rows: DrawRow[]): Draw[] {
     date: row.date,
     main: row.mains.slice(),
     supp: row.supps.slice(),
+    isSimulated: row.isSimulated,
   }));
 }
 
@@ -416,4 +427,41 @@ export function applySafeOfficialSourceCorrections(localRows: DrawRow[], compari
   });
 
   return sortHistoryRows(nextRows, "desc");
+}
+
+export function mergeMissingSourceRows(localRows: DrawRow[], sourceRows: DrawRow[]): MergeMissingSourceRowsResult {
+  const officialRows = sourceRows.filter((row) => !row.isSimulated);
+  if (officialRows.length === 0) {
+    return {
+      rows: sortHistoryRows(localRows, "desc"),
+      sourceRowCount: 0,
+      addedRowCount: 0,
+      missingDateCount: 0,
+      conflictingDateCount: 0,
+      extraLocalDateCount: 0,
+    };
+  }
+
+  const comparison = compareOfficialSourceRows(localRows, officialRows);
+  let nextRows = sortHistoryRows(localRows, "desc");
+  let addedRowCount = 0;
+
+  comparison.missingInLocal.forEach((group) => {
+    group.sourceRows.forEach((sourceRow) => {
+      const beforeLength = nextRows.length;
+      nextRows = addSourceRowIfMissing(nextRows, sourceRow);
+      if (nextRows.length > beforeLength) {
+        addedRowCount += 1;
+      }
+    });
+  });
+
+  return {
+    rows: sortHistoryRows(nextRows, "desc"),
+    sourceRowCount: officialRows.length,
+    addedRowCount,
+    missingDateCount: comparison.missingInLocal.length,
+    conflictingDateCount: comparison.conflictingDates.length,
+    extraLocalDateCount: comparison.extraInLocal.length,
+  };
 }

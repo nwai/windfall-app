@@ -1,15 +1,77 @@
 // State Presets storage helpers (localStorage) for windfall-app
 // v1 keeps data purely client-side and exportable/importable.
 
+import { normalizeBatesParameters, type BatesParameterSet } from "./batesWeightsCore";
+import { normalizeWeightedTargetNumbers, normalizeWeightedTargets } from "./weightedTargets";
+
 export type UUID = string;
 export type PresetVersion = 1;
 type MainEndingDigitBucketKey = "main0" | "main1" | "main2" | "main3" | "main4" | "main5" | "main6" | "main7" | "main8" | "main9";
 type MainDecadeBucketKey = "decade0x" | "decade1x" | "decade2x" | "decade3x" | "decade4x";
+type MonthlyFrequencyBucketKey = "undrawn" | "times1" | "times2" | "times3" | "times4" | "times5" | "times6" | "times7" | "times8";
+type PresetPickSixSource = "manual" | "manualSim" | "dgaSim";
+
+export type PresetMonthlyFrequencyConstraints = Record<MonthlyFrequencyBucketKey, number>;
+export type PresetMRBBucketBoosts = Record<MonthlyFrequencyBucketKey, number>;
+
+export interface PresetProbabilityOverlay {
+  pAtLeastRaw: number;
+  pAtLeastWeighted: number;
+  targetRaw: number;
+  targetWeighted: number;
+}
 
 interface MainBucketBoostSnapshot {
   singleDigit?: number;
   twoDigit?: number;
 }
+
+const PRESET_MONTHLY_BUCKET_KEYS: MonthlyFrequencyBucketKey[] = [
+  "undrawn",
+  "times1",
+  "times2",
+  "times3",
+  "times4",
+  "times5",
+  "times6",
+  "times7",
+  "times8",
+];
+
+export const DEFAULT_PRESET_ACCEPTANCE_NEEDS_COUNTS: PresetMonthlyFrequencyConstraints = {
+  undrawn: 0,
+  times1: 0,
+  times2: 0,
+  times3: 0,
+  times4: 0,
+  times5: 0,
+  times6: 0,
+  times7: 0,
+  times8: 0,
+};
+
+export const DEFAULT_PRESET_MRB_BUCKET_BOOSTS: PresetMRBBucketBoosts = {
+  undrawn: 1,
+  times1: 1,
+  times2: 1,
+  times3: 1,
+  times4: 1,
+  times5: 1,
+  times6: 1,
+  times7: 1,
+  times8: 1,
+};
+
+export const DEFAULT_PRESET_PICK_SIX_MANUAL = [1, 2, 3, 4, 5, 6, 7, 8];
+
+const DEFAULT_NUM_CANDIDATES = 8;
+const DEFAULT_BATCH_SIZE = 200;
+const DEFAULT_BATCH_SESSION_RUNS = 10;
+const DEFAULT_OCTAGONAL_TOP = 9;
+const DEFAULT_LAST_DRAW_MATCH_CAP = 3;
+const DEFAULT_TREND_LOOKBACK = 4;
+const DEFAULT_TREND_THRESHOLD = 0.02;
+const MRB_BUDGET = 9;
 
 export interface AppPreset {
   id: UUID;
@@ -136,12 +198,18 @@ export interface AppPresetSnapshot {
   overgenFactor?: number;
 
   // MiAN hard-exclusion toggle
+  acceptanceNeedsEnabled?: boolean;
+  acceptanceNeedsCounts?: Partial<PresetMonthlyFrequencyConstraints>;
   acceptanceNeedsHardExclude?: boolean;
 
   // Generation-time boost for user selected numbers
   selectedBoostEnabled?: boolean;
   selectedBoostFactor?: number;
   ogaSpokeCount?: number;
+  numCandidates?: number;
+  batchSize?: number;
+  batchSessionRuns?: number;
+  octagonalTop?: number;
 
   // Additional UI state to persist toggles/inputs
   autoExcludeUnselected?: boolean;
@@ -159,6 +227,7 @@ export interface AppPresetSnapshot {
   patternSumTolerance?: number;
   selectedWindowPatterns?: { low: number; high: number; even: number; odd: number; sum: number }[];
   insightsEnabled?: boolean;
+  dgaHeatmapView?: "temperature" | "monthlyBucketState";
   tempMetric?: "ema" | "recency" | "hybrid";
   showHeatmapLetters?: boolean;
   ogaRefMode?: "window" | "all";
@@ -167,11 +236,148 @@ export interface AppPresetSnapshot {
   ogaPreferredBand?: "auto" | "low" | "mid" | "high";
   ogaPreferredDeciles?: { index: number; weight: number }[];
   traceVerbose?: boolean;
+  monthEndCarryOverBiasEnabled?: boolean;
+  monthEndCarryOverStrength?: "light" | "normal" | "strong";
+  monthEndCarryOverIncludeMonthEndUndrawn?: boolean;
+  monthEndCarryOverIncludeBoundaryRepeats?: boolean;
+  selectedCarryOverBoostNumbers?: number[];
+  selectedCarryOverBoostMode?: "normal" | "strong" | "nearForced";
   // Readiness (Rdy) score weights
   rdyWeights?: { idm: number; conv: number; oga: number };
+
+  // Parameter search and probability overlay
+  batesParams?: Partial<BatesParameterSet>;
+  probOverlay?: PresetProbabilityOverlay | null;
+
+  // Monthly constructive constraints and repeat-bias controls
+  monthlyConstructiveEnabled?: boolean;
+  mrbEnabled?: boolean;
+  mrbIncludeSupp?: boolean;
+  mrbBucketBoosts?: Partial<PresetMRBBucketBoosts>;
+
+  // Pick-Six conversion panel
+  pickSixSource?: PresetPickSixSource;
+  pickSixManual?: number[];
 }
 
 const KEY = "app:presets:v1";
+
+function finiteNumber(value: unknown, fallback: number): number {
+  const numeric = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function clampInteger(value: unknown, min: number, max: number, fallback: number): number {
+  return Math.max(min, Math.min(max, Math.round(finiteNumber(value, fallback))));
+}
+
+function clampIntegerOrFallback(value: unknown, min: number, max: number, fallback: number): number {
+  const numeric = finiteNumber(value, fallback);
+  if (numeric < min || numeric > max) return fallback;
+  return Math.max(min, Math.min(max, Math.round(numeric)));
+}
+
+function normalizeMonthlyCounts(input: Partial<PresetMonthlyFrequencyConstraints> | undefined): PresetMonthlyFrequencyConstraints {
+  return PRESET_MONTHLY_BUCKET_KEYS.reduce<PresetMonthlyFrequencyConstraints>((next, key) => {
+    next[key] = clampInteger(input?.[key], 0, 8, DEFAULT_PRESET_ACCEPTANCE_NEEDS_COUNTS[key]);
+    return next;
+  }, { ...DEFAULT_PRESET_ACCEPTANCE_NEEDS_COUNTS });
+}
+
+function normalizeMRBBoosts(input: Partial<PresetMRBBucketBoosts> | undefined): PresetMRBBucketBoosts {
+  const raw = PRESET_MONTHLY_BUCKET_KEYS.reduce<PresetMRBBucketBoosts>((next, key) => {
+    next[key] = Math.max(1, Math.min(10, finiteNumber(input?.[key], DEFAULT_PRESET_MRB_BUCKET_BOOSTS[key])));
+    return next;
+  }, { ...DEFAULT_PRESET_MRB_BUCKET_BOOSTS });
+
+  const usedBudget = PRESET_MONTHLY_BUCKET_KEYS.reduce((sum, key) => sum + Math.max(0, raw[key] - 1), 0);
+  if (usedBudget <= MRB_BUDGET) return raw;
+
+  const scale = MRB_BUDGET / usedBudget;
+  return PRESET_MONTHLY_BUCKET_KEYS.reduce<PresetMRBBucketBoosts>((next, key) => {
+    next[key] = 1 + Math.max(0, raw[key] - 1) * scale;
+    return next;
+  }, { ...DEFAULT_PRESET_MRB_BUCKET_BOOSTS });
+}
+
+function isTrendRatioTag(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const parts = value.split("-");
+  if (parts.length !== 3) return false;
+  const counts = parts.map((part) => Number(part));
+  return counts.every((count) => Number.isInteger(count) && count >= 0) && counts.reduce((sum, count) => sum + count, 0) === 8;
+}
+
+function normalizeTrendRatios(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  return Array.from(new Set(input.filter(isTrendRatioTag)));
+}
+
+function normalizePickSixSource(value: unknown): PresetPickSixSource {
+  return value === "manualSim" || value === "dgaSim" ? value : "manual";
+}
+
+function normalizePickSixManual(values: unknown): number[] {
+  const seen = new Set<number>();
+  const output: number[] = [];
+  if (Array.isArray(values)) {
+    for (const value of values) {
+      const numeric = Math.round(finiteNumber(value, Number.NaN));
+      if (!Number.isFinite(numeric) || numeric < 1 || numeric > 45 || seen.has(numeric)) continue;
+      seen.add(numeric);
+      output.push(numeric);
+      if (output.length === 8) return output;
+    }
+  }
+
+  for (let n = 1; output.length < 8 && n <= 45; n += 1) {
+    if (seen.has(n)) continue;
+    seen.add(n);
+    output.push(n);
+  }
+  return output;
+}
+
+function normalizeProbabilityOverlay(value: unknown): PresetProbabilityOverlay | null {
+  if (!value || typeof value !== "object") return null;
+  const overlay = value as Partial<Record<keyof PresetProbabilityOverlay, unknown>>;
+  const pAtLeastRaw = finiteNumber(overlay.pAtLeastRaw, Number.NaN);
+  const pAtLeastWeighted = finiteNumber(overlay.pAtLeastWeighted, Number.NaN);
+  const targetRaw = finiteNumber(overlay.targetRaw, Number.NaN);
+  const targetWeighted = finiteNumber(overlay.targetWeighted, Number.NaN);
+  if (![pAtLeastRaw, pAtLeastWeighted, targetRaw, targetWeighted].every(Number.isFinite)) return null;
+  return { pAtLeastRaw, pAtLeastWeighted, targetRaw, targetWeighted };
+}
+
+export function normalizeAppPresetSnapshot(snapshot: AppPresetSnapshot): AppPresetSnapshot {
+  const userSelectedNumbers = normalizeWeightedTargetNumbers(snapshot.userSelectedNumbers);
+
+  return {
+    ...snapshot,
+    userSelectedNumbers,
+    weightedTargets: normalizeWeightedTargets(userSelectedNumbers, snapshot.weightedTargets),
+    trendLookback: clampIntegerOrFallback(snapshot.trendLookback, 1, 52, DEFAULT_TREND_LOOKBACK),
+    trendThreshold: Math.max(0, Math.min(1, finiteNumber(snapshot.trendThreshold, DEFAULT_TREND_THRESHOLD))),
+    allowedTrendRatios: normalizeTrendRatios(snapshot.allowedTrendRatios),
+    acceptanceNeedsEnabled: !!snapshot.acceptanceNeedsEnabled,
+    acceptanceNeedsCounts: normalizeMonthlyCounts(snapshot.acceptanceNeedsCounts),
+    acceptanceNeedsHardExclude: !!snapshot.acceptanceNeedsHardExclude,
+    maxLastDrawMatchesEnabled: !!snapshot.maxLastDrawMatchesEnabled,
+    maxLastDrawMatchesValue: clampInteger(snapshot.maxLastDrawMatchesValue, 0, 6, DEFAULT_LAST_DRAW_MATCH_CAP),
+    numCandidates: clampInteger(snapshot.numCandidates, 1, 1000, DEFAULT_NUM_CANDIDATES),
+    batchSize: clampInteger(snapshot.batchSize, 1, 100000, DEFAULT_BATCH_SIZE),
+    batchSessionRuns: clampInteger(snapshot.batchSessionRuns, 1, 200, DEFAULT_BATCH_SESSION_RUNS),
+    octagonalTop: clampInteger(snapshot.octagonalTop, 1, 45, DEFAULT_OCTAGONAL_TOP),
+    probOverlay: normalizeProbabilityOverlay(snapshot.probOverlay),
+    batesParams: normalizeBatesParameters(snapshot.batesParams),
+    monthlyConstructiveEnabled: !!snapshot.monthlyConstructiveEnabled,
+    mrbEnabled: !!snapshot.mrbEnabled,
+    mrbIncludeSupp: snapshot.mrbIncludeSupp ?? true,
+    mrbBucketBoosts: normalizeMRBBoosts(snapshot.mrbBucketBoosts),
+    pickSixSource: normalizePickSixSource(snapshot.pickSixSource),
+    pickSixManual: normalizePickSixManual(snapshot.pickSixManual),
+  };
+}
 
 function uid(): UUID {
   // Simple unique ID
@@ -198,7 +404,7 @@ export function saveNewPreset(name: string, snapshot: AppPresetSnapshot): AppPre
     version: 1,
     createdAt: now,
     updatedAt: now,
-    state: snapshot,
+    state: normalizeAppPresetSnapshot(snapshot),
   };
   const all = listPresets();
   all.push(preset);
@@ -214,7 +420,7 @@ export function updatePreset(id: UUID, snapshot: AppPresetSnapshot, name?: strin
     ...all[idx],
     name: name ?? all[idx].name,
     updatedAt: new Date().toISOString(),
-    state: snapshot,
+    state: normalizeAppPresetSnapshot(snapshot),
   };
   localStorage.setItem(KEY, JSON.stringify(all));
   return all[idx];
@@ -249,7 +455,7 @@ export function importPresetJSON(json: string): AppPreset | null {
       version: 1,
       createdAt: now,
       updatedAt: now,
-      state: p.state,
+      state: normalizeAppPresetSnapshot(p.state),
     };
     const all = listPresets();
     all.push(imported);

@@ -202,6 +202,12 @@ export const MonthlyDigitOccurrencePanel: React.FC<MonthlyDigitOccurrencePanelPr
     () => (latestFirst ? [...summary.rows].reverse() : summary.rows),
     [latestFirst, summary.rows],
   );
+  const averageMonthHint = summary.averageMonthCount > 0
+    ? `${summary.avgOneDigitPerMonth.toFixed(1)} per month across ${summary.averageMonthCount} complete month${summary.averageMonthCount === 1 ? "" : "s"}${summary.averageExcludedMonthLabels.length ? ` (excl. ${summary.averageExcludedMonthLabels.join(", ")})` : ""}`
+    : `No complete months available${summary.averageExcludedMonthLabels.length ? ` (excl. ${summary.averageExcludedMonthLabels.join(", ")})` : ""}`;
+  const averageTwoDigitHint = summary.averageMonthCount > 0
+    ? `${summary.avgTwoDigitPerMonth.toFixed(1)} per month across ${summary.averageMonthCount} complete month${summary.averageMonthCount === 1 ? "" : "s"}${summary.averageExcludedMonthLabels.length ? ` (excl. ${summary.averageExcludedMonthLabels.join(", ")})` : ""}`
+    : `No complete months available${summary.averageExcludedMonthLabels.length ? ` (excl. ${summary.averageExcludedMonthLabels.join(", ")})` : ""}`;
 
   return (
     <section style={{ border: "1px solid #e5e7eb", borderRadius: 8, background: "#fff", padding: 12, display: "flex", flexDirection: "column", gap: 12 }}>
@@ -238,9 +244,9 @@ export const MonthlyDigitOccurrencePanel: React.FC<MonthlyDigitOccurrencePanelPr
       </div>
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-        <StatCard label="Months analysed" value={String(summary.totalMonths)} hint={`${summary.totalDraws} draws counted`} tone="slate" />
-        <StatCard label="1-digit occurrences" value={String(summary.totalOneDigitOccurrences)} hint={`${summary.avgOneDigitPerMonth.toFixed(1)} per month · ${summary.avgOneDigitPerDraw.toFixed(2)} per draw`} tone="cyan" />
-        <StatCard label="2-digit occurrences" value={String(summary.totalTwoDigitOccurrences)} hint={`${summary.avgTwoDigitPerMonth.toFixed(1)} per month · ${summary.avgTwoDigitPerDraw.toFixed(2)} per draw`} tone="blue" />
+        <StatCard label="Months analysed" value={String(summary.totalMonths)} hint={`${summary.totalDraws} draws counted${summary.averageExcludedMonthLabels.length ? ` · month averages exclude ${summary.averageExcludedMonthLabels.join(", ")}` : ""}`} tone="slate" />
+        <StatCard label="1-digit occurrences" value={String(summary.totalOneDigitOccurrences)} hint={`${averageMonthHint} · ${summary.avgOneDigitPerDraw.toFixed(2)} per draw`} tone="cyan" />
+        <StatCard label="2-digit occurrences" value={String(summary.totalTwoDigitOccurrences)} hint={`${averageTwoDigitHint} · ${summary.avgTwoDigitPerDraw.toFixed(2)} per draw`} tone="blue" />
         <StatCard label="Monthly leaders" value={`${summary.monthsOneDigitLed} / ${summary.monthsTwoDigitLed} / ${summary.balancedMonths}`} hint="1-digit led / 2-digit led / balanced" tone="amber" />
       </div>
 

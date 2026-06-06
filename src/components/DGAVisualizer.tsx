@@ -80,6 +80,7 @@ export interface DGAVisualizerProps {
    * Defaults to 0 (all columns at full opacity).
    */
   wfmqyhStart?: number;
+  cellSize?: number;
 }
 
 type SolveMode = 'center-and-targets' | 'targets-only';
@@ -218,6 +219,7 @@ export const DGAVisualizer: React.FC<DGAVisualizerProps> = ({
   focusedCol = null,
   onColumnClick,
   wfmqyhStart = 0,
+  cellSize = 20,
 }) => {
   // Defensive defaults
   grid = grid || [];
@@ -948,6 +950,9 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
   };
 
   const disableCenterInputs = solveMode === 'targets-only';
+  const tableCellSize = Math.max(18, Math.floor(cellSize));
+  const tableCellLineHeight = `${tableCellSize}px`;
+  const railCellWidth = Math.max(28, tableCellSize + 6);
 
   /* ------------------------------- Rendering ------------------------------ */
 
@@ -1607,17 +1612,33 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
       <table key={tableKey} style={{ borderCollapse: 'collapse', fontSize: 13 }}>
         <thead>
           <tr>
-            <th style={{ background: '#f9f9f9' }}></th>
+            <th
+              style={{
+                background: '#f9f9f9',
+                minWidth: railCellWidth,
+                width: railCellWidth,
+                height: tableCellSize,
+                lineHeight: tableCellLineHeight,
+                padding: 0,
+                boxSizing: 'border-box',
+                border: '1px solid #eee',
+              }}
+            ></th>
             {drawLabels.map((label, cIdx) => (
               <th
                 key={cIdx}
                 style={{
-                  minWidth: 20,
+                  minWidth: tableCellSize,
+                  width: tableCellSize,
+                  height: tableCellSize,
+                  lineHeight: tableCellLineHeight,
                   textAlign: 'center',
                   background: wfmqyhStart > 0 && cIdx < wfmqyhStart ? '#f5f5f5' : '#f9f9f9',
                   border: '1px solid #eee',
                   opacity: getColOpacity(cIdx),
                   cursor: 'pointer',
+                  padding: 0,
+                  boxSizing: 'border-box',
                 }}
                 onClick={() => onColumnClick?.(cIdx)}
               >
@@ -1627,13 +1648,17 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
             {includeNextCol && (
               <th
                 style={{
-                    width: 36,
-                    minWidth: 36,
+                  width: 36,
+                  minWidth: 36,
+                  height: tableCellSize,
+                  lineHeight: tableCellLineHeight,
                   textAlign: 'center',
                   background: '#f0f7ff',
                   border: '1px solid #dbeaff',
                   opacity: getColOpacity(drawLabels.length),
                   cursor: 'pointer',
+                  padding: 0,
+                  boxSizing: 'border-box',
                 }}
                 title="Next draw (synthetic column)"
                 onClick={() => onColumnClick?.(drawLabels.length)}
@@ -1656,6 +1681,12 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
             background: getHeatmapColor(numberCounts[rIdx], minCount, maxCount),
             border: isFocusedRow ? '2px solid #ff9800' : '1px solid #eee',
             fontWeight: 700,
+            height: tableCellSize,
+            lineHeight: tableCellLineHeight,
+            minWidth: railCellWidth,
+            width: railCellWidth,
+            padding: '0 6px 0 0',
+            boxSizing: 'border-box',
             position: 'sticky',
             left: 0,
             zIndex: 1,
@@ -1764,9 +1795,10 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
             <td
               key={cIdx}
               style={{
-                width: 20,
-                minWidth: 20,
-                height: 20,
+                width: tableCellSize,
+                minWidth: tableCellSize,
+                height: tableCellSize,
+                lineHeight: tableCellLineHeight,
                 textAlign: 'center',
                 verticalAlign: 'middle',
                 border,
@@ -1776,6 +1808,7 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
                 backgroundSize: '6px 6px',
                 padding: 0,
                 opacity,
+                boxSizing: 'border-box',
               }}
               title={cellTitle}
             >
@@ -1810,14 +1843,17 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
 
               const baseHeat = getHeatmapColor(numberCounts[rIdx], minCount, maxCount);
               const style: React.CSSProperties = {
-                minWidth: 20,
-                height: 20,
+                minWidth: 36,
+                height: tableCellSize,
+                lineHeight: tableCellLineHeight,
                 textAlign: 'center',
                 position: 'relative',
                 cursor: 'pointer',
                 background: baseHeat,
                 border: '1px solid #eee',
                 opacity,
+                padding: 0,
+                boxSizing: 'border-box',
               };
 
               if (hasHighlight) {

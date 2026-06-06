@@ -1,6 +1,11 @@
 import React, { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import { generateExhaustiveCombos } from "../../lib/exhaustiveGenerator";
 import { isDisplayedValueInRange } from "../../lib/generatedCandidateFilterUtils";
+import {
+  buildHistoricalPrizeBacktest,
+  selectRowsForCandidateExport,
+  type GeneratedCandidateViewRow,
+} from "../../lib/generatedCandidates";
 import { computeOGA, getOGAPercentile } from "../../utils/oga";
 import { CandidateSet, Draw } from "../../types";
 import {
@@ -8,6 +13,12 @@ import {
   computeWeekdayWindfallPrizeScore,
 } from "../../lib/prizeDivisions";
 import { ogaPercentileToSimilarity } from "../../lib/ogaQuality";
+import {
+  MAX_USER_SELECTED_NUMBER,
+  MIN_USER_SELECTED_NUMBER,
+  normalizeUserSelectedNumbers,
+  toggleUserSelectedNumber,
+} from "../../lib/userSelectedNumbers";
 
 /** Settings snapshot captured at export time — written as ## comment rows in CSV */
 export interface ExportSettings {
@@ -17,6 +28,12 @@ export interface ExportSettings {
   /** SDE1-excluded numbers */
   sde1Exclusions: number[];
   selectedOddEvenRatios: string[];
+  trendRatioFilter?: {
+    lookback: number;
+    threshold: number;
+    allowedRatios: string[];
+    coveragePercent: number;
+  };
   lambdaEnabled: boolean;
   lambda: number;
   selectedBoostEnabled: boolean;
@@ -229,7 +246,10 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
     const sortIndicator = (key: SortKey): string => (sortKey === key ? (sortDir === "asc" ? " ▲" : " ▼") : "");
     const sortableStyle: React.CSSProperties = { cursor: "pointer", userSelect: "none" };
 
-    const recentSet = new Set([...(mostRecentDraw?.main || []), ...(mostRecentDraw?.supp || [])]);
+    const recentSet = useMemo(
+      () => new Set([...(mostRecentDraw?.main || []), ...(mostRecentDraw?.supp || [])]),
+      [mostRecentDraw],
+    );
 
     // --- Multi-column range filter ---
     interface RangeFilter {
@@ -495,9 +515,26 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
       }
     }, [manualSimSelected.length]);
 
-    const selSet = new Set(userSelectedNumbers);
-    const forcedSet = new Set(forcedNumbers);
-    const hitSet = new Set<number>([...selSet, ...forcedSet]); // union for SelHits
+    const normalizedUserSelectedNumbers = useMemo(
+      () => normalizeUserSelectedNumbers(userSelectedNumbers),
+      [userSelectedNumbers],
+    );
+    const selSet = useMemo(() => new Set(normalizedUserSelectedNumbers), [normalizedUserSelectedNumbers]);
+    const forcedSet = useMemo(() => new Set(forcedNumbers), [forcedNumbers]);
+    const hitSet = useMemo(() => new Set<number>([...selSet, ...forcedSet]), [selSet, forcedSet]);
+    const userSelectedNumberOptions = useMemo(
+      () => Array.from(
+        { length: MAX_USER_SELECTED_NUMBER - MIN_USER_SELECTED_NUMBER + 1 },
+        (_, index) => MIN_USER_SELECTED_NUMBER + index,
+      ),
+      [],
+    );
+    const toggleUserSelection = useCallback((number: number): void => {
+      setUserSelectedNumbers(toggleUserSelectedNumber(normalizedUserSelectedNumbers, number));
+    }, [normalizedUserSelectedNumbers, setUserSelectedNumbers]);
+    const clearUserSelection = useCallback((): void => {
+      setUserSelectedNumbers([]);
+    }, [setUserSelectedNumbers]);
 
   const manualMainSet = useMemo(() => new Set(manualSimSelected.slice(0, 6)), [manualSimSelected]);
   const manualSuppSet = useMemo(() => new Set(manualSimSelected.slice(6, 8)), [manualSimSelected]);
@@ -727,7 +764,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
       const nums = [...c.main, ...c.supp];
       const idm = getIdealDrawMatch(nums);
       const conv = convergenceScores[idx];
-      const ogaPct = (c as any).ogaPercentile as number | undefined;
+      const ogaPct = c.ogaPercentile;
       if (idm === null) return null;
       const convNorm = conv !== null ? Math.abs(conv) / safeMaxAbsConv : 0;
       const ogaNorm = enableOGA && ogaPct !== undefined ? ogaPercentileToSimilarity(ogaPct) : 0;
@@ -773,7 +810,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
    *   Tier D:  2x = 0  → baseline
    *
    * Sort Win DESCENDING for best candidates first (higher = better).
-   * Use the ⭐ Rec button for the full multi-signal recommended sort.
+   * Use the Recommended button for the full multi-signal recommended sort.
    */
   const winScores = useMemo((): (number | null)[] => {
     // Pre-compute |Conv| range for within-tier normalisation
@@ -926,7 +963,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
   }, [nsScores]);
 
   /** Sorted candidates — preserves original index for callbacks */
-  const sortedCandidates = useMemo((): { c: CandidateSet; origIdx: number }[] => {
+  const sortedCandidates = useMemo((): GeneratedCandidateViewRow[] => {
     const indexed = candidates.map((c, i) => ({ c, origIdx: i }));
     if (!sortKey) return indexed;
     const dir = sortDir === "asc" ? 1 : -1;
@@ -961,24 +998,24 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
           vb = convergenceScores[b.origIdx] ?? -Infinity;
           break;
         case "comp":
-          va = (a.c as any).finalCompositeAdj ?? -Infinity;
-          vb = (b.c as any).finalCompositeAdj ?? -Infinity;
+          va = a.c.finalCompositeAdj ?? -Infinity;
+          vb = b.c.finalCompositeAdj ?? -Infinity;
           break;
         case "ogaRaw":
-          va = (a.c as any).ogaScore ?? -Infinity;
-          vb = (b.c as any).ogaScore ?? -Infinity;
+          va = a.c.ogaScore ?? -Infinity;
+          vb = b.c.ogaScore ?? -Infinity;
           break;
         case "ogaPct":
-          va = (a.c as any).ogaPercentile ?? -Infinity;
-          vb = (b.c as any).ogaPercentile ?? -Infinity;
+          va = a.c.ogaPercentile ?? -Infinity;
+          vb = b.c.ogaPercentile ?? -Infinity;
           break;
         case "selHits":
-          va = (a.c as any).selHits ?? numsA.filter((n: number) => hitSet.has(n)).length;
-          vb = (b.c as any).selHits ?? numsB.filter((n: number) => hitSet.has(n)).length;
+          va = a.c.selHits ?? numsA.filter((n: number) => hitSet.has(n)).length;
+          vb = b.c.selHits ?? numsB.filter((n: number) => hitSet.has(n)).length;
           break;
         case "recentHits":
-          va = (a.c as any).recentHits ?? numsA.filter((n: number) => recentSet.has(n)).length;
-          vb = (b.c as any).recentHits ?? numsB.filter((n: number) => recentSet.has(n)).length;
+          va = a.c.recentHits ?? numsA.filter((n: number) => recentSet.has(n)).length;
+          vb = b.c.recentHits ?? numsB.filter((n: number) => recentSet.has(n)).length;
           break;
         case "oddEven":
           va = numsA.filter((n: number) => n % 2 === 1).length;
@@ -1026,7 +1063,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
   }, [candidates, sortKey, sortDir, convergenceScores, readinessScores, idmScores, winScores, nrrScores, nsScores]);
 
   // --- Multi-column range filter applied to sorted candidates ---
-  const filteredCandidates = useMemo((): { c: CandidateSet; origIdx: number; matched: boolean }[] => {
+  const filteredCandidates = useMemo((): Required<GeneratedCandidateViewRow>[] => {
     if (!isFilteringActive) return sortedCandidates.map((r) => ({ ...r, matched: true }));
     const parse = (v: string): number | null => {
       if (v.trim() === "") return null;
@@ -1082,7 +1119,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
       && nsMin === null && nsMax === null;
     if (allEmpty) return sortedCandidates.map((r) => ({ ...r, matched: true }));
 
-    const testMatch = ({ c, origIdx }: { c: CandidateSet; origIdx: number }): boolean => {
+    const testMatch = ({ c, origIdx }: GeneratedCandidateViewRow): boolean => {
       const nums: number[] = [...c.main, ...c.supp];
       const candidateSingleDigits = nums.filter((n) => n < 10);
       const candidateTwoDigits = nums.filter((n) => n >= 10);
@@ -1098,12 +1135,12 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
       }
       // SelHits: exact integer
       if (selHitsV !== null) {
-        const sh = (c as any).selHits ?? nums.filter((n: number) => hitSet.has(n)).length;
+        const sh = c.selHits ?? nums.filter((n: number) => hitSet.has(n)).length;
         if (sh !== selHitsV) return false;
       }
       // RecentHits: exact integer
       if (recentHitsV !== null) {
-        const rh = (c as any).recentHits ?? nums.filter((n: number) => recentSet.has(n)).length;
+        const rh = c.recentHits ?? nums.filter((n: number) => recentSet.has(n)).length;
         if (rh !== recentHitsV) return false;
       }
       const bucketCounts = getMonthlyBucketCounts(nums);
@@ -1117,11 +1154,11 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
       if (b7xV !== null && (bucketCounts?.times7 ?? null) !== b7xV) return false;
       if (b8xV !== null && (bucketCounts?.times8 ?? null) !== b8xV) return false;
       // Comp%: raw is finalCompositeAdj * 100
-      if (!isDisplayedValueInRange((c as any).finalCompositeAdj * 100, compMin, compMax, 2)) return false;
+      if (!isDisplayedValueInRange(c.finalCompositeAdj === undefined ? undefined : c.finalCompositeAdj * 100, compMin, compMax, 2)) return false;
       // OGA Raw
-      if (!isDisplayedValueInRange((c as any).ogaScore, ogaRawMin, ogaRawMax, 2)) return false;
+      if (!isDisplayedValueInRange(c.ogaScore, ogaRawMin, ogaRawMax, 2)) return false;
       // OGA%
-      if (!isDisplayedValueInRange((c as any).ogaPercentile, ogaPctMin, ogaPctMax, 1)) return false;
+      if (!isDisplayedValueInRange(c.ogaPercentile, ogaPctMin, ogaPctMax, 1)) return false;
       // Conv
       if (!isDisplayedValueInRange(convergenceScores[origIdx], convMin, convMax, 1)) return false;
       // IDM%: raw is idmScores[i] * 100
@@ -1140,8 +1177,8 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
     };
     if (filterPinned !== "off") {
       // Sort mode: "desc" = matches first, "asc" = matches last — all rows visible
-      const matched: { c: CandidateSet; origIdx: number; matched: boolean }[] = [];
-      const unmatched: { c: CandidateSet; origIdx: number; matched: boolean }[] = [];
+      const matched: Required<GeneratedCandidateViewRow>[] = [];
+      const unmatched: Required<GeneratedCandidateViewRow>[] = [];
       for (const row of sortedCandidates) {
         if (testMatch(row)) {
           matched.push({ ...row, matched: true });
@@ -1161,20 +1198,6 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
   /** Count of rows matching the current filter (for UI labels) */
   const matchedCount = useMemo(() => filteredCandidates.filter((r) => r.matched).length, [filteredCandidates]);
   const hasActiveFilter = isFilteringActive && matchedCount < sortedCandidates.length;
-
-  /**
-   * Maps original candidate array index → 1-based display row number in the
-   * current sorted/filtered table.  Used so the Historical Prize Backtest chips
-   * show the same "#N" the user sees in the table, regardless of sort order.
-   * If a candidate has been hidden by an active filter its key is absent.
-   */
-  const origToDisplayPos = useMemo((): Map<number, number> => {
-    const m = new Map<number, number>();
-    filteredCandidates.forEach((r, displayIdx) => {
-      if (r.matched) m.set(r.origIdx, displayIdx + 1);
-    });
-    return m;
-  }, [filteredCandidates]);
 
   /** Prize-qualifying counts — requires Manual Simulation to be fully populated (6M + 2S) */
   const prizeQualifyingCount = useMemo((): number => {
@@ -1232,29 +1255,10 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
     bestDiv: string;
     qualifying: { idx: number; div: string }[];
   }[] => {
-    // Use full history for backtest so all draws are checked regardless of the generation window
-    const backtestHistory = fullHistory ?? historyForOGA;
-    if (!backtestHistory || backtestHistory.length === 0 || manualSimSelected.length < 8) return [];
-    const manualMain = manualSimSelected.slice(0, 6);
-    const manualSupp = manualSimSelected.slice(6, 8);
-    // backtestHistory is typically oldest-first; reverse so index 0 = most recent
-    const sorted = [...backtestHistory].reverse();
-    return sorted.map((draw) => {
-      const drawMainSet = new Set(draw.main);
-      const drawSuppSet = new Set(draw.supp);
-      const div = computePrizeDivision(manualMain, manualSupp, drawMainSet, drawSuppSet);
-      if (div === "—") {
-        return { draw, tally: {}, total: 0, bestDiv: "—", qualifying: [] };
-      }
-      return {
-        draw,
-        tally: { [div]: 1 },
-        total: 1,
-        bestDiv: div,
-        qualifying: [{ idx: 0, div }],
-      };
+    return buildHistoricalPrizeBacktest({
+      history: fullHistory ?? historyForOGA,
+      manualSelection: manualSimSelected,
     });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [manualSimSelected, historyForOGA, fullHistory]);
 
   /** Aggregate totals across all historical draws */
@@ -1310,7 +1314,6 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
   }, [candidates.length]);
 
   const totalRows = filteredCandidates.length;
-  const totalHeight = totalRows * ROW_HEIGHT;
   const startIdx = shouldVirtualise
     ? Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN)
     : 0;
@@ -1427,6 +1430,16 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
          return a[0] - b[0];
        });
      }, [candidates]);
+
+     const activeSortLabel = sortKey
+       ? `${sortKey}${sortDir === "asc" ? " ↑" : " ↓"}`
+       : "original";
+     const visibleRowsLabel = candidates.length === 0
+       ? "0"
+       : isFilteringActive
+         ? `${matchedCount}/${sortedCandidates.length}`
+         : `${sortedCandidates.length}`;
+     const manualSimLabel = `${Math.min(manualSimSelected.length, 8)}/8`;
 
      function renderNumberWithCount(n: number, count: number) {
        return (
@@ -1593,7 +1606,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
 
      /** Export candidates to CSV — when filter is active, only filtered rows are exported */
      const exportCSV = useCallback(() => {
-       const exportData = isFilteringActive ? filteredCandidates : sortedCandidates;
+       const exportData = selectRowsForCandidateExport(isFilteringActive ? filteredCandidates : sortedCandidates, isFilteringActive);
        if (!exportData.length) return;
        const headers = [
          "#", "Main (6)", "Supp (2)", "Prize", "Odd/Even",
@@ -1607,10 +1620,10 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
          const odd = nums.filter((n: number) => n % 2 === 1).length;
          const even = nums.length - odd;
          const prizeLabel = computePrizeDivision(c.main, c.supp, manualMainSet, manualSuppSet);
-         const ogaRaw = (c as any).ogaScore as number | undefined;
-         const ogaPct = (c as any).ogaPercentile as number | undefined;
-         const selHits = (c as any).selHits ?? nums.filter((n: number) => hitSet.has(n)).length;
-         const recentHits = (c as any).recentHits ?? nums.filter((n: number) => recentSet.has(n)).length;
+         const ogaRaw = c.ogaScore;
+         const ogaPct = c.ogaPercentile;
+         const selHits = c.selHits ?? nums.filter((n: number) => hitSet.has(n)).length;
+         const recentHits = c.recentHits ?? nums.filter((n: number) => recentSet.has(n)).length;
          const bc = getMonthlyBucketCounts(nums);
          const convScore = convergenceScores[i];
          const idmScore = idmScores[i];
@@ -1621,7 +1634,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
            c.supp.join(" "),
            prizeLabel,
            `${odd}:${even}`,
-           (c as any).finalCompositeAdj !== undefined ? ((c as any).finalCompositeAdj * 100).toFixed(2) : "",
+           c.finalCompositeAdj !== undefined ? (c.finalCompositeAdj * 100).toFixed(2) : "",
            ogaRaw !== undefined ? ogaRaw.toFixed(2) : "",
            ogaPct !== undefined ? ogaPct.toFixed(1) : "",
            selHits,
@@ -1653,7 +1666,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
 
        tag("Generated", new Date().toISOString());
        tag("Candidates",
-         `${exportData.length} exported | ${numCandidates} requested | overgen ${overgenFactor}x | attempts ${attemptMultiplier}x | filtered ${isFilteringActive && filteredCandidates.length !== sortedCandidates.length ? "YES" : "NO"}`
+         `${exportData.length} exported | ${numCandidates} requested | overgen ${overgenFactor}x | attempts ${attemptMultiplier}x | filtered ${isFilteringActive && matchedCount !== sortedCandidates.length ? "YES" : "NO"}`
        );
        tag("Draw window", `${historyForOGA?.length ?? 0} draws`);
        tag("OGA", `${enableOGA ? "ON" : "OFF"} | Spokes ${ogaSpokeCount ?? 9}`);
@@ -1695,6 +1708,11 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
            es.selectedOddEvenRatios.length
              ? `(${es.selectedOddEvenRatios.length}): [${es.selectedOddEvenRatios.join(", ")}]`
              : "none (all ratios allowed)"
+         );
+         tag("Trend ratio filter",
+           es.trendRatioFilter?.allowedRatios.length
+             ? `(${es.trendRatioFilter.allowedRatios.length}): [${es.trendRatioFilter.allowedRatios.join(", ")}] | lookback=${es.trendRatioFilter.lookback} | threshold=${es.trendRatioFilter.threshold} | historical coverage=${es.trendRatioFilter.coveragePercent.toFixed(2)}%`
+             : "none (all trend ratios allowed)"
          );
          tag("Recent matches", `min=${es.minRecentMatches} | bias=${es.recentMatchBias}`);
          tag("Monthly boostPenalize", es.monthlyBoostPenalize ? "ON" : "OFF");
@@ -1744,21 +1762,21 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
        const url = URL.createObjectURL(blob);
        const a = document.createElement("a");
        a.href = url;
-       a.download = isFilteringActive && filteredCandidates.length !== sortedCandidates.length
+       a.download = isFilteringActive && matchedCount !== sortedCandidates.length
          ? `candidates_filtered.csv`
          : `candidates.csv`;
        a.click();
        URL.revokeObjectURL(url);
      // eslint-disable-next-line react-hooks/exhaustive-deps
-      }, [sortedCandidates, filteredCandidates, isFilteringActive, convergenceScores, idmScores, readinessScores, winScores, nrrScores, nsScores, exportSettings, enableOGA, numCandidates, overgenFactor, attemptMultiplier, ogaSpokeCount, forcedNumbers, userSelectedNumbers, monthlyBuckets, historyForOGA]);
+      }, [sortedCandidates, filteredCandidates, isFilteringActive, matchedCount, convergenceScores, idmScores, readinessScores, winScores, nrrScores, nsScores, exportSettings, enableOGA, numCandidates, overgenFactor, attemptMultiplier, ogaSpokeCount, forcedNumbers, userSelectedNumbers, monthlyBuckets, historyForOGA]);
 
      return (
      <section style={panel}>
        <header style={hdr}>
-         <div style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
+         <div style={{ fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }}>
            Generated Candidates
          </div>
-         <label style={{ fontSize: 12 }}>
+          <label style={{ fontSize: 12 }} title="Defaults to the active draw window size until you type a manual count.">
            Count:
             <input
               type="number"
@@ -1789,7 +1807,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
              }}
              title="Export all candidates to CSV file (current sort order)"
            >
-             📥 Export CSV
+             Export CSV
            </button>
           {(isGenerating || elapsedMs > 0) && (
             <span
@@ -1803,8 +1821,8 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
               }}
               title={isGenerating ? "Generation in progress…" : "Last generation time"}
             >
-              {isGenerating ? "⏱ " : "✓ "}{formatElapsed(elapsedMs)}
-            </span>
+             {formatElapsed(elapsedMs)}
+           </span>
           )}
          {onAttemptMultiplierChange && (
            <label style={{ fontSize: 12 }} title="Attempt budget = Count × multiplier; increase if constraints are tight">
@@ -1824,7 +1842,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
          )}
          {attemptMultiplier > 50 && (
             <span style={{ color: "#d32f2f", fontSize: 11, fontWeight: 700 }}>
-              ⚠️ High multiplier ({attemptMultiplier}×) — generation may be slow
+              Warning: high multiplier ({attemptMultiplier}×) may slow generation
             </span>
           )}
           {onOvergenFactorChange && (
@@ -1843,17 +1861,11 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
               />
             </label>
           )}
-          {overgenFactor > 200 && (
+         {overgenFactor > 200 && (
             <span style={{ color: "#d32f2f", fontSize: 11, fontWeight: 700 }}>
-              ⚠️ High overgen ({overgenFactor}×) — may use significant memory
+              Warning: high overgen ({overgenFactor}×) may use significant memory
             </span>
           )}
-         {numberFreq.length > 0 ? (
-           <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, fontSize: 12 }}>
-             <span style={{ color: "#555" }}>Number counts:</span>
-             {numberFreq.map(([n, c]) => renderNumberWithCount(n, c))}
-           </div>
-         ) : null}
          {quotaWarning && (
            <span style={{ color: "#d32f2f", fontSize: 12 }}>{quotaWarning}</span>
          )}
@@ -1863,6 +1875,79 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
            </div>
          )}
        </header>
+
+       <div
+         data-testid="generated-user-selected-strip"
+         aria-label="User selected numbers"
+         style={userSelectionStrip}
+       >
+         <div style={userSelectionMeta}>
+           <span style={userSelectionTitle}>User selected numbers</span>
+           <span style={userSelectionHint}>
+             {normalizedUserSelectedNumbers.length === 0
+               ? "none selected"
+               : `${normalizedUserSelectedNumbers.length} selected`}
+           </span>
+         </div>
+         <div style={userSelectionNumberGrid}>
+           {userSelectedNumberOptions.map((number) => {
+             const isSelected = selSet.has(number);
+             const isForced = forcedSet.has(number);
+             return (
+               <button
+                 key={number}
+                 type="button"
+                 aria-pressed={isSelected}
+                 aria-label={`Toggle user selected number ${number}`}
+                 onClick={() => toggleUserSelection(number)}
+                 style={userSelectionNumberButton(isSelected, isForced)}
+                 title={isForced
+                   ? `${number} is currently carry-over boosted; click to toggle user selection.`
+                   : isSelected
+                     ? `Remove ${number} from user selected numbers`
+                     : `Add ${number} to user selected numbers`}
+               >
+                 {number}
+               </button>
+             );
+           })}
+         </div>
+         <button
+           type="button"
+           onClick={clearUserSelection}
+           disabled={normalizedUserSelectedNumbers.length === 0}
+           style={userSelectionClearButton(normalizedUserSelectedNumbers.length === 0)}
+           title="Clear user selected numbers"
+         >
+           Clear
+         </button>
+       </div>
+
+       <div style={summaryStrip}>
+         {[
+           { label: "Generated", value: String(candidates.length) },
+           { label: "Visible", value: visibleRowsLabel },
+           { label: "Prize-qualified", value: manualSimSelected.length >= 8 ? String(prizeQualifyingCount) : "manual off" },
+           { label: "Manual Sim", value: manualSimLabel },
+           { label: "Sort", value: activeSortLabel },
+         ].map((item) => (
+           <div key={item.label} style={summaryItem}>
+             <span style={summaryLabel}>{item.label}</span>
+             <span style={summaryValue}>{item.value}</span>
+           </div>
+         ))}
+       </div>
+
+       {numberFreq.length > 0 ? (
+         <details style={numberCountDisclosure}>
+           <summary style={{ cursor: "pointer", fontWeight: 600, color: "#374151" }}>
+             Number counts across generated pool
+           </summary>
+           <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, fontSize: 12, marginTop: 8 }}>
+             {numberFreq.map(([n, c]) => renderNumberWithCount(n, c))}
+           </div>
+         </details>
+       ) : null}
 
        {/* Multi-column range filter */}
        {candidates.length > 0 && (
@@ -1879,7 +1964,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                }}
                title="Toggle multi-column range filter to narrow candidates by Nrr, Rdy%, IDM%, Comp%, OGA Raw"
              >
-               🔍 Filter {filterEnabled ? "ON" : "OFF"}
+               Filter {filterEnabled ? "ON" : "OFF"}
                 {hasActiveFilter && (
                   <span style={{ marginLeft: 6, fontWeight: 700, color: "#c62828" }}>
                     ({matchedCount} of {sortedCandidates.length})
@@ -1898,7 +1983,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                }}
                title={`Recommended Ranking Strategy (data-driven):\n1. 2x bucket count ↓  (6.17× lift — strongest signal)\n2. Nrr ↓  (number rarity rank, 2× lift)\n3. |Conv| magnitude ↓  (distribution impact)\n\nBased on analysis of 71K candidates: candidates with more numbers drawn exactly twice this month statistically win most often. Nrr breaks ties by preferring rarer numbers in the pool.`}
              >
-               ⭐ Rec
+               Recommended
              </button>
             {prizeQualifyingCount > 0 && (() => {
               const divOrder = ["Div1","Div2","Div3","Div4","Div5","Div6"];
@@ -1919,8 +2004,8 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                     cursor: "default",
                   }}
                   title={`${prizeQualifyingCount} candidate${prizeQualifyingCount !== 1 ? "s" : ""} qualify for a prize division (${prizeQualifyingPercent.toFixed(1)}%)\n${breakdownStr}${filteredDiffNote}`}
-                >
-                  🏆 {prizeQualifyingCount} prize-qualifying ({prizeQualifyingPercent.toFixed(1)}%)
+               >
+                  {prizeQualifyingCount} prize-qualifying ({prizeQualifyingPercent.toFixed(1)}%)
                   {hasActiveFilter && prizeQualifyingFilteredCount !== prizeQualifyingCount && (
                     <span style={{ fontWeight: 400, color: "#b45309" }}>
                       &nbsp;({prizeQualifyingFilteredCount} in filter · {prizeQualifyingFilteredPercent.toFixed(1)}%)
@@ -2028,7 +2113,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                  }}
                  title="Apply filter ranges to narrow candidates"
                >
-                 🔍 Search
+                 Search
                </button>
                 <button
                   type="button"
@@ -2049,7 +2134,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                   }}
                   title="Save current filter values to browser storage so you can reload them later"
                 >
-                  {filterSaveFlash === "saved" ? "✓ Saved" : "💾 Save"}
+                  {filterSaveFlash === "saved" ? "Saved" : "Save"}
                 </button>
                 {hasSavedFilter && (
                   <button
@@ -2064,7 +2149,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                     }}
                     title="Load previously saved filter values"
                   >
-                    {filterSaveFlash === "loaded" ? "✓ Loaded" : "📂 Load"}
+                    {filterSaveFlash === "loaded" ? "Loaded" : "Load"}
                   </button>
                 )}
                {hasActiveFilter && (
@@ -2247,7 +2332,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                 }}
                 title="Apply main, supp, single-digit, and two-digit search to the generated candidates table"
               >
-                🔍 Search numbers
+                Search numbers
               </button>
               <button
                 type="button"
@@ -2297,6 +2382,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
             style={{
               maxHeight: shouldVirtualise ? 600 : undefined,
               overflowY: shouldVirtualise ? "auto" : undefined,
+              overflowX: "auto",
               position: "relative",
             }}
           >
@@ -2326,7 +2412,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                  <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("conv")} title="Convergence: how much this draw moves the month's distribution toward (+) or away from (−) the historical average. NOTE: direction (positive vs negative) does NOT predict prize-winning candidates — both positive and negative Conv winners occur at equal rates. Conv is informational (shows distribution impact), not predictive.">Conv{sortIndicator("conv")}</th>
                  <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("idm")} title="Ideal Draw Match: how closely this candidate's bucket composition matches the statistically optimal draw. 100% = perfect match, 0.0 = completely different.">IDM{sortIndicator("idm")}</th>
                  <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("rdy")} title="Readiness score: composite of Ideal Draw Match (bucket composition vs optimal), Convergence, and OGA%. Higher = more statistically ready. Weights configurable in Candidate Generation Influences.">Rdy{sortIndicator("rdy")}</th>
-                 <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("win")} title="WinScore (recalibrated): tier-gate based on 2x bucket count — the strongest prize predictor found (6.17× lift at top tier). Tier A: 2x≥3. Tier B: 2x=2. Tier C: 2x=1. Tier D: 2x=0. Within-tier, ranked by |Conv| magnitude. Sort Win ↓ for best-first. Use ⭐ Rec for full multi-signal recommended sort.">Win{sortIndicator("win")}</th>
+                 <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("win")} title="WinScore (recalibrated): tier-gate based on 2x bucket count — the strongest prize predictor found (6.17× lift at top tier). Tier A: 2x≥3. Tier B: 2x=2. Tier C: 2x=1. Tier D: 2x=0. Within-tier, ranked by |Conv| magnitude. Sort Win ↓ for best-first. Use Recommended for full multi-signal sorting.">Win{sortIndicator("win")}</th>
                  <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("nrr")} title="Number Rarity Rank: scores candidates by how rare their numbers are within the generated pool. Numbers that barely survive constraint filtering (contrarian picks) empirically correlate with actual winning numbers. Higher = rarer numbers = 15× lift at top-50.">Nrr{sortIndicator("nrr")}</th>
                  <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("ns")} title="NumSum Score: percentile rank of the candidate's number sum against the historical draw distribution (windfall_history_lottolyzer.csv). 50 = median historical sum. Higher = more high-value numbers vs history. Prize-winning candidates trend toward the upper percentiles. Complements Conv/IDM/Rdy/Nrr.">NS{sortIndicator("ns")}</th>
                  <th style={th}>Actions</th>
@@ -2342,8 +2428,8 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                 const isDimmed = filterPinned !== "off" && !isMatched;
                 const isSelRow = i === selectedCandidateIdx;
                 const nums: number[] = [...c.main, ...c.supp];
-                const selHits = (c as any).selHits ?? nums.filter((n: number) => hitSet.has(n)).length;
-                const recentHits = (c as any).recentHits ?? nums.filter((n: number) => recentSet.has(n)).length;
+                const selHits = c.selHits ?? nums.filter((n: number) => hitSet.has(n)).length;
+                const recentHits = c.recentHits ?? nums.filter((n: number) => recentSet.has(n)).length;
                 const odd = nums.filter((n: number) => n % 2 === 1).length;
                 const even = nums.length - odd;
                 const manualMainHits = c.main.filter((n: number) => manualMainSet.has(n)).length;
@@ -2354,8 +2440,8 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                   : isSelRow
                   ? "#FFF9C4"
                   : undefined;
-                const ogaRaw = (c as any).ogaScore as number | undefined;
-                const ogaPct = (c as any).ogaPercentile as number | undefined;
+                const ogaRaw = c.ogaScore;
+                const ogaPct = c.ogaPercentile;
                 const ogaTip = formatOGATooltip(ogaRaw, ogaPct);
                  const isActiveSim = simSourceKind === "candidate" && activeSimCandidateIdx === i;
                  const bucketCounts = getMonthlyBucketCounts(nums);
@@ -2443,8 +2529,8 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                    <td style={tdCenter}>{prizeLabel}</td>
                    <td style={tdCenter}>{`${odd}:${even}`}</td>
                     <td style={tdCenter}>
-                      {(c as any).finalCompositeAdj !== undefined
-                        ? ((c as any).finalCompositeAdj * 100).toFixed(2)
+                      {c.finalCompositeAdj !== undefined
+                        ? (c.finalCompositeAdj * 100).toFixed(2)
                         : ""}
                     </td>
                    <td style={tdCenter} title={ogaTip}>
@@ -2469,21 +2555,21 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                       fontWeight: isBestConv ? 700 : undefined,
                       color: convScore !== null ? (convScore > 0 ? "#2e7d32" : convScore < 0 ? "#c62828" : undefined) : undefined,
                     }}>
-                      {convScore !== null ? (isBestConv ? `⭐ ${convScore.toFixed(1)}` : convScore.toFixed(1)) : "—"}
+                      {convScore !== null ? (isBestConv ? `Top ${convScore.toFixed(1)}` : convScore.toFixed(1)) : "—"}
                     </td>
                     <td style={{
                       ...tdCenter,
                       fontWeight: isBestIdm ? 700 : undefined,
                       color: idmScore !== null ? (idmScore >= 0.875 ? "#1565c0" : idmScore >= 0.5 ? "#2e7d32" : "#888") : undefined,
                     }}>
-                      {idmScore !== null ? (isBestIdm ? `⭐ ${(idmScore * 100).toFixed(1)}%` : `${(idmScore * 100).toFixed(1)}%`) : "—"}
+                      {idmScore !== null ? (isBestIdm ? `Top ${(idmScore * 100).toFixed(1)}%` : `${(idmScore * 100).toFixed(1)}%`) : "—"}
                     </td>
                     <td style={{
                       ...tdCenter,
                       fontWeight: isBestRdy ? 700 : undefined,
                       color: rdyScore !== null ? (rdyScore >= 0.7 ? "#b8860b" : rdyScore >= 0.4 ? "#2e7d32" : "#888") : undefined,
                     }}>
-                      {rdyScore !== null ? (isBestRdy ? `⭐ ${(rdyScore * 100).toFixed(1)}%` : `${(rdyScore * 100).toFixed(1)}%`) : "—"}
+                      {rdyScore !== null ? (isBestRdy ? `Top ${(rdyScore * 100).toFixed(1)}%` : `${(rdyScore * 100).toFixed(1)}%`) : "—"}
                     </td>
                     {(() => {
                       const ws = winScores[origIdx];
@@ -2500,7 +2586,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                         }}
                         title={ws !== null ? `WinScore: ${ws.toFixed(1)} (Tier ${tier}) — 2x=${getMonthlyBucketCounts([...c.main, ...c.supp])?.times2 ?? "?"}, |Conv|=${Math.abs(convergenceScores[origIdx] ?? 0).toFixed(1)}, Nrr=${nrrScores[origIdx]?.toFixed(1) ?? "?"}` : "No data"}
                         >
-                          {ws !== null ? (isBestWin ? `⭐ ${tier} ${ws.toFixed(0)}` : `${tier} ${ws.toFixed(0)}`) : "—"}
+                          {ws !== null ? (isBestWin ? `Top ${tier} ${ws.toFixed(0)}` : `${tier} ${ws.toFixed(0)}`) : "—"}
                         </td>
                      )})()}
                      {(() => {
@@ -2515,7 +2601,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                          }}
                          title={nrr !== null ? `Nrr: ${nrr.toFixed(1)} — candidate contains numbers that are rare in the generated pool. Higher = more contrarian picks.` : "No data"}
                          >
-                           {nrr !== null ? (isBestNrr ? `⭐ ${nrr.toFixed(1)}` : nrr.toFixed(1)) : "—"}
+                           {nrr !== null ? (isBestNrr ? `Top ${nrr.toFixed(1)}` : nrr.toFixed(1)) : "—"}
                          </td>
                        );
                      })()}
@@ -2533,7 +2619,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                          }}
                           title={`NS: ${ns.toFixed(1)} — NumSum Score: percentile rank vs historical draws (${historyForOGA?.length ?? 0} draws from windfall_history_lottolyzer.csv). 50 = median. Higher = more high-value numbers relative to history.`}
                          >
-                           {isBestNs ? `⭐ ${ns.toFixed(1)}` : ns.toFixed(1)}
+                           {isBestNs ? `Top ${ns.toFixed(1)}` : ns.toFixed(1)}
                          </td>
                        );
                      })()}
@@ -2583,13 +2669,13 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                 }}
                 title="For each historical draw, check if the manual simulation candidate would have qualified for a prize if played for that draw"
               >
-                📊 Historical Prize Backtest {showHistoricalBacktest ? "▲" : "▼"}
+                Historical Prize Backtest {showHistoricalBacktest ? "▲" : "▼"}
               </button>
               {manualSimSelected.length < 8 ? (
                 <span style={{ fontSize: 11, color: "#999" }}>Select 8 numbers in Manual Simulation to run backtest</span>
               ) : backtestOverallSummary.totalInstances > 0 ? (
                 <span style={{ fontSize: 11, color: "#7b5800", fontWeight: 600 }}>
-                  🏅 {backtestOverallSummary.drawsWithAnyPrize}/{historicalBacktest.length} draws — manual candidate won a prize
+                  {backtestOverallSummary.drawsWithAnyPrize}/{historicalBacktest.length} draws — manual candidate won a prize
                 </span>
               ) : (
                 <span style={{ fontSize: 11, color: "#999" }}>manual candidate never won a prize in any historical draw</span>
@@ -2802,8 +2888,6 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
 
          <ManualSim
            manualSimSelected={manualSimSelected}
-          setManualSimSelected={setManualSimSelected}
-          onManualSimulationChanged={onManualSimulationChanged}
           toggleManualPick={toggleManualPick}
           numberToBucket={numberToBucket}
           currentDist={currentDist}
@@ -2923,8 +3007,8 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                     const nums = [...combo.main, ...combo.supp];
                     const odd = nums.filter((n) => n % 2 === 1).length;
                     const even = nums.length - odd;
-                    const ogaRaw = (combo as any).ogaScore as number | undefined;
-                    const ogaPct = (combo as any).ogaPercentile as number | undefined;
+                    const ogaRaw = combo.ogaScore;
+                    const ogaPct = combo.ogaPercentile;
                     const ogaTip = formatOGATooltip(ogaRaw, ogaPct);
                     const canSim = onSimulateNumbers && nums.length === 8;
                     const pressKey = `ex-${exPage}-${idx}`;
@@ -3211,16 +3295,12 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
 
 const ManualSim: React.FC<{
   manualSimSelected: number[];
-  setManualSimSelected: React.Dispatch<React.SetStateAction<number[]>>;
-  onManualSimulationChanged?: (next: number[]) => void;
   toggleManualPick: (n: number) => void;
   numberToBucket: Map<number, number> | null;
   currentDist: number[] | null;
   targetDist: number[] | null;
 }> = ({
   manualSimSelected,
-  setManualSimSelected,
-  onManualSimulationChanged,
   toggleManualPick,
   numberToBucket,
   currentDist,
@@ -3349,17 +3429,7 @@ const ManualSim: React.FC<{
                 type="checkbox"
                 checked={picked}
                 disabled={atCapacity}
-                onChange={() => {
-                  setManualSimSelected((prev) => {
-                    const next = prev.includes(n)
-                      ? prev.filter((x) => x !== n)
-                      : prev.length >= 8
-                      ? prev
-                      : [...prev, n];
-                    onManualSimulationChanged?.(next);
-                    return next;
-                  });
-                }}
+                onChange={() => toggleManualPick(n)}
                 style={{ marginBottom: 2 }}
               />
               {n}
@@ -3390,6 +3460,111 @@ const hdr: React.CSSProperties = {
   flexWrap: "wrap",
   marginBottom: 6,
 };
+const summaryStrip: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
+  gap: 8,
+  margin: "8px 0 10px",
+};
+const summaryItem: React.CSSProperties = {
+  border: "1px solid #e5e7eb",
+  borderRadius: 6,
+  padding: "6px 8px",
+  background: "#fafafa",
+  minWidth: 0,
+};
+const summaryLabel: React.CSSProperties = {
+  display: "block",
+  fontSize: 10,
+  color: "#6b7280",
+  fontWeight: 700,
+  textTransform: "uppercase",
+  whiteSpace: "nowrap",
+};
+const summaryValue: React.CSSProperties = {
+  display: "block",
+  marginTop: 2,
+  fontSize: 13,
+  color: "#111827",
+  fontWeight: 700,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+};
+const numberCountDisclosure: React.CSSProperties = {
+  marginBottom: 10,
+  padding: "8px 10px",
+  border: "1px solid #e5e7eb",
+  borderRadius: 6,
+  background: "#fff",
+  fontSize: 12,
+};
+const userSelectionStrip: React.CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  alignItems: "center",
+  gap: 10,
+  margin: "8px 0 10px",
+  padding: "8px 10px",
+  border: "1px solid #111827",
+  borderRadius: 6,
+  background: "#f9fafb",
+};
+const userSelectionMeta: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 2,
+  minWidth: 0,
+};
+const userSelectionTitle: React.CSSProperties = {
+  fontSize: 11,
+  color: "#111827",
+  fontWeight: 800,
+  textTransform: "uppercase",
+  whiteSpace: "nowrap",
+};
+const userSelectionHint: React.CSSProperties = {
+  fontSize: 11,
+  color: "#4b5563",
+  fontWeight: 600,
+  whiteSpace: "nowrap",
+};
+const userSelectionNumberGrid: React.CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 4,
+  flex: "1 1 320px",
+  minWidth: 0,
+};
+const userSelectionNumberButton = (selected: boolean, forced: boolean): React.CSSProperties => ({
+  width: 26,
+  height: 24,
+  padding: 0,
+  borderRadius: 4,
+  border: selected
+    ? "1px solid #111827"
+    : forced
+      ? "1px solid #b45309"
+      : "1px solid #d1d5db",
+  background: selected ? "#111827" : forced ? "#fffbeb" : "#fff",
+  color: selected ? "#fff" : forced ? "#92400e" : "#111827",
+  fontSize: 11,
+  fontWeight: selected || forced ? 800 : 600,
+  fontVariantNumeric: "tabular-nums",
+  cursor: "pointer",
+  lineHeight: 1,
+});
+const userSelectionClearButton = (disabled: boolean): React.CSSProperties => ({
+  padding: "5px 8px",
+  borderRadius: 4,
+  border: "1px solid #d1d5db",
+  background: disabled ? "#f3f4f6" : "#fff",
+  color: disabled ? "#9ca3af" : "#111827",
+  cursor: disabled ? "default" : "pointer",
+  fontSize: 11,
+  fontWeight: 700,
+  whiteSpace: "nowrap",
+});
 const genBtn = (disabled: boolean): React.CSSProperties => ({
   padding: "6px 14px",
   background: disabled ? "#bbb" : "#1976d2",

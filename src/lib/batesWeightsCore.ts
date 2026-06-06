@@ -1,190 +1,237 @@
-/**
- * Core weight construction logic refactored from BatesPanel.
- * This is a PURE function except for Math.random usage in sampling helpers.
- */
+import { batesDiscreteWeights } from "./distributions/bates";
 
 export interface BatesParameterSet {
   k: number;
   dualTri: boolean;
   triMode: number;
   triMode2: number;
-  dualTriWeightA: number;   // weight for first triangular peak if dualTri
-  mixWeight: number;        // convex mix triangles vs Bates
+  dualTriWeightA: number;
+  mixWeight: number;
   betaHot: number;
   betaCold: number;
   betaGlobal: number;
   gammaConditional: number;
-  hotQuantile: number;      // 0.5 .. 0.95 typical
-  coldQuantile: number;     // 0.05 .. 0.5 typical (should be < hotQuantile)
+  hotQuantile: number;
+  coldQuantile: number;
   highlightHotCold: boolean;
 }
 
 export interface BatesInputs {
-  recentSignal?: number[];       // length 45
-  conditionalProb?: number[];    // length 45
+  recentSignal?: number[];
+  conditionalProb?: number[];
 }
 
 export interface BatesWeightsResult {
-  finalWeights: number[];        // length 45
-  triWeights: number[];          // raw triangular mixture
-  batesWeights: number[];        // raw Bates distribution
-  baseConvex: number[];          // convex mix pre-modulation
+  finalWeights: number[];
+  triWeights: number[];
+  batesWeights: number[];
+  baseConvex: number[];
   hotSet: Set<number>;
   coldSet: Set<number>;
+  normalizedParams: BatesParameterSet;
 }
 
-function factorial(n:number){ let r=1; for(let i=2;i<=n;i++) r*=i; return r; }
-function comb(n:number,k:number){ if(k<0||k>n)return 0; if(k===0||k===n)return 1; return Math.round(factorial(n)/(factorial(k)*factorial(n-k))); }
+const SLOT_COUNT = 45;
+const MIN_QUANTILE_GAP = 0.05;
 
-/* Bates PDF (k > 0). Approx forms for integer k */
-function batesPdfAt(x:number,k:number){
-  if(k<=1) return (x>=0&&x<=1)?1:0;
-  if(x<0||x>1) return 0;
-  // Implementation similar to your existing panel but simplified:
-  const n = Math.max(2, Math.round(k));
-  // Bates(n) = average of n uniforms => Irwin-Hall scaled; using piecewise sum.
-  // For simplicity, we reuse Irwin–Hall derivative (Polynomial) over [0,1].
-  // Very small k differences are minor; a fuller exact formula can be plugged in.
-  // We'll approximate via sampling for speed -> but here keep analytic:
-  // Irwin-Hall (sum of n uniforms) PDF piecewise polynomial; we want average => scale x by n then multiply n.
-  // We'll do series approach:
-  const s = x * n;
-  const f = Math.floor(s);
-  let sum = 0;
-  for (let j=0;j<=f;j++){
-    sum += ((j%2===0)?1:-1)*comb(n,j)*Math.pow(s - j, n - 1);
+export const DEFAULT_BATES_PARAMETERS: BatesParameterSet = {
+  k: 3,
+  dualTri: false,
+  triMode: 0.5,
+  triMode2: 0.2,
+  dualTriWeightA: 0.5,
+  mixWeight: 0.5,
+  betaHot: 0,
+  betaCold: 0,
+  betaGlobal: 0,
+  gammaConditional: 0,
+  hotQuantile: 0.7,
+  coldQuantile: 0.3,
+  highlightHotCold: true,
+};
+
+export function normalizeBatesParameters(params: Partial<BatesParameterSet> = {}): BatesParameterSet {
+  const source = { ...DEFAULT_BATES_PARAMETERS, ...params };
+  let hotQuantile = clampNumber(source.hotQuantile, 0.5, 0.95, DEFAULT_BATES_PARAMETERS.hotQuantile);
+  let coldQuantile = clampNumber(source.coldQuantile, 0.05, 0.5, DEFAULT_BATES_PARAMETERS.coldQuantile);
+  if (hotQuantile - coldQuantile < MIN_QUANTILE_GAP) {
+    hotQuantile = Math.min(0.95, Math.max(0.5, coldQuantile + MIN_QUANTILE_GAP));
+    if (hotQuantile - coldQuantile < MIN_QUANTILE_GAP) {
+      coldQuantile = Math.max(0.05, hotQuantile - MIN_QUANTILE_GAP);
+    }
   }
-  return (n * sum) / factorial(n-1);
-}
 
-/* Single triangular PDF with mode m in [0,1] */
-function triangularPdfAt(x:number,m:number){
-  if(x<0||x>1) return 0;
-  if(m<=0) return x===0?0:2*(1-x);
-  if(m>=1) return x===1?0:2*x;
-  return x<=m ? (2*x)/m : (2*(1-x))/(1-m);
-}
-
-/* Build triangular discrete weights */
-function singleTriangularDiscrete(n:number, mode:number): number[] {
-  const arr:number[]=[];
-  for(let i=1;i<=n;i++){
-    const x=(i-0.5)/n;
-    arr.push(triangularPdfAt(x, mode));
-  }
-  const sum=arr.reduce((a,b)=>a+b,0)||1;
-  return arr.map(v=>v/sum);
-}
-
-function dualTriangularDiscrete(n:number, modeA:number, modeB:number, wA:number): {dual:number[], triA:number[], triB:number[]} {
-  const wAn = Math.min(1,Math.max(0,wA));
-  const wB = 1 - wAn;
-  const triA:number[] = singleTriangularDiscrete(n, modeA);
-  const triB:number[] = singleTriangularDiscrete(n, modeB);
-  const dual = triA.map((a,i)=> wAn*a + wB*triB[i]);
-  return { dual, triA, triB };
-}
-
-function batesDiscrete(n:number, k:number): number[] {
-  const kw = Math.max(1, Math.round(k));
-  const arr:number[]=[];
-  for(let i=1;i<=n;i++){
-    const x=(i-0.5)/n;
-    arr.push(batesPdfAt(x, kw));
-  }
-  const sum=arr.reduce((a,b)=>a+b,0)||1;
-  return arr.map(v=>v/sum);
+  return {
+    k: clampInteger(source.k, 1, 60, DEFAULT_BATES_PARAMETERS.k),
+    dualTri: source.dualTri === true,
+    triMode: clampNumber(source.triMode, 0, 1, DEFAULT_BATES_PARAMETERS.triMode),
+    triMode2: clampNumber(source.triMode2, 0, 1, DEFAULT_BATES_PARAMETERS.triMode2),
+    dualTriWeightA: clampNumber(source.dualTriWeightA, 0, 1, DEFAULT_BATES_PARAMETERS.dualTriWeightA),
+    mixWeight: clampNumber(source.mixWeight, 0, 1, DEFAULT_BATES_PARAMETERS.mixWeight),
+    betaHot: clampNumber(source.betaHot, 0, 3, DEFAULT_BATES_PARAMETERS.betaHot),
+    betaCold: clampNumber(source.betaCold, 0, 3, DEFAULT_BATES_PARAMETERS.betaCold),
+    betaGlobal: clampNumber(source.betaGlobal, 0, 2, DEFAULT_BATES_PARAMETERS.betaGlobal),
+    gammaConditional: clampNumber(source.gammaConditional, 0, 3, DEFAULT_BATES_PARAMETERS.gammaConditional),
+    hotQuantile,
+    coldQuantile,
+    highlightHotCold: source.highlightHotCold !== false,
+  };
 }
 
 export function computeBatesWeights(
   params: BatesParameterSet,
-  inputs: BatesInputs
+  inputs: BatesInputs,
 ): BatesWeightsResult {
-  const N=45;
+  const normalizedParams = normalizeBatesParameters(params);
+  const recentSignal = normalizeSignal(inputs.recentSignal);
+  const conditionalProb = normalizeSignal(inputs.conditionalProb);
   const {
-    k, dualTri, triMode, triMode2,
-    dualTriWeightA, mixWeight,
-    betaHot, betaCold, betaGlobal,
-    gammaConditional, hotQuantile, coldQuantile,
-    highlightHotCold
-  } = params;
-  const recentSignal = inputs.recentSignal;
-  const cond = inputs.conditionalProb;
+    k,
+    dualTri,
+    triMode,
+    triMode2,
+    dualTriWeightA,
+    mixWeight,
+    betaHot,
+    betaCold,
+    betaGlobal,
+    gammaConditional,
+    hotQuantile,
+    coldQuantile,
+    highlightHotCold,
+  } = normalizedParams;
 
-  // 1. Triangular(s)
-  let triWeights:number[];
-  if(dualTri){
-    const dual = dualTriangularDiscrete(N, triMode, triMode2, dualTriWeightA).dual;
-    triWeights = dual;
-  } else {
-    triWeights = singleTriangularDiscrete(N, triMode);
-  }
+  const triWeights = dualTri
+    ? dualTriangularDiscrete(SLOT_COUNT, triMode, triMode2, dualTriWeightA)
+    : singleTriangularDiscrete(SLOT_COUNT, triMode);
+  const batesWeights = normalizeWeights(batesDiscreteWeights(SLOT_COUNT, k));
+  const baseConvex = normalizeWeights(triWeights.map((triWeight, index) => (
+    mixWeight * triWeight + (1 - mixWeight) * batesWeights[index]
+  )));
 
-  // 2. Bates
-  const bWeights = batesDiscrete(N, k);
-
-  // 3. Convex mix
-  const wTri = Math.min(1,Math.max(0,mixWeight));
-  let base = triWeights.map((t,i)=> wTri*t + (1-wTri)*bWeights[i]);
-
-  // 4. Hot/Cold sets
-  let hotSet = new Set<number>(), coldSet = new Set<number>();
-  if(recentSignal && highlightHotCold) {
-    const sorted=[...recentSignal].sort((a,b)=>a-b);
-    const lowQ = Math.min(coldQuantile, hotQuantile - 0.05);
-    const highQ = Math.max(hotQuantile, lowQ + 0.05);
-    const qColdVal = sorted[Math.floor(lowQ*(sorted.length-1))];
-    const qHotVal = sorted[Math.floor(highQ*(sorted.length-1))];
-    recentSignal.forEach((v,i)=>{
-      if(v<=qColdVal) coldSet.add(i+1);
-      else if(v>=qHotVal) hotSet.add(i+1);
+  const hotSet = new Set<number>();
+  const coldSet = new Set<number>();
+  if (recentSignal && highlightHotCold) {
+    const coldCutoff = quantile(recentSignal, coldQuantile);
+    const hotCutoff = quantile(recentSignal, hotQuantile);
+    recentSignal.forEach((value, index) => {
+      if (value <= coldCutoff) coldSet.add(index + 1);
+      if (value >= hotCutoff) hotSet.add(index + 1);
     });
   }
 
-  // 5. Modulations
-  let w = base.slice();
-
-  // Hot / Cold factor
-  if(recentSignal && (betaHot>0 || betaCold>0)) {
-    const sorted=[...recentSignal].sort((a,b)=>a-b);
-    const lowQ = Math.min(coldQuantile, hotQuantile - 0.05);
-    const highQ = Math.max(hotQuantile, lowQ + 0.05);
-    const qColdVal = sorted[Math.floor(lowQ*(sorted.length-1))];
-    const qHotVal = sorted[Math.floor(highQ*(sorted.length-1))];
-    const mean = recentSignal.reduce((a,b)=>a+b,0)/recentSignal.length;
-    w = w.map((baseWi,i)=>{
-      const s = recentSignal[i];
-      let f=1;
-      if(s>=qHotVal && betaHot>0) f*=1+betaHot*Math.max(0,s-mean);
-      else if(s<=qColdVal && betaCold>0) f*=1+betaCold*Math.max(0,mean-s);
-      return baseWi*f;
-    });
-    const sum=w.reduce((a,b)=>a+b,0)||1;
-    w=w.map(v=>v/sum);
+  let finalWeights = baseConvex.slice();
+  if (recentSignal && (betaHot > 0 || betaCold > 0)) {
+    const zScores = robustZScores(recentSignal);
+    finalWeights = normalizeWeights(finalWeights.map((weight, index) => {
+      const number = index + 1;
+      const hotBoost = hotSet.has(number) ? Math.max(0, zScores[index]) : 0;
+      const coldBoost = coldSet.has(number) ? Math.max(0, -zScores[index]) : 0;
+      return weight * boundedExp((betaHot * hotBoost + betaCold * coldBoost) / 4);
+    }));
   }
 
-  // Global tilt
-  if(recentSignal && betaGlobal>0){
-    const mean=recentSignal.reduce((a,b)=>a+b,0)/recentSignal.length;
-    w=w.map((baseWi,i)=> baseWi*(1+betaGlobal*(recentSignal[i]-mean)));
-    const sum=w.reduce((a,b)=>a+b,0)||1;
-    w=w.map(v=>v/sum);
+  if (recentSignal && betaGlobal > 0) {
+    const zScores = robustZScores(recentSignal);
+    finalWeights = normalizeWeights(finalWeights.map((weight, index) => (
+      weight * boundedExp((betaGlobal * zScores[index]) / 4)
+    )));
   }
 
-  // Conditional
-  if(cond && gammaConditional>0){
-    const meanC=cond.reduce((a,b)=>a+b,0)/cond.length;
-    w=w.map((baseWi,i)=> baseWi*(1+gammaConditional*(cond[i]-meanC)));
-    const sum=w.reduce((a,b)=>a+b,0)||1;
-    w=w.map(v=>v/sum);
+  if (conditionalProb && gammaConditional > 0) {
+    const zScores = robustZScores(conditionalProb);
+    finalWeights = normalizeWeights(finalWeights.map((weight, index) => (
+      weight * boundedExp((gammaConditional * zScores[index]) / 4)
+    )));
   }
 
   return {
-    finalWeights: w,
+    finalWeights,
     triWeights,
-    batesWeights: bWeights,
-    baseConvex: base,
+    batesWeights,
+    baseConvex,
     hotSet,
-    coldSet
+    coldSet,
+    normalizedParams,
   };
+}
+
+function finiteNumber(value: unknown, fallback: number): number {
+  const numeric = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
+  const numeric = finiteNumber(value, fallback);
+  return Math.max(min, Math.min(max, numeric));
+}
+
+function clampInteger(value: unknown, min: number, max: number, fallback: number): number {
+  return Math.max(min, Math.min(max, Math.round(finiteNumber(value, fallback))));
+}
+
+function triangularPdfAt(x: number, mode: number): number {
+  if (x < 0 || x > 1) return 0;
+  if (mode <= 0) return 2 * (1 - x);
+  if (mode >= 1) return 2 * x;
+  return x <= mode ? (2 * x) / mode : (2 * (1 - x)) / (1 - mode);
+}
+
+function singleTriangularDiscrete(slotCount: number, mode: number): number[] {
+  const weights = Array.from({ length: slotCount }, (_, index) => {
+    const x = (index + 0.5) / slotCount;
+    return triangularPdfAt(x, mode);
+  });
+  return normalizeWeights(weights);
+}
+
+function dualTriangularDiscrete(slotCount: number, modeA: number, modeB: number, weightA: number): number[] {
+  const triA = singleTriangularDiscrete(slotCount, modeA);
+  const triB = singleTriangularDiscrete(slotCount, modeB);
+  return normalizeWeights(triA.map((value, index) => weightA * value + (1 - weightA) * triB[index]));
+}
+
+function normalizeSignal(values: number[] | undefined): number[] | null {
+  if (!Array.isArray(values) || values.length !== SLOT_COUNT) return null;
+  const clean = values.map((value) => finiteNumber(value, Number.NaN));
+  return clean.every(Number.isFinite) ? clean : null;
+}
+
+function normalizeWeights(weights: number[]): number[] {
+  const clean = Array.from({ length: SLOT_COUNT }, (_, index) => {
+    const weight = weights[index] ?? 0;
+    return Number.isFinite(weight) ? Math.max(0, weight) : 0;
+  });
+  const sum = clean.reduce((total, weight) => total + weight, 0);
+  if (sum <= 0) return Array.from({ length: SLOT_COUNT }, () => 1 / SLOT_COUNT);
+  return clean.map((weight) => weight / sum);
+}
+
+function quantile(values: number[], q: number): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.max(0, Math.min(sorted.length - 1, Math.floor(q * (sorted.length - 1))))];
+}
+
+function robustZScores(values: number[]): number[] {
+  const center = median(values);
+  const deviations = values.map((value) => Math.abs(value - center));
+  const mad = median(deviations) * 1.4826;
+  const scale = mad > 1e-12 ? mad : standardDeviation(values) || 1;
+  return values.map((value) => Math.max(-4, Math.min(4, (value - center) / scale)));
+}
+
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+function standardDeviation(values: number[]): number {
+  const mean = values.reduce((total, value) => total + value, 0) / values.length;
+  const variance = values.reduce((total, value) => total + (value - mean) ** 2, 0) / values.length;
+  return Math.sqrt(variance);
+}
+
+function boundedExp(value: number): number {
+  return Math.exp(Math.max(-4, Math.min(4, value)));
 }

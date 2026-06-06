@@ -1,4 +1,5 @@
 import { CandidateSet, Draw } from "./types";
+import { getHC3OverlapNumbers, getMostRecentDraw } from "./lib/recentDraws";
 
 /**
  * Returns true if at least one pair of numbers in 'main' shares the same last digit
@@ -38,10 +39,8 @@ function hasTriplet(candidateMain: number[], history: Draw[]): boolean {
  * Returns true if candidate (main or supp) contains any number that appeared in both main or supp of the most recent and second most recent draw (main or supp).
  */
 function hasNumberInBothMostRecent(history: Draw[], candidateMain: number[], candidateSupp: number[]): boolean {
-  if (history.length < 2) return false;
-  const recentAll = [...history[history.length - 1].main, ...history[history.length - 1].supp];
-  const prevAll = [...history[history.length - 2].main, ...history[history.length - 2].supp];
-  const overlap = recentAll.filter(n => prevAll.includes(n));
+  const overlap = getHC3OverlapNumbers(history);
+  if (overlap.length === 0) return false;
   const candidateAll = [...candidateMain, ...candidateSupp];
   return candidateAll.some(n => overlap.includes(n));
 }
@@ -122,7 +121,8 @@ function checkPairCooldown(candidateMain: number[], history: Draw[], pairCooldow
  */
 function getExcludedLastDigits(history: Draw[]): Set<number> {
   if (history.length === 0) return new Set();
-  const recent = history[history.length - 1];
+  const recent = getMostRecentDraw(history);
+  if (!recent) return new Set();
   const numbers = [...recent.main, ...recent.supp];
   // Find which last digits are duplicated (appear more than once)
   const lastDigitCounts: Record<string, number> = {};

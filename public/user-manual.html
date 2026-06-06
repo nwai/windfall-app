@@ -186,6 +186,7 @@
     <a href="#official-source-compare">Official / Reference Source Comparison</a>
 
     <a class="section" href="#generated-candidates">Generated Candidates</a>
+    <a href="#paste-weighted-generator">Paste-Weighted Generator</a>
     <a href="#columns">Column Reference</a>
     <a href="#ns-column">NS Column Styling</a>
     <a href="#winscore">Win Column &amp; WinScore</a>
@@ -216,6 +217,9 @@
     <a href="#ending-digit-sequences">Ending Digit Sequence Analyzer</a>
     <a href="#draw-bucket-forecast">Draw Bucket Month Forecast</a>
     <a href="#hot-cold-ranking">Hot vs Cold Ranking</a>
+
+    <a class="section" href="#undrawn-patterns">Undrawn Patterns</a>
+    <a href="#month-end-carry-over">Month-end carry-over</a>
 
     <a class="section" href="#dga">DGA Grid</a>
     <a href="#dga-overview">Overview</a>
@@ -408,6 +412,47 @@
   <h2 id="generated-candidates">Generated Candidates Panel</h2>
 
   <p>The <strong>Generated Candidates</strong> panel is the main working area. After clicking <strong>Generate</strong>, it displays a table of candidate number sets with a rich set of analytical scores.</p>
+
+  <!-- ───────────────────────────────────────── -->
+  <h3 id="paste-weighted-generator">Paste-Weighted Candidate Generator</h3>
+
+  <p>The <strong>Paste-Weighted Candidate Generator</strong> lets you paste any number of six-number rows, counts how often each number appears, and then generates mains-only candidates weighted toward the most common pasted numbers.</p>
+
+  <h4>Adaptive shape</h4>
+  <p><strong>Adaptive shape</strong> is a history-aware profile for the six main numbers. It does not score individual numbers. Instead, it describes the candidate's structure by splitting the six mains into:</p>
+  <ul>
+    <li><strong>S</strong> — single-digit numbers, <code>1–9</code></li>
+    <li><strong>D</strong> — double-digit numbers, <code>10–45</code></li>
+  </ul>
+
+  <p>Each side is written as <strong>odd:even</strong>, so the full label is:</p>
+  <pre><code>S&lt;single-digit odd&gt;:&lt;single-digit even&gt; D&lt;double-digit odd&gt;:&lt;double-digit even&gt;</code></pre>
+
+  <table>
+    <thead>
+      <tr><th>Adaptive shape</th><th>Plain-English meaning</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>S0:0 D4:2</code></td><td>No single-digit numbers. Six double-digit numbers: 4 odd and 2 even.</td></tr>
+      <tr><td><code>S0:1 D2:3</code></td><td>One single-digit even number. Five double-digit numbers: 2 odd and 3 even.</td></tr>
+      <tr><td><code>S1:0 D3:2</code></td><td>One single-digit odd number. Five double-digit numbers: 3 odd and 2 even.</td></tr>
+      <tr><td><code>S0:0 D3:3</code></td><td>No single-digit numbers. Six double-digit numbers: 3 odd and 3 even.</td></tr>
+      <tr><td><code>S0:2 D2:2</code></td><td>Two single-digit even numbers. Four double-digit numbers: 2 odd and 2 even.</td></tr>
+      <tr><td><code>S0:0 D5:1</code></td><td>No single-digit numbers. Six double-digit numbers: 5 odd and 1 even.</td></tr>
+    </tbody>
+  </table>
+
+  <p>The percentage beside each profile, such as <code>S0:0 D4:2 (12%)</code>, is the learned target share from draw-history evidence. It is not a guaranteed probability of the next draw. The app builds this evidence from the active WFMQYH history; when that active window is small, it shrinks the estimate toward the latest 50 draws so the filter stays current without overreacting to a tiny sample.</p>
+
+  <h4>Observe only vs Quota filter</h4>
+  <ul>
+    <li><strong>Observe only</strong> — generates candidates normally and reports which adaptive shapes appeared in the output.</li>
+    <li><strong>Quota filter</strong> — uses the learned percentages as accept/reject quotas, so the final generated candidates try to follow the same shape distribution.</li>
+  </ul>
+
+  <div class="tip">
+    <strong>Quick reading:</strong> adaptive shape is a more detailed version of odd/even balance. It asks not only "how many odd and even numbers?", but also "are those odd/even numbers coming from single-digit or double-digit ranges?"
+  </div>
 
   <!-- ───────────────────────────────────────── -->
   <h3 id="columns">Column Reference</h3>
@@ -711,6 +756,7 @@
       <tr><td>Single-digit / two-digit share</td><td>Strictly enforces how many numbers must be 1-digit (1–9) versus 2-digit (10–45), with linked percentage selectors and a mains-only or main+supp counting scope.</td></tr>
       <tr><td>MiAN</td><td>Must include minimum counts from each Acceptance needs bucket. See <a href="#mian">MiAN</a>.</td></tr>
       <tr><td>Monthly Repeat Bias</td><td>Boosts numbers drawn exactly once this month. See <a href="#repeat-bias">Repeat Bias</a>.</td></tr>
+      <tr><td>Month-end carry-over bias</td><td>Uses the month-end carry-over study as a live weighting input for both generation and candidate ranking during the early part of a planning month.</td></tr>
       <tr><td>Max Matches to Last Draw</td><td>Rejects candidates that share too many numbers with the most recent draw. See <a href="#last-draw-match">Last Draw Match</a>.</td></tr>
     </tbody>
   </table>
@@ -799,10 +845,20 @@
   <h4>Synced mode</h4>
   <p>When <strong>"Use these counts when constructing candidates"</strong> is ON in Monthly Draws Summary, the MiAN values are automatically <em>synced</em> from the "Acceptance needs" row — they become read-only (shown with a green tint and 🔗 sync notice). This ensures MiAN always reflects the actual selections made in Monthly Draws Summary.</p>
 
+  <p>In this synced mode, the same bucket counts are used in <strong>two places</strong>:</p>
+  <ul>
+    <li><strong>Constructive fill</strong> — used while building candidates.</li>
+    <li><strong>MiAN post-filter</strong> — checked again after candidates are generated.</li>
+  </ul>
+
+  <p>This means constructive fill tries to steer candidates toward the required monthly bucket mix, and MiAN then acts as a final guard to reject any candidate that still misses those minimum bucket counts.</p>
+
   <p>When constructive fill is OFF, the 9 bucket count inputs are fully editable.</p>
 
   <h4>Hard exclude zero-count buckets</h4>
-  <p>When this sub-toggle is enabled, <em>all</em> numbers in buckets whose required count is 0 are excluded from the candidate number pool entirely. This is a stronger constraint than the acceptance filter alone.</p>
+  <p>When this sub-toggle is enabled, <em>all</em> numbers in buckets whose required count is 0 are excluded from the candidate number pool entirely <strong>before</strong> constructive fill and before the normal weighted generation step. This is a stronger constraint than the acceptance filter alone.</p>
+
+  <p><strong>Example:</strong> if the required counts are <code>2x = 0</code>, <code>3x = 0</code>, and <code>6x = 0</code>, then every currently eligible number in those monthly buckets is removed from the generator pool before any candidate numbers are chosen.</p>
 
   <!-- ───────────────────────────────────────── -->
   <h3 id="repeat-bias">Monthly Repeat Bias</h3>
@@ -812,6 +868,22 @@
     <li><strong>Boost factor</strong> — how many times more likely a 1x number is to be selected (1 = no boost, up to 10).</li>
     <li><strong>Include supplementary numbers</strong> — if checked, the boost also applies when filling supplementary positions.</li>
   </ul>
+
+  <h3 id="carry-over-bias">Month-end carry-over bias</h3>
+
+  <p>This toggle reuses the <a href="#month-end-carry-over">Month-end carry-over</a> study as an <strong>actual weighting signal</strong> rather than just a display panel.</p>
+  <ul>
+    <li><strong>When ON</strong> — numbers in the active carry-over pool can receive extra or reduced weighting during candidate generation, and candidate ranking can include a carry-over component.</li>
+    <li><strong>Influence</strong> — choose <strong>Light</strong>, <strong>Normal</strong>, or <strong>Strong</strong> to control how far carry-over weights move away from neutral and how much ranking influence they receive.</li>
+    <li><strong>Signal sources</strong> — use separate checkboxes for <strong>still-undrawn month-end numbers</strong> and <strong>last-to-first boundary repeats</strong>. This lets you keep the more direct undrawn signal while turning off boundary-repeat evidence if it feels too speculative.</li>
+    <li><strong>Clicked boost</strong> — when carry-over numbers are clicked from the month-end bucket panel, choose <strong>Normal</strong>, <strong>Strong</strong>, or <strong>Near-forced</strong> instead of always using one fixed massive boost.</li>
+    <li><strong>Automatic default</strong> — the toggle defaults <strong>ON</strong> only while the next draw still falls inside the <strong>first 3 draws</strong> of the planning month <em>and</em> at least one active carry-over number has a positive learned weight. If all active weights are neutral or penalties, the default stays OFF.</li>
+    <li><strong>Planning month logic</strong> — if the current calendar month already looks complete, the app can treat the <em>upcoming month</em> as the planning month, so the carry-over toggle can default on again for the next month boundary.</li>
+  </ul>
+
+  <div class="tip">
+    The panel now labels active weights as boosts or penalties. For example, <code>13×0.93 penalty</code> means number 13 is in the active carry-over pool, but the learned evidence slightly reduces its generation/ranking influence rather than favouring it.
+  </div>
 
   <!-- ───────────────────────────────────────── -->
   <h3 id="last-draw-match">Maximum Matches to Last Draw</h3>
@@ -824,15 +896,48 @@
 
   <p>The <strong>Monthly Draws Summary</strong> panel analyses how frequently each number (1–45) has been drawn in each calendar month. Numbers are grouped into nine <em>frequency buckets</em>: Undrawn (0x), and Drawn 1x through 8x+.</p>
 
+  <div class="note">
+    <strong>Partial opening month:</strong> The first visible history month, <strong>2024-05</strong>, remains visible in month-by-month tables, but it is excluded from all-history monthly baselines / averages because it is not a complete month.
+  </div>
+
   <!-- ───────────────────────────────────────── -->
   <h3 id="acceptance-needs">Acceptance Needs Row</h3>
 
-  <p>Displays the <em>count of numbers selected</em> in each bucket from the number picker below. Use the number picker to choose which specific numbers you want to include in generated candidates, then these counts drive the MiAN filter.</p>
+  <p>Each Acceptance Needs bucket shows <strong>selected count / available count</strong> for the latest real month bucket set.</p>
+
+  <p><strong>Examples:</strong></p>
+  <ul>
+    <li><code>Undrawn 2/3</code> means you selected <strong>2</strong> numbers from a bucket that currently has <strong>3</strong> available numbers.</li>
+    <li><code>1x 5/17</code> means you selected <strong>5</strong> numbers from a bucket that currently has <strong>17</strong> available numbers.</li>
+    <li><code>4x 1/5</code> means you selected <strong>1</strong> number from a bucket that currently has <strong>5</strong> available numbers.</li>
+  </ul>
+
+  <h4>Selected numbers vs selected counts</h4>
+  <p>This distinction is important:</p>
+  <ul>
+    <li>The <strong>selected numbers themselves</strong> are used by the <strong>Use selected</strong> button and the <strong>Simulate 8</strong> button.</li>
+    <li>The <strong>selected counts</strong> are what drive <strong>Constructive Fill</strong> and the synced <strong>MiAN</strong> values.</li>
+  </ul>
+
+  <div class="tip">
+    When <strong>Use counts when constructing candidates</strong> is ON, the generator does <strong>not</strong> force the exact bucket numbers you clicked. It uses the <em>count</em> you selected in each bucket and then chooses that many numbers from the full eligible bucket pool.
+  </div>
 
   <!-- ───────────────────────────────────────── -->
   <h3 id="ideal-draw">Ideal Draw Row</h3>
 
   <p>Shows the bucket allocation that — if drawn — would bring the current month's distribution closest to the historical average, computed by exhaustive SSD minimisation over all possible 8-number bucket compositions. This is also the target used by the IDM score.</p>
+
+  <p>The Ideal pick mix is now <strong>date-smart</strong>:</p>
+  <ul>
+    <li>If the active month already exists in draw history, the ideal mix works from that observed month state.</li>
+    <li>If the calendar has moved into a new month and no draws from that month are loaded yet, the ideal mix automatically treats the planning month as a <strong>fresh all-undrawn month</strong>.</li>
+    <li>If the current observed month already appears complete, the ideal mix can automatically <strong>roll forward to the next planning month</strong> so it does not keep trying to optimise a finished month.</li>
+  </ul>
+
+  <div class="tip">
+    The <strong>Monthly Buckets</strong> table still shows only observed months. The date-smart reset is used internally for <strong>Robust Baseline and Ideal Draw</strong>, so the Ideal pick mix can behave correctly at month boundaries without needing to display a fake history row.
+  </div>
 
   <!-- ───────────────────────────────────────── -->
   <h3 id="needed-row">Needed Row</h3>
@@ -840,7 +945,7 @@
   <p>Shows the gap between the current month's bucket totals and the historical average. Negative values mean the current month already exceeds the average in that bucket; positive values indicate how many more numbers from that bucket are needed to reach the average.</p>
 
   <div class="note">
-    <strong>Like-months averaging:</strong> To keep averages honest, only months with the same number of draws as the <em>Draws per month</em> setting are included in the average. A warning is shown if some months are excluded. The current (partial) month is always included in the frequency display but excluded from the average calculation.
+    <strong>Like-months averaging:</strong> To keep averages honest, only months with the same number of draws as the <em>Draws per month</em> setting are included in the average. A warning is shown if some months are excluded. The current (partial) month is always included in the frequency display but excluded from the average calculation, and the opening partial month <strong>2024-05</strong> is also excluded from history-wide monthly baselines.
   </div>
 
   <!-- ───────────────────────────────────────── -->
@@ -851,6 +956,80 @@
     <li>Every generated candidate must contain at least the specified count from each bucket.</li>
     <li>The MiAN values in Candidate Generation Influences are automatically synced (see <a href="#mian">MiAN</a>).</li>
   </ul>
+
+  <h4>How numbers are chosen from a bucket</h4>
+  <p>During constructive fill, the generator receives:</p>
+  <ul>
+    <li><strong>bucket counts</strong> — how many numbers are needed from each bucket, and</li>
+    <li><strong>bucket sets</strong> — all currently eligible numbers in each bucket.</li>
+  </ul>
+
+  <p>If a bucket contains more numbers than required, the generator picks from that bucket by <strong>uniform random sampling without replacement</strong>.</p>
+
+  <p><strong>Examples:</strong></p>
+  <ul>
+    <li><code>1x 5/17</code> means the generator needs <strong>5</strong> numbers from the <code>1x</code> bucket, so it randomly samples <strong>5</strong> from the <strong>17</strong> currently eligible <code>1x</code> numbers.</li>
+    <li><code>4x 1/5</code> means the generator needs <strong>1</strong> number from the <code>4x</code> bucket, so it randomly samples <strong>1</strong> from the <strong>5</strong> currently eligible <code>4x</code> numbers.</li>
+  </ul>
+
+  <p>The exact constructive-fill order is fixed:</p>
+  <ol>
+    <li><code>Undrawn</code></li>
+    <li><code>1x</code></li>
+    <li><code>2x</code></li>
+    <li><code>3x</code></li>
+    <li><code>4x</code></li>
+    <li><code>5x</code></li>
+    <li><code>6x</code></li>
+    <li><code>7x</code></li>
+    <li><code>8x+</code></li>
+  </ol>
+
+  <p>As numbers are picked, the generator fills the candidate <strong>main numbers first</strong> until there are 6 mains, then fills the remaining supplementary positions until there are 2 supps.</p>
+
+  <h4>When constructive fill happens relative to other generation rules</h4>
+  <p>The order matters:</p>
+  <ol>
+    <li><strong>Exclusions are built first</strong> — including user exclusions, SDE1, HC3, and any <strong>Hard exclude zero-count buckets</strong> removals.</li>
+    <li><strong>Constructive fill runs next</strong> — bucket counts are used to seed the candidate.</li>
+    <li><strong>An early digit-width guard runs</strong> — if the seeded candidate already breaks the single-digit / two-digit target, that attempt is rejected immediately.</li>
+    <li><strong>Any remaining open slots</strong> are then filled by the normal weighted generator.</li>
+    <li><strong>Full-candidate constraints</strong> are checked after the 8 numbers are assembled.</li>
+  </ol>
+
+  <p>This means the constructive bucket picks happen <strong>before</strong> the later weighted-fill influences such as:</p>
+  <ul>
+    <li><strong>Digit decade boost / punish</strong></li>
+    <li><strong>n-ending numbers max allowed</strong> (checked later as a hard constraint)</li>
+    <li><strong>Single digit / two digit share</strong></li>
+    <li><strong>Selected-number boost</strong></li>
+    <li><strong>Monthly Repeat Bias</strong></li>
+  </ul>
+
+  <div class="note">
+    Constructive-fill picks themselves are <strong>not weighted</strong> by decade boosts or ending-digit boosts. Those weighting systems only influence the later <em>remaining-slot fill</em> stage if the candidate still has empty positions after constructive fill.
+  </div>
+
+  <h4>What happens when the selected counts already total 8</h4>
+  <p>If the selected bucket counts add up to all 8 candidate positions, constructive fill can populate the entire candidate before the normal weighted generator runs.</p>
+
+  <p>In that case:</p>
+  <ul>
+    <li>the candidate is driven almost entirely by the monthly bucket counts,</li>
+    <li>the generator randomly chooses within each eligible bucket, and</li>
+    <li>later weighting systems do not get a chance to choose additional numbers because there are no free slots left.</li>
+  </ul>
+
+  <p>However, the finished candidate is still checked against later hard rules such as:</p>
+  <ul>
+    <li><strong>n-ending numbers max allowed</strong></li>
+    <li><strong>Single digit / two digit share</strong></li>
+    <li><strong>Odd/Even ratio</strong></li>
+    <li><strong>Maximum matches to last draw</strong></li>
+    <li><strong>Entropy / Hamming / Jaccard</strong></li>
+  </ul>
+
+  <p>So even a fully constructive candidate can still be rejected and retried.</p>
 
   <!-- ───────────────────────────────────────── -->
   <h3 id="ending-digit-sequences">Ending Digit Sequence Analyzer</h3>
@@ -982,6 +1161,52 @@
 
   <p>If you want the quickest reading: numbers near the top usually combine a strong <strong>Recent rank</strong>, a positive <strong>Recent Δ</strong>, and a strong <strong>Weighted rank</strong>. Numbers near the bottom usually show the opposite pattern.</p>
 
+  <!-- ───────────────────────────────────────── -->
+  <h2 id="undrawn-patterns">Undrawn Patterns</h2>
+
+  <p>The <strong>Undrawn Patterns (Empirical)</strong> panel analyses absence patterns <em>draw by draw</em>. A number can add multiple undrawn instances across the active window if it stays absent in multiple draws.</p>
+
+  <p>The panel always follows the active history window and the active <strong>Mode</strong>:</p>
+  <ul>
+    <li><strong>Mains only</strong> — counts only the 6 main numbers in each draw.</li>
+    <li><strong>Mains + supps</strong> — counts both the main and supplementary numbers.</li>
+  </ul>
+
+  <p>Besides the cold/hot absence lists and simulation snapshot, the panel now includes a dedicated month-boundary study.</p>
+
+  <h3 id="month-end-carry-over">Month-end carry-over</h3>
+
+  <p>The <strong>Month-end carry-over</strong> card tests a specific hypothesis: <em>numbers that finish a month undrawn may be more likely to appear early in the next month.</em></p>
+
+  <h4>How the analysis is built</h4>
+  <ol>
+    <li>For each completed month in the active window, the app builds that month’s <strong>month-end undrawn set</strong> — the numbers not seen anywhere in that month under the current mode.</li>
+    <li>It then checks the <strong>first 3 draws of the next consecutive month</strong>.</li>
+    <li>If a month-end undrawn number appears in those early next-month draws, it counts as an <strong>early carry-over hit</strong>.</li>
+    <li>Non-consecutive month gaps are skipped rather than treated as true carry-over transitions.</li>
+  </ol>
+
+  <h4>What the headline stats mean</h4>
+  <ul>
+    <li><strong>Transitions</strong> — how many consecutive month-to-month boundaries were actually evaluated.</li>
+    <li><strong>Month-end undrawn avg</strong> — the average size of the month-end undrawn set across those transitions.</li>
+    <li><strong>Early-next-month hit rate</strong> — the share of month-end undrawn instances that were drawn within the first 3 draws of the next month.</li>
+    <li><strong>Baseline</strong> — the ordinary per-slot draw rate over those same early-next-month draws.</li>
+    <li><strong>Lift</strong> — the early-hit rate divided by baseline. Values above <code>1.00x</code> suggest the month-end undrawn set was drawn early more often than a random number would be.</li>
+    <li><strong>95% range</strong> — the observed transition-to-transition range for early carry-over hit counts.</li>
+  </ul>
+
+  <h4>How to read the number lists</h4>
+  <ul>
+    <li><strong>Most likely to flip early next month</strong> — numbers that most often moved from month-end undrawn into an early next-month draw.</li>
+    <li><strong>Most persistent into next month</strong> — numbers that tended to remain undrawn even after the month changed.</li>
+    <li><strong>Early-hit timing</strong> — shows whether those flips happened more often in draw 1, draw 2, or draw 3 of the next month.</li>
+  </ul>
+
+  <div class="tip">
+    The analysis uses the active window only. If the window starts or ends mid-month, the boundary months may be partial, so full-history windows usually give the cleanest month-end interpretation.
+  </div>
+
   <!-- ═══════════════════════════════════════════ -->
   <h2 id="dga">DGA Grid</h2>
 
@@ -1077,7 +1302,7 @@
       <tr><td><strong>Bucket</strong></td><td>A frequency category for the current month: Undrawn (0x), Drawn 1x, 2x … 8x+.</td></tr>
       <tr><td><strong>Candidate</strong></td><td>A set of 8 numbers (6 main + 2 supplementary) generated for potential play.</td></tr>
       <tr><td><strong>Conv</strong></td><td>Convergence score — how much drawing this candidate would move the monthly distribution toward the historical average.</td></tr>
-      <tr><td><strong>Constructive Fill</strong></td><td>Generation mode where the bucket composition of every candidate is constrained to match the Acceptance needs counts.</td></tr>
+      <tr><td><strong>Constructive Fill</strong></td><td>Generation mode where the candidate is seeded from monthly bucket <em>counts</em> (not exact selected bucket numbers). The generator samples from each eligible bucket to satisfy the required mix before later weighted fill and hard-rule checks.</td></tr>
       <tr><td><strong>DGA</strong></td><td>Draw-Grid Analysis — heat-map visualisation of number frequency across the draw history.</td></tr>
       <tr><td><strong>Exact duplicate</strong></td><td>A repeated history row with the same date and the same main/supplementary numbers.</td></tr>
       <tr><td><strong>IDM</strong></td><td>Ideal Draw Match — similarity of a candidate's bucket composition to the optimal draw composition.</td></tr>

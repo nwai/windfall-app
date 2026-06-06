@@ -25,6 +25,18 @@ export function serializeMonthlyBuckets(
         };
         allowShortfall?: boolean;
         boostPenalize?: boolean;
+        selectedNumbersByBucket?: {
+          undrawn: number[];
+          times1: number[];
+          times2: number[];
+          times3: number[];
+          times4: number[];
+          times5: number[];
+          times6: number[];
+          times7: number[];
+          times8: number[];
+        };
+        selectedNumberBiasEnabled?: boolean;
       }
     | undefined
 ): GenerateWorkerArgs["monthlyBucketOptions"] | undefined {
@@ -44,6 +56,20 @@ export function serializeMonthlyBuckets(
     },
     allowShortfall: opts.allowShortfall,
     boostPenalize: opts.boostPenalize,
+    selectedNumbersByBucket: opts.selectedNumbersByBucket
+      ? {
+          undrawn: [...opts.selectedNumbersByBucket.undrawn],
+          times1: [...opts.selectedNumbersByBucket.times1],
+          times2: [...opts.selectedNumbersByBucket.times2],
+          times3: [...opts.selectedNumbersByBucket.times3],
+          times4: [...opts.selectedNumbersByBucket.times4],
+          times5: [...opts.selectedNumbersByBucket.times5],
+          times6: [...opts.selectedNumbersByBucket.times6],
+          times7: [...opts.selectedNumbersByBucket.times7],
+          times8: [...opts.selectedNumbersByBucket.times8],
+        }
+      : undefined,
+    selectedNumberBiasEnabled: opts.selectedNumberBiasEnabled,
   };
 }
 
@@ -138,6 +164,20 @@ export function useGenerateWorker() {
                   },
                   allowShortfall: args.monthlyBucketOptions.allowShortfall,
                   boostPenalize: args.monthlyBucketOptions.boostPenalize,
+                  selectedNumbersByBucket: args.monthlyBucketOptions.selectedNumbersByBucket
+                    ? {
+                        undrawn: [...args.monthlyBucketOptions.selectedNumbersByBucket.undrawn],
+                        times1: [...args.monthlyBucketOptions.selectedNumbersByBucket.times1],
+                        times2: [...args.monthlyBucketOptions.selectedNumbersByBucket.times2],
+                        times3: [...args.monthlyBucketOptions.selectedNumbersByBucket.times3],
+                        times4: [...args.monthlyBucketOptions.selectedNumbersByBucket.times4],
+                        times5: [...args.monthlyBucketOptions.selectedNumbersByBucket.times5],
+                        times6: [...args.monthlyBucketOptions.selectedNumbersByBucket.times6],
+                        times7: [...args.monthlyBucketOptions.selectedNumbersByBucket.times7],
+                        times8: [...args.monthlyBucketOptions.selectedNumbersByBucket.times8],
+                      }
+                    : undefined,
+                  selectedNumberBiasEnabled: args.monthlyBucketOptions.selectedNumberBiasEnabled,
                 }
               : undefined;
             const result = generateCandidates(
@@ -151,7 +191,7 @@ export function useGenerateWorker() {
               trendMap, args.allowedTrendRatios, args.sumFilter,
               args.patternOptions, args.ogaBiasOptions, args.div5Options, args.mainZeroOptions, args.mainFiveOptions, args.mainOneOptions, args.mainTwoOptions, args.mainThreeOptions, args.mainFourOptions, args.mainSixOptions, args.mainSevenOptions, args.mainEightOptions, args.mainNineOptions, args.digitWidthConstraint,
               monthlyBucketOptions, args.attemptMultiplier, args.ogaSpokeCount,
-               args.maxLastDrawMatches, args.monthlyRepeatBiasWeights, args.mainDecadeBiases
+                args.maxLastDrawMatches, args.monthlyRepeatBiasWeights, args.mainDecadeBiases, args.monthEndCarryOverWeights
             );
             onResult(result);
           } catch (e: any) {

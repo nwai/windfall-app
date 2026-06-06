@@ -5,12 +5,12 @@ import {
   applyAutomaticHistoryCorrections,
   describeDrawRow,
   dropHistoryRowAtIndex,
-  formatIsoDateAsMdyy,
   keepOnlyDateVersion,
   keepOnlyNumbersVersion,
   normalizeHistoryDate,
   replaceHistoryRowAtIndex,
 } from "../lib/drawHistoryReview";
+import { validateDrawEntry } from "../lib/drawHistoryValidation";
 import { showToast } from "../lib/toastBus";
 
 interface DrawHistoryIntegrityPanelProps {
@@ -34,10 +34,6 @@ function toIsoDateInputValue(rawDate: string): string {
   return /^\d{4}-\d{2}-\d{2}$/.test(normalized)
     ? normalized
     : new Date().toISOString().slice(0, 10);
-}
-
-function formatDateForSave(isoDate: string, sampleDate: string): string {
-  return sampleDate.includes("/") ? formatIsoDateAsMdyy(isoDate) : isoDate;
 }
 
 export const DrawHistoryIntegrityPanel = ({
@@ -104,44 +100,28 @@ export const DrawHistoryIntegrityPanel = ({
     if (editingIndex === null) {
       return;
     }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(editDate)) {
-      setEditError("Choose a valid draw date.");
-      return;
-    }
-
-    const mains = editMains.map((value) => Number(value)).filter((value) => Number.isInteger(value));
-    const supps = editSupps.map((value) => Number(value)).filter((value) => Number.isInteger(value));
-    if (mains.length !== mainCount) {
-      setEditError(`Enter ${mainCount} main numbers before saving the correction.`);
-      return;
-    }
-    if (supps.length !== suppCount) {
-      setEditError(`Enter ${suppCount} supplementary numbers before saving the correction.`);
-      return;
-    }
-
-    const allNumbers = [...mains, ...supps];
-    if (allNumbers.some((value) => value < minNumber || value > maxNumber)) {
-      setEditError(`All numbers must stay between ${minNumber} and ${maxNumber}.`);
-      return;
-    }
-    if (new Set(allNumbers).size !== allNumbers.length) {
-      setEditError("Draw numbers must be unique across main and supplementary slots.");
-      return;
-    }
-
     const currentRow = rows[editingIndex];
     if (!currentRow) {
       setEditError("The selected draw is no longer available. Please reopen the editor.");
       return;
     }
 
-    const replacement: DrawRow = {
-      date: formatDateForSave(editDate, currentRow.date),
-      mains,
-      supps,
-    };
-    const nextRows = replaceHistoryRowAtIndex(rows, editingIndex, replacement);
+    const validated = validateDrawEntry(
+      { date: editDate, mains: editMains, supps: editSupps },
+      {
+        mainCount,
+        suppCount,
+        minNumber,
+        maxNumber,
+        outputDateFormat: currentRow.date.includes("/") ? "mdyy" : "iso",
+      },
+    );
+    if (!validated.ok) {
+      setEditError(validated.message);
+      return;
+    }
+
+    const nextRows = replaceHistoryRowAtIndex(rows, editingIndex, validated.row);
     commitRows(nextRows, `Updated draw ${currentRow.date}.`);
   }, [commitRows, editDate, editMains, editSupps, editingIndex, mainCount, maxNumber, minNumber, rows, suppCount]);
 

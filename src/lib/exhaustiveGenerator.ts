@@ -21,33 +21,34 @@ export function generateExhaustiveCombos(pool: number[], options: ExhaustiveOpti
   const combos: CandidateSet[] = [];
   if (n < 8 || cap <= 0) return { total: 0, combos, capped: false };
 
-  // total combos without cap
   const total = combination(n, 6) * combination(n - 6, 2);
+  const capLimit = Math.max(0, Math.floor(cap));
 
-  // Simple lexicographic generation, short-circuited at cap
-  outer: for (let a = 0; a <= n - 8; a++) {
-    for (let b = a + 1; b <= n - 7; b++) {
-      for (let c = b + 1; c <= n - 6; c++) {
-        for (let d = c + 1; d <= n - 5; d++) {
-          for (let e = d + 1; e <= n - 4; e++) {
-            for (let f = e + 1; f <= n - 3; f++) {
-              // mains are indices a..f; supps drawn from remaining indices > f
-              for (let g = f + 1; g <= n - 2; g++) {
-                for (let h = g + 1; h <= n - 1; h++) {
-                  const main = [sortedPool[a], sortedPool[b], sortedPool[c], sortedPool[d], sortedPool[e], sortedPool[f]];
-                  const supp = [sortedPool[g], sortedPool[h]];
-                  combos.push({ main, supp });
-                  if (combos.length >= cap) {
-                    break outer;
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
+  const visitCombinations = (
+    source: number[],
+    size: number,
+    visit: (combo: number[]) => boolean,
+    start = 0,
+    chosen: number[] = [],
+  ): boolean => {
+    if (chosen.length === size) return visit([...chosen]);
+    const remaining = size - chosen.length;
+    for (let index = start; index <= source.length - remaining; index++) {
+      chosen.push(source[index]);
+      if (!visitCombinations(source, size, visit, index + 1, chosen)) return false;
+      chosen.pop();
     }
-  }
+    return true;
+  };
+
+  visitCombinations(sortedPool, 6, (main) => {
+    const mainSet = new Set(main);
+    const suppPool = sortedPool.filter((n) => !mainSet.has(n));
+    return visitCombinations(suppPool, 2, (supp) => {
+      combos.push({ main, supp });
+      return combos.length < capLimit;
+    });
+  });
 
   return { total, combos, capped: combos.length < total };
 }

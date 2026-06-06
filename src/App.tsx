@@ -17,7 +17,7 @@ import { MonteCarloPanel } from "./components/candidates/MonteCarloPanel";
 import { OperatorsPanel } from "./components/OperatorsPanel";
 import { NumberTrendsTable, NumberTrend } from "./components/NumberTrendsTable";
 import { entropy, minHamming, maxJaccard } from "./analytics";
-import { fetchDraws } from "./lib/fetchDraws";
+import { fetchDraws, loadCsvFallbackDraws } from "./lib/fetchDraws";
 import { getUniqueRandomNumbers } from "./lib/random";
 import { parseCSVorJSON } from "./parseCSVorJSON";
 import { getSDE1FilteredPool } from "./sde1";
@@ -26,6 +26,7 @@ import { DGAVisualizer } from "./components/DGAVisualizer";
 import { computeOGA, getOGAPercentile } from "./utils/oga";
 import { Draw, Knobs, CandidateSet } from "./types";
 import { GeneratedCandidatesPanel, ExportSettings } from "./components/candidates/GeneratedCandidatesPanel";
+import { PasteWeightedCandidatesPanel } from "./components/candidates/PasteWeightedCandidatesPanel";
 import { buildTrendWeights } from "./lib/trendBias";
 import { buildMonthlyRepeatBiasWeights, MRB_BUCKET_KEYS, MRB_BUCKET_LABELS, MRB_BUDGET } from "./lib/numberBiases";
 import { OGAHistogram } from "./components/OGAHistogram";
@@ -68,6 +69,13 @@ import { DrawRow } from "./lib/drawHistory";
 import { buildChurnDataset } from "./lib/churnFeatures";
 import { HeatmapLegendBar } from "./components/HeatmapLegendBar";
 import {
+  buildMonthlyBucketDrawSeries,
+  MONTHLY_BUCKET_HEATMAP_COLORS,
+  MONTHLY_BUCKET_HEATMAP_LABELS,
+  MONTHLY_BUCKET_HEATMAP_LETTERS,
+} from "./lib/monthlyBucketDrawSeries";
+import { buildSimulatedNextDraw } from "./lib/simulatedNextDraw";
+import {
   AppPresetSnapshot,
   listPresets,
   saveNewPreset,
@@ -79,12 +87,13 @@ import {
   type AppPreset,
 } from "./lib/presets";
 import type { WindowPattern } from "./components/WindowStatsPanel";
-import { generateCandidates } from "./generateCandidates";
+import { applyOddEvenRatioQuotas, generateCandidates, summarizeOddEvenRatios } from "./generateCandidates";
 import { useGenerateWorker, serializeMonthlyBuckets, serializeTrendMap } from "./hooks/useGenerateWorker";
 import type { GenerateWorkerArgs } from "./workers/generateWorker";
 import { ModulationDiagnosticsPanel } from "./components/ModulationDiagnosticsPanel";
 import { SelectionInsightsPanel } from "./components/SelectionInsightsPanel";
 import { CollapsibleSection } from "./components/shared/CollapsibleSection";
+import { InlineCollapsibleCard } from "./components/shared/InlineCollapsibleCard";
 import { NextDrawProbabilitiesPanel } from "./components/NextDrawProbabilitiesPanel";
 import { forecastOGA } from "./lib/ogaForecast";
 import { MostLikelyNotDrawnPanel } from "./components/MostLikelyNotDrawnPanel";
@@ -95,6 +104,7 @@ import MonthlyOverlapPanel from "./components/MonthlyOverlapPanel";
 import MonthlyDrawsSummaryPanel, { type MonthlyConstraintPayload, type MonthlyFrequencyConstraints, type MonthlyBucketSets } from "./components/MonthlyDrawsSummaryPanel";
 import MonthlyFirstLastPanel from "./components/MonthlyFirstLastPanel";
 import MonthlyDigitOccurrencePanel from "./components/MonthlyDigitOccurrencePanel";
+import MonthEndCarryOverBucketsPanel from "./components/MonthEndCarryOverBucketsPanel";
 import HotColdRankingPanel from "./components/HotColdRankingPanel";
 import { AdjacentCombosPanel } from "./components/AdjacentCombosPanel";
 import { applyOctagonalPostProcess } from "./octagonal";
@@ -102,6 +112,8 @@ import { PickSixPanel, type PickSixSource } from "./components/PickSixPanel";
 import { buildWfmqyhNumberCounts } from "./lib/wfmqyhNumberCounts";
 import { DrawBucketPatternPanel } from "./components/DrawBucketPatternPanel";
 import { EndingDigitSequencePanel } from "./components/EndingDigitSequencePanel";
+import DGAMonthlyBucketStateGrid from "./components/DGAMonthlyBucketStateGrid";
+import { buildMonthlyBucketTimeline } from "./lib/monthlyBucketTimeline";
 import { deriveMainConstraintExclusions } from "./lib/mainConstraintExclusions";
 import {
   analyzeDrawHistoryRows,
@@ -110,6 +122,7 @@ import {
   rowsFromDraws,
 } from "./lib/drawHistoryReview";
 import { loadCachedDrawHistory, saveCachedDrawHistory } from "./lib/historyPersistence";
+import { chooseInitialDrawHistory } from "./lib/initialDrawHistory";
 import {
   DIGIT_WIDTH_PERCENT_OPTIONS,
   deriveDigitWidthTargets,
@@ -117,10 +130,48 @@ import {
   type DigitWidthConstraintScope,
 } from "./lib/digitWidthConstraint";
 import {
-  computeWeekdayWindfallPrizeDivision,
-  rankWeekdayWindfallPrizeDivision,
-} from "./lib/prizeDivisions";
-import { ogaPercentileToSimilarity } from "./lib/ogaQuality";
+  DEFAULT_GENERATED_CANDIDATE_COUNT,
+  getGeneratedCandidateCountWindowDefault,
+  normalizeGeneratedCandidateCount,
+} from "./lib/generatedCandidateCount";
+import {
+  buildEffectiveMonthEndCarryOverWeights,
+  buildMonthEndCarryOverWeighting,
+  SELECTED_MONTH_END_CARRY_OVER_BOOST_FACTOR,
+  scoreMonthEndCarryOverCandidate,
+} from "./lib/monthEndCarryOver";
+
+type DgaHeatmapViewMode = "temperature" | "monthlyBucketState";
+
+type MonthEndCarryOverStrength = "light" | "normal" | "strong";
+type SelectedCarryOverBoostMode = "normal" | "strong" | "nearForced";
+
+const MONTH_END_CARRY_OVER_STRENGTHS: Record<MonthEndCarryOverStrength, {
+  label: string;
+  factorScale: number;
+  rankingWeight: number;
+}> = {
+  light: { label: "Light", factorScale: 0.5, rankingWeight: 0.05 },
+  normal: { label: "Normal", factorScale: 1, rankingWeight: 0.15 },
+  strong: { label: "Strong", factorScale: 1.5, rankingWeight: 0.3 },
+};
+
+const SELECTED_CARRY_OVER_BOOSTS: Record<SelectedCarryOverBoostMode, {
+  label: string;
+  factor: number;
+}> = {
+  normal: { label: "Normal", factor: 10 },
+  strong: { label: "Strong", factor: 100 },
+  nearForced: { label: "Near-forced", factor: SELECTED_MONTH_END_CARRY_OVER_BOOST_FACTOR },
+};
+
+const normalizeMonthEndCarryOverStrength = (value: unknown): MonthEndCarryOverStrength => (
+  value === "light" || value === "strong" ? value : "normal"
+);
+
+const normalizeSelectedCarryOverBoostMode = (value: unknown): SelectedCarryOverBoostMode => (
+  value === "normal" || value === "nearForced" ? value : "strong"
+);
 
 
 const custom: ZoneGroups = [
@@ -644,7 +695,13 @@ function AppInner(): JSX.Element {
     // @ts-ignore
     setTrace(updater);
   }, [traceVerbose]);
-  const [numCandidates, setNumCandidates] = useState<number>(8);
+  const [numCandidates, setNumCandidatesState] = useState<number>(DEFAULT_GENERATED_CANDIDATE_COUNT);
+  const lastWindowDefaultNumCandidatesRef = useRef<number>(DEFAULT_GENERATED_CANDIDATE_COUNT);
+  const setNumCandidates = useCallback((nextCount: number) => {
+    setNumCandidatesState(
+      normalizeGeneratedCandidateCount(nextCount, lastWindowDefaultNumCandidatesRef.current),
+    );
+  }, []);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [octagonalTop, setOctagonalTop] = useState<number>(defaultKnobs.octagonal_top);
   const [ogaSpokeCount, setOgaSpokeCount] = useState<number>(9);
@@ -675,6 +732,13 @@ function AppInner(): JSX.Element {
   const [mrbBucketBoosts, setMrbBucketBoosts] = useState<import("./lib/numberBiases").MRBBucketBoosts>({
     undrawn: 1, times1: 1, times2: 1, times3: 1, times4: 1, times5: 1, times6: 1, times7: 1, times8: 1,
   });
+  const [monthEndCarryOverBiasEnabled, setMonthEndCarryOverBiasEnabled] = useState<boolean>(false);
+  const [monthEndCarryOverStrength, setMonthEndCarryOverStrength] = useState<MonthEndCarryOverStrength>("normal");
+  const [monthEndCarryOverIncludeMonthEndUndrawn, setMonthEndCarryOverIncludeMonthEndUndrawn] = useState<boolean>(true);
+  const [monthEndCarryOverIncludeBoundaryRepeats, setMonthEndCarryOverIncludeBoundaryRepeats] = useState<boolean>(true);
+  const [selectedCarryOverBoostNumbers, setSelectedCarryOverBoostNumbers] = useState<number[]>([]);
+  const [selectedCarryOverBoostMode, setSelectedCarryOverBoostMode] = useState<SelectedCarryOverBoostMode>("strong");
+  const monthEndCarryOverBiasTouchedRef = useRef(false);
 
   // Sync acceptance-needs defaults from the bucket sizes in the payload
   useEffect(() => {
@@ -739,16 +803,54 @@ function AppInner(): JSX.Element {
     return sets;
   }, [history]);
 
+  const dgaCurrentCalendarMonthLabel = useMemo(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  }, []);
+
+  const dgaEffectiveMonthlyBuckets = useMemo(
+    () => monthlyBucketSetsAlways ?? monthlyConstraintPayload?.buckets ?? dgaLiveMonthlyBuckets,
+    [dgaLiveMonthlyBuckets, monthlyBucketSetsAlways, monthlyConstraintPayload],
+  );
+
+  const dgaMonthlyBucketTimelineBase = useMemo(
+    () => buildMonthlyBucketTimeline(history),
+    [history],
+  );
+
+  const dgaEffectiveMonthLabel = useMemo(() => {
+    if (monthlyBucketSetsAlways || monthlyConstraintPayload?.buckets) {
+      return dgaMonthlyBucketTimelineBase[dgaMonthlyBucketTimelineBase.length - 1]?.monthLabel ?? dgaCurrentCalendarMonthLabel;
+    }
+    return dgaCurrentCalendarMonthLabel;
+  }, [dgaCurrentCalendarMonthLabel, dgaMonthlyBucketTimelineBase, monthlyBucketSetsAlways, monthlyConstraintPayload]);
+
+  const dgaMonthlyBucketTimeline = useMemo(() => {
+    const next = dgaMonthlyBucketTimelineBase.slice();
+    if (next.length === 0) {
+      return [{ monthLabel: dgaEffectiveMonthLabel, bucketSets: dgaEffectiveMonthlyBuckets, drawCount: 0 }];
+    }
+    const last = next[next.length - 1];
+    if (last.monthLabel === dgaEffectiveMonthLabel) {
+      next[next.length - 1] = { ...last, bucketSets: dgaEffectiveMonthlyBuckets };
+      return next;
+    }
+    return [...next, { monthLabel: dgaEffectiveMonthLabel, bucketSets: dgaEffectiveMonthlyBuckets, drawCount: 0 }];
+  }, [dgaEffectiveMonthLabel, dgaEffectiveMonthlyBuckets, dgaMonthlyBucketTimelineBase]);
+
   const [numberCounts, setNumberCounts] = useState<number[]>([]);
   const [minCount, setMinCount] = useState<number>(0);
   const [maxCount, setMaxCount] = useState<number>(0);
   const [focusedDgaCol, setFocusedDgaCol] = useState<number | null>(null);
+  const [dgaHoveredNumber, setDgaHoveredNumber] = useState<number | null>(null);
   const [minRecentMatches, setMinRecentMatches] = useState<number>(0);
   const [maxLastDrawMatchesEnabled, setMaxLastDrawMatchesEnabled] = useState<boolean>(false);
   const [maxLastDrawMatchesValue, setMaxLastDrawMatchesValue] = useState<number>(3);
   const [recentMatchBias, setRecentMatchBias] = useState<number>(0);
   const [highlightMsg, setHighlightMsg] = useState<string>("");
   const [highlights, setHighlights] = useState<any[]>([]);
+  const [dgaHeatmapExpanded, setDgaHeatmapExpanded] = useState<boolean>(true);
+  const [dgaGridExpanded, setDgaGridExpanded] = useState<boolean>(true);
 
   const [excludedNumbers, setExcludedNumbers] = useState<number[]>([]);
   const [userSelectedNumbers, setUserSelectedNumbers] = useState<number[]>([]);
@@ -769,6 +871,7 @@ function AppInner(): JSX.Element {
   const [focusNumber, setFocusNumber] = useState<number | null>(null);
   const [showHeatmapLetters, setShowHeatmapLetters] = useState(false);
   const [tempMetric, setTempMetric] = useState<"ema" | "recency" | "hybrid">("hybrid");
+  const [dgaHeatmapView, setDgaHeatmapView] = useState<DgaHeatmapViewMode>("temperature");
   const [repeatWindowSizeW, setRepeatWindowSizeW] = useState<number>(12);
   const [minFromRecentUnionM, setMinFromRecentUnionM] = useState<number>(0);
   const [presets, setPresets] = useState<AppPreset[]>(() => listPresets());
@@ -850,11 +953,20 @@ function AppInner(): JSX.Element {
 
   useEffect(() => {
     const cachedRows = loadCachedDrawHistory();
-    if (cachedRows && cachedRows.length > 0) {
-      const ordered = rowsToDraws(cachedRows);
-      commitHistory(ordered);
-      setTraceMaybe((t) => [...t, `[TRACE] Loaded ${ordered.length} draws from saved local draw history state.`]);
-      return;
+    const cachedHistory = cachedRows && cachedRows.length > 0 ? rowsToDraws(cachedRows) : null;
+    const bundledHistory = loadCsvFallbackDraws(strictValidateDraws);
+
+    if (cachedHistory && cachedHistory.length > 0) {
+      const choice = chooseInitialDrawHistory(cachedHistory, bundledHistory);
+      if (choice.history.length > 0) {
+        commitHistory(choice.history);
+        setTraceMaybe((t) => [...t,
+          choice.source === "cache"
+            ? `[TRACE] Loaded ${choice.history.length} draws from saved local draw history state. ${choice.reason}`
+            : `[TRACE] Refreshed draw history from bundled CSV fallback (${choice.history.length} draws). ${choice.reason}`
+        ]);
+        return;
+      }
     }
 
     fetchDraws({
@@ -1055,6 +1167,10 @@ function AppInner(): JSX.Element {
   const mainDecadeGenerationBiases = useMemo(() => ({ ...mainDecadeBiases }), [mainDecadeBiases]);
 
   const activeWindowSize = filteredHistory.length;
+  const generatedCandidateCountWindowDefault = useMemo(
+    () => getGeneratedCandidateCountWindowDefault(activeWindowSize, DEFAULT_GENERATED_CANDIDATE_COUNT),
+    [activeWindowSize],
+  );
   const mostRecentDrawDateLabel = useMemo(() => {
     if (history.length === 0) return "no draws yet";
     const latestDraw = history.reduce((latest, draw) => {
@@ -1069,6 +1185,16 @@ function AppInner(): JSX.Element {
       setRepeatWindowSizeW(activeWindowSize);
     }
   }, [activeWindowSize]);
+
+  useEffect(() => {
+    const previousWindowDefault = lastWindowDefaultNumCandidatesRef.current;
+    setNumCandidatesState((previousCount) => (
+      previousCount === previousWindowDefault
+        ? generatedCandidateCountWindowDefault
+        : previousCount
+    ));
+    lastWindowDefaultNumCandidatesRef.current = generatedCandidateCountWindowDefault;
+  }, [generatedCandidateCountWindowDefault]);
 
   const sde1Exclusions = knobs.enableSDE1 ? getSDE1FilteredPool(filteredHistory).excludedNumbers : [];
   let hc3Exclusions: number[] = [];
@@ -1109,6 +1235,7 @@ function AppInner(): JSX.Element {
   const dgaGridRef = useRef<HTMLDivElement>(null);
   const [simScrollOriginY, setSimScrollOriginY] = useState<number | null>(null);
   const scrollToDGA = useCallback(() => {
+    setDgaGridExpanded(true);
     setSimScrollOriginY(window.scrollY);
     requestAnimationFrame(() => {
       dgaGridRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1159,6 +1286,13 @@ function AppInner(): JSX.Element {
   };
 
   const activeSimulatedDraw = simulatedDraw;
+  const activeSimulatedMainKey = useMemo(() => {
+    const mainNumbers = Array.isArray(simulatedDraw?.main)
+      ? simulatedDraw.main.filter((value) => Number.isFinite(value))
+      : [];
+    if (mainNumbers.length === 0) return null;
+    return [...mainNumbers].sort((left, right) => left - right).join(",");
+  }, [simulatedDraw]);
   // Heatmap overlay only from manual checkboxes (manualSimSelected)
   const overlayNumbers = useMemo(() => simNumbers.slice(0, 8), [simNumbers]);
   const dgaSimNumbers = useMemo(() => {
@@ -1180,6 +1314,22 @@ function AppInner(): JSX.Element {
       default: return "";
     }
   }, [windowMode, filteredHistory.length, drawWindowMode, rangeFrom, rangeTo]);
+
+  const handleSimulatePasteWeightedCandidate = useCallback((numbers: number[]) => {
+    const main = numbers
+      .filter((value) => Number.isFinite(value))
+      .slice(0, 6)
+      .sort((left, right) => left - right);
+
+    if (main.length < 6) return;
+
+    setSelectedCandidateIdx(-1);
+    setSimulatedDraw({ main, supp: [], date: "PasteWeighted", isSimulated: true } as any);
+    setSimSource('candidate');
+    setSimCandidateIdx(null);
+    setDgaStripSelected([]);
+    scrollToDGA();
+  }, [scrollToDGA]);
   
 
   // Trend series for panels
@@ -1336,6 +1486,140 @@ function AppInner(): JSX.Element {
     return buildMonthlyRepeatBiasWeights(filteredHistory, mrbBucketBoosts, mrbIncludeSupp, mrbEffectiveDate);
   }, [mrbEnabled, filteredHistory, mrbBucketBoosts, mrbIncludeSupp, mrbEffectiveDate]);
 
+  const monthEndCarryOverStrengthSettings = MONTH_END_CARRY_OVER_STRENGTHS[monthEndCarryOverStrength];
+  const selectedCarryOverBoostSettings = SELECTED_CARRY_OVER_BOOSTS[selectedCarryOverBoostMode];
+  const selectedCarryOverBoostFactor = selectedCarryOverBoostSettings.factor;
+
+  const monthEndCarryOverWeighting = useMemo(() => {
+    return buildMonthEndCarryOverWeighting(history, {
+      includeSupp: true,
+      earlyDrawLimit: 3,
+      referenceDate: mrbEffectiveDate,
+      factorScale: monthEndCarryOverStrengthSettings.factorScale,
+      includeMonthEndUndrawn: monthEndCarryOverIncludeMonthEndUndrawn,
+      includeBoundaryRepeats: monthEndCarryOverIncludeBoundaryRepeats,
+    });
+  }, [
+    history,
+    mrbEffectiveDate,
+    monthEndCarryOverStrengthSettings.factorScale,
+    monthEndCarryOverIncludeMonthEndUndrawn,
+    monthEndCarryOverIncludeBoundaryRepeats,
+  ]);
+
+  useEffect(() => {
+    if (monthEndCarryOverBiasTouchedRef.current) return;
+    setMonthEndCarryOverBiasEnabled(monthEndCarryOverWeighting.defaultEnabled);
+  }, [monthEndCarryOverWeighting.defaultEnabled]);
+
+  const setMonthEndCarryOverBiasEnabledManual = useCallback((enabled: boolean) => {
+    monthEndCarryOverBiasTouchedRef.current = true;
+    setMonthEndCarryOverBiasEnabled(enabled);
+  }, []);
+
+  const setMonthEndCarryOverStrengthManual = useCallback((value: MonthEndCarryOverStrength) => {
+    monthEndCarryOverBiasTouchedRef.current = true;
+    setMonthEndCarryOverStrength(value);
+  }, []);
+
+  const setMonthEndCarryOverIncludeMonthEndUndrawnManual = useCallback((enabled: boolean) => {
+    monthEndCarryOverBiasTouchedRef.current = true;
+    setMonthEndCarryOverIncludeMonthEndUndrawn(enabled);
+  }, []);
+
+  const setMonthEndCarryOverIncludeBoundaryRepeatsManual = useCallback((enabled: boolean) => {
+    monthEndCarryOverBiasTouchedRef.current = true;
+    setMonthEndCarryOverIncludeBoundaryRepeats(enabled);
+  }, []);
+
+  const setSelectedCarryOverBoostModeManual = useCallback((value: SelectedCarryOverBoostMode) => {
+    monthEndCarryOverBiasTouchedRef.current = true;
+    setSelectedCarryOverBoostMode(value);
+  }, []);
+
+  const toggleSelectedCarryOverBoostNumber = useCallback((number: number) => {
+    if (!Number.isInteger(number) || number < 1 || number > 45) return;
+    monthEndCarryOverBiasTouchedRef.current = true;
+    setMonthEndCarryOverBiasEnabled(true);
+    setSelectedCarryOverBoostNumbers((previous) => (
+      previous.includes(number)
+        ? previous.filter((item) => item !== number)
+        : [...previous, number].sort((left, right) => left - right)
+    ));
+  }, []);
+
+  const monthEndCarryOverWeightsForGeneration = useMemo(() => {
+    if (!monthEndCarryOverBiasEnabled) return undefined;
+    return buildEffectiveMonthEndCarryOverWeights(
+      monthEndCarryOverWeighting.weights,
+      selectedCarryOverBoostNumbers,
+      selectedCarryOverBoostFactor,
+    );
+  }, [monthEndCarryOverBiasEnabled, monthEndCarryOverWeighting.weights, selectedCarryOverBoostNumbers, selectedCarryOverBoostFactor]);
+
+  const formatMonthEndCarryOverWeight = useCallback((number: number, factor: number): string => {
+    const direction = factor > 1 + 1e-9
+      ? "boost"
+      : factor < 1 - 1e-9
+        ? "penalty"
+        : "neutral";
+    const formattedFactor = factor >= 100
+      ? factor.toFixed(0)
+      : factor.toFixed(2);
+    return `${number}×${formattedFactor} ${direction}`;
+  }, []);
+
+  const monthEndCarryOverTopWeightSummary = useMemo(() => {
+    if (monthEndCarryOverWeightsForGeneration) {
+      return Object.entries(monthEndCarryOverWeightsForGeneration)
+        .map(([number, factor]) => ({ number: Number(number), factor }))
+        .filter(({ number, factor }) => number >= 1 && number <= 45 && Math.abs(factor - 1) > 1e-9)
+        .sort((left, right) => Math.abs(right.factor - 1) - Math.abs(left.factor - 1) || left.number - right.number)
+        .slice(0, 8)
+        .map(({ number, factor }) => formatMonthEndCarryOverWeight(number, factor))
+        .join(", ");
+    }
+    return monthEndCarryOverWeighting.weightedNumbers
+      .slice(0, 8)
+      .map((item) => formatMonthEndCarryOverWeight(item.number, item.factor))
+      .join(", ");
+  }, [formatMonthEndCarryOverWeight, monthEndCarryOverWeighting.weightedNumbers, monthEndCarryOverWeightsForGeneration]);
+
+  const monthEndCarryOverDirectionSummary = useMemo(() => {
+    const boosted = monthEndCarryOverWeighting.weightedNumbers.filter((item) => item.factor > 1 + 1e-9).length;
+    const penalized = monthEndCarryOverWeighting.weightedNumbers.filter((item) => item.factor < 1 - 1e-9).length;
+    if (boosted === 0 && penalized === 0) return "all active weights are neutral";
+    return `${boosted} boost${boosted === 1 ? "" : "s"} · ${penalized} penalt${penalized === 1 ? "y" : "ies"}`;
+  }, [monthEndCarryOverWeighting.weightedNumbers]);
+
+  const selectedCarryOverBoostSummary = useMemo(() => (
+    selectedCarryOverBoostNumbers.length > 0 ? selectedCarryOverBoostNumbers.join(", ") : ""
+  ), [selectedCarryOverBoostNumbers]);
+
+  const monthEndCarryOverPoolBreakdown = useMemo(() => {
+    const parts: string[] = [];
+    const monthEndUndrawnCount = monthEndCarryOverWeighting.monthEndUndrawnNumbers.length;
+    const boundaryRepeatCount = monthEndCarryOverWeighting.boundaryRepeatNumbers.length;
+    if (monthEndUndrawnCount > 0) {
+      parts.push(`${monthEndUndrawnCount} month-end undrawn`);
+    }
+    if (boundaryRepeatCount > 0) {
+      parts.push(`${boundaryRepeatCount} last→first repeat${boundaryRepeatCount === 1 ? "" : "s"}`);
+    }
+    return parts.join(" + ");
+  }, [monthEndCarryOverWeighting.boundaryRepeatNumbers, monthEndCarryOverWeighting.monthEndUndrawnNumbers]);
+
+  const monthEndCarryOverDefaultLabel = useMemo(() => {
+    const nextDrawOrdinal = monthEndCarryOverWeighting.drawsSoFarThisMonth + 1;
+    if (monthEndCarryOverWeighting.defaultEnabled) {
+      return `Default ON • next draw is D${nextDrawOrdinal} of ${monthEndCarryOverWeighting.targetMonthLabel}`;
+    }
+    if (monthEndCarryOverWeighting.drawsSoFarThisMonth < monthEndCarryOverWeighting.earlyDrawLimit) {
+      return `Default OFF • no positive active signal for D${nextDrawOrdinal} of ${monthEndCarryOverWeighting.targetMonthLabel}`;
+    }
+    return `Default OFF • first ${monthEndCarryOverWeighting.earlyDrawLimit} draws of ${monthEndCarryOverWeighting.targetMonthLabel} are already recorded`;
+  }, [monthEndCarryOverWeighting.defaultEnabled, monthEndCarryOverWeighting.drawsSoFarThisMonth, monthEndCarryOverWeighting.earlyDrawLimit, monthEndCarryOverWeighting.targetMonthLabel]);
+
   // Reference mode for OGA percentiles and histogram
   const [ogaRefMode, setOgaRefMode] = useState<"window" | "all">("window");
 
@@ -1388,16 +1672,26 @@ function AppInner(): JSX.Element {
     const manualSuppSet = new Set(manualSimSelected.slice(6, 8));
     const computePrize = (main: number[], supp: number[]) => {
       if (manualMainSet.size < 6 || manualSuppSet.size < 2) return { label: "—", rank: 99 };
-      const label = computeWeekdayWindfallPrizeDivision(main, supp, manualMainSet, manualSuppSet);
-      return { label, rank: rankWeekdayWindfallPrizeDivision(label) };
+      const mainHits = main.filter((n) => manualMainSet.has(n)).length;
+      const suppHits = supp.filter((n) => manualSuppSet.has(n)).length;
+      if (mainHits === 6) return { label: "Div1", rank: 1 };
+      if (mainHits === 5 && suppHits >= 1) return { label: "Div2", rank: 2 };
+      if (mainHits === 5) return { label: "Div3", rank: 3 };
+      if (mainHits === 4) return { label: "Div4", rank: 4 };
+      if (mainHits === 3 && suppHits >= 1) return { label: "Div5", rank: 5 };
+      if (mainHits >= 1 && suppHits >= 2) return { label: "Div6", rank: 6 };
+      return { label: "—", rank: 99 };
     };
      const recentDraw = filteredHistory[filteredHistory.length - 1];
      const recentSet = recentDraw ? new Set([...recentDraw.main, ...recentDraw.supp]) : null;
      const selectedSet = new Set(userSelectedNumbers);
-     const sumW = rankingWeights.oga + rankingWeights.sel + rankingWeights.recent || 1;
+      const carryOverWeight = monthEndCarryOverBiasEnabled ? monthEndCarryOverStrengthSettings.rankingWeight : 0;
+      const carryOverWeights = monthEndCarryOverBiasEnabled ? monthEndCarryOverWeightsForGeneration : undefined;
+      const sumW = rankingWeights.oga + rankingWeights.sel + rankingWeights.recent + carryOverWeight || 1;
      const wOGA = rankingWeights.oga / sumW;
      const wSel = rankingWeights.sel / sumW;
      const wRecent = rankingWeights.recent / sumW;
+      const wCarryOver = carryOverWeight / sumW;
      const hasUserSelected = userSelectedNumbers && userSelectedNumbers.length > 0;
      const applySelBoost = hasUserSelected && rankingWeights.sel > 0;
 
@@ -1413,20 +1707,34 @@ function AppInner(): JSX.Element {
           : 0;
         const selHits = nums.filter(n => selectedSet.has(n)).length;
         const recentHits = recentSet ? nums.filter(n => recentSet.has(n)).length : 0;
-        const ogaNorm = knobs.enableOGA ? ogaPercentileToSimilarity(ogaPercentile) : 0;
-        const finalComposite = wOGA * ogaNorm + wSel * (selHits / 8) + wRecent * (recentHits / 8);
+        const carryOver = scoreMonthEndCarryOverCandidate(nums, carryOverWeights);
+        const ogaNorm = knobs.enableOGA ? Math.max(0, Math.min(1, ogaPercentile / 100)) : 0;
+        const finalComposite = wOGA * ogaNorm + wSel * (selHits / 8) + wRecent * (recentHits / 8) + wCarryOver * carryOver.normalizedScore;
         const { label: prizeLabel, rank: prizeRank } = computePrize(c.main, c.supp);
-        return { ...c, ogaScore, ogaPercentile, selHits, recentHits, finalCompositeAdj: finalComposite, prizeLabel, prizeRank };
+        return {
+          ...c,
+          ogaScore,
+          ogaPercentile,
+          selHits,
+          recentHits,
+          carryOverHits: carryOver.hits,
+          carryOverScore: carryOver.normalizedScore,
+          finalCompositeAdj: finalComposite,
+          prizeLabel,
+          prizeRank,
+        };
       })
       .sort((a: any, b: any) => {
         // Sort by statistical quality only. Prize is a display/evaluation metric
         // and must NOT influence pool ranking (otherwise Manual Simulation
         // changes which candidates survive the over-generation slice).
         if (b.finalCompositeAdj !== a.finalCompositeAdj) return b.finalCompositeAdj - a.finalCompositeAdj;
+        if (monthEndCarryOverBiasEnabled && b.carryOverScore !== a.carryOverScore) return b.carryOverScore - a.carryOverScore;
+        if (monthEndCarryOverBiasEnabled && b.carryOverHits !== a.carryOverHits) return b.carryOverHits - a.carryOverHits;
         if (b.selHits !== a.selHits) return b.selHits - a.selHits;
         if (b.recentHits !== a.recentHits) return b.recentHits - a.recentHits;
         // Skip OGA tiebreaker when disabled
-        if (knobs.enableOGA && b.ogaPercentile !== a.ogaPercentile) return a.ogaPercentile - b.ogaPercentile;
+        if (knobs.enableOGA && b.ogaPercentile !== a.ogaPercentile) return b.ogaPercentile - a.ogaPercentile;
         return 0;
       });
    }
@@ -1537,7 +1845,7 @@ function AppInner(): JSX.Element {
       const cleared = prev.map(c => ({ ...c, ogaScore: undefined, ogaPercentile: undefined }));
       return recomputeCompositeRanking(cleared);
     });
-  }, [rankingWeights, userSelectedNumbers, filteredHistory, stableOGAScores, ogaSpokeCount]);
+  }, [rankingWeights, userSelectedNumbers, filteredHistory, stableOGAScores, ogaSpokeCount, monthEndCarryOverBiasEnabled, monthEndCarryOverWeightsForGeneration, monthEndCarryOverStrengthSettings.rankingWeight]);
 
   function withinSumRange(candidate: CandidateSet): boolean {
     // Hook for sum filter if you enable it later
@@ -1564,6 +1872,7 @@ function AppInner(): JSX.Element {
     // OGA forecast bands (KDE) based on selected baseline
     const baselineForOGAForecast = ogaBaselineMode === "window" ? filteredHistory : history;
     const ogaStats = forecastOGA(filteredHistory, baselineForOGAForecast, ogaSpokeCount);
+    const monthEndCarryOverWeights = monthEndCarryOverBiasEnabled ? monthEndCarryOverWeightsForGeneration : undefined;
     const monthlyBucketOptions = monthlyConstructiveEnabled && monthlyConstraintPayload ? {
       constraints: monthlyConstraintPayload.constraints,
       buckets: monthlyConstraintPayload.buckets,
@@ -1597,6 +1906,11 @@ function AppInner(): JSX.Element {
     if (digitWidthConstraintTargets.enabled) {
       setTraceMaybe((t) => [...t,
         `[TRACE] Digit-width share active: ${digitWidthConstraintTargets.singleDigitPercent}% single-digit / ${digitWidthConstraintTargets.twoDigitPercent}% two-digit | ${formatDigitWidthScopeLabel(digitWidthConstraintTargets.scope)} | strict target ${digitWidthConstraintTargets.singleDigitCount} single-digit + ${digitWidthConstraintTargets.twoDigitCount} two-digit`
+      ]);
+    }
+    if (monthEndCarryOverBiasEnabled) {
+      setTraceMaybe((t) => [...t,
+        `[TRACE] Month-end carry-over bias active: ${monthEndCarryOverStrengthSettings.label} strength; ${monthEndCarryOverWeighting.targetMonthLabel} (${monthEndCarryOverWeighting.drawsSoFarThisMonth} draw${monthEndCarryOverWeighting.drawsSoFarThisMonth === 1 ? "" : "s"} so far) ← ${monthEndCarryOverWeighting.sourceMonthLabel ?? "no previous month"}; sources undrawn=${monthEndCarryOverIncludeMonthEndUndrawn ? "on" : "off"} boundary=${monthEndCarryOverIncludeBoundaryRepeats ? "on" : "off"}; active pool ${monthEndCarryOverWeighting.activeNumbers.length}${monthEndCarryOverPoolBreakdown ? ` (${monthEndCarryOverPoolBreakdown})` : ""}${selectedCarryOverBoostSummary ? ` | selected boost ${selectedCarryOverBoostSummary} ×${selectedCarryOverBoostFactor}` : ""}${monthEndCarryOverTopWeightSummary ? ` | active weights ${monthEndCarryOverTopWeightSummary}` : ""}`
       ]);
     }
 
@@ -1661,6 +1975,7 @@ function AppInner(): JSX.Element {
       ogaSpokeCount,
       maxLastDrawMatches: maxLastDrawMatchesEnabled ? maxLastDrawMatchesValue : undefined,
       monthlyRepeatBiasWeights: monthlyRepeatBiasResult?.weights,
+      monthEndCarryOverWeights,
     };
 
     // Trace callback: appends messages as they arrive from the worker
@@ -1742,21 +2057,39 @@ function AppInner(): JSX.Element {
       // Sort by composite score ONLY (prize-agnostic) so Manual Simulation
       // does not influence which candidates are kept.
       const poolBeforeSlice = processedCandidates.length;
+      let finalRatioTargets = result.ratioSummary.targetRatios;
+      let finalRatioQuotaWarning: string | undefined;
       if (processedCandidates.length > numCandidates) {
         processedCandidates.sort((a: any, b: any) => {
           if (b.finalCompositeAdj !== a.finalCompositeAdj) return b.finalCompositeAdj - a.finalCompositeAdj;
-          if (knobs.enableOGA && b.ogaPercentile !== a.ogaPercentile) return a.ogaPercentile - b.ogaPercentile;
+          if (knobs.enableOGA && b.ogaPercentile !== a.ogaPercentile) return b.ogaPercentile - a.ogaPercentile;
           return 0;
         });
-        processedCandidates = processedCandidates.slice(0, numCandidates);
+        if (selectedRatios.length > 0) {
+          const quotaResult = applyOddEvenRatioQuotas(processedCandidates, numCandidates, selectedRatios, ratioOptions);
+          processedCandidates = quotaResult.candidates;
+          finalRatioTargets = quotaResult.quotas;
+          if (Object.keys(quotaResult.shortfalls).length > 0) {
+            finalRatioQuotaWarning = `Final odd/even ratio quotas short by ${Object.entries(quotaResult.shortfalls).map(([ratio, missing]) => `${ratio}:${missing}`).join(", ")} after post-filters. Increase over-generation or loosen filters to preserve the selected percentage split.`;
+          }
+        } else {
+          processedCandidates = processedCandidates.slice(0, numCandidates);
+        }
       }
 
       // Now apply final ranking with prize labels for display
       processedCandidates = recomputeCompositeRanking(processedCandidates);
+      const finalRatioSummary = summarizeOddEvenRatios(
+        processedCandidates,
+        numCandidates,
+        result.ratioSummary.totalAttempts,
+        finalRatioTargets
+      );
+      const finalQuotaWarning = [result.quotaWarning, finalRatioQuotaWarning].filter(Boolean).join(" ");
 
       setCandidates(processedCandidates);
-      setRatioSummary(result.ratioSummary);
-      setQuotaWarning(result.quotaWarning);
+      setRatioSummary(finalRatioSummary);
+      setQuotaWarning(finalQuotaWarning || undefined);
       setSelectedCandidateIdx(0);
 
       const dt = Math.round(performance.now() - t0);
@@ -1794,6 +2127,7 @@ function AppInner(): JSX.Element {
 
     const baselineForOGAForecast = ogaBaselineMode === "window" ? filteredHistory : history;
     const ogaStats = forecastOGA(filteredHistory, baselineForOGAForecast, ogaSpokeCount);
+    const monthEndCarryOverWeights = monthEndCarryOverBiasEnabled ? monthEndCarryOverWeightsForGeneration : undefined;
     const monthlyBucketOptions = monthlyConstructiveEnabled && monthlyConstraintPayload ? {
       constraints: monthlyConstraintPayload.constraints,
       buckets: monthlyConstraintPayload.buckets,
@@ -1823,6 +2157,11 @@ function AppInner(): JSX.Element {
     if (digitWidthConstraintTargets.enabled) {
       setTraceMaybe((t) => [...t,
         `[TRACE] Digit-width share active: ${digitWidthConstraintTargets.singleDigitPercent}% single-digit / ${digitWidthConstraintTargets.twoDigitPercent}% two-digit | ${formatDigitWidthScopeLabel(digitWidthConstraintTargets.scope)} | strict target ${digitWidthConstraintTargets.singleDigitCount} single-digit + ${digitWidthConstraintTargets.twoDigitCount} two-digit`
+      ]);
+    }
+    if (monthEndCarryOverBiasEnabled) {
+      setTraceMaybe((t) => [...t,
+        `[TRACE] Month-end carry-over bias active: ${monthEndCarryOverStrengthSettings.label} strength; ${monthEndCarryOverWeighting.targetMonthLabel} (${monthEndCarryOverWeighting.drawsSoFarThisMonth} draw${monthEndCarryOverWeighting.drawsSoFarThisMonth === 1 ? "" : "s"} so far) ← ${monthEndCarryOverWeighting.sourceMonthLabel ?? "no previous month"}; sources undrawn=${monthEndCarryOverIncludeMonthEndUndrawn ? "on" : "off"} boundary=${monthEndCarryOverIncludeBoundaryRepeats ? "on" : "off"}; active pool ${monthEndCarryOverWeighting.activeNumbers.length}${monthEndCarryOverPoolBreakdown ? ` (${monthEndCarryOverPoolBreakdown})` : ""}${selectedCarryOverBoostSummary ? ` | selected boost ${selectedCarryOverBoostSummary} ×${selectedCarryOverBoostFactor}` : ""}${monthEndCarryOverTopWeightSummary ? ` | active weights ${monthEndCarryOverTopWeightSummary}` : ""}`
       ]);
     }
 
@@ -1886,7 +2225,8 @@ function AppInner(): JSX.Element {
       ogaSpokeCount,
       maxLastDrawMatchesEnabled ? maxLastDrawMatchesValue : undefined,
       monthlyRepeatBiasResult?.weights,
-      mainDecadeGenerationBiases
+      mainDecadeGenerationBiases,
+      monthEndCarryOverWeights
     );
 
     const monthlyTrace = buildMonthlyTrace();
@@ -1943,6 +2283,22 @@ function AppInner(): JSX.Element {
       );
       capRejects = before - processed.length;
       processed = recomputeCompositeRanking(processed);
+    }
+    if (processed.length > target) {
+      processed.sort((a: any, b: any) => {
+        if (b.finalCompositeAdj !== a.finalCompositeAdj) return b.finalCompositeAdj - a.finalCompositeAdj;
+        if (knobs.enableOGA && b.ogaPercentile !== a.ogaPercentile) return b.ogaPercentile - a.ogaPercentile;
+        return 0;
+      });
+      if (selectedRatios.length > 0) {
+        const quotaResult = applyOddEvenRatioQuotas(processed, target, selectedRatios, ratioOptions);
+        processed = quotaResult.candidates;
+        if (Object.keys(quotaResult.shortfalls).length > 0) {
+          setTraceMaybe((t) => [...t, `[TRACE] ${traceLabel}: odd/even quota shortfall after post-filters ${Object.entries(quotaResult.shortfalls).map(([ratio, missing]) => `${ratio}:${missing}`).join(", ")}`]);
+        }
+      } else {
+        processed = processed.slice(0, target);
+      }
     }
 
     const freq = new Map<number, number>();
@@ -2082,6 +2438,63 @@ function AppInner(): JSX.Element {
   function bucketIndex(v: number): number { for (let i = 0; i < bucketStops.length; i++) if (v < bucketStops[i]) return i; return bucketStops.length; }
   const [legendCounts, setLegendCounts] = useState<number[]>(() => Array(bucketLabels.length).fill(0));
   const [legendTotal, setLegendTotal] = useState<number>(0);
+  const dgaMonthlyBucketDrawSeries = useMemo(
+    () => buildMonthlyBucketDrawSeries(filteredHistory),
+    [filteredHistory],
+  );
+  const dgaMonthlyBucketHeatmapHistory = useMemo(() => {
+    if (!simulatedDraw) return history;
+    return [...history, buildSimulatedNextDraw(history, simulatedDraw)];
+  }, [history, simulatedDraw]);
+  const dgaMonthlyBucketDrawSeriesFull = useMemo(
+    () => buildMonthlyBucketDrawSeries(dgaMonthlyBucketHeatmapHistory),
+    [dgaMonthlyBucketHeatmapHistory],
+  );
+  const isMonthlyBucketHeatmapView = dgaHeatmapView === "monthlyBucketState";
+  const dgaHeatmapHighlightedColumns = useMemo(() => {
+    if (!isMonthlyBucketHeatmapView || !simulatedDraw || dgaMonthlyBucketHeatmapHistory.length <= history.length) {
+      return [] as number[];
+    }
+    return [dgaMonthlyBucketHeatmapHistory.length - 1];
+  }, [dgaMonthlyBucketHeatmapHistory.length, history.length, isMonthlyBucketHeatmapView, simulatedDraw]);
+  const dgaHeatmapActiveWindow = useMemo(() => {
+    if (!history.length || !filteredHistory.length) return null;
+
+    if (drawWindowMode === "range") {
+      const start = Math.max(1, Math.min(rangeFrom, history.length));
+      const end = Math.max(start, Math.min(rangeTo, history.length));
+      if (start === 1 && end === history.length) return null;
+      return { start: start - 1, end: end - 1 };
+    }
+
+    const start = Math.max(0, history.length - filteredHistory.length);
+    if (start === 0) return null;
+    return { start, end: history.length - 1 };
+  }, [history.length, filteredHistory.length, drawWindowMode, rangeFrom, rangeTo]);
+  const dgaHeatmapBucketLabels = isMonthlyBucketHeatmapView ? [...MONTHLY_BUCKET_HEATMAP_LABELS] : bucketLabels;
+  const dgaHeatmapBucketColors = isMonthlyBucketHeatmapView ? [...MONTHLY_BUCKET_HEATMAP_COLORS] : bucketColors;
+  const dgaHeatmapBucketLetters = isMonthlyBucketHeatmapView
+    ? [...MONTHLY_BUCKET_HEATMAP_LETTERS]
+    : ["pR","F","pF","<C","C>","tT","W","H","tR","V"];
+  const dgaHeatmapLegendCounts = isMonthlyBucketHeatmapView
+    ? dgaMonthlyBucketDrawSeries.bucketCounts
+    : legendCounts;
+  const dgaHeatmapLegendTotal = isMonthlyBucketHeatmapView
+    ? dgaMonthlyBucketDrawSeries.totalCells
+    : legendTotal;
+  const dgaHeatmapBucketIndexSeries = isMonthlyBucketHeatmapView
+    ? dgaMonthlyBucketDrawSeriesFull.bucketIndexSeries
+    : undefined;
+  const dgaHeatmapTitle = isMonthlyBucketHeatmapView
+    ? "Monthly Bucket State Heatmap"
+    : "Temperature Heatmap";
+  const dgaHeatmapSubtitle = isMonthlyBucketHeatmapView
+    ? dgaHeatmapActiveWindow
+      ? `${simulatedDraw ? "Appends the simulated next draw on the right and " : ""}shows each number’s running calendar-month bucket after every draw across all history. Columns outside the active WFMQYH window are dimmed; legend and drought summaries stay scoped to the active window.`
+      : `${simulatedDraw ? "Appends the simulated next draw on the right. " : ""}Shows each number’s running calendar-month bucket after every draw (Undrawn → 8x+).`
+    : dgaHeatmapActiveWindow
+      ? "Shows each number’s temperature bucket across all history using the selected metric. Columns outside the active WFMQYH window are dimmed; legend and drought summaries stay scoped to the active window."
+      : "Shows the temperature bucket of each number through time using the selected metric.";
   useEffect(() => {
     const values: number[] = [];
     for (let n = 0; n < trendValueSeries.length; n++) {
@@ -2142,7 +2555,7 @@ function AppInner(): JSX.Element {
       <CollapsibleSection title={<b>Draw History Manager ({history.length} draws • latest {mostRecentDrawDateLabel})</b>} defaultOpen={false}>
         {/* In-app CSV updater */}
         <DrawHistoryManager
-          csvPathHint="file:///Users/admin/Weekly_Windfall/windfall-app-clean/windfall_history_lottolyzer.csv"
+          csvPathHint="Bundled fallback: src/windfall_history_lottolyzer.csv"
           currentRows={rowsFromDraws(history)}
           mainCount={6}
           suppCount={2}
@@ -2214,55 +2627,7 @@ function AppInner(): JSX.Element {
         <NextDrawProbabilitiesPanel history={filteredHistory} allHistory={history} title={`Next Draw Probabilities (${historyWindowName})`} />
       </CollapsibleSection>
 
-      {/* [ORDER-ANCHOR] 03 Odd/Even Ratio Filters */}
-      <CollapsibleSection title={<b>Odd/Even Ratio Filters</b>} summaryHint="Select one or more ratios, or use Tricky Rule" defaultOpen={false}>
-        <div style={{ marginBottom: 8 }}>
-          <label style={{ fontWeight: "bold", display: "inline-block", marginRight: 16 }}>
-            <input
-              type="radio"
-              checked={drawWindowMode === "lastN"}
-              onChange={() => setDrawWindowMode("lastN")}
-            />
-            Last N draws
-          </label>
-          <label style={{ fontWeight: "bold", display: "inline-block", marginRight: 16 }}>
-            <input
-              type="radio"
-              checked={drawWindowMode === "range"}
-              onChange={() => setDrawWindowMode("range")}
-            />
-            Range (x to y)
-          </label>
-          {drawWindowMode === "range" && (
-            <>
-              <span>From</span>
-              <input type="number" min={1} max={history.length} value={rangeFrom} onChange={e => setRangeFrom(Number(e.target.value))} style={{ width: 60 }} />
-              <span>to</span>
-              <input type="number" min={1} max={history.length} value={rangeTo} onChange={e => setRangeTo(Number(e.target.value))} style={{ width: 60 }} />
-              <span>(inclusive)</span>
-            </>
-          )}
-        </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 18 }}>
-          {ratioOptions.map(({ ratio, count, percent }) => (
-            <label key={ratio} style={{ marginRight: 16, opacity: useTrickyRule ? 0.4 : 1 }}>
-              <input
-                type="checkbox"
-                checked={selectedRatios.includes(ratio)}
-                onChange={() => handleRatioToggle(ratio)}
-                disabled={useTrickyRule}
-                style={{ marginRight: 6 }}
-              />
-              {ratio} ({count} draws, {percent}%)
-            </label>
-          ))}
-        </div>
-        <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>
-          Ratios apply to all 8 numbers. Only ratios observed in selected window are shown.
-        </div>
-      </CollapsibleSection>
-
-      {/* [ORDER-ANCHOR] 04 Windowed Draw Filtering (WFMQYH) */}
+      {/* [ORDER-ANCHOR] 03 Windowed Draw Filtering (WFMQYH) */}
       <CollapsibleSection title={<b>Windowed Draw Filtering (WFMQYH)</b>} defaultOpen={false}>
         {(() => (
           <>
@@ -2602,6 +2967,54 @@ function AppInner(): JSX.Element {
         ))()}
       </CollapsibleSection>
 
+      {/* [ORDER-ANCHOR] 04 Odd/Even Ratio Filters */}
+      <CollapsibleSection title={<b>Odd/Even Ratio Filters</b>} summaryHint="Select one or more ratios, or use Tricky Rule" defaultOpen={false}>
+        <div style={{ marginBottom: 8 }}>
+          <label style={{ fontWeight: "bold", display: "inline-block", marginRight: 16 }}>
+            <input
+              type="radio"
+              checked={drawWindowMode === "lastN"}
+              onChange={() => setDrawWindowMode("lastN")}
+            />
+            Last N draws
+          </label>
+          <label style={{ fontWeight: "bold", display: "inline-block", marginRight: 16 }}>
+            <input
+              type="radio"
+              checked={drawWindowMode === "range"}
+              onChange={() => setDrawWindowMode("range")}
+            />
+            Range (x to y)
+          </label>
+          {drawWindowMode === "range" && (
+            <>
+              <span>From</span>
+              <input type="number" min={1} max={history.length} value={rangeFrom} onChange={e => setRangeFrom(Number(e.target.value))} style={{ width: 60 }} />
+              <span>to</span>
+              <input type="number" min={1} max={history.length} value={rangeTo} onChange={e => setRangeTo(Number(e.target.value))} style={{ width: 60 }} />
+              <span>(inclusive)</span>
+            </>
+          )}
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 18 }}>
+          {ratioOptions.map(({ ratio, count, percent }) => (
+            <label key={ratio} style={{ marginRight: 16, opacity: useTrickyRule ? 0.4 : 1 }}>
+              <input
+                type="checkbox"
+                checked={selectedRatios.includes(ratio)}
+                onChange={() => handleRatioToggle(ratio)}
+                disabled={useTrickyRule}
+                style={{ marginRight: 6 }}
+              />
+              {ratio} ({count} draws, {percent}%)
+            </label>
+          ))}
+        </div>
+        <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>
+          Ratios apply to all 8 numbers. Only ratios observed in selected window are shown.
+        </div>
+      </CollapsibleSection>
+
       {/* [ORDER-ANCHOR] 05 Survival Analyzer */}
       <CollapsibleSection title={<b>Survival Analyzer</b>} defaultOpen={false}>
         <SurvivalAnalyzer
@@ -2797,7 +3210,7 @@ function AppInner(): JSX.Element {
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 15 Operator’s Panel – Candidate Generation Controls */}
-      <CollapsibleSection title={<b>Operator’s Panel – Candidate Generation Controls</b>} defaultOpen={true}>
+      <CollapsibleSection title={<b>Operator’s Panel – Candidate Generation Controls</b>} defaultOpen={false}>
          <OperatorsPanel
            entropy={entropyThreshold} setEntropy={setEntropyThreshold}
            entropyEnabled={entropyEnabled} setEntropyEnabled={setEntropyEnabled}
@@ -2917,6 +3330,14 @@ function AppInner(): JSX.Element {
         />
       </CollapsibleSection>
 
+      <CollapsibleSection title={<b>Month-End Carry-Over Buckets</b>} defaultOpen={false} summaryHint="Last draw → first draw by monthly frequency bucket">
+        <MonthEndCarryOverBucketsPanel
+          history={history}
+          selectedBoostNumbers={selectedCarryOverBoostNumbers}
+          onToggleBoostNumber={toggleSelectedCarryOverBoostNumber}
+        />
+      </CollapsibleSection>
+
       <CollapsibleSection title={<b>Monthly 1-Digit vs 2-Digit Occurrences</b>} defaultOpen={false} summaryHint="Monthly counts for numbers 1–9 versus 10–45">
         <MonthlyDigitOccurrencePanel history={history} />
       </CollapsibleSection>
@@ -3011,6 +3432,24 @@ function AppInner(): JSX.Element {
             </div>
           </div>
         )}
+      </CollapsibleSection>
+
+      {/* [ORDER-ANCHOR] 23.5 Paste-Weighted Candidate Generator */}
+      <CollapsibleSection
+        title={<b>Paste-Weighted Candidate Generator</b>}
+        summaryHint="Paste rows, weight numbers, generate six-number candidates"
+        defaultOpen={true}
+      >
+        <div style={{ marginTop: 8 }}>
+          <PasteWeightedCandidatesPanel
+            onSimulateCandidate={handleSimulatePasteWeightedCandidate}
+            activeSimulatedKey={activeSimulatedMainKey}
+            initialCandidateCount={Math.max(4, Math.min(30, numCandidates || 12))}
+            fullHistory={history}
+            activeHistory={filteredHistory}
+            activeWindowLabel={historyWindowName}
+          />
+        </div>
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 24 Generated Candidates */}
@@ -3732,6 +4171,119 @@ function AppInner(): JSX.Element {
                     );
                   })()}
                 </div>
+
+                <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px dashed #ddd" }}>
+                  <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                    Month-end carry-over bias
+                    <span
+                      style={{
+                        marginLeft: 8,
+                        fontSize: 11,
+                        fontWeight: 400,
+                        color: monthEndCarryOverWeighting.defaultEnabled ? "#166534" : "#92400e",
+                        background: monthEndCarryOverWeighting.defaultEnabled ? "#dcfce7" : "#fef3c7",
+                        borderRadius: 4,
+                        padding: "1px 6px",
+                      }}
+                      title="Automatic default based on whether the planning month is still inside its first three draws."
+                    >
+                      {monthEndCarryOverDefaultLabel}
+                    </span>
+                  </div>
+                  <label style={{ display: "block", marginBottom: 6, fontSize: 13 }}>
+                    <input
+                      type="checkbox"
+                      checked={monthEndCarryOverBiasEnabled}
+                      onChange={(e) => setMonthEndCarryOverBiasEnabledManual(e.target.checked)}
+                      style={{ marginRight: 6 }}
+                    />
+                    Use month-end carry-over weighting in ranking and generation
+                  </label>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", marginBottom: 6, fontSize: 12 }}>
+                    <label title="Controls how far learned carry-over factors move away from neutral and how much ranking weight carry-over receives.">
+                      Influence{" "}
+                      <select
+                        value={monthEndCarryOverStrength}
+                        onChange={(e) => setMonthEndCarryOverStrengthManual(normalizeMonthEndCarryOverStrength(e.target.value))}
+                        disabled={!monthEndCarryOverBiasEnabled}
+                        style={{ marginLeft: 4, fontSize: 12 }}
+                      >
+                        {Object.entries(MONTH_END_CARRY_OVER_STRENGTHS).map(([value, settings]) => (
+                          <option key={value} value={value}>
+                            {settings.label} ({settings.rankingWeight.toFixed(2)} rank)
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label title="Use numbers that finished the source month undrawn and are still undrawn in the planning month.">
+                      <input
+                        type="checkbox"
+                        checked={monthEndCarryOverIncludeMonthEndUndrawn}
+                        onChange={(e) => setMonthEndCarryOverIncludeMonthEndUndrawnManual(e.target.checked)}
+                        style={{ marginRight: 4 }}
+                      />
+                      Still-undrawn month-end
+                    </label>
+                    <label title="Use numbers that repeated from the source month's final draw into the planning month's first draw.">
+                      <input
+                        type="checkbox"
+                        checked={monthEndCarryOverIncludeBoundaryRepeats}
+                        onChange={(e) => setMonthEndCarryOverIncludeBoundaryRepeatsManual(e.target.checked)}
+                        style={{ marginRight: 4 }}
+                      />
+                      Last-to-first repeats
+                    </label>
+                    <label title="Controls the extra multiplier when you click carry-over numbers in the Month-end carry-over bucket panel.">
+                      Clicked boost{" "}
+                      <select
+                        value={selectedCarryOverBoostMode}
+                        onChange={(e) => setSelectedCarryOverBoostModeManual(normalizeSelectedCarryOverBoostMode(e.target.value))}
+                        disabled={!monthEndCarryOverBiasEnabled}
+                        style={{ marginLeft: 4, fontSize: 12 }}
+                      >
+                        {Object.entries(SELECTED_CARRY_OVER_BOOSTS).map(([value, settings]) => (
+                          <option key={value} value={value}>
+                            {settings.label} (×{settings.factor})
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <div style={{ fontSize: 11, color: "#64748b", lineHeight: 1.5 }}>
+                    Numbers left undrawn at the previous month-end and/or last-to-first month-boundary repeats can be weighted up or down early in the next month. The automatic default turns on only when the next draw is inside the first 3 draws and at least one active signal has a positive weight.
+                  </div>
+                  <div style={{ marginTop: 6, fontSize: 11, color: "#334155", background: "#f8fafc", borderRadius: 6, padding: "6px 8px" }}>
+                    <div style={{ fontWeight: 600, marginBottom: 2 }}>
+                      Planning month {monthEndCarryOverWeighting.targetMonthLabel}
+                      {monthEndCarryOverWeighting.sourceMonthLabel ? ` ← source ${monthEndCarryOverWeighting.sourceMonthLabel}` : ""}
+                    </div>
+                    <div>
+                      Draws so far: {monthEndCarryOverWeighting.drawsSoFarThisMonth} · Active carry-over numbers: {monthEndCarryOverWeighting.activeNumbers.length}{monthEndCarryOverPoolBreakdown ? ` (${monthEndCarryOverPoolBreakdown})` : ""}
+                    </div>
+                    <div style={{ marginTop: 2 }}>
+                      Direction: {monthEndCarryOverDirectionSummary}
+                    </div>
+                    <div style={{ marginTop: 2 }}>
+                      {monthEndCarryOverTopWeightSummary
+                        ? `Active weights: ${monthEndCarryOverTopWeightSummary}`
+                        : "No active carry-over numbers are available for the current planning month."}
+                    </div>
+                    {selectedCarryOverBoostNumbers.length > 0 && (
+                      <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <span style={{ color: "#14532d", fontWeight: 700 }}>
+                          Selected carry-over boost: {selectedCarryOverBoostSummary} ×{selectedCarryOverBoostFactor} ({selectedCarryOverBoostSettings.label})
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedCarryOverBoostNumbers([])}
+                          style={{ border: "1px solid #bbf7d0", borderRadius: 5, background: "#f0fdf4", color: "#166534", fontSize: 11, fontWeight: 700, padding: "2px 7px", cursor: "pointer" }}
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
 
               {/* Column 2: Composition & Recency + OGA Bias */}
@@ -3935,14 +4487,14 @@ function AppInner(): JSX.Element {
                 </div>
 
                 <div style={{ marginBottom: 10 }}>
-                  <label style={{ display: "block", marginBottom: 2, fontSize: 12 }} title="OGA (Octagonal Geometry Alignment): lower raw OGA scores are closer to the historical spoke mix, so this component favours lower OGA percentiles.">
+                  <label style={{ display: "block", marginBottom: 2, fontSize: 12 }} title="OGA (Octagonal Geometry Alignment): The candidate's OGA percentile relative to all historical draws. High OGA% = numbers that form geometrically balanced patterns on the DGA grid.">
                     <b>OGA</b> — Geometry Alignment: <b>{Math.round(rdyWeights.oga / (rdyWeights.idm + rdyWeights.conv + rdyWeights.oga || 1) * 100)}%</b>
                   </label>
                   <input type="range" min={0} max={1} step={0.05} value={rdyWeights.oga}
                     onChange={(e) => setRdyWeights(prev => ({ ...prev, oga: Number(e.target.value) }))}
                     style={{ width: "100%" }} />
                   <div style={{ fontSize: 11, color: "#888" }}>
-                    Uses inverse OGA percentile to favour candidates closer to the historical spoke mix. Independent of monthly frequency analysis.
+                    Uses the OGA percentile to favour candidates whose numbers form geometrically aligned patterns. Independent of monthly frequency analysis.
                   </div>
                 </div>
 
@@ -3953,7 +4505,7 @@ function AppInner(): JSX.Element {
               </div>{/* end column 3 */}
             </div>
             <div style={{ marginTop: 10, fontSize: 12, color: "#555" }}>
-              <b>Provenance:</b> Window={filteredHistory.length}; Entropy={entropyEnabled ? entropyThreshold : "off"}; Hamming={hammingEnabled ? hammingThreshold : "off"}; Jaccard={jaccardEnabled ? jaccardThreshold : "off"}; Tricky={useTrickyRule ? "on" : "off"}; Ratios={selectedRatios.length ? selectedRatios.join(" ") : "none"}; RecMin={minRecentMatches}; RecBias={recentMatchBias}; Repeat W={repeatWindowSizeW} M={minFromRecentUnionM}; GPWF={gpwfEnabled ? "on" : "off"}; λ={lambdaEnabled ? lambda.toFixed(2) : "off"}; Sum={sumFilter.enabled ? `${sumFilter.min}–${sumFilter.max}${sumFilter.includeSupp ? "+supp" : ""}` : "off"}; PatternMode={patternConstraintMode} Tol={patternSumTolerance} Boost={patternBoostFactor}; OGABias={enableOGAForecastBias ? `${ogaPreferredBand} @ ${ogaBaselineMode}` : "off"}; End0Set=${mainZeroSetEnabled ? `max ${maxMainZeroSetCount}` : "off"}; End1Set=${mainOneSetEnabled ? `max ${maxMainOneSetCount}` : "off"}; End2Set=${mainTwoSetEnabled ? `max ${maxMainTwoSetCount}` : "off"}; End3Set=${mainThreeSetEnabled ? `max ${maxMainThreeSetCount}` : "off"}; End4Set=${mainFourSetEnabled ? `max ${maxMainFourSetCount}` : "off"}; End5Set=${mainFiveSetEnabled ? `max ${maxMainFiveSetCount}` : "off"}; End6Set=${mainSixSetEnabled ? `max ${maxMainSixSetCount}` : "off"}; End7Set=${mainSevenSetEnabled ? `max ${maxMainSevenSetCount}` : "off"}; End8Set=${mainEightSetEnabled ? `max ${maxMainEightSetCount}` : "off"}; End9Set=${mainNineSetEnabled ? `max ${maxMainNineSetCount}` : "off"}; DigitWidth=${digitWidthConstraintTargets.enabled ? `${digitWidthConstraintTargets.singleDigitPercent}/${digitWidthConstraintTargets.twoDigitPercent} ${formatDigitWidthScopeLabel(digitWidthConstraintTargets.scope)} => ${digitWidthConstraintTargets.singleDigitCount}/${digitWidthConstraintTargets.twoDigitCount}` : "off"}; EndDigitBoosts={activeMainDigitBoostSummary || "none"}; DecadeBias={activeMainDecadeBiasSummary || "none"}; MRB={mrbEnabled ? `ON budget:${MRB_BUCKET_KEYS.reduce((s,k)=>s+Math.max(0,(mrbBucketBoosts[k]??1)-1),0).toFixed(1)}/${MRB_BUDGET}` : "off"}
+              <b>Provenance:</b> Window={filteredHistory.length}; Entropy={entropyEnabled ? entropyThreshold : "off"}; Hamming={hammingEnabled ? hammingThreshold : "off"}; Jaccard={jaccardEnabled ? jaccardThreshold : "off"}; Tricky={useTrickyRule ? "on" : "off"}; Ratios={selectedRatios.length ? selectedRatios.join(" ") : "none"}; RecMin={minRecentMatches}; RecBias={recentMatchBias}; Repeat W={repeatWindowSizeW} M={minFromRecentUnionM}; GPWF={gpwfEnabled ? "on" : "off"}; λ={lambdaEnabled ? lambda.toFixed(2) : "off"}; Sum={sumFilter.enabled ? `${sumFilter.min}–${sumFilter.max}${sumFilter.includeSupp ? "+supp" : ""}` : "off"}; PatternMode={patternConstraintMode} Tol={patternSumTolerance} Boost={patternBoostFactor}; OGABias={enableOGAForecastBias ? `${ogaPreferredBand} @ ${ogaBaselineMode}` : "off"}; End0Set=${mainZeroSetEnabled ? `max ${maxMainZeroSetCount}` : "off"}; End1Set=${mainOneSetEnabled ? `max ${maxMainOneSetCount}` : "off"}; End2Set=${mainTwoSetEnabled ? `max ${maxMainTwoSetCount}` : "off"}; End3Set=${mainThreeSetEnabled ? `max ${maxMainThreeSetCount}` : "off"}; End4Set=${mainFourSetEnabled ? `max ${maxMainFourSetCount}` : "off"}; End5Set=${mainFiveSetEnabled ? `max ${maxMainFiveSetCount}` : "off"}; End6Set=${mainSixSetEnabled ? `max ${maxMainSixSetCount}` : "off"}; End7Set=${mainSevenSetEnabled ? `max ${maxMainSevenSetCount}` : "off"}; End8Set=${mainEightSetEnabled ? `max ${maxMainEightSetCount}` : "off"}; End9Set=${mainNineSetEnabled ? `max ${maxMainNineSetCount}` : "off"}; DigitWidth=${digitWidthConstraintTargets.enabled ? `${digitWidthConstraintTargets.singleDigitPercent}/${digitWidthConstraintTargets.twoDigitPercent} ${formatDigitWidthScopeLabel(digitWidthConstraintTargets.scope)} => ${digitWidthConstraintTargets.singleDigitCount}/${digitWidthConstraintTargets.twoDigitCount}` : "off"}; EndDigitBoosts={activeMainDigitBoostSummary || "none"}; DecadeBias={activeMainDecadeBiasSummary || "none"}; MRB={mrbEnabled ? `ON budget:${MRB_BUCKET_KEYS.reduce((s,k)=>s+Math.max(0,(mrbBucketBoosts[k]??1)-1),0).toFixed(1)}/${MRB_BUDGET}` : "off"}; CarryOver={monthEndCarryOverBiasEnabled ? `ON ${monthEndCarryOverStrengthSettings.label} ${monthEndCarryOverWeighting.targetMonthLabel} active:${monthEndCarryOverWeighting.activeNumbers.length}${monthEndCarryOverPoolBreakdown ? ` [${monthEndCarryOverPoolBreakdown}]` : ""} sources:undrawn=${monthEndCarryOverIncludeMonthEndUndrawn ? "on" : "off"},boundary=${monthEndCarryOverIncludeBoundaryRepeats ? "on" : "off"}${selectedCarryOverBoostSummary ? ` selected:${selectedCarryOverBoostSummary}×${selectedCarryOverBoostFactor}` : ""}` : `off default:${monthEndCarryOverWeighting.defaultEnabled ? "on" : "off"}`}
             </div>
             {/* Forced and Excluded reporting */}
             <div style={{ marginTop: 8, fontSize: 12, color: "#333", background: "#fafafa", border: "1px solid #eee", borderRadius: 6, padding: 8 }}>
@@ -4025,153 +4577,226 @@ function AppInner(): JSX.Element {
               onClearAutoExclusions={() => setAutoExcludeUnselected(false)}
             />
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6 }}>
-            <h4 style={{ margin: 0 }}>Temperature Heatmap</h4>
-            <label style={{ fontSize: 13 }}>
-              Metric:
-              <select value={tempMetric} onChange={(e) => setTempMetric(e.target.value as any)} style={{ marginLeft: 6 }} title="EMA • Recency • Hybrid">
-                <option value="hybrid">Hybrid (EMA ⊕ Recency)</option>
-                <option value="ema">EMA only</option>
-                <option value="recency">Recency only</option>
-              </select>
-            </label>
-            <label style={{ fontSize: 13, marginLeft: 12 }}>
-              Letters:
-              <input type="checkbox" checked={showHeatmapLetters} onChange={e => setShowHeatmapLetters(e.target.checked)} style={{ marginLeft: 6 }} title="Overlay letter codes" />
-            </label>
-          </div>
+          <InlineCollapsibleCard
+            title="DGA heatmap"
+            subtitle={`${filteredHistory.length} draw${filteredHistory.length === 1 ? "" : "s"} in the active window · heatmap view, drought hazard and exclusions strip`}
+            collapsedSummary="Shows the DGA heatmap with a view selector for temperature or monthly bucket-state mode, plus legend controls, the drought-break shortlist, and the aligned exclusions strip."
+            defaultExpanded={true}
+            expanded={dgaHeatmapExpanded}
+            onExpandedChange={setDgaHeatmapExpanded}
+            keepMounted={true}
+            collapsedLabel={`Show heatmap (${filteredHistory.length} draw${filteredHistory.length === 1 ? "" : "s"}) ▼`}
+          >
+            <div style={{ padding: "10px 12px 12px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6, flexWrap: "wrap" }}>
+                <h4 style={{ margin: 0 }}>{dgaHeatmapTitle}</h4>
+                <label style={{ fontSize: 13 }}>
+                  View:
+                  <select
+                    value={dgaHeatmapView}
+                    onChange={(e) => setDgaHeatmapView(e.target.value as DgaHeatmapViewMode)}
+                    style={{ marginLeft: 6 }}
+                    title="Switch between temperature and monthly bucket-state views"
+                  >
+                    <option value="temperature">Temperature</option>
+                    <option value="monthlyBucketState">Monthly bucket state</option>
+                  </select>
+                </label>
+                <label style={{ fontSize: 13 }}>
+                  Metric:
+                  <select
+                    value={tempMetric}
+                    onChange={(e) => setTempMetric(e.target.value as any)}
+                    style={{ marginLeft: 6 }}
+                    title="EMA • Recency • Hybrid"
+                    disabled={isMonthlyBucketHeatmapView}
+                  >
+                    <option value="hybrid">Hybrid (EMA ⊕ Recency)</option>
+                    <option value="ema">EMA only</option>
+                    <option value="recency">Recency only</option>
+                  </select>
+                </label>
+                <label style={{ fontSize: 13 }}>
+                  Letters:
+                  <input type="checkbox" checked={showHeatmapLetters} onChange={e => setShowHeatmapLetters(e.target.checked)} style={{ marginLeft: 6 }} title="Overlay letter codes" />
+                </label>
+                <span style={{ fontSize: 12, color: "#64748b" }}>{dgaHeatmapSubtitle}</span>
+              </div>
 
-          <div style={{ width: "100%", marginBottom: 8 }}>
-            <DroughtHazardPanel
-              history={filteredHistory}
-              top={8}
-              title="Most likely to break a drought next draw"
-              bucketLabels={monthlyBucketLabels}
-            />
-          </div>
-
-          <div style={{ width: "100%", marginTop: 8, marginBottom: 6 }}>
-            <HeatmapLegendBar labels={bucketLabels} counts={legendCounts} total={legendTotal} colors={bucketColors} />
-          </div>
-
-          <div style={{ width: "100%", overflowX: "auto" }}>
-            <div style={{ display: "inline-flex", alignItems: "flex-start", gap: 12, position: "relative" }}>
-              <div style={{ display: "inline-block" }}>
-                <TemperatureHeatmap
+              <div style={{ width: "100%", marginBottom: 8 }}>
+                <DroughtHazardPanel
                   history={filteredHistory}
-                  alpha={0.25}
-                  cellSize={DGA_CELL_SIZE}
-                  metric={tempMetric}
-                  buckets={10}
-                  bucketStops={bucketStops}
-                  bucketLabels={bucketLabels}
-                  hybridWeight={0.6}
-                  emaNormalize="per-number"
-                  enforcePeaks={true}
-                  onHoverNumber={setFocusNumber}
-                  showLegendCounts={false}
-                  overlayNumbers={overlayNumbers}
-                  showBucketLetters={showHeatmapLetters}
-                  bucketLetters={["pR","F","pF","<C","C>","tT","W","H","tR","V"]}
+                  top={8}
+                  title="Most likely to break a drought next draw"
+                  bucketLabels={monthlyBucketLabels}
                 />
               </div>
-              {/* Vertical user exclusions aligned to rows for Heatmap */}
-              <div style={{ position: "sticky", right: 0, top: 0 }}>
-                <UserExclusionsStrip
-                  title={undefined}
-                  excludedNumbers={effectiveExcludedNumbers}
-                  setExcludedNumbers={setExcludedNumbers as any}
-                  orientation="vertical"
-                  labelPosition="right"
-                  cellSize={DGA_CELL_SIZE}
-                  monthlyBuckets={monthlyBucketSetsAlways ?? monthlyConstraintPayload?.buckets}
-                />
+
+              <div style={{ width: "100%", marginTop: 8, marginBottom: 6 }}>
+                <HeatmapLegendBar labels={dgaHeatmapBucketLabels} counts={dgaHeatmapLegendCounts} total={dgaHeatmapLegendTotal} colors={dgaHeatmapBucketColors} />
+              </div>
+
+              <div style={{ width: "100%", overflowX: "auto" }}>
+                <div style={{ display: "inline-flex", alignItems: "flex-start", gap: 12, position: "relative" }}>
+                  <div style={{ display: "inline-block" }}>
+                    <TemperatureHeatmap
+                      history={history}
+                      displayHistory={isMonthlyBucketHeatmapView ? dgaMonthlyBucketHeatmapHistory : undefined}
+                      alpha={0.25}
+                      cellSize={DGA_CELL_SIZE}
+                      showLegend={false}
+                      metric={tempMetric}
+                      buckets={dgaHeatmapBucketLabels.length}
+                      bucketStops={isMonthlyBucketHeatmapView ? undefined : bucketStops}
+                      bucketLabels={dgaHeatmapBucketLabels}
+                      bucketColors={dgaHeatmapBucketColors}
+                      bucketIndexSeries={dgaHeatmapBucketIndexSeries}
+                      hybridWeight={0.6}
+                      emaNormalize="per-number"
+                      enforcePeaks={true}
+                      onHoverNumber={setFocusNumber}
+                      showLegendCounts={false}
+                      hazardHistory={filteredHistory}
+                      activeWindowStart={dgaHeatmapActiveWindow?.start}
+                      activeWindowEnd={dgaHeatmapActiveWindow?.end}
+                      highlightedColumns={dgaHeatmapHighlightedColumns}
+                      overlayNumbers={overlayNumbers}
+                      showBucketLetters={showHeatmapLetters}
+                      bucketLetters={dgaHeatmapBucketLetters}
+                    />
+                  </div>
+                  {/* Vertical user exclusions aligned to rows for Heatmap */}
+                  <div style={{ position: "sticky", right: 0, top: 0 }}>
+                    <UserExclusionsStrip
+                      title={undefined}
+                      excludedNumbers={effectiveExcludedNumbers}
+                      setExcludedNumbers={setExcludedNumbers as any}
+                      orientation="vertical"
+                      labelPosition="right"
+                      cellSize={DGA_CELL_SIZE}
+                      monthlyBuckets={dgaEffectiveMonthlyBuckets}
+                    />
+                  </div>
+                </div>
               </div>
             </div>
+          </InlineCollapsibleCard>
+
+          <div ref={dgaGridRef} style={{ marginTop: 12 }}>
+            <InlineCollapsibleCard
+              title="DGA grid"
+              subtitle={dgaGrid.length > 0
+                ? `${dgaGrid.length} rows · ${dgaDrawLabels.length} historical draw${dgaDrawLabels.length === 1 ? "" : "s"} · simulate strip and DGA tools`
+                : "No grid data loaded yet"}
+              collapsedSummary="Shows the main DGA draw grid, simulate strip, and the grid’s highlight / diamond tools. Existing DGA grid settings stay in place while this panel is hidden."
+              defaultExpanded={true}
+              expanded={dgaGridExpanded}
+              onExpandedChange={setDgaGridExpanded}
+              keepMounted={true}
+              collapsedLabel={`Show grid (${dgaDrawLabels.length} draw${dgaDrawLabels.length === 1 ? "" : "s"}) ▼`}
+            >
+              <div style={{ padding: "10px 12px 12px" }}>
+                {highlightMsg && (
+                  <div style={{ color: "#c00", marginTop: 2, marginBottom: 12 }}>{highlightMsg}</div>
+                )}
+
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+                  {simScrollOriginY !== null && (
+                    <button
+                      type="button"
+                      onClick={scrollBackToOrigin}
+                      style={{
+                        padding: "4px 10px",
+                        borderRadius: 4,
+                        border: "1px solid #1976d2",
+                        background: "#e3f2fd",
+                        color: "#1976d2",
+                        cursor: "pointer",
+                        fontSize: 12,
+                        fontWeight: 600,
+                      }}
+                      title="Return to where you pressed Simulate"
+                    >
+                      ↑ Back
+                    </button>
+                  )}
+                </div>
+
+                {dgaGrid.length > 0 ? (
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                    {/* Grid takes all available width */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <DGAVisualizer
+                        grid={dgaGrid}
+                        diamonds={dgaDiamonds}
+                        predictions={dgaPredictions}
+                        drawLabels={dgaDrawLabels}
+                        numberLabels={Array.from({ length: 45 }, (_, i) => String(i + 1))}
+                        numberCounts={numberCounts}
+                        minCount={minCount}
+                        maxCount={maxCount}
+                        highlights={highlights}
+                        setHighlights={setHighlights}
+                        controlsPosition="below"
+                        focusNumber={focusNumber}
+                        focusedCol={focusedDgaCol}
+                        onColumnClick={(col) => setFocusedDgaCol((prev) => (prev === col ? null : col))}
+                        wfmqyhStart={dgaWfmqyhStart}
+                        cellSize={DGA_CELL_SIZE}
+                      />
+                    </div>
+                    {/* Simulate strip sits to the right of the grid — no overlap */}
+                    <div style={{ flexShrink: 0 }}>
+                      <DGASimulateStrip
+                        selectedNumbers={dgaStripSelected}
+                        cellSize={DGA_CELL_SIZE}
+                        monthlyBuckets={dgaEffectiveMonthlyBuckets}
+                        hoveredNumber={dgaHoveredNumber}
+                        onHoverNumber={(value) => setDgaHoveredNumber(value)}
+                        onChange={(nums) => {
+                          setDgaStripSelected(nums);
+                          // Simulate in the Next column when at least 1 number is selected
+                          if (nums.length === 0) {
+                            setSimulatedDraw(null);
+                            setSimSource('none');
+                            setSimCandidateIdx(null);
+                          } else {
+                            const sorted = [...nums].sort((a, b) => a - b);
+                            const main = sorted.slice(0, 6);
+                            const supp = sorted.slice(6, 8);
+                            setSimulatedDraw({ main, supp, date: "DGAStrip", isSimulated: true } as any);
+                            setSimSource('dga-strip');
+                            setSimCandidateIdx(null);
+                          }
+                        }}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <i>No grid data available.</i>
+                )}
+              </div>
+            </InlineCollapsibleCard>
           </div>
 
-          {highlightMsg && (
-            <div style={{ color: "#c00", marginTop: 10, marginBottom: 12 }}>{highlightMsg}</div>
-          )}
-
-          <div ref={dgaGridRef} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-            {simScrollOriginY !== null && (
-              <button
-                type="button"
-                onClick={scrollBackToOrigin}
-                style={{
-                  padding: "4px 10px",
-                  borderRadius: 4,
-                  border: "1px solid #1976d2",
-                  background: "#e3f2fd",
-                  color: "#1976d2",
-                  cursor: "pointer",
-                  fontSize: 12,
-                  fontWeight: 600,
-                }}
-                title="Return to where you pressed Simulate"
-              >
-                ↑ Back
-              </button>
-            )}
-          </div>
-
-          {dgaGrid.length > 0 ? (
-            <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-              {/* Grid takes all available width */}
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <DGAVisualizer
-                  grid={dgaGrid}
-                  diamonds={dgaDiamonds}
-                  predictions={dgaPredictions}
-                  drawLabels={dgaDrawLabels}
-                  numberLabels={Array.from({ length: 45 }, (_, i) => String(i + 1))}
-                  numberCounts={numberCounts}
-                  minCount={minCount}
-                  maxCount={maxCount}
-                  highlights={highlights}
-                  setHighlights={setHighlights}
-                  controlsPosition="below"
-                  focusNumber={focusNumber}
-                  focusedCol={focusedDgaCol}
-                  onColumnClick={(col) => setFocusedDgaCol((prev) => (prev === col ? null : col))}
-                  wfmqyhStart={dgaWfmqyhStart}
-                />
-              </div>
-              {/* Simulate strip sits to the right of the grid — no overlap */}
-              <div style={{ flexShrink: 0, paddingTop: DGA_CELL_SIZE - 3 }}>
-                <DGASimulateStrip
-                  selectedNumbers={dgaStripSelected}
-                  cellSize={DGA_CELL_SIZE}
-                  monthlyBuckets={monthlyBucketSetsAlways ?? monthlyConstraintPayload?.buckets ?? dgaLiveMonthlyBuckets}
-                  onChange={(nums) => {
-                    setDgaStripSelected(nums);
-                    // Simulate in the Next column when at least 1 number is selected
-                    if (nums.length === 0) {
-                      setSimulatedDraw(null);
-                      setSimSource('none');
-                      setSimCandidateIdx(null);
-                    } else {
-                      const sorted = [...nums].sort((a, b) => a - b);
-                      const main = sorted.slice(0, 6);
-                      const supp = sorted.slice(6, 8);
-                      setSimulatedDraw({ main, supp, date: "DGAStrip", isSimulated: true } as any);
-                      setSimSource('dga-strip');
-                      setSimCandidateIdx(null);
-                    }
-                  }}
-                />
-              </div>
-            </div>
-          ) : (
-            <i>No grid data available.</i>
-          )}
+          <DGAMonthlyBucketStateGrid
+            timeline={dgaMonthlyBucketTimeline}
+            currentMonthLabel={dgaEffectiveMonthLabel}
+            cellSize={DGA_CELL_SIZE}
+            hoveredNumber={dgaHoveredNumber}
+            onHoverNumber={(value) => setDgaHoveredNumber(value)}
+            selectedNumbers={dgaStripSelected}
+          />
         </div>
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 26 Undrawn Patterns (Empirical) */}
       <CollapsibleSection title={<b>Undrawn Patterns (Empirical)</b>} defaultOpen={false} summaryHint="Mains vs mains+supps toggle">
-        <UndrawnPatternsPanel history={history} />
+        <UndrawnPatternsPanel
+          history={filteredHistory}
+          windowLabel={historyWindowName}
+          loadedDrawCount={history.length}
+        />
       </CollapsibleSection>
 
       <TracePanel lines={trace} onClear={() => setTrace([])} />
@@ -4252,6 +4877,7 @@ function AppInner(): JSX.Element {
       selectedBoostEnabled,
       selectedBoostFactor,
       ogaSpokeCount,
+      numCandidates,
       autoExcludeUnselected,
       userSelectedNumbers: [...userSelectedNumbers],
       manualSimSelected: [...manualSimSelected],
@@ -4265,6 +4891,7 @@ function AppInner(): JSX.Element {
       patternSumTolerance,
       selectedWindowPatterns: [...selectedWindowPatterns],
       insightsEnabled,
+      dgaHeatmapView,
       tempMetric,
       showHeatmapLetters,
       ogaRefMode,
@@ -4273,6 +4900,12 @@ function AppInner(): JSX.Element {
       ogaPreferredBand,
       ogaPreferredDeciles: [...ogaPreferredDeciles],
       traceVerbose,
+      monthEndCarryOverBiasEnabled: monthEndCarryOverBiasTouchedRef.current ? monthEndCarryOverBiasEnabled : undefined,
+      monthEndCarryOverStrength,
+      monthEndCarryOverIncludeMonthEndUndrawn,
+      monthEndCarryOverIncludeBoundaryRepeats,
+      selectedCarryOverBoostNumbers: [...selectedCarryOverBoostNumbers],
+      selectedCarryOverBoostMode,
       rdyWeights: { ...rdyWeights },
     };
   }
@@ -4388,6 +5021,11 @@ function AppInner(): JSX.Element {
     setSelectedBoostEnabled(s.selectedBoostEnabled ?? false);
     setSelectedBoostFactor(s.selectedBoostFactor ?? 2);
     setOgaSpokeCount(s.ogaSpokeCount ?? 9);
+    setNumCandidatesState(
+      typeof s.numCandidates === "number"
+        ? normalizeGeneratedCandidateCount(s.numCandidates, lastWindowDefaultNumCandidatesRef.current)
+        : lastWindowDefaultNumCandidatesRef.current,
+    );
     setAutoExcludeUnselected(!!s.autoExcludeUnselected);
     setUserSelectedNumbers(s.userSelectedNumbers ?? []);
     setManualSimSelected(s.manualSimSelected ?? []);
@@ -4401,6 +5039,7 @@ function AppInner(): JSX.Element {
     setPatternSumTolerance(s.patternSumTolerance ?? 0);
     setSelectedWindowPatterns(s.selectedWindowPatterns ?? []);
     setInsightsEnabled(s.insightsEnabled ?? false);
+    setDgaHeatmapView(s.dgaHeatmapView === 'monthlyBucketState' ? 'monthlyBucketState' : 'temperature');
     setTempMetric(s.tempMetric ?? 'hybrid');
     setShowHeatmapLetters(s.showHeatmapLetters ?? false);
     setOgaRefMode(s.ogaRefMode ?? 'window');
@@ -4409,6 +5048,21 @@ function AppInner(): JSX.Element {
     setOGAPreferredBand(s.ogaPreferredBand ?? 'auto');
     setOGAPreferredDeciles(s.ogaPreferredDeciles ?? []);
     setTraceVerbose(s.traceVerbose ?? true);
+    setMonthEndCarryOverStrength(normalizeMonthEndCarryOverStrength(s.monthEndCarryOverStrength));
+    setMonthEndCarryOverIncludeMonthEndUndrawn(s.monthEndCarryOverIncludeMonthEndUndrawn ?? true);
+    setMonthEndCarryOverIncludeBoundaryRepeats(s.monthEndCarryOverIncludeBoundaryRepeats ?? true);
+    if (typeof s.monthEndCarryOverBiasEnabled === "boolean") {
+      monthEndCarryOverBiasTouchedRef.current = true;
+      setMonthEndCarryOverBiasEnabled(s.monthEndCarryOverBiasEnabled);
+    } else {
+      monthEndCarryOverBiasTouchedRef.current = false;
+      setMonthEndCarryOverBiasEnabled(monthEndCarryOverWeighting.defaultEnabled);
+    }
+    setSelectedCarryOverBoostNumbers(
+      Array.from(new Set((s.selectedCarryOverBoostNumbers ?? []).filter((number) => Number.isInteger(number) && number >= 1 && number <= 45)))
+        .sort((left, right) => left - right)
+    );
+    setSelectedCarryOverBoostMode(normalizeSelectedCarryOverBoostMode(s.selectedCarryOverBoostMode));
     setRdyWeights(s.rdyWeights ?? { idm: 0.70, conv: 0.10, oga: 0.20 });
   }
 }
@@ -4447,14 +5101,22 @@ interface DGASimulateStripProps {
   onChange: (nums: number[]) => void;
   cellSize?: number;
   monthlyBuckets?: MonthlyBucketSets | null;
+  hoveredNumber?: number | null;
+  onHoverNumber?: (value: number | null) => void;
 }
-const DGASimulateStrip: React.FC<DGASimulateStripProps> = ({ selectedNumbers, onChange, cellSize, monthlyBuckets }) => {
+const DGASimulateStrip: React.FC<DGASimulateStripProps> = ({
+  selectedNumbers,
+  onChange,
+  cellSize,
+  monthlyBuckets,
+  hoveredNumber,
+  onHoverNumber,
+}) => {
   const MAX_SELECT = 8;
   const atMax = selectedNumbers.length >= MAX_SELECT;
   const selectionCountLabel = `${selectedNumbers.length}/${MAX_SELECT}`;
-  const sizeStyles: React.CSSProperties = cellSize
-    ? { height: cellSize, lineHeight: `${cellSize}px`, justifyContent: "center" }
-    : {};
+  const tableCellSize = Math.max(18, Math.floor(cellSize ?? 20));
+  const tableCellLineHeight = `${tableCellSize}px`;
 
   const handleToggle = (n: number) => {
     if (selectedNumbers.includes(n)) {
@@ -4467,51 +5129,95 @@ const DGASimulateStrip: React.FC<DGASimulateStripProps> = ({ selectedNumbers, on
   return (
     <div style={{ marginTop: 0 }}>
       <div style={{ display: "flex", flexDirection: "column", gap: 0, paddingTop: 0, paddingBottom: 0, alignItems: "flex-start" }}>
-        {Array.from({ length: 45 }, (_, i) => i + 1).map((n) => {
-          const checked = selectedNumbers.includes(n);
-          const disabled = !checked && atMax;
-          // When selected: blue; when unselected: monthly bucket colour (if available) or transparent
-          const bucketColor = _stripBucketColor(n, monthlyBuckets);
-          const bgColor = checked ? "#1565c0" : (bucketColor ?? "transparent");
-          const textColor = checked || bucketColor ? "#fff" : "#333";
-          return (
-            <label
-              key={n}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 4,
-                minWidth: 28,
-                cursor: disabled ? "not-allowed" : "pointer",
-                opacity: disabled ? 0.4 : 1,
-                ...sizeStyles,
-              }}
-              title={checked ? `Remove ${n} from simulation` : disabled ? "Max 8 numbers" : `Simulate ${n} in Next column`}
-            >
-              <input
-                type="checkbox"
-                checked={checked}
-                disabled={disabled}
-                onChange={() => handleToggle(n)}
-                style={{ margin: 0 }}
-              />
-              <span
-                style={{
-                  fontSize: 11,
-                  minWidth: 20,
-                  textAlign: "center",
-                  display: "inline-block",
-                  background: bgColor,
-                  color: textColor,
-                  borderRadius: 3,
-                  padding: (checked || bucketColor) ? "0 3px" : undefined,
-                }}
-              >
-                {n}
-              </span>
-            </label>
-          );
-        })}
+        <div style={{ border: "1px solid transparent", background: "transparent" }}>
+          <table style={{ borderCollapse: "collapse", fontSize: 11 }}>
+            <thead>
+              <tr>
+                <th
+                  style={{
+                    height: tableCellSize,
+                    minHeight: tableCellSize,
+                    lineHeight: tableCellLineHeight,
+                    padding: 0,
+                    border: "1px solid transparent",
+                    boxSizing: "border-box",
+                    background: "transparent",
+                  }}
+                ></th>
+              </tr>
+            </thead>
+            <tbody>
+              {Array.from({ length: 45 }, (_, i) => i + 1).map((n) => {
+                const checked = selectedNumbers.includes(n);
+                const disabled = !checked && atMax;
+                const isHovered = hoveredNumber === n;
+                const bucketColor = _stripBucketColor(n, monthlyBuckets);
+                const bgColor = checked ? "#1565c0" : (bucketColor ?? "transparent");
+                const textColor = checked || bucketColor ? "#fff" : "#333";
+
+                return (
+                  <tr key={n}>
+                    <td
+                      style={{
+                        height: tableCellSize,
+                        minHeight: tableCellSize,
+                        lineHeight: tableCellLineHeight,
+                        padding: 0,
+                        border: "1px solid transparent",
+                        boxSizing: "border-box",
+                        background: "transparent",
+                      }}
+                    >
+                      <label
+                        onMouseEnter={() => onHoverNumber?.(n)}
+                        onMouseLeave={() => onHoverNumber?.(null)}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 4,
+                          minWidth: 28,
+                          height: tableCellSize,
+                          boxSizing: "border-box",
+                          cursor: disabled ? "not-allowed" : "pointer",
+                          opacity: disabled ? 0.4 : 1,
+                          background: isHovered ? "rgba(21,101,192,0.10)" : "transparent",
+                          borderRadius: 6,
+                          boxShadow: isHovered ? "inset 0 0 0 1px rgba(21,101,192,0.30)" : "none",
+                          padding: "0 4px 0 2px",
+                        }}
+                        title={checked ? `Remove ${n} from simulation` : disabled ? "Max 8 numbers" : `Simulate ${n} in Next column`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={disabled}
+                          onChange={() => handleToggle(n)}
+                          style={{ margin: 0 }}
+                        />
+                        <span
+                          style={{
+                            fontSize: 11,
+                            minWidth: 20,
+                            textAlign: "center",
+                            display: "inline-block",
+                            background: bgColor,
+                            color: textColor,
+                            borderRadius: 3,
+                            padding: (checked || bucketColor) ? "0 3px" : undefined,
+                            boxShadow: isHovered ? "0 0 0 2px rgba(13,71,161,0.35)" : undefined,
+                            fontWeight: isHovered ? 800 : 600,
+                          }}
+                        >
+                          {n}
+                        </span>
+                      </label>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
         {selectedNumbers.length > 0 && (
           <>
             <button

@@ -1,5 +1,6 @@
 import { Draw } from "../types";
 import { getSDE1FilteredPool } from "../sde1";
+import { getHC3OverlapNumbers } from "./recentDraws";
 
 /**
  * GPWF-style per-number weights from recent history.
@@ -38,17 +39,7 @@ export function buildHC3PenaltyWeights(
   const weights: Record<number, number> = {};
   for (let n = 1; n <= 45; n++) weights[n] = 1;
 
-  if (history.length < 2) return weights;
-
-  const last = history[history.length - 1];
-  const prev = history[history.length - 2];
-  const lastAll = new Set([...last.main, ...last.supp]);
-  const prevAll = new Set([...prev.main, ...prev.supp]);
-  const overlap = new Set<number>();
-  lastAll.forEach((n) => {
-    if (prevAll.has(n)) overlap.add(n);
-  });
-  overlap.forEach((n) => {
+  getHC3OverlapNumbers(history).forEach((n) => {
     if (n >= 1 && n <= 45) weights[n] = penalty;
   });
   return weights;

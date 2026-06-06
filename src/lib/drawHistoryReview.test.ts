@@ -8,6 +8,7 @@ import {
   compareOfficialSourceRows,
   keepOnlyDateVersion,
   keepOnlyNumbersVersion,
+  mergeMissingSourceRows,
   normalizeHistoryDate,
   replaceLocalDateWithSourceRow,
 } from "./drawHistoryReview";
@@ -117,5 +118,28 @@ describe("drawHistoryReview", () => {
 
     expect(addSourceRowIfMissing(localRows, sourceRows[1])).toHaveLength(3);
     expect(replaceLocalDateWithSourceRow(localRows, sourceRows[0])[0]).toEqual(sourceRows[0]);
+  });
+
+  it("can merge missing source dates into cached local history without overwriting conflicts", () => {
+    const localRows: DrawRow[] = [
+      { date: "10/27/25", mains: [1, 2, 3, 4, 5, 6], supps: [7, 8] },
+      { date: "10/28/25", mains: [9, 10, 11, 12, 13, 14], supps: [15, 16] },
+    ];
+    const sourceRows: DrawRow[] = [
+      { date: "2025-10-28", mains: [9, 10, 11, 12, 13, 99], supps: [15, 16] },
+      { date: "2025-10-29", mains: [17, 18, 19, 20, 21, 22], supps: [23, 24] },
+    ];
+
+    const merged = mergeMissingSourceRows(localRows, sourceRows);
+
+    expect(merged.sourceRowCount).toBe(2);
+    expect(merged.addedRowCount).toBe(1);
+    expect(merged.missingDateCount).toBe(1);
+    expect(merged.conflictingDateCount).toBe(1);
+    expect(merged.rows).toEqual([
+      { date: "2025-10-29", mains: [17, 18, 19, 20, 21, 22], supps: [23, 24] },
+      { date: "10/28/25", mains: [9, 10, 11, 12, 13, 14], supps: [15, 16] },
+      { date: "10/27/25", mains: [1, 2, 3, 4, 5, 6], supps: [7, 8] },
+    ]);
   });
 });

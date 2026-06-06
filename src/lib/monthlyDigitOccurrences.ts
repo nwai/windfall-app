@@ -1,4 +1,8 @@
 import type { Draw } from "../types";
+import {
+  filterRowsForHistoryBaselines,
+  getExcludedMonthLabelsForHistoryBaselines,
+} from "./monthlyAverageScope";
 
 export interface MonthlyDigitNumberCount {
   number: number;
@@ -25,6 +29,8 @@ export interface MonthlyDigitOccurrenceRow {
 export interface MonthlyDigitOccurrenceSummary {
   rows: MonthlyDigitOccurrenceRow[];
   totalMonths: number;
+  averageMonthCount: number;
+  averageExcludedMonthLabels: string[];
   totalDraws: number;
   totalOccurrences: number;
   totalOneDigitOccurrences: number;
@@ -211,6 +217,9 @@ export const analyzeMonthlyDigitOccurrences = (
       };
     });
 
+  const averageRows = filterRowsForHistoryBaselines(rows, (row) => row.monthLabel);
+  const averageExcludedMonthLabels = getExcludedMonthLabelsForHistoryBaselines(rows, (row) => row.monthLabel);
+
   const totalDraws = rows.reduce((sum, row) => sum + row.drawCount, 0);
   const totalOneDigitOccurrences = rows.reduce((sum, row) => sum + row.oneDigitOccurrences, 0);
   const totalTwoDigitOccurrences = rows.reduce((sum, row) => sum + row.twoDigitOccurrences, 0);
@@ -243,22 +252,22 @@ export const analyzeMonthlyDigitOccurrences = (
   }, null);
 
   const recentWindowMonths = getRecentWindowMonths(rows.length);
-  const historicalWindowMonths = Math.max(rows.length - recentWindowMonths, 0);
-
   const recentRows = recentWindowMonths > 0 ? rows.slice(-recentWindowMonths) : [];
-  const historicalRows = historicalWindowMonths > 0 ? rows.slice(0, rows.length - recentWindowMonths) : [];
+  const historicalRows = rows.length > recentWindowMonths ? rows.slice(0, rows.length - recentWindowMonths) : [];
+  const recentRowsForAverage = filterRowsForHistoryBaselines(recentRows, (row) => row.monthLabel);
+  const historicalRowsForAverage = filterRowsForHistoryBaselines(historicalRows, (row) => row.monthLabel);
 
-  const recentAvgOneDigitShare = average(recentRows.map((row) => row.oneDigitShare));
-  const historicalAvgOneDigitShare = average(historicalRows.map((row) => row.oneDigitShare));
-  const recentAvgTwoDigitShare = average(recentRows.map((row) => row.twoDigitShare));
-  const historicalAvgTwoDigitShare = average(historicalRows.map((row) => row.twoDigitShare));
+  const recentAvgOneDigitShare = average(recentRowsForAverage.map((row) => row.oneDigitShare));
+  const historicalAvgOneDigitShare = average(historicalRowsForAverage.map((row) => row.oneDigitShare));
+  const recentAvgTwoDigitShare = average(recentRowsForAverage.map((row) => row.twoDigitShare));
+  const historicalAvgTwoDigitShare = average(historicalRowsForAverage.map((row) => row.twoDigitShare));
   const oneDigitBiasScore = recentAvgOneDigitShare - historicalAvgOneDigitShare;
   const twoDigitBiasScore = recentAvgTwoDigitShare - historicalAvgTwoDigitShare;
 
-  const recentBias: MonthlyDigitOccurrenceBias = recentRows.length === 0 || historicalRows.length === 0
+  const recentBias: MonthlyDigitOccurrenceBias = recentRowsForAverage.length === 0 || historicalRowsForAverage.length === 0
     ? {
-        recentWindowMonths,
-        historicalWindowMonths,
+        recentWindowMonths: recentRowsForAverage.length,
+        historicalWindowMonths: historicalRowsForAverage.length,
         recentAvgOneDigitShare,
         historicalAvgOneDigitShare,
         recentAvgTwoDigitShare,
@@ -269,8 +278,8 @@ export const analyzeMonthlyDigitOccurrences = (
         intensity: "none",
       }
     : {
-        recentWindowMonths,
-        historicalWindowMonths,
+        recentWindowMonths: recentRowsForAverage.length,
+        historicalWindowMonths: historicalRowsForAverage.length,
         recentAvgOneDigitShare,
         historicalAvgOneDigitShare,
         recentAvgTwoDigitShare,
@@ -289,12 +298,14 @@ export const analyzeMonthlyDigitOccurrences = (
   return {
     rows,
     totalMonths: rows.length,
+    averageMonthCount: averageRows.length,
+    averageExcludedMonthLabels,
     totalDraws,
     totalOccurrences,
     totalOneDigitOccurrences,
     totalTwoDigitOccurrences,
-    avgOneDigitPerMonth: rows.length > 0 ? totalOneDigitOccurrences / rows.length : 0,
-    avgTwoDigitPerMonth: rows.length > 0 ? totalTwoDigitOccurrences / rows.length : 0,
+    avgOneDigitPerMonth: averageRows.length > 0 ? averageRows.reduce((sum, row) => sum + row.oneDigitOccurrences, 0) / averageRows.length : 0,
+    avgTwoDigitPerMonth: averageRows.length > 0 ? averageRows.reduce((sum, row) => sum + row.twoDigitOccurrences, 0) / averageRows.length : 0,
     avgOneDigitPerDraw: totalDraws > 0 ? totalOneDigitOccurrences / totalDraws : 0,
     avgTwoDigitPerDraw: totalDraws > 0 ? totalTwoDigitOccurrences / totalDraws : 0,
     monthsOneDigitLed: rows.filter((row) => row.leadingBucket === "oneDigit").length,

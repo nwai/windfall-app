@@ -1,5 +1,6 @@
 import React, { useMemo, useState, useCallback } from "react";
 import type { Draw } from "../types";
+import { filterRowsForHistoryBaselines, getExcludedMonthLabelsForHistoryBaselines } from "../lib/monthlyAverageScope";
 
 interface OverlapRow {
   monthLabel: string;
@@ -217,10 +218,13 @@ export const MonthlyOverlapPanel: React.FC<{ history: Draw[] }> = ({ history }) 
    *  The most recent month and pending rows are excluded (may be incomplete). */
   const footerStats = useMemo(() => {
     if (!rows.length || !mostRecentLabel) return [];
-    const filteredRows = rows.filter((r) => !r.isPending && r.monthLabel !== mostRecentLabel);
-    if (!filteredRows.length) return [];
+    const averageRows = filterRowsForHistoryBaselines(
+      rows.filter((r) => !r.isPending && r.monthLabel !== mostRecentLabel),
+      (row) => row.monthLabel,
+    );
+    if (!averageRows.length) return [];
     const groups = new Map<number, OverlapRow[]>();
-    filteredRows.forEach((r) => {
+    averageRows.forEach((r) => {
       if (!groups.has(r.totalDrawsInMonth)) groups.set(r.totalDrawsInMonth, []);
       groups.get(r.totalDrawsInMonth)!.push(r);
     });
@@ -237,12 +241,20 @@ export const MonthlyOverlapPanel: React.FC<{ history: Draw[] }> = ({ history }) 
     }
     result.push({
       label: "All",
-      count: filteredRows.length,
-      avgOverlap: filteredRows.reduce((s, r) => s + r.overlapCount, 0) / filteredRows.length,
-      avgFreq: filteredRows.reduce((s, r) => s + r.avgOverlapFreq, 0) / filteredRows.length,
+      count: averageRows.length,
+      avgOverlap: averageRows.reduce((s, r) => s + r.overlapCount, 0) / averageRows.length,
+      avgFreq: averageRows.reduce((s, r) => s + r.avgOverlapFreq, 0) / averageRows.length,
     });
     return result;
-  }, [rows]);
+  }, [mostRecentLabel, rows]);
+
+  const footerExcludedLabels = useMemo(() => {
+    const labels = new Set<string>(
+      getExcludedMonthLabelsForHistoryBaselines(rows, (row) => row.monthLabel),
+    );
+    if (mostRecentLabel) labels.add(mostRecentLabel);
+    return [...labels].sort((left, right) => left.localeCompare(right));
+  }, [mostRecentLabel, rows]);
 
   const hasData = rows.length > 0;
 
@@ -408,7 +420,7 @@ export const MonthlyOverlapPanel: React.FC<{ history: Draw[] }> = ({ history }) 
                 <td colSpan={2} style={{ padding: "6px 8px", fontWeight: 700, fontSize: 12, color: "#4a5568" }}>
                   Avg overlap by draws/month
                   <span style={{ fontWeight: 400, color: "#a0aec0", marginLeft: 6 }}>
-                    (excl. {mostRecentLabel ?? "most recent month"})
+                    (excl. {footerExcludedLabels.length ? footerExcludedLabels.join(", ") : mostRecentLabel ?? "most recent month"})
                   </span>
                 </td>
                 <td colSpan={8} style={{ padding: "6px 8px" }}>

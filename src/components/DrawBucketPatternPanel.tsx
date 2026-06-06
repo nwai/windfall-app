@@ -15,6 +15,7 @@ import {
   type DrawBucketPatternStats,
 } from "../lib/drawBucketPatterns";
 import { forecastDrawBucketMonth, type BucketHitForecast } from "../lib/drawBucketMonthForecast";
+import { getMostRecentDraw } from "../lib/recentDraws";
 
 type HeatmapTone = "past" | "current";
 type HeatmapAlign = "left" | "right";
@@ -658,7 +659,7 @@ export const DrawBucketPatternPanel: React.FC<DrawBucketPatternPanelProps> = ({ 
   );
 
   const latestAllHistoryMonthKey = useMemo(() => {
-    const mostRecentDraw = comparisonHistory[comparisonHistory.length - 1];
+    const mostRecentDraw = getMostRecentDraw(comparisonHistory);
     return mostRecentDraw ? getDrawMonthKey(mostRecentDraw.date) ?? "" : "";
   }, [comparisonHistory]);
 

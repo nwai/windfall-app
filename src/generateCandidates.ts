@@ -1,21 +1,39 @@
 import { CandidateSet, Draw, Knobs } from "./types";
 import { entropy, precomputeHistoryBitmasks, minHammingBit, maxJaccardBit, toBitmask } from "./analytics";
-import { applyOctagonalPostProcess } from "./octagonal";
 import { getSDE1FilteredPool } from "./sde1";
-import { computeOGA, DEFAULT_OGA_SPOKES } from "./utils/oga";
+import { getHC3OverlapNumbers, getMostRecentDraw } from "./lib/recentDraws";
+import { computeOGA, DEFAULT_OGA_SPOKES, getOGAPercentile } from "./utils/oga";
 import {
   countSingleDigitNumbers,
   deriveDigitWidthTargets,
   formatDigitWidthScopeLabel,
   type DigitWidthConstraintConfig,
 } from "./lib/digitWidthConstraint";
+import { scoreMonthEndCarryOverCandidate } from "./lib/monthEndCarryOver";
+import { MONTHLY_BUCKET_KEYS, type MonthlyBucketKey } from "./lib/monthlyDrawSummary";
+import {
+  buildOddEvenRatioQuotas,
+  summarizeOddEvenRatios,
+  type OddEvenRatioOption,
+  type OddEvenRatioSummary,
+} from "./lib/oddEvenRatios";
+export {
+  applyOddEvenRatioQuotas,
+  buildOddEvenRatioQuotas,
+  candidateOddEvenRatio,
+  summarizeOddEvenRatios,
+} from "./lib/oddEvenRatios";
+export type {
+  OddEvenRatioOption as GenerateCandidateRatioOption,
+  OddEvenRatioSummary as GenerateCandidateRatioSummary,
+} from "./lib/oddEvenRatios";
 
 /** Trend classification union (avoid missing type) */
 export type TrendClass = 'UP' | 'DOWN' | 'FLAT';
 
 export interface GenerateCandidatesResult {
   candidates: CandidateSet[];
-  ratioSummary: any;
+  ratioSummary: OddEvenRatioSummary;
   quotaWarning?: string;
   rejectionStats: {
     entropy: number;
@@ -59,6 +77,7 @@ interface MainDigitConstraintOptions {
 type MainDecadeBiases = Partial<Record<'decade0x' | 'decade1x' | 'decade2x' | 'decade3x' | 'decade4x', number>>;
 
 const DEBUG = false;
+const MONTHLY_SELECTED_NUMBER_BIAS_REPEATS = 3;
 
 /* ------------------------ Pattern helpers (top-level) ----------------------- */
 
@@ -106,16 +125,16 @@ export function generateCandidates(
   excludedNumbers: number[],
   selectedOddEvenRatios: string[],
   useTrickyRule: boolean,
-  minOGAPercentile: number,          // currently unused in this function (left for future OGA filtering)
-  pastOGAScores: number[],           // currently unused here (OGA computed later post-process)
+  minOGAPercentile: number,
+  pastOGAScores: number[],
   forcedNumbers: number[],
   selectedNumbersForBoost: number[],
   selectedBoostOptions: { enabled?: boolean; factor?: number } | undefined,
   entropyThreshold: number,
   hammingThreshold: number,
   jaccardThreshold: number,
-  lambda: number,                    // currently not applied inside this function (placeholder for future weighting)
-  ratioOptions?: { ratio: string; count: number }[],
+  lambda: number,
+  ratioOptions?: OddEvenRatioOption[],
   minRecentMatches: number = 0,
   recentMatchBias: number = 0,
   repeatWindowSizeW: number = 0,
@@ -128,7 +147,7 @@ export function generateCandidates(
   patternOptions?: {
     constraints?: { low: number; high: number; even: number; odd: number; sum: number }[];
     mode?: 'boost' | 'restrict';
-    boostFactor?: number;   // not used here; applied in App ranking
+    boostFactor?: number;
     sumTolerance?: number;  // default 0 means exact sum
   },
   // NEW: OGA forecast bias options
@@ -163,6 +182,8 @@ export function generateCandidates(
     allowShortfall?: boolean;
     /** When true, exclude undrawn numbers and boost drawn numbers' weights */
     boostPenalize?: boolean;
+    selectedNumbersByBucket?: { undrawn: number[]; times1: number[]; times2: number[]; times3: number[]; times4: number[]; times5: number[]; times6: number[]; times7: number[]; times8: number[] };
+    selectedNumberBiasEnabled?: boolean;
   },
   attemptMultiplier?: number,
   ogaSpokeCount?: number,
@@ -170,7 +191,9 @@ export function generateCandidates(
   maxLastDrawMatches?: number,
   /** Per-number boost weights from monthly repeat bias (once-drawn numbers get boosted). */
   monthlyRepeatBiasWeights?: Record<number, number>,
-  mainDecadeBiases?: MainDecadeBiases
+  mainDecadeBiases?: MainDecadeBiases,
+  /** Per-number month-end carry-over weighting for active early-month candidates. */
+  monthEndCarryOverWeights?: Record<number, number>,
 ): GenerateCandidatesResult {
 
   if (DEBUG) {
@@ -194,12 +217,24 @@ export function generateCandidates(
   let candidates: CandidateSet[] = [];
   const seenKeys = new Set<string>();
   let attempts = 0;
+  const oddEvenQuotas = selectedOddEvenRatios.length > 0
+    ? buildOddEvenRatioQuotas(num, selectedOddEvenRatios, ratioOptions)
+    : {};
+  const oddEvenQuotaCounts: Record<string, number> = {};
 
   const selectedBoostSet = new Set<number>((selectedNumbersForBoost ?? []).filter(n => n >= 1 && n <= 45));
   const boostFactorRaw = selectedBoostOptions?.factor ?? 1;
   const boostFactor = Math.max(1, Number.isFinite(boostFactorRaw) ? boostFactorRaw : 1);
   const boostEnabled = !!selectedBoostOptions?.enabled && boostFactor > 1 && selectedBoostSet.size > 0;
   const spokeCount = Math.max(1, Math.floor(ogaSpokeCount ?? DEFAULT_OGA_SPOKES));
+  const finitePastOGAScores = (pastOGAScores ?? []).filter(Number.isFinite);
+  const normalizedMinOGAPercentile = Math.max(0, Math.min(100, Number.isFinite(minOGAPercentile) ? minOGAPercentile : 0));
+  const minOGAFloorEnabled = normalizedMinOGAPercentile > 0 && finitePastOGAScores.length > 0;
+  if (minOGAFloorEnabled) {
+    traceSetter(
+      `[TRACE] OGA percentile floor enabled: minimum=${normalizedMinOGAPercentile.toFixed(1)}% reference=${finitePastOGAScores.length} scores`
+    );
+  }
 
   const stats = {
     entropy: 0,
@@ -232,7 +267,6 @@ export function generateCandidates(
     accepted: 0
   };
 
-  const ratioSummary: any = {};  // placeholder in case you aggregate ratios later
   const warnings: string[] = [];
   const hasSplitFiveBucketConstraint = typeof mainZeroOptions?.maxCount === 'number' || typeof mainFiveOptions?.maxCount === 'number';
   const clampMainDigitBoost = (boost: number | undefined): number => {
@@ -318,11 +352,7 @@ export function generateCandidates(
   // HC3 overlap (numbers that appear in both last two draws)
   let hc3Numbers: number[] = [];
   if (knobs.enableHC3 && history.length >= 2) {
-    const lastDraw = history[history.length - 1];
-    const prevDraw = history[history.length - 2];
-    const lastAll = [...lastDraw.main, ...lastDraw.supp];
-    const prevAll = [...prevDraw.main, ...prevDraw.supp];
-    hc3Numbers = lastAll.filter(n => prevAll.includes(n));
+    hc3Numbers = getHC3OverlapNumbers(history);
     traceSetter(`[TRACE] HC3 enabled: overlap with last two draws -> count=${hc3Numbers.length}${hc3Numbers.length > 0 ? ` [${hc3Numbers.join(", ")}]` : ""}`);
   }
 
@@ -448,7 +478,7 @@ export function generateCandidates(
   }
 
   // Pre-calc last draw for quick overlap metrics
-  const lastDraw = history.length ? history[history.length - 1] : null;
+  const lastDraw = getMostRecentDraw(history);
   const lastDrawSet = lastDraw
     ? new Set([...lastDraw.main, ...lastDraw.supp])
     : null;
@@ -492,6 +522,18 @@ export function generateCandidates(
       `[TRACE] Monthly repeat bias enabled: ${boostedNums.length} numbers boosted | ${summary}`
     );
   }
+  const activeMonthEndCarryOverEntries = Object.entries(monthEndCarryOverWeights ?? {})
+    .map(([key, value]) => ({ number: Number(key), factor: Number(value) }))
+    .filter(({ number, factor }) => number >= 1 && number <= 45 && Number.isFinite(factor) && Math.abs(factor - 1) > 1e-9)
+    .sort((left, right) => right.factor - left.factor || left.number - right.number);
+  if (activeMonthEndCarryOverEntries.length > 0) {
+    traceSetter(
+      `[TRACE] Month-end carry-over weighting enabled: ${activeMonthEndCarryOverEntries.length} active number${activeMonthEndCarryOverEntries.length === 1 ? "" : "s"} | ${activeMonthEndCarryOverEntries
+        .slice(0, 12)
+        .map(({ number, factor }) => `${number}×${factor.toFixed(2)}`)
+        .join(", ")}`
+    );
+  }
 
   const activeMainDigitBoosts = Object.entries(mainDigitBoosts)
     .flatMap(([digit, boosts]) => {
@@ -524,6 +566,31 @@ export function generateCandidates(
       `[TRACE] Digit-width rule enabled: ${digitWidthTargets.singleDigitPercent}% single-digit / ${digitWidthTargets.twoDigitPercent}% two-digit | ${formatDigitWidthScopeLabel(digitWidthTargets.scope)} | strict target ${digitWidthTargets.singleDigitCount} single-digit + ${digitWidthTargets.twoDigitCount} two-digit`
     );
   }
+  const monthlySelectedNumbersByBucket = monthlyBucketOptions?.selectedNumbersByBucket;
+  const monthlySelectedNumberBiasEnabled = !!monthlyBucketOptions?.selectedNumberBiasEnabled && !!monthlySelectedNumbersByBucket;
+  if (monthlySelectedNumberBiasEnabled && monthlySelectedNumbersByBucket) {
+    const bucketTraceLabels: Record<MonthlyBucketKey, string> = {
+      undrawn: "und",
+      times1: "1x",
+      times2: "2x",
+      times3: "3x",
+      times4: "4x",
+      times5: "5x",
+      times6: "6x",
+      times7: "7x",
+      times8: "8x+",
+    };
+    const selectionSummary = MONTHLY_BUCKET_KEYS
+      .map((bucketKey) => ({ bucketKey, count: monthlySelectedNumbersByBucket[bucketKey]?.length ?? 0 }))
+      .filter(({ count }) => count > 0)
+      .map(({ bucketKey, count }) => `${bucketTraceLabels[bucketKey]}:${count}`)
+      .join(" ");
+    if (selectionSummary) {
+      traceSetter(
+        `[TRACE] Monthly constructive selected-number bias enabled: ${MONTHLY_SELECTED_NUMBER_BIAS_REPEATS}x weight for clicked bucket numbers | ${selectionSummary} | favoured, not forced`
+      );
+    }
+  }
 
   const buildWeightedPool = (pool: number[], applyMainDigitBoosts: boolean = false) => {
     const out: number[] = [];
@@ -553,6 +620,10 @@ export function generateCandidates(
         const repBias = monthlyRepeatBiasWeights[n] ?? 1;
         if (repBias !== 1) factor *= repBias;
       }
+      const carryOverBias = monthEndCarryOverWeights?.[n] ?? 1;
+      if (carryOverBias !== 1) {
+        factor *= carryOverBias;
+      }
       if (factor < 1) {
         // Probabilistic inclusion: e.g. factor=0.3 → 30 % chance of 1 rep
         if (Math.random() < factor) out.push(n);
@@ -579,6 +650,35 @@ export function generateCandidates(
     return picked;
   };
 
+  const drawDigitWidthConstrainedUnique = (
+    pool: number[],
+    singleDigitNeeded: number,
+    twoDigitNeeded: number,
+    applyMainDigitBoosts: boolean = false,
+  ): number[] | null => {
+    if (singleDigitNeeded < 0 || twoDigitNeeded < 0) return null;
+    const singleDigitPool = pool.filter((n) => n >= 1 && n <= 9);
+    const twoDigitPool = pool.filter((n) => n >= 10 && n <= 45);
+    if (singleDigitPool.length < singleDigitNeeded || twoDigitPool.length < twoDigitNeeded) return null;
+
+    const singleDigitPicks = drawWeightedUnique(singleDigitPool, singleDigitNeeded, applyMainDigitBoosts);
+    if (singleDigitPicks.length !== singleDigitNeeded) return null;
+
+    const twoDigitPicks = drawWeightedUnique(twoDigitPool, twoDigitNeeded, applyMainDigitBoosts);
+    if (twoDigitPicks.length !== twoDigitNeeded) return null;
+
+    return [...singleDigitPicks, ...twoDigitPicks];
+  };
+
+  const shuffledIntegerRange = (min: number, max: number): number[] => {
+    const values = Array.from({ length: Math.max(0, max - min + 1) }, (_, index) => min + index);
+    for (let i = values.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [values[i], values[j]] = [values[j], values[i]];
+    }
+    return values;
+  };
+
   const sampleWithoutReplacement = (pool: number[], k: number): number[] => {
     const arr = pool.slice();
     const res: number[] = [];
@@ -588,6 +688,30 @@ export function generateCandidates(
     }
     for (let i = 0; i < k && i < arr.length; i++) res.push(arr[i]);
     return res;
+  };
+
+  const sampleMonthlyBucketWithSelectionBias = (
+    pool: number[],
+    k: number,
+    preferredSet: ReadonlySet<number>
+  ): number[] => {
+    if (k <= 0 || pool.length === 0) return [];
+    if (preferredSet.size === 0) return sampleWithoutReplacement(pool, k);
+    let weighted: number[] = [];
+    for (const n of pool) {
+      const selectedBias = preferredSet.has(n) ? MONTHLY_SELECTED_NUMBER_BIAS_REPEATS : 1;
+      const carryOverBias = Math.max(0.1, monthEndCarryOverWeights?.[n] ?? 1);
+      const reps = Math.max(1, Math.round(selectedBias * carryOverBias));
+      for (let i = 0; i < reps; i++) weighted.push(n);
+    }
+    const picked: number[] = [];
+    while (picked.length < k && weighted.length > 0) {
+      const idx = Math.floor(Math.random() * weighted.length);
+      const val = weighted[idx];
+      picked.push(val);
+      weighted = weighted.filter((n) => n !== val);
+    }
+    return picked;
   };
 
   // Pre-compute supp base pool: 1-45 minus static exclusions (constant across iterations)
@@ -617,7 +741,7 @@ export function generateCandidates(
     if (monthlyBucketOptions?.constraints && monthlyBucketOptions?.buckets) {
       const { constraints, buckets } = monthlyBucketOptions;
       const maxSlots = 8;
-      const tryFill = (bucketKey: keyof typeof buckets, needed: number) => {
+      const tryFill = (bucketKey: MonthlyBucketKey, needed: number) => {
         if (needed <= 0) return;
         if (main.length + supp.length >= maxSlots) return;
         const avail = Array.from(buckets[bucketKey]).filter((n) =>
@@ -625,21 +749,18 @@ export function generateCandidates(
         );
         const take = Math.min(needed, avail.length, maxSlots - main.length - supp.length);
         if (take <= 0) return;
-        const picks = sampleWithoutReplacement(avail, take);
+        const preferredSet = monthlySelectedNumberBiasEnabled
+          ? new Set((monthlySelectedNumbersByBucket?.[bucketKey] ?? []).filter((n) => avail.includes(n)))
+          : new Set<number>();
+        const picks = sampleMonthlyBucketWithSelectionBias(avail, take, preferredSet);
         for (const n of picks) {
           if (main.length < 6) main.push(n);
           else if (supp.length < 2) supp.push(n);
         }
       };
-      tryFill('undrawn', constraints.undrawn);
-      tryFill('times1', constraints.times1);
-      tryFill('times2', constraints.times2);
-      tryFill('times3', constraints.times3);
-      tryFill('times4', constraints.times4);
-      tryFill('times5', constraints.times5);
-      tryFill('times6', constraints.times6);
-      tryFill('times7', constraints.times7);
-      tryFill('times8', constraints.times8);
+      for (const bucketKey of MONTHLY_BUCKET_KEYS) {
+        tryFill(bucketKey, constraints[bucketKey]);
+      }
     }
 
     if (digitWidthTargets.enabled) {
@@ -652,25 +773,100 @@ export function generateCandidates(
       }
     }
 
-    // Fill main from remaining pool
-    const restPool = mainPool.filter(n => !main.includes(n));
-    const drawnMain = drawWeightedUnique(restPool, 6 - main.length, true);
-    main = [...main, ...drawnMain];
-    if (main.length < 6) { stats.exclusions++; continue; }
-    main.sort((a, b) => a - b);
+    if (digitWidthTargets.enabled && digitWidthTargets.scope === "mainAndSupp") {
+      const countedSeedNumbers = [...main, ...supp];
+      const seedSingleCount = countSingleDigitNumbers(countedSeedNumbers);
+      const seedTwoDigitCount = countedSeedNumbers.length - seedSingleCount;
+      const totalSingleNeeded = digitWidthTargets.singleDigitCount - seedSingleCount;
+      const totalTwoDigitNeeded = digitWidthTargets.twoDigitCount - seedTwoDigitCount;
+      const mainSlots = 6 - main.length;
+      const suppSlots = 2 - supp.length;
+      const minMainSingleDigits = Math.max(0, totalSingleNeeded - suppSlots);
+      const maxMainSingleDigits = Math.min(mainSlots, totalSingleNeeded);
+      const mainSingleDigitOptions = shuffledIntegerRange(minMainSingleDigits, maxMainSingleDigits);
+      let filledDigitWidthCandidate = false;
 
-    // Build supp pool (exclude already used; static exclusions already removed in suppBasePool)
-    const usedSet = new Set([...main, ...supp]);
-    const suppPool = suppBasePool.filter(n => !usedSet.has(n));
-    const drawnSupp = drawWeightedUnique(suppPool, 2 - supp.length, true);
-    supp = [...supp, ...drawnSupp];
-    if (supp.length < 2) { stats.exclusions++; continue; }
+      for (const mainSingleDigitsNeeded of mainSingleDigitOptions) {
+        const mainTwoDigitsNeeded = mainSlots - mainSingleDigitsNeeded;
+        const suppSingleDigitsNeeded = totalSingleNeeded - mainSingleDigitsNeeded;
+        const suppTwoDigitsNeeded = totalTwoDigitNeeded - mainTwoDigitsNeeded;
+        if (mainTwoDigitsNeeded < 0 || suppSingleDigitsNeeded < 0 || suppTwoDigitsNeeded < 0) continue;
+
+        const restPool = mainPool.filter((n) => !main.includes(n) && !supp.includes(n));
+        const drawnMain = drawDigitWidthConstrainedUnique(
+          restPool,
+          mainSingleDigitsNeeded,
+          mainTwoDigitsNeeded,
+          true,
+        );
+        if (!drawnMain || drawnMain.length !== mainSlots) continue;
+
+        const candidateMain = [...main, ...drawnMain];
+        const usedAfterMain = new Set([...candidateMain, ...supp]);
+        const suppPool = suppBasePool.filter((n) => !usedAfterMain.has(n));
+        const drawnSupp = drawDigitWidthConstrainedUnique(
+          suppPool,
+          suppSingleDigitsNeeded,
+          suppTwoDigitsNeeded,
+          true,
+        );
+        if (!drawnSupp || drawnSupp.length !== suppSlots) continue;
+
+        main = candidateMain;
+        supp = [...supp, ...drawnSupp];
+        filledDigitWidthCandidate = true;
+        break;
+      }
+
+      if (!filledDigitWidthCandidate) {
+        stats.digitWidth++;
+        continue;
+      }
+    } else {
+      const mainSlots = 6 - main.length;
+      if (digitWidthTargets.enabled && digitWidthTargets.scope === "main") {
+        const seedSingleCount = countSingleDigitNumbers(main);
+        const seedTwoDigitCount = main.length - seedSingleCount;
+        const singleDigitsNeeded = digitWidthTargets.singleDigitCount - seedSingleCount;
+        const twoDigitsNeeded = digitWidthTargets.twoDigitCount - seedTwoDigitCount;
+        const restPool = mainPool.filter((n) => !main.includes(n) && !supp.includes(n));
+        const drawnMain = drawDigitWidthConstrainedUnique(
+          restPool,
+          singleDigitsNeeded,
+          twoDigitsNeeded,
+          true,
+        );
+        if (!drawnMain || drawnMain.length !== mainSlots) {
+          stats.digitWidth++;
+          continue;
+        }
+        main = [...main, ...drawnMain];
+      } else {
+        const restPool = mainPool.filter((n) => !main.includes(n) && !supp.includes(n));
+        const drawnMain = drawWeightedUnique(restPool, mainSlots, true);
+        main = [...main, ...drawnMain];
+      }
+      if (main.length < 6) { stats.exclusions++; continue; }
+
+      // Build supp pool (exclude already used; static exclusions already removed in suppBasePool)
+      const usedSet = new Set([...main, ...supp]);
+      const suppPool = suppBasePool.filter(n => !usedSet.has(n));
+      const drawnSupp = drawWeightedUnique(suppPool, 2 - supp.length, true);
+      supp = [...supp, ...drawnSupp];
+      if (supp.length < 2) { stats.exclusions++; continue; }
+    }
+
+    main.sort((a, b) => a - b);
     supp.sort((a, b) => a - b);
 
     const nums8 = [...main, ...supp];
 
     // SAFETY: Final exclusion guard (should be redundant, but ensures no leaks)
     if (nums8.some(n => fullExcludedSet.has(n))) {
+      stats.exclusions++;
+      continue;
+    }
+    if (new Set(nums8).size !== nums8.length) {
       stats.exclusions++;
       continue;
     }
@@ -728,11 +924,14 @@ export function generateCandidates(
       }
     }
 
-    // Odd/Even ratio filter
+    let oddEvenRatio: string | null = null;
+
+    // Odd/Even ratio quota filter
     if (selectedOddEvenRatios.length > 0) {
       const odd = nums8.filter(n => n % 2 === 1).length;
-      const ratio = `${odd}:${8 - odd}`;
-      if (!selectedOddEvenRatios.includes(ratio)) { stats.oddEven++; continue; }
+      oddEvenRatio = `${odd}:${8 - odd}`;
+      const quota = oddEvenQuotas[oddEvenRatio] ?? 0;
+      if (quota <= 0 || (oddEvenQuotaCounts[oddEvenRatio] ?? 0) >= quota) { stats.oddEven++; continue; }
     }
 
     // Tricky rule (reject extreme all-odd/all-even patterns)
@@ -808,9 +1007,13 @@ if (patternOptions?.constraints?.length && patternOptions?.mode === 'restrict') 
     if (knobs.enableHamming && minHammingBit(candidateMainMask, main.length, histBitmasks) < hammingThreshold) { stats.hamming++; continue; }
     if (knobs.enableJaccard && maxJaccardBit(candidateMainMask, main.length, histBitmasks) > jaccardThreshold) { stats.jaccard++; continue; }
 
+    let candidateOGA: number | null = null;
+    if (ogaBiasOptions?.enabled || minOGAFloorEnabled) {
+      candidateOGA = computeOGA(nums8, history, spokeCount);
+    }
+
     // OGA forecast bias acceptance — deterministic by raw candidate OGA vs bands/deciles
-    if (ogaBiasOptions?.enabled) {
-      const candidateOGA = computeOGA(nums8, history, spokeCount);
+    if (ogaBiasOptions?.enabled && candidateOGA !== null) {
       let acceptedByDecile = false;
       if (ogaBiasOptions.deciles && Array.isArray(ogaBiasOptions.preferredDeciles) && ogaBiasOptions.preferredDeciles.length) {
         const th = ogaBiasOptions.deciles.thresholds || [];
@@ -852,6 +1055,14 @@ if (patternOptions?.constraints?.length && patternOptions?.mode === 'restrict') 
       }
     }
 
+    if (minOGAFloorEnabled && candidateOGA !== null) {
+      const percentile = getOGAPercentile(candidateOGA, finitePastOGAScores);
+      if (percentile < normalizedMinOGAPercentile) {
+        stats.ogaBias++;
+        continue;
+      }
+    }
+
     // ACCEPT
     // Deduplicate: reject if this exact main+supp combo was already accepted
     const candidateKey = `${main.join(',')};${supp.join(',')}`;
@@ -864,7 +1075,10 @@ if (patternOptions?.constraints?.length && patternOptions?.mode === 'restrict') 
       const sumTol = Math.max(0, patternOptions?.sumTolerance ?? 0);
       patternMatches = matchesAnyPattern(pat, patternOptions.constraints, sumTol);
     }
-    candidates.push({ main, supp, patternMatches } as any);
+    candidates.push({ main, supp, patternMatches });
+    if (oddEvenRatio) {
+      oddEvenQuotaCounts[oddEvenRatio] = (oddEvenQuotaCounts[oddEvenRatio] ?? 0) + 1;
+    }
     stats.accepted++;
   }
 
@@ -873,6 +1087,14 @@ if (patternOptions?.constraints?.length && patternOptions?.mode === 'restrict') 
   if (candidates.length < num && attempts >= maxAttempts) {
      warnings.push(`Stopped after ${attempts} attempts; generated ${candidates.length}/${num}. Consider loosening constraints (e.g., main ending-digit max rules) or increasing attempt multiplier (currently ${effectiveAttemptMultiplier}).`);
    }
+  if (selectedOddEvenRatios.length > 0) {
+    const shortfalls = Object.entries(oddEvenQuotas)
+      .map(([ratio, quota]) => ({ ratio, missing: quota - (oddEvenQuotaCounts[ratio] ?? 0) }))
+      .filter((item) => item.missing > 0);
+    if (shortfalls.length > 0) {
+      warnings.push(`Odd/even ratio quotas short by ${shortfalls.map((item) => `${item.ratio}:${item.missing}`).join(", ")}. Loosen filters or increase attempt multiplier to preserve the requested percentage split.`);
+    }
+  }
  
    // Trace ending-digit enforcement summary for debugging/visibility
    if (!hasSplitFiveBucketConstraint && typeof div5Options?.maxMainCount === 'number' && div5Options.maxMainCount >= 0) {
@@ -913,13 +1135,33 @@ if (patternOptions?.constraints?.length && patternOptions?.mode === 'restrict') 
     }).join(' | ');
     traceSetter(`[TRACE] Ending-digit boost results: ${boostOutcomeSummary}`);
   }
+  if (activeMonthEndCarryOverEntries.length > 0) {
+    const acceptedCandidateCount = Math.max(1, candidates.length);
+    const carryOverSummary = candidates.reduce((acc, candidate) => {
+      const scored = scoreMonthEndCarryOverCandidate([...candidate.main, ...candidate.supp], monthEndCarryOverWeights);
+      acc.hits += scored.hits;
+      acc.score += scored.normalizedScore;
+      return acc;
+    }, { hits: 0, score: 0 });
+    traceSetter(
+      `[TRACE] Month-end carry-over results: ${carryOverSummary.hits} weighted hit${carryOverSummary.hits === 1 ? '' : 's'} across ${candidates.length} accepted candidates (${(carryOverSummary.hits / acceptedCandidateCount).toFixed(2)} per candidate, avg ranking score ${(carryOverSummary.score / acceptedCandidateCount * 100).toFixed(1)}%)`
+    );
+  }
 
   if (DEBUG) {
     console.log('[generateCandidates] rejection stats', stats);
   }
 
+  const acceptedCandidates = candidates.slice(0, num);
+  const ratioSummary = summarizeOddEvenRatios(
+    acceptedCandidates,
+    num,
+    attempts,
+    selectedOddEvenRatios.length > 0 ? oddEvenQuotas : undefined
+  );
+
   return {
-    candidates: candidates.slice(0, num),
+    candidates: acceptedCandidates,
     ratioSummary,
     quotaWarning: warnings.length ? warnings.join(" ") : undefined,
     rejectionStats: stats

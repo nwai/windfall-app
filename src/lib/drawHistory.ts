@@ -7,6 +7,7 @@ export type DrawRow = {
   date: string;
   mains: number[];
   supps: number[];
+  isSimulated?: boolean;
 };
 
 export type CsvParseResult = {

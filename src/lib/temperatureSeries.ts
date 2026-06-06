@@ -1,4 +1,5 @@
 import { Draw } from "../types";
+import { sortDrawsChronologically } from "./recentDraws";
 
 export type Metric = "ema" | "recency" | "hybrid";
 export type EmaNormalize = "global" | "per-number";
@@ -15,11 +16,7 @@ export interface TemperatureOptions {
 }
 
 function toChronological(history: Draw[]) {
-  if (history.length <= 1) return history.slice();
-  const first = new Date(history[0].date).getTime();
-  const last = new Date(history[history.length - 1].date).getTime();
-  const newestFirst = history.length > 1 && first > last;
-  return newestFirst ? history.slice().reverse() : history.slice();
+  return sortDrawsChronologically(history);
 }
 
 export function computeTemperatureAndBuckets(historyRaw: Draw[], opts: TemperatureOptions = {}) {

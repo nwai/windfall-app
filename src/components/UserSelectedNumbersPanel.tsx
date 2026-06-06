@@ -1,14 +1,23 @@
 import React from "react";
 
+import {
+  MAX_USER_SELECTED_NUMBER,
+  areUserSelectedNumberListsEqual,
+  buildUserSelectionSimulation,
+  normalizeUserSelectedNumbers,
+  toggleUserSelectedNumber,
+} from "../lib/userSelectedNumbers";
+
+const NUMBER_OPTIONS = Array.from({ length: MAX_USER_SELECTED_NUMBER }, (_, index) => index + 1);
+
 interface UserSelectedNumbersPanelProps {
   userSelectedNumbers: number[];
   setUserSelectedNumbers: React.Dispatch<React.SetStateAction<number[]>>;
   title?: string;
-  persistKey?: string; // optional localStorage key
-  // New: simulate integration
+  persistKey?: string;
   onSimulate?: (nums: number[]) => void;
   onClear?: () => void;
-  isSimulatingUser?: boolean; // visual feedback when user-based simulation active
+  isSimulatingUser?: boolean;
   autoExcludeUnselected?: boolean;
   onToggleAutoExclude?: (enabled: boolean) => void;
 }
@@ -16,7 +25,7 @@ interface UserSelectedNumbersPanelProps {
 export const UserSelectedNumbersPanel: React.FC<UserSelectedNumbersPanelProps> = ({
   userSelectedNumbers,
   setUserSelectedNumbers,
-  title = "User Selected Numbers (Highlight Only)",
+  title = "User Selected Numbers",
   persistKey = "userSelectedNumbers",
   onSimulate,
   onClear,
@@ -24,147 +33,311 @@ export const UserSelectedNumbersPanel: React.FC<UserSelectedNumbersPanelProps> =
   autoExcludeUnselected = false,
   onToggleAutoExclude,
 }) => {
+  const hasLoadedPersistedSelection = React.useRef(false);
+  const pendingPersistedSelection = React.useRef<number[] | null>(null);
 
-  // Optional persistence
-  React.useEffect(() => {
-    try {
-      localStorage.setItem(persistKey, JSON.stringify(userSelectedNumbers));
-    } catch { /* ignore storage errors */ }
-  }, [userSelectedNumbers, persistKey]);
+  const selectedNumbers = React.useMemo(
+    () => normalizeUserSelectedNumbers(userSelectedNumbers),
+    [userSelectedNumbers],
+  );
+  const selectedSet = React.useMemo(() => new Set(selectedNumbers), [selectedNumbers]);
+  const simulation = React.useMemo(
+    () => buildUserSelectionSimulation(selectedNumbers),
+    [selectedNumbers],
+  );
+
+  const selectedCount = selectedNumbers.length;
+  const autoExcludeAvailable = selectedCount > 0 && !!onToggleAutoExclude;
+  const autoExcludeActive = autoExcludeAvailable && autoExcludeUnselected;
+  const autoExcludedCount = autoExcludeActive ? MAX_USER_SELECTED_NUMBER - selectedCount : 0;
+  const simulateDisabled = !onSimulate || (!isSimulatingUser && !simulation.ready);
 
   React.useEffect(() => {
+    if (hasLoadedPersistedSelection.current) return;
+    hasLoadedPersistedSelection.current = true;
+
     try {
       const raw = localStorage.getItem(persistKey);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          setUserSelectedNumbers(parsed.filter((n: any) => Number.isInteger(n) && n >= 1 && n <= 45));
-        }
+      if (!raw) return;
+      const parsed: unknown = JSON.parse(raw);
+      const persisted = normalizeUserSelectedNumbers(Array.isArray(parsed) ? parsed : []);
+      if (persisted.length > 0 && !isSameNumberList(userSelectedNumbers, persisted)) {
+        pendingPersistedSelection.current = persisted;
+        setUserSelectedNumbers(persisted);
       }
-    } catch { /* ignore */ }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    } catch {
+      pendingPersistedSelection.current = null;
+    }
+  }, [persistKey, setUserSelectedNumbers, userSelectedNumbers]);
 
-  const toggle = (n: number) => {
-    setUserSelectedNumbers(prev =>
-      prev.includes(n) ? prev.filter(x => x !== n) : [...prev, n]
-    );
-  };
+  React.useEffect(() => {
+    const pending = pendingPersistedSelection.current;
+    if (pending && !isSameNumberList(selectedNumbers, pending)) return;
+    pendingPersistedSelection.current = null;
 
-  const handleClearAll = () => {
+    try {
+      localStorage.setItem(persistKey, JSON.stringify(selectedNumbers));
+    } catch {
+      // Browser storage can be unavailable in privacy modes; app state remains authoritative.
+    }
+  }, [persistKey, selectedNumbers]);
+
+  React.useEffect(() => {
+    if (!isSameNumberList(userSelectedNumbers, selectedNumbers)) {
+      setUserSelectedNumbers(selectedNumbers);
+    }
+  }, [selectedNumbers, setUserSelectedNumbers, userSelectedNumbers]);
+
+  React.useEffect(() => {
+    if (autoExcludeUnselected && selectedCount === 0) {
+      onToggleAutoExclude?.(false);
+    }
+  }, [autoExcludeUnselected, onToggleAutoExclude, selectedCount]);
+
+  const handleToggle = React.useCallback((number: number) => {
+    setUserSelectedNumbers((current) => toggleUserSelectedNumber(current, number));
+  }, [setUserSelectedNumbers]);
+
+  const handleClearAll = React.useCallback(() => {
     onClear?.();
     onToggleAutoExclude?.(false);
     setUserSelectedNumbers([]);
-  };
+  }, [onClear, onToggleAutoExclude, setUserSelectedNumbers]);
 
-  const handleSimulate = () => {
+  const handleSimulate = React.useCallback(() => {
     if (!onSimulate) return;
-    // Toggle behavior: if currently simulated via user, pressing again will ask parent to clear
     if (isSimulatingUser) {
       onClear?.();
       return;
     }
-    const nums = userSelectedNumbers.slice(0, 8);
-    if (nums.length < 6) {
-      onSimulate([]); // parent can toast about insufficient selection if desired
+    if (!simulation.ready) {
+      onSimulate([]);
       return;
     }
-    onSimulate(nums);
-  };
+    onSimulate(simulation.numbers);
+  }, [isSimulatingUser, onClear, onSimulate, simulation]);
 
   return (
-    <section style={{
-      border: "1px solid #eee",
-      borderRadius: 8,
-      padding: 16,
-      background: "#fff",
-      marginTop: 16
-    }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
-        <h3 style={{ margin: 0, fontSize: 16 }}>{title}</h3>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+    <section style={panel}>
+      <div style={header}>
+        <div>
+          <h3 style={titleStyle}>{title}</h3>
+          <div style={subtleText}>
+            {selectedCount > 0 ? `Selected set: ${selectedNumbers.join(", ")}` : "Selected set: none"}
+          </div>
+        </div>
+        <div style={toolbar}>
           <button
             type="button"
             onClick={handleSimulate}
-            style={{
-              padding: "6px 12px",
-              borderRadius: 6,
-              border: isSimulatingUser ? "1px solid #1976d2" : "1px solid #bbb",
-              background: isSimulatingUser ? "#1976d2" : "#fafafa",
-              color: isSimulatingUser ? "#fff" : "#222",
-              cursor: "pointer",
-              fontSize: 12,
-              fontWeight: 600
-            }}
-            title={isSimulatingUser ? "Simulated (click to clear)" : "Simulate selected numbers in DGA grid"}
+            disabled={simulateDisabled}
+            style={simulateButton(isSimulatingUser, simulateDisabled)}
+            title={isSimulatingUser ? "Clear the user-number simulation" : simulation.reason}
           >
-            {isSimulatingUser ? "Simulated" : "Simulate"}
+            {isSimulatingUser ? "Clear Sim" : "Simulate"}
           </button>
-          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }} title="When on, every unselected number becomes a user exclusion">
-            <input
-              type="checkbox"
-              checked={autoExcludeUnselected}
-              onChange={(e) => onToggleAutoExclude?.(e.target.checked)}
-            />
-            Exclude unselected
-          </label>
-          <div style={{ fontSize: 12, color: "#555" }}>
-            Selected: {userSelectedNumbers.length}
-          </div>
           <button
             type="button"
             onClick={handleClearAll}
-            style={{
-              padding: "4px 10px",
-              border: "1px solid #ccc",
-              background: "#fafafa",
-              borderRadius: 4,
-              cursor: "pointer",
-              fontSize: 12
-            }}
-            title="Clear all selected highlight numbers and simulation"
+            disabled={selectedCount === 0 && !isSimulatingUser && !autoExcludeUnselected}
+            style={secondaryButton(selectedCount === 0 && !isSimulatingUser && !autoExcludeUnselected)}
+            title="Clear selected numbers and linked simulation state"
           >
             Clear
           </button>
         </div>
       </div>
-      <div style={{
-        display: "flex",
-        flexWrap: "wrap",
-        gap: 6,
-        marginTop: 10
-      }}>
-        {Array.from({ length: 45 }, (_, i) => i + 1).map(n => {
-          const active = userSelectedNumbers.includes(n);
-            return (
-              <button
-                key={n}
-                type="button"
-                onClick={() => toggle(n)}
-                style={{
-                  width: 40,
-                  padding: "6px 0",
-                  borderRadius: 6,
-                  border: active ? "2px solid #1976d2" : "1px solid #bbb",
-                  background: active ? "#1976d2" : "#fff",
-                  color: active ? "#fff" : "#222",
-                  fontWeight: active ? 600 : 400,
-                  cursor: "pointer",
-                  fontSize: 12,
-                  transition: "background 0.15s,border 0.15s"
-                }}
-                title={active ? "Click to remove" : "Click to add"}
-              >
-                {n}
-              </button>
-            );
+
+      <div style={metricsGrid}>
+        <Metric label="Selected" value={String(selectedCount)} />
+        <Metric
+          label="Simulation"
+          value={simulation.ready ? `${simulation.main.length}+${simulation.supp.length}` : `${selectedCount}/6`}
+        />
+        <Metric label="Auto-Exclude" value={autoExcludeActive ? `${autoExcludedCount} held` : "Off"} />
+      </div>
+
+      <div style={numberGrid} aria-label="User selected number buttons">
+        {NUMBER_OPTIONS.map((number) => {
+          const active = selectedSet.has(number);
+          return (
+            <button
+              key={number}
+              type="button"
+              onClick={() => handleToggle(number)}
+              style={numberButton(active)}
+              aria-pressed={active}
+              title={active ? `Remove ${number}` : `Add ${number}`}
+            >
+              {number}
+            </button>
+          );
         })}
       </div>
-      <div style={{ fontSize: 11, color: "#666", marginTop: 8, lineHeight: 1.4 }}>
-        These selections highlight matches in Generated Candidates and show a SelHits count. They DO NOT force inclusion or
-        affect weighting (different from forced/trend lists and manual simulation). Turning on "Exclude unselected" will add every
-        unselected number to User Exclusions until toggled off or cleared via NHB block clear.
+
+      <div style={footerRow}>
+        <label style={toggleLabel(autoExcludeAvailable)} title="Use only the selected set as the eligible number space">
+          <input
+            type="checkbox"
+            checked={autoExcludeActive}
+            disabled={!autoExcludeAvailable}
+            onChange={(event) => onToggleAutoExclude?.(event.currentTarget.checked)}
+          />
+          Exclude unselected
+        </label>
+        <span style={subtleText}>
+          {autoExcludeActive
+            ? `${selectedCount} numbers remain eligible for user-controlled generation filters.`
+            : "Selections are available to highlights, weighted targets, selected boosts, and simulation."}
+        </span>
       </div>
     </section>
   );
 };
+
+interface MetricProps {
+  label: string;
+  value: string;
+}
+
+const Metric: React.FC<MetricProps> = ({ label, value }) => (
+  <div style={metric}>
+    <span style={metricLabel}>{label}</span>
+    <b style={metricValue}>{value}</b>
+  </div>
+);
+
+function isSameNumberList(left: readonly number[], right: readonly number[]): boolean {
+  return areUserSelectedNumberListsEqual(left, right)
+    && left.length === right.length
+    && left.every((value, index) => value === right[index]);
+}
+
+const panel: React.CSSProperties = {
+  border: "1px solid #e5e7eb",
+  borderRadius: 8,
+  padding: 14,
+  background: "#fff",
+  marginTop: 16,
+};
+
+const header: React.CSSProperties = {
+  display: "flex",
+  alignItems: "flex-start",
+  justifyContent: "space-between",
+  gap: 12,
+  flexWrap: "wrap",
+};
+
+const titleStyle: React.CSSProperties = {
+  margin: 0,
+  fontSize: 15,
+};
+
+const subtleText: React.CSSProperties = {
+  fontSize: 12,
+  color: "#64748b",
+  lineHeight: 1.35,
+};
+
+const toolbar: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  flexWrap: "wrap",
+};
+
+const metricsGrid: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(118px, 1fr))",
+  gap: 8,
+  marginTop: 12,
+};
+
+const metric: React.CSSProperties = {
+  minHeight: 48,
+  padding: "8px 10px",
+  border: "1px solid #e2e8f0",
+  borderRadius: 8,
+  background: "#f8fafc",
+};
+
+const metricLabel: React.CSSProperties = {
+  display: "block",
+  fontSize: 11,
+  color: "#64748b",
+};
+
+const metricValue: React.CSSProperties = {
+  display: "block",
+  marginTop: 2,
+  fontSize: 15,
+  color: "#0f172a",
+};
+
+const numberGrid: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fill, minmax(38px, 42px))",
+  gap: 6,
+  justifyContent: "start",
+  marginTop: 12,
+};
+
+const footerRow: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 10,
+  flexWrap: "wrap",
+  marginTop: 12,
+};
+
+const simulateButton = (active: boolean, disabled: boolean): React.CSSProperties => ({
+  minHeight: 32,
+  padding: "6px 11px",
+  border: `1px solid ${active ? "#2563eb" : "#cbd5e1"}`,
+  borderRadius: 6,
+  background: disabled ? "#f1f5f9" : active ? "#2563eb" : "#fff",
+  color: disabled ? "#94a3b8" : active ? "#fff" : "#0f172a",
+  cursor: disabled ? "not-allowed" : "pointer",
+  fontSize: 12,
+  fontWeight: 700,
+  lineHeight: 1.2,
+});
+
+const secondaryButton = (disabled: boolean): React.CSSProperties => ({
+  minHeight: 32,
+  padding: "6px 10px",
+  border: "1px solid #cbd5e1",
+  borderRadius: 6,
+  background: disabled ? "#f1f5f9" : "#fff",
+  color: disabled ? "#94a3b8" : "#0f172a",
+  cursor: disabled ? "not-allowed" : "pointer",
+  fontSize: 12,
+  lineHeight: 1.2,
+});
+
+const numberButton = (active: boolean): React.CSSProperties => ({
+  width: 38,
+  height: 32,
+  border: `1px solid ${active ? "#2563eb" : "#cbd5e1"}`,
+  borderRadius: 6,
+  background: active ? "#2563eb" : "#fff",
+  boxShadow: active ? "inset 0 0 0 1px #2563eb" : "none",
+  color: active ? "#fff" : "#0f172a",
+  cursor: "pointer",
+  fontSize: 12,
+  fontWeight: active ? 700 : 500,
+  lineHeight: 1,
+});
+
+const toggleLabel = (enabled: boolean): React.CSSProperties => ({
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 6,
+  minHeight: 28,
+  color: enabled ? "#0f172a" : "#94a3b8",
+  cursor: enabled ? "pointer" : "not-allowed",
+  fontSize: 12,
+  fontWeight: 600,
+});

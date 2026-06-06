@@ -1,0 +1,54 @@
+import type { Draw } from "../types";
+import { parseDrawDateToEpoch } from "./recentDraws";
+
+export type InitialDrawHistorySource = "cache" | "bundled-csv" | "none";
+
+export interface InitialDrawHistoryChoice {
+  history: Draw[];
+  source: InitialDrawHistorySource;
+  reason: string;
+}
+
+const latestEpoch = (history: Draw[]): number => history.reduce((latest, draw) => {
+  const epoch = parseDrawDateToEpoch(draw.date);
+  return epoch > latest ? epoch : latest;
+}, 0);
+
+export function chooseInitialDrawHistory(
+  cachedHistory: Draw[] | null | undefined,
+  bundledCsvHistory: Draw[] | null | undefined,
+): InitialDrawHistoryChoice {
+  const cached = cachedHistory ?? [];
+  const bundled = bundledCsvHistory ?? [];
+
+  if (cached.length === 0 && bundled.length === 0) {
+    return { history: [], source: "none", reason: "No cached or bundled draw history is available." };
+  }
+  if (cached.length === 0) {
+    return { history: bundled, source: "bundled-csv", reason: "No reviewed browser cache exists." };
+  }
+  if (bundled.length === 0) {
+    return { history: cached, source: "cache", reason: "No bundled CSV draw history is available." };
+  }
+
+  const cachedLatest = latestEpoch(cached);
+  const bundledLatest = latestEpoch(bundled);
+
+  if (bundledLatest > cachedLatest) {
+    return {
+      history: bundled,
+      source: "bundled-csv",
+      reason: "Bundled CSV is newer than the reviewed browser cache.",
+    };
+  }
+
+  if (bundledLatest === cachedLatest && bundled.length > cached.length) {
+    return {
+      history: bundled,
+      source: "bundled-csv",
+      reason: "Bundled CSV has more draw rows at the same latest date than the reviewed browser cache.",
+    };
+  }
+
+  return { history: cached, source: "cache", reason: "Reviewed browser cache is at least as current as the bundled CSV." };
+}

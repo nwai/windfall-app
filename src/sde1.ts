@@ -1,4 +1,5 @@
 import { Draw } from "./types";
+import { getMostRecentDraw } from "./lib/recentDraws";
 
 /**
  * Returns a filtered main pool, the excluded numbers, and a trace string that logs:
@@ -16,8 +17,7 @@ export function getSDE1FilteredPool(history: Draw[]): { pool: number[], trace: s
       excludedNumbers: []
     };
   }
-  // Use the most recent draw (last in array)
-  const mostRecentDraw = history[history.length - 1];
+  const mostRecentDraw = getMostRecentDraw(history) ?? history[0];
   const mostRecentNumbers = [...mostRecentDraw.main, ...mostRecentDraw.supp];
 
   // Map each number to its last digit
@@ -51,6 +51,7 @@ export function getSDE1FilteredPool(history: Draw[]): { pool: number[], trace: s
 
   // Detailed trace output
   const traceLines = [
+    `SDE1: Most recent draw date: ${mostRecentDraw.date || "unknown"}`,
     `SDE1: Most recent draw numbers (main+supp): [${mostRecentNumbers.join(", ")}]`,
     `SDE1: Last digit mapping: [${lastDigits.join(", ")}]`,
     `SDE1: Last digit counts: ${JSON.stringify(digitCount)}`,
