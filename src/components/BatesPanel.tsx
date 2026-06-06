@@ -1,7 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { computeBatesWeights, type BatesParameterSet } from "../lib/batesWeightsCore";
-import { weightedSampleWithoutReplacement } from "../lib/weightedSample";
+import {
+  DEFAULT_BATES_PARAMETERS,
+  computeBatesWeights,
+  normalizeBatesParameters,
+  type BatesParameterSet,
+} from "../lib/batesWeightsCore";
 import { assessBatesGuardrails } from "../lib/batesGuardrails";
+import { buildBatesCandidate, uniqueValidNumbers, type BatesCandidate } from "../lib/batesCandidate";
 import { showToast } from "../lib/toastBus";
 import { computeBatesDiagnostics, type BatesDiagnostics } from "../lib/batesDiagnostics";
 
@@ -10,8 +15,8 @@ interface BatesPanelProps {
   forcedNumbers: number[];
   recentSignal?: number[] | null;
   conditionalProb?: number[] | null;
-  onGenerate?: (c: { main: number[]; supp: number[]; weights: number[] }) => void;
-  onParamsChange?: (p: Partial<BatesParameterSet>) => void;
+  onGenerate?: (candidate: { main: number[]; supp: number[]; weights: number[] }) => void;
+  onParamsChange?: (params: Partial<BatesParameterSet>) => void;
   controlledParams?: Partial<BatesParameterSet>;
   probabilityOverlay?: {
     pAtLeastRaw: number;
@@ -19,24 +24,21 @@ interface BatesPanelProps {
     targetRaw: number;
     targetWeighted: number;
   } | null;
-  onDiagnostics?: (d: BatesDiagnostics) => void;
+  onDiagnostics?: (diagnostics: BatesDiagnostics) => void;
 }
 
-const defaults: BatesParameterSet = {
-  k: 3,
-  dualTri: false,
-  triMode: 0.5,
-  triMode2: 0.2,
-  dualTriWeightA: 0.5,
-  mixWeight: 0.5,
-  betaHot: 0,
-  betaCold: 0,
-  betaGlobal: 0,
-  gammaConditional: 0,
-  hotQuantile: 0.7,
-  coldQuantile: 0.3,
-  highlightHotCold: true,
-};
+type NumericParamKey =
+  | "k"
+  | "triMode"
+  | "triMode2"
+  | "dualTriWeightA"
+  | "mixWeight"
+  | "betaHot"
+  | "betaCold"
+  | "betaGlobal"
+  | "gammaConditional"
+  | "hotQuantile"
+  | "coldQuantile";
 
 export const BatesPanel: React.FC<BatesPanelProps> = ({
   excludedNumbers,
@@ -49,330 +51,383 @@ export const BatesPanel: React.FC<BatesPanelProps> = ({
   probabilityOverlay,
   onDiagnostics,
 }) => {
-  const [params, setParams] = useState<BatesParameterSet>(defaults);
-  const [lastCandidate, setLastCandidate] = useState<{ main: number[]; supp: number[] } | null>(null);
+  const [params, setParams] = useState<BatesParameterSet>(DEFAULT_BATES_PARAMETERS);
+  const [lastCandidate, setLastCandidate] = useState<BatesCandidate | null>(null);
+  const [generationError, setGenerationError] = useState<string>("");
 
   useEffect(() => {
-    if (controlledParams) {
-      setParams(prev => ({ ...prev, ...controlledParams }));
-    }
+    if (!controlledParams) return;
+    setParams((prev) => normalizeBatesParameters({ ...prev, ...controlledParams }));
   }, [controlledParams]);
 
-  function update<K extends keyof BatesParameterSet>(k: K, v: BatesParameterSet[K]) {
-    setParams(prev => {
-      const next = { ...prev, [k]: v };
-      onParamsChange?.(next);
-      return next;
-    });
-  }
-
-  const weightsRes = useMemo(
+  const weightsResult = useMemo(
     () =>
       computeBatesWeights(params, {
         recentSignal: recentSignal ?? undefined,
         conditionalProb: conditionalProb ?? undefined,
       }),
-    [params, recentSignal, conditionalProb]
+    [params, recentSignal, conditionalProb],
   );
-
-  const guardrail = assessBatesGuardrails(params);
-
-  function handleGenerate() {
-    const forcedMain = forcedNumbers.slice(0, 6);
-    const forcedSupp = forcedNumbers.slice(6, 8);
-
-    const pool = Array.from({ length: 45 }, (_, i) => i + 1).filter(
-      (n) => !excludedNumbers.includes(n) && !forcedNumbers.includes(n)
-    );
-    const poolWeights = pool.map((n) => weightsRes.finalWeights[n - 1]);
-
-    const needMain = Math.max(0, 6 - forcedMain.length);
-    const pickedMain = weightedSampleWithoutReplacement(pool, poolWeights, needMain);
-
-    const remaining = pool.filter((n) => !pickedMain.includes(n));
-    const remainingWeights = remaining.map((n) => weightsRes.finalWeights[n - 1]);
-
-    const needSupp = Math.max(0, 2 - forcedSupp.length);
-    const pickedSupp = weightedSampleWithoutReplacement(remaining, remainingWeights, needSupp);
-
-    const main = [...forcedMain, ...pickedMain].slice(0, 6).sort((a, b) => a - b);
-    const supp = [...forcedSupp, ...pickedSupp].slice(0, 2).sort((a, b) => a - b);
-
-    setLastCandidate({ main, supp });
-    onGenerate?.({ main, supp, weights: weightsRes.finalWeights });
-    showToast("Bates candidate generated");
-  }
+  const activeParams = weightsResult.normalizedParams;
+  const guardrail = useMemo(() => assessBatesGuardrails(activeParams), [activeParams]);
+  const forced = useMemo(() => uniqueValidNumbers(forcedNumbers), [forcedNumbers]);
+  const excluded = useMemo(() => new Set(uniqueValidNumbers(excludedNumbers)), [excludedNumbers]);
+  const availablePoolCount = useMemo(() => {
+    const forcedSet = new Set(forced);
+    let count = forced.length;
+    for (let number = 1; number <= 45; number += 1) {
+      if (!excluded.has(number) && !forcedSet.has(number)) count += 1;
+    }
+    return count;
+  }, [excluded, forced]);
+  const candidateIssue = forced.length > 8
+    ? `Only 8 forced numbers can fit in one Bates ticket; ${forced.length} are selected.`
+    : availablePoolCount < 8
+      ? `Only ${availablePoolCount} eligible numbers are available; 8 are required.`
+      : "";
+  const topWeights = useMemo(
+    () => weightsResult.finalWeights
+      .map((weight, index) => ({ number: index + 1, weight }))
+      .sort((a, b) => b.weight - a.weight || a.number - b.number)
+      .slice(0, 8),
+    [weightsResult.finalWeights],
+  );
+  const effectiveNumbers = useMemo(() => {
+    const sumSquares = weightsResult.finalWeights.reduce((sum, weight) => sum + weight * weight, 0);
+    return sumSquares > 0 ? 1 / sumSquares : 0;
+  }, [weightsResult.finalWeights]);
 
   useEffect(() => {
     if (!onDiagnostics) return;
-    try {
-      const diag = computeBatesDiagnostics(params, weightsRes.finalWeights, {
-        recentSignal: recentSignal ?? null,
-        conditionalProb: conditionalProb ?? null,
-      });
-      onDiagnostics(diag);
-    } catch {}
-  }, [params, weightsRes.finalWeights, recentSignal, conditionalProb, onDiagnostics]);
+    onDiagnostics(computeBatesDiagnostics(activeParams, weightsResult.finalWeights, {
+      recentSignal: recentSignal ?? null,
+      conditionalProb: conditionalProb ?? null,
+    }));
+  }, [activeParams, conditionalProb, onDiagnostics, recentSignal, weightsResult.finalWeights]);
 
-  const fmtProb = (p?: number) => (p == null ? "–" : (p * 100).toFixed(2) + "%");
+  function updateParam<K extends NumericParamKey>(key: K, value: number) {
+    setParams((prev) => {
+      const next = normalizeBatesParameters({ ...prev, [key]: value });
+      onParamsChange?.(next);
+      return next;
+    });
+  }
+
+  function updateBoolean<K extends "dualTri" | "highlightHotCold">(key: K, value: boolean) {
+    setParams((prev) => {
+      const next = normalizeBatesParameters({ ...prev, [key]: value });
+      onParamsChange?.(next);
+      return next;
+    });
+  }
+
+  function handleGenerate() {
+    const result = buildBatesCandidate({
+      weights: weightsResult.finalWeights,
+      forcedNumbers,
+      excludedNumbers,
+    });
+    if (!result.ok) {
+      setGenerationError(result.reason);
+      showToast(`Bates generation blocked: ${result.reason}`);
+      return;
+    }
+
+    setGenerationError("");
+    setLastCandidate(result.candidate);
+    onGenerate?.({
+      main: result.candidate.main,
+      supp: result.candidate.supp,
+      weights: weightsResult.finalWeights,
+    });
+    showToast("Bates candidate generated");
+  }
 
   return (
     <section style={panel}>
-      <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
-        <h3 style={{ margin: 0 }}>Bates / (Dual) Tri Sampler</h3>
-        {probabilityOverlay && (
-          <div style={probBox} title="Estimated probability from last parameter search">
-            <b>P(≥{probabilityOverlay.targetRaw} raw):</b> {fmtProb(probabilityOverlay.pAtLeastRaw)} |{" "}
-            <b>P(≥weighted {probabilityOverlay.targetWeighted.toFixed(2)}):</b> {fmtProb(probabilityOverlay.pAtLeastWeighted)}
-          </div>
-        )}
-      </div>
-
-      {guardrail.warnings.length > 0 && (
-        <div
-          style={{
-            ...guardBox,
-            borderColor: guardrail.severity === "risk" ? "#c62828" : "#e0a100",
-            background: guardrail.severity === "risk" ? "#fdecea" : "#fff8e1",
-            color: guardrail.severity === "risk" ? "#8b1d1d" : "#795c00",
-          }}
-        >
-          <b>{guardrail.severity === "risk" ? "Parameter Risk:" : "Guardrails:"}</b>{" "}
-          {guardrail.warnings.map((w, i) => (
-            <span key={i} style={{ marginLeft: 6 }}>
-              • {w}
-            </span>
-          ))}
+      <div style={header}>
+        <div>
+          <h3 style={title}>Bates Weighting Panel</h3>
+          <p style={subtitle}>
+            Weighted sampling from the current historical signals. It describes the configured distribution; it does not predict future draws.
+          </p>
         </div>
-      )}
-
-      <div style={row}>
-        <label>
-          k
-          <input
-            type="number"
-            value={params.k}
-            min={1}
-            max={60}
-            onChange={(e) => update("k", Math.max(1, Number(e.target.value) || 1))}
-            style={inp}
-          />
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={params.dualTri}
-            onChange={(e) => update("dualTri", e.target.checked)}
-            style={{ marginRight: 4 }}
-          />
-          Dual Tri
-        </label>
-        {!params.dualTri && (
-          <label>
-            Mode
-            <input
-              type="number"
-              step={0.01}
-              min={0}
-              max={1}
-              value={params.triMode}
-              onChange={(e) => update("triMode", clamp(0, 1, Number(e.target.value)))}
-              style={inp}
-            />
-          </label>
-        )}
-        {params.dualTri && (
-          <>
-            <label>
-              Mode A
-              <input
-                type="number"
-                step={0.01}
-                min={0}
-                max={1}
-                value={params.triMode}
-                onChange={(e) => update("triMode", clamp(0, 1, Number(e.target.value)))}
-                style={inp}
-              />
-            </label>
-            <label>
-              Mode B
-              <input
-                type="number"
-                step={0.01}
-                min={0}
-                max={1}
-                value={params.triMode2}
-                onChange={(e) => update("triMode2", clamp(0, 1, Number(e.target.value)))}
-                style={inp}
-              />
-            </label>
-            <label>
-              wA
-              <input
-                type="number"
-                step={0.05}
-                min={0}
-                max={1}
-                value={params.dualTriWeightA}
-                onChange={(e) => update("dualTriWeightA", clamp(0, 1, Number(e.target.value)))}
-                style={inp}
-              />
-            </label>
-          </>
-        )}
-        <label>
-          Mix
-          <input
-            type="number"
-            step={0.05}
-            min={0}
-            max={1}
-            value={params.mixWeight}
-            onChange={(e) => update("mixWeight", clamp(0, 1, Number(e.target.value)))}
-            style={inp}
-          />
-        </label>
-        <button type="button" onClick={handleGenerate} style={genBtn}>
+        <button type="button" onClick={handleGenerate} disabled={!!candidateIssue} style={buttonStyle(!!candidateIssue)}>
           Generate
         </button>
       </div>
 
-      <div style={row}>
-        <label>
-          βHot
-          <input
-            type="number"
-            step={0.05}
-            min={0}
-            max={3}
-            value={params.betaHot}
-            onChange={(e) => update("betaHot", clamp(0, 3, Number(e.target.value)))}
-            style={inp}
-          />
-        </label>
-        <label>
-          βCold
-          <input
-            type="number"
-            step={0.05}
-            min={0}
-            max={3}
-            value={params.betaCold}
-            onChange={(e) => update("betaCold", clamp(0, 3, Number(e.target.value)))}
-            style={inp}
-          />
-        </label>
-        <label>
-          βGlobal
-          <input
-            type="number"
-            step={0.05}
-            min={0}
-            max={2}
-            value={params.betaGlobal}
-            onChange={(e) => update("betaGlobal", clamp(0, 2, Number(e.target.value)))}
-            style={inp}
-          />
-        </label>
-        <label>
-          γCond
-          <input
-            type="number"
-            step={0.05}
-            min={0}
-            max={3}
-            value={params.gammaConditional}
-            onChange={(e) => update("gammaConditional", clamp(0, 3, Number(e.target.value)))}
-            style={inp}
-          />
-        </label>
-        <label>
-          Hot q
-          <input
-            type="number"
-            step={0.01}
-            min={0.5}
-            max={0.95}
-            value={params.hotQuantile}
-            onChange={(e) => update("hotQuantile", clamp(0.5, 0.95, Number(e.target.value)))}
-            style={inp}
-          />
-        </label>
-        <label>
-          Cold q
-          <input
-            type="number"
-            step={0.01}
-            min={0.05}
-            max={0.5}
-            value={params.coldQuantile}
-            onChange={(e) => update("coldQuantile", clamp(0.05, 0.5, Number(e.target.value)))}
-            style={inp}
-          />
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={params.highlightHotCold}
-            onChange={(e) => update("highlightHotCold", e.target.checked)}
-            style={{ marginRight: 4 }}
-          />
-          Hot/Cold
-        </label>
+      <div style={metricGrid}>
+        <Metric label="Shape" value={activeParams.dualTri ? "Dual triangular + Bates" : "Triangular + Bates"} />
+        <Metric label="Effective numbers" value={effectiveNumbers.toFixed(1)} />
+        <Metric label="Eligible pool" value={`${availablePoolCount}/45`} />
+        <Metric label="Top weight" value={topWeights[0] ? `${topWeights[0].number} (${formatPercent(topWeights[0].weight)})` : "none"} />
       </div>
 
+      {probabilityOverlay && (
+        <div style={infoBox}>
+          Search overlay: P(raw {"\u003e="} {probabilityOverlay.targetRaw}) {formatPercent(probabilityOverlay.pAtLeastRaw)}; P(weighted {"\u003e="} {probabilityOverlay.targetWeighted.toFixed(2)}) {formatPercent(probabilityOverlay.pAtLeastWeighted)}
+        </div>
+      )}
+
+      {(candidateIssue || generationError || guardrail.warnings.length > 0) && (
+        <div style={calloutStyle(guardrail.severity, !!candidateIssue || !!generationError)}>
+          {candidateIssue || generationError || guardrail.warnings.join(" ")}
+        </div>
+      )}
+
+      <div style={controlsGrid}>
+        <section style={controlGroup}>
+          <h4 style={groupTitle}>Distribution</h4>
+          <div style={fieldGrid}>
+            <NumberField label="Bates k" value={activeParams.k} min={1} max={60} step={1} onChange={(value) => updateParam("k", value)} />
+            <NumberField label="Mix tri" value={activeParams.mixWeight} min={0} max={1} step={0.05} onChange={(value) => updateParam("mixWeight", value)} />
+            <ToggleField label="Dual tri" checked={activeParams.dualTri} onChange={(checked) => updateBoolean("dualTri", checked)} />
+            <NumberField label={activeParams.dualTri ? "Mode A" : "Mode"} value={activeParams.triMode} min={0} max={1} step={0.01} onChange={(value) => updateParam("triMode", value)} />
+            {activeParams.dualTri && (
+              <>
+                <NumberField label="Mode B" value={activeParams.triMode2} min={0} max={1} step={0.01} onChange={(value) => updateParam("triMode2", value)} />
+                <NumberField label="A weight" value={activeParams.dualTriWeightA} min={0} max={1} step={0.05} onChange={(value) => updateParam("dualTriWeightA", value)} />
+              </>
+            )}
+          </div>
+        </section>
+
+        <section style={controlGroup}>
+          <h4 style={groupTitle}>Modulation</h4>
+          <div style={fieldGrid}>
+            <NumberField label="Hot beta" value={activeParams.betaHot} min={0} max={3} step={0.05} onChange={(value) => updateParam("betaHot", value)} />
+            <NumberField label="Cold beta" value={activeParams.betaCold} min={0} max={3} step={0.05} onChange={(value) => updateParam("betaCold", value)} />
+            <NumberField label="Global beta" value={activeParams.betaGlobal} min={0} max={2} step={0.05} onChange={(value) => updateParam("betaGlobal", value)} />
+            <NumberField label="Conditional gamma" value={activeParams.gammaConditional} min={0} max={3} step={0.05} onChange={(value) => updateParam("gammaConditional", value)} />
+            <NumberField label="Hot q" value={activeParams.hotQuantile} min={0.5} max={0.95} step={0.01} onChange={(value) => updateParam("hotQuantile", value)} />
+            <NumberField label="Cold q" value={activeParams.coldQuantile} min={0.05} max={0.5} step={0.01} onChange={(value) => updateParam("coldQuantile", value)} />
+            <ToggleField label="Hot/cold sets" checked={activeParams.highlightHotCold} onChange={(checked) => updateBoolean("highlightHotCold", checked)} />
+          </div>
+        </section>
+      </div>
+
+      <section style={weightStrip}>
+        <div style={stripLabel}>Top weighted numbers</div>
+        <div style={weightGrid}>
+          {topWeights.map(({ number, weight }) => (
+            <div key={number} style={weightItem}>
+              <b>{number}</b>
+              <span>{formatPercent(weight)}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+
       {lastCandidate && (
-        <div style={{ fontSize: 12, marginTop: 4 }}>
-          <b>Last Candidate:</b> Main [{lastCandidate.main.join(", ")}] Supp [{lastCandidate.supp.join(", ")}]
+        <div style={candidateBox}>
+          <b>Last candidate</b>
+          <span>Main [{lastCandidate.main.join(", ")}]</span>
+          <span>Supp [{lastCandidate.supp.join(", ")}]</span>
         </div>
       )}
     </section>
   );
 };
 
-function clamp(min: number, max: number, v: number) {
-  return Math.min(max, Math.max(min, v));
+interface NumberFieldProps {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (value: number) => void;
+}
+
+function NumberField({ label, value, min, max, step, onChange }: NumberFieldProps): JSX.Element {
+  return (
+    <label style={field}>
+      <span>{label}</span>
+      <input
+        type="number"
+        value={formatInputValue(value)}
+        min={min}
+        max={max}
+        step={step}
+        onChange={(event) => onChange(Number(event.target.value))}
+        style={input}
+      />
+    </label>
+  );
+}
+
+interface ToggleFieldProps {
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}
+
+function ToggleField({ label, checked, onChange }: ToggleFieldProps): JSX.Element {
+  return (
+    <label style={toggleField}>
+      <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
+      <span>{label}</span>
+    </label>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: string }): JSX.Element {
+  return (
+    <div style={metric}>
+      <span style={metricLabel}>{label}</span>
+      <b style={metricValue}>{value}</b>
+    </div>
+  );
+}
+
+function formatPercent(value: number): string {
+  return `${(value * 100).toFixed(2)}%`;
+}
+
+function formatInputValue(value: number): number | string {
+  return Number.isInteger(value) ? value : Number(value.toFixed(4));
+}
+
+function buttonStyle(disabled: boolean): React.CSSProperties {
+  return {
+    minHeight: 34,
+    padding: "6px 14px",
+    border: `1px solid ${disabled ? "#cbd5e1" : "#1d4ed8"}`,
+    borderRadius: 6,
+    background: disabled ? "#f1f5f9" : "#2563eb",
+    color: disabled ? "#94a3b8" : "#fff",
+    fontWeight: 700,
+    cursor: disabled ? "not-allowed" : "pointer",
+    whiteSpace: "nowrap",
+  };
+}
+
+function calloutStyle(severity: "ok" | "caution" | "risk", hardBlock: boolean): React.CSSProperties {
+  if (hardBlock || severity === "risk") {
+    return { ...callout, borderColor: "#fecaca", background: "#fff1f2", color: "#991b1b" };
+  }
+  if (severity === "caution") {
+    return { ...callout, borderColor: "#fde68a", background: "#fffbeb", color: "#92400e" };
+  }
+  return { ...callout, borderColor: "#bfdbfe", background: "#eff6ff", color: "#1e3a8a" };
 }
 
 const panel: React.CSSProperties = {
-  border: "1px solid #eee",
-  borderRadius: 8,
-  padding: 16,
+  display: "grid",
+  gap: 12,
+  border: "1px solid #dbe3ef",
+  borderRadius: 6,
+  padding: 14,
   background: "#fff",
-  marginTop: 18,
+  marginTop: 12,
+  color: "#111827",
+  fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
 };
-const row: React.CSSProperties = {
+const header: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "start",
+  gap: 12,
+  flexWrap: "wrap",
+};
+const title: React.CSSProperties = { margin: 0, fontSize: 17, lineHeight: 1.2 };
+const subtitle: React.CSSProperties = { margin: "4px 0 0", color: "#64748b", fontSize: 12, lineHeight: 1.4 };
+const metricGrid: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+  gap: 8,
+};
+const metric: React.CSSProperties = {
+  display: "grid",
+  gap: 3,
+  border: "1px solid #e2e8f0",
+  borderRadius: 6,
+  padding: "8px 10px",
+  background: "#f8fafc",
+};
+const metricLabel: React.CSSProperties = { color: "#64748b", fontSize: 11, fontWeight: 700, textTransform: "uppercase" };
+const metricValue: React.CSSProperties = { color: "#0f172a", fontSize: 14 };
+const infoBox: React.CSSProperties = {
+  border: "1px solid #bfdbfe",
+  borderRadius: 6,
+  padding: "7px 9px",
+  background: "#eff6ff",
+  color: "#1e3a8a",
+  fontSize: 12,
+};
+const callout: React.CSSProperties = {
+  border: "1px solid",
+  borderRadius: 6,
+  padding: "7px 9px",
+  fontSize: 12,
+  lineHeight: 1.35,
+};
+const controlsGrid: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+  gap: 10,
+};
+const controlGroup: React.CSSProperties = {
+  display: "grid",
+  gap: 8,
+  alignContent: "start",
+  border: "1px solid #e2e8f0",
+  borderRadius: 6,
+  padding: 10,
+};
+const groupTitle: React.CSSProperties = { margin: 0, fontSize: 13, color: "#334155" };
+const fieldGrid: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+  gap: 8,
+  alignItems: "end",
+  alignContent: "start",
+};
+const field: React.CSSProperties = { display: "grid", gap: 4, color: "#475569", fontSize: 12, fontWeight: 650 };
+const toggleField: React.CSSProperties = {
+  display: "inline-flex",
+  gap: 6,
+  alignItems: "center",
+  minHeight: 52,
+  color: "#475569",
+  fontSize: 12,
+  fontWeight: 650,
+};
+const input: React.CSSProperties = {
+  width: "100%",
+  minHeight: 30,
+  border: "1px solid #cbd5e1",
+  borderRadius: 6,
+  padding: "4px 7px",
+  boxSizing: "border-box",
+};
+const weightStrip: React.CSSProperties = { display: "grid", gap: 6 };
+const stripLabel: React.CSSProperties = { color: "#475569", fontSize: 12, fontWeight: 750 };
+const weightGrid: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(82px, 1fr))",
+  gap: 6,
+};
+const weightItem: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 6,
+  border: "1px solid #e2e8f0",
+  borderRadius: 6,
+  padding: "5px 7px",
+  fontSize: 12,
+  background: "#fff",
+};
+const candidateBox: React.CSSProperties = {
   display: "flex",
   flexWrap: "wrap",
-  gap: 16,
-  alignItems: "flex-end",
-  marginBottom: 10,
-  fontSize: 13,
-};
-const inp: React.CSSProperties = { marginLeft: 6, width: 70 };
-const genBtn: React.CSSProperties = {
-  padding: "6px 14px",
-  background: "#1976d2",
-  color: "#fff",
-  border: "none",
-  borderRadius: 4,
-  fontWeight: 600,
-  cursor: "pointer",
-};
-const probBox: React.CSSProperties = {
-  background: "#eef6ff",
-  border: "1px solid #c2dcff",
-  padding: "6px 10px",
+  gap: 10,
+  alignItems: "center",
+  border: "1px solid #bbf7d0",
   borderRadius: 6,
-  fontSize: 11,
-  lineHeight: 1.3,
-};
-const guardBox: React.CSSProperties = {
-  marginBottom: 10,
-  padding: "6px 10px",
-  borderRadius: 6,
-  border: "1px solid",
-  fontSize: 11,
-  lineHeight: 1.4,
+  padding: "8px 10px",
+  background: "#f0fdf4",
+  color: "#14532d",
+  fontSize: 12,
 };

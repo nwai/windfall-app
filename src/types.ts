@@ -52,6 +52,11 @@ export type CandidateSet = {
   numMatches?: number;
   matchHistoryFrequency?: number;
   patternMatches?: number;
+  finalCompositeAdj?: number;
+  selHits?: number;
+  recentHits?: number;
+  carryOverHits?: number;
+  carryOverScore?: number;
 };
 
 

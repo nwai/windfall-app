@@ -2,9 +2,12 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Draw } from "../types";
 import { DGA_CELL_SIZE } from "../constants/ui";
 import { computeDroughtHazard } from "../lib/droughtHazard";
+import { getHeatmapColumnOpacity, normalizeHeatmapContextWindow } from "../lib/heatmapContextWindow";
+import { sortDrawsChronologically } from "../lib/recentDraws";
 
 export interface TemperatureHeatmapProps {
   history: Draw[];
+  displayHistory?: Draw[];
   alpha?: number;
   cellSize?: number;
   gutter?: number;
@@ -16,9 +19,16 @@ export interface TemperatureHeatmapProps {
   bucketLabels?: string[];
   bucketStops?: number[];
   bucketAssignments?: number[];
+  bucketIndexSeries?: number[][];
   bucketColors?: string[];         // NEW
   onHoverNumber?: (n: number | null) => void;
   showLegendCounts?: boolean;
+  hazardHistory?: Draw[];
+
+  activeWindowStart?: number;
+  activeWindowEnd?: number;
+  dimmedWindowOpacity?: number;
+  highlightedColumns?: number[];
 
   hybridWeight?: number; // for hybrid
   emaNormalize?: "global" | "per-number";
@@ -66,6 +76,7 @@ const DEFAULT_BUCKET_LETTERS = ["pR","F","pF","<C","C>","tT","W","H","tR","V"];
 
 export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
   history,
+  displayHistory,
   alpha = 0.2,
   cellSize = DGA_CELL_SIZE,
   gutter = 15,
@@ -86,27 +97,42 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
   bucketLetters,
   bucketAssignments,
   bucketColors,
+  bucketIndexSeries,
+  hazardHistory,
+  activeWindowStart,
+  activeWindowEnd,
+  dimmedWindowOpacity = 0.35,
+  highlightedColumns = [],
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [hoverN, setHoverN] = useState<number | null>(null);
   const [hoverPt, setHoverPt] = useState<{ x: number; y: number } | null>(null);
+  const [hoverDrawIndex, setHoverDrawIndex] = useState<number | null>(null);
 
   // Chronological history and time length
   const chrono = useMemo(() => {
-    if (history.length <= 1) return history.slice();
-    const first = new Date(history[0].date).getTime();
-    const last = new Date(history[history.length - 1].date).getTime();
-    const newestFirst = history.length > 1 && first > last;
-    return newestFirst ? history.slice().reverse() : history.slice();
+    return sortDrawsChronologically(history);
   }, [history]);
-  const T = chrono.length;
+  const displayChrono = useMemo(() => {
+    return sortDrawsChronologically(displayHistory ?? history);
+  }, [displayHistory, history]);
+  const analysisT = chrono.length;
+  const displayT = displayChrono.length;
+  const T = bucketIndexSeries ? displayT : analysisT;
+  const contextWindow = useMemo(
+    () => normalizeHeatmapContextWindow(T, activeWindowStart, activeWindowEnd),
+    [T, activeWindowStart, activeWindowEnd],
+  );
+  const hazardChrono = useMemo(() => {
+    return sortDrawsChronologically(hazardHistory ?? history);
+  }, [hazardHistory, history]);
 
   // Occurrence + EMA
   const { occurSeries, emaSeries } = useMemo(() => {
-    const occur: number[][] = Array.from({ length: heightNumbers }, () => Array(T).fill(0));
-    const ema: number[][] = Array.from({ length: heightNumbers }, () => Array(T).fill(0));
+    const occur: number[][] = Array.from({ length: heightNumbers }, () => Array(analysisT).fill(0));
+    const ema: number[][] = Array.from({ length: heightNumbers }, () => Array(analysisT).fill(0));
     const prev: number[] = Array(heightNumbers).fill(0);
-    for (let t = 0; t < T; t++) {
+    for (let t = 0; t < analysisT; t++) {
       const present = new Set<number>([...(chrono[t]?.main || []), ...(chrono[t]?.supp || [])]);
       for (let n = 1; n <= heightNumbers; n++) {
         const o = present.has(n) ? 1 : 0;
@@ -117,60 +143,60 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
       }
     }
     return { occurSeries: occur, emaSeries: ema };
-  }, [chrono, T, alpha, heightNumbers]);
+  }, [chrono, analysisT, alpha, heightNumbers]);
 
   // Recency exponential-decay
   const recencySeries = useMemo(() => {
-    const rec: number[][] = Array.from({ length: heightNumbers }, () => Array(T).fill(0));
+    const rec: number[][] = Array.from({ length: heightNumbers }, () => Array(analysisT).fill(0));
     const p = 8 / 45;
     const k = 1 / (p || 0.0001);
     const maxAgeCap = Math.max(1, Math.floor(k * 8));
     for (let n = 0; n < heightNumbers; n++) {
       let age = maxAgeCap;
-      for (let t = 0; t < T; t++) {
+      for (let t = 0; t < analysisT; t++) {
         if (occurSeries[n][t] === 1) age = 0; else age = Math.min(maxAgeCap, age + 1);
         const v = Math.exp(-age / k);
         rec[n][t] = v;
       }
     }
     return rec;
-  }, [occurSeries, T, heightNumbers]);
+  }, [occurSeries, analysisT, heightNumbers]);
 
   // EMA normalization
   const emaNorm = useMemo(() => {
     if (emaNormalize === "per-number") {
-      const out = Array.from({ length: heightNumbers }, () => Array(T).fill(0));
+      const out = Array.from({ length: heightNumbers }, () => Array(analysisT).fill(0));
       for (let n = 0; n < heightNumbers; n++) {
         let minV = Number.POSITIVE_INFINITY, maxV = Number.NEGATIVE_INFINITY;
-        for (let t = 0; t < T; t++) {
+        for (let t = 0; t < analysisT; t++) {
           const v = emaSeries[n][t];
           if (v < minV) minV = v;
           if (v > maxV) maxV = v;
         }
         const denom = (maxV - minV) || 1;
-        for (let t = 0; t < T; t++) out[n][t] = (emaSeries[n][t] - minV) / denom;
+        for (let t = 0; t < analysisT; t++) out[n][t] = (emaSeries[n][t] - minV) / denom;
       }
       return out;
     } else {
       let minV = Number.POSITIVE_INFINITY, maxV = Number.NEGATIVE_INFINITY;
-      for (let n = 0; n < heightNumbers; n++) for (let t = 0; t < T; t++) {
+      for (let n = 0; n < heightNumbers; n++) for (let t = 0; t < analysisT; t++) {
         const v = emaSeries[n][t]; if (v < minV) minV = v; if (v > maxV) maxV = v;
       }
       const denom = (maxV - minV) || 1;
-      const out = Array.from({ length: heightNumbers }, () => Array(T).fill(0));
-      for (let n = 0; n < heightNumbers; n++) for (let t = 0; t < T; t++) {
+      const out = Array.from({ length: heightNumbers }, () => Array(analysisT).fill(0));
+      for (let n = 0; n < heightNumbers; n++) for (let t = 0; t < analysisT; t++) {
         out[n][t] = (emaSeries[n][t] - minV) / denom;
       }
       return out;
     }
-  }, [emaSeries, T, heightNumbers, emaNormalize]);
+  }, [emaSeries, analysisT, heightNumbers, emaNormalize]);
 
   // Combined value series
   const valueSeries = useMemo(() => {
-    const out: number[][] = Array.from({ length: heightNumbers }, () => Array(T).fill(0));
+    const out: number[][] = Array.from({ length: heightNumbers }, () => Array(analysisT).fill(0));
     const w = Math.max(0, Math.min(1, hybridWeight));
     for (let n = 0; n < heightNumbers; n++) {
-      for (let t = 0; t < T; t++) {
+      for (let t = 0; t < analysisT; t++) {
         let v = 0;
         if (metric === "ema") v = emaNorm[n][t];
         else if (metric === "recency") v = recencySeries[n][t];
@@ -180,7 +206,7 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
       }
     }
     return out;
-  }, [emaNorm, recencySeries, occurSeries, metric, T, heightNumbers, hybridWeight, enforcePeaks]);
+  }, [emaNorm, recencySeries, occurSeries, metric, analysisT, heightNumbers, hybridWeight, enforcePeaks]);
 
   // Buckets (labels/colors/stops)
   const { stops, labels, colors } = useMemo(() => {
@@ -205,6 +231,26 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
     for (let i = 0; i < stops.length; i++) if (v <= stops[i]) return i;
     return stops.length;
   };
+
+  const effectiveBucketIndexSeries = useMemo(() => {
+    const out: number[][] = Array.from({ length: heightNumbers }, () => Array(T).fill(0));
+    for (let n = 0; n < heightNumbers; n++) {
+      for (let t = 0; t < T; t++) {
+        const seriesBucket = bucketIndexSeries?.[n]?.[t];
+        if (typeof seriesBucket === "number" && Number.isFinite(seriesBucket)) {
+          out[n][t] = Math.max(0, Math.min(buckets - 1, Math.floor(seriesBucket)));
+          continue;
+        }
+
+        const baseBucket = bucketIndexFor(valueSeries[n]?.[Math.min(t, Math.max(0, analysisT - 1))] ?? 0);
+        const assigned = bucketAssignments && bucketAssignments[n] != null
+          ? bucketAssignments[n]
+          : baseBucket;
+        out[n][t] = Math.max(0, Math.min(buckets - 1, assigned));
+      }
+    }
+    return out;
+  }, [bucketAssignments, bucketIndexSeries, buckets, heightNumbers, T, valueSeries, analysisT, stops]);
 
   // Canvas size
   const widthPx = useMemo(() => T * cellSize + gutter * 2, [T, cellSize, gutter]);
@@ -233,12 +279,12 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
 
     for (let n = 0; n < heightNumbers; n++) {
       for (let t = 0; t < T; t++) {
-        const v = valueSeries[n][t];
-        const baseBucket = bucketIndexFor(v);
-        const assigned = bucketAssignments && bucketAssignments[n] != null ? bucketAssignments[n] : baseBucket;
+        const assigned = effectiveBucketIndexSeries[n]?.[t] ?? 0;
         const color = colors[assigned] ?? colors[colors.length - 1];
         const x = gutter + t * cellSize;
         const y = gutter + n * cellSize;
+        const cellOpacity = getHeatmapColumnOpacity(t, contextWindow, dimmedWindowOpacity, highlightedColumns);
+        ctx.globalAlpha = cellOpacity;
         ctx.fillStyle = color;
         ctx.fillRect(x, y, cellSize, cellSize);
         if (showBucketLetters) {
@@ -246,6 +292,7 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
           ctx.fillStyle = getContrastTextColor(color);
           ctx.fillText(letter, x + cellSize / 2, y + cellSize / 2);
         }
+        ctx.globalAlpha = 1;
       }
     }
 
@@ -273,7 +320,7 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
   }, [
     canvasRef, widthPx, heightPx, gutter, heightNumbers, T, cellSize,
     valueSeries, colors, stops, overlayNumbers,
-    showBucketLetters, letters, bucketAssignments
+    showBucketLetters, letters, effectiveBucketIndexSeries, contextWindow, dimmedWindowOpacity, highlightedColumns
   ]);
 
   // Legend counts should match bucket assignments if provided
@@ -281,13 +328,12 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
     const counts = Array(buckets).fill(0);
     for (let n = 0; n < heightNumbers; n++) {
       for (let t = 0; t < T; t++) {
-        const baseBucket = bucketIndexFor(valueSeries[n][t]);
-        const assigned = bucketAssignments && bucketAssignments[n] != null ? bucketAssignments[n] : baseBucket;
+        const assigned = effectiveBucketIndexSeries[n]?.[t] ?? 0;
         counts[assigned] = (counts[assigned] || 0) + 1;
       }
     }
     return counts;
-  }, [valueSeries, buckets, T, heightNumbers, stops, bucketAssignments]);
+  }, [buckets, T, heightNumbers, effectiveBucketIndexSeries]);
 
   // Unified hover
   const onMouseMove: React.MouseEventHandler<HTMLCanvasElement> = (e) => {
@@ -295,20 +341,24 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
     const y = e.clientY - rect.top;
     const x = e.clientX - rect.left;
     const row = Math.floor((y - gutter) / cellSize);
+    const col = Math.floor((x - gutter) / cellSize);
     if (row >= 0 && row < heightNumbers) {
       const n = row + 1;
       setHoverN(n);
       setHoverPt({ x, y });
+      setHoverDrawIndex(col >= 0 && col < T ? col : null);
       onHoverNumber?.(n);
     } else {
       setHoverN(null);
       setHoverPt(null);
+      setHoverDrawIndex(null);
       onHoverNumber?.(null);
     }
   };
   const onMouseLeave = () => {
     setHoverN(null);
     setHoverPt(null);
+    setHoverDrawIndex(null);
     onHoverNumber?.(null);
   };
 
@@ -329,8 +379,9 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
     return { d, W, H, N };
   }, [hoverN, valueSeries]);
 
-  // Drought hazard from the same chronological window
-  const hazard = useMemo(() => computeDroughtHazard(chrono), [chrono]);
+  // Drought hazard can stay scoped to a narrower analysis window even when the
+  // heatmap itself is rendering full-history context.
+  const hazard = useMemo(() => computeDroughtHazard(hazardChrono), [hazardChrono]);
 
   function labelForP(p: number) {
     if (p >= 0.28) return { label: "High", color: "#d32f2f" };
@@ -379,12 +430,26 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
             const rec = hazard.byNumber[hoverN - 1] || { k: 0, p: 0 };
             const baseline = 8 / 45;
             const { label, color } = labelForP(rec.p);
+            const hoveredDraw = hoverDrawIndex !== null ? displayChrono[hoverDrawIndex] : null;
+            const hoveredBucketLabel = hoverDrawIndex !== null
+              ? labels[effectiveBucketIndexSeries[hoverN - 1]?.[hoverDrawIndex] ?? 0] ?? null
+              : null;
+            const hoveredDrawLabel = hoverDrawIndex !== null
+              ? hoveredDraw?.isSimulated
+                ? `Simulated next draw (${hoveredDraw.date})`
+                : hoveredDraw?.date ?? `column ${hoverDrawIndex + 1}`
+              : null;
             return (
               <div>
                 <div style={{ marginBottom: 4 }}>
                   <b style={{ marginRight: 6 }}>#{hoverN}</b>
                   <span style={{ color: "#666" }}>Break-drought chance next draw</span>
                 </div>
+                {hoveredBucketLabel && hoveredDrawLabel ? (
+                  <div style={{ color: "#555", marginBottom: 4 }}>
+                    Cell bucket @ <b>{hoveredDrawLabel}</b>: <b>{hoveredBucketLabel}</b>
+                  </div>
+                ) : null}
                 <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
                   <span style={{ color, fontWeight: 700, fontSize: 14 }}>{(rec.p * 100).toFixed(1)}%</span>
                   <span style={{ color: "#444", fontWeight: 600 }}>{label}</span>

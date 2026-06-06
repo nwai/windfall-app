@@ -1,5 +1,11 @@
 import { computeBatesWeights, BatesParameterSet } from "./batesWeightsCore";
 import { weightedSampleWithoutReplacement } from "./weightedSample";
+import {
+  computeWeightedMatchFloor,
+  normalizeWeightedTargetNumbers,
+  normalizeWeightedTargets,
+  sanitizeTargetMatchCount,
+} from "./weightedTargets";
 
 /* ---- Types ---- */
 export interface ParameterSearchOptions {
@@ -188,15 +194,14 @@ export function searchForParameterMatch(opts: ParameterSearchOptions): SearchRes
     paretoMaxSize = 8
   } = opts;
 
-  // Weighted map
-  const wMap: Record<number, number> = {};
-  userNumbers.forEach(n => { wMap[n] = (weightedTargets?.[n] ?? 1); });
+  const selectedUserNumbers = normalizeWeightedTargetNumbers(userNumbers);
+  const normalizedTargetMatchCount = sanitizeTargetMatchCount(targetMatchCount);
+  const wMap = normalizeWeightedTargets(selectedUserNumbers, weightedTargets);
 
-  // Weighted threshold fallback
   const fallbackWeightedTarget = (() => {
-    if (targetWeightedScore) return targetWeightedScore;
-    const sorted = userNumbers.map(n => wMap[n]).sort((a, b) => a - b).slice(0, Math.min(4, userNumbers.length));
-    return sorted.reduce((a, b) => a + b, 0);
+    const explicitTarget = typeof targetWeightedScore === "number" ? targetWeightedScore : Number(targetWeightedScore);
+    if (Number.isFinite(explicitTarget) && explicitTarget >= 0) return explicitTarget;
+    return computeWeightedMatchFloor(selectedUserNumbers, wMap, normalizedTargetMatchCount);
   })();
 
   let rng = Math.random;
@@ -208,7 +213,7 @@ export function searchForParameterMatch(opts: ParameterSearchOptions): SearchRes
     };
   }
 
-  const userSet = new Set(userNumbers);
+  const userSet = new Set(selectedUserNumbers);
   const excludedSet = new Set(excludedNumbers);
 
   let bestParams: BatesParameterSet | null = null;
@@ -260,7 +265,7 @@ export function searchForParameterMatch(opts: ParameterSearchOptions): SearchRes
         bestRaw = scores.raw;
         bestWeighted = scores.weighted;
         log.push(`[BEST ${phase}] raw=${scores.raw} weighted=${scores.weighted.toFixed(2)} cand=[${cand.all.join(",")}]`);
-        if (scores.raw >= targetMatchCount && scores.weighted >= fallbackWeightedTarget) {
+        if (scores.raw >= normalizedTargetMatchCount && scores.weighted >= fallbackWeightedTarget) {
           stoppedEarly = true;
           return true;
         }
@@ -302,17 +307,17 @@ export function searchForParameterMatch(opts: ParameterSearchOptions): SearchRes
     for (let i = 0; i < probabilitySimulations; i++) {
       const cand = buildCandidate(finalWeights, excludedSet, forcedNumbers, rng);
       const scores = matchScores(cand.all, userSet, wMap);
-      if (scores.raw >= targetMatchCount) rawHits++;
+      if (scores.raw >= normalizedTargetMatchCount) rawHits++;
       if (scores.weighted >= fallbackWeightedTarget) weightedHits++;
     }
     probability = {
       pAtLeastRaw: rawHits / probabilitySimulations,
       pAtLeastWeighted: weightedHits / probabilitySimulations,
       simulations: probabilitySimulations,
-      targetRaw: targetMatchCount,
+      targetRaw: normalizedTargetMatchCount,
       targetWeighted: fallbackWeightedTarget
     };
-    log.push(`[PROB] P(raw≥${targetMatchCount})=${probability.pAtLeastRaw.toFixed(4)} P(weighted≥${fallbackWeightedTarget.toFixed(2)})=${probability.pAtLeastWeighted.toFixed(4)}`);
+    log.push(`[PROB] P(raw≥${normalizedTargetMatchCount})=${probability.pAtLeastRaw.toFixed(4)} P(weighted≥${fallbackWeightedTarget.toFixed(2)})=${probability.pAtLeastWeighted.toFixed(4)}`);
   }
 
   // Finalization

@@ -10,8 +10,6 @@ export function OGAHistogram({
   candidateOGA?: number;
   candidatePercentile?: number;
 }) {
-  console.log("Rendering NIVO OGAHistogram");
-
   if (!ogaScores.length) return null;
 
   // Bin data
@@ -115,13 +113,13 @@ export function OGAHistogram({
             {candidatePercentile !== undefined && (
               <span>
                 (<b>{candidatePercentile.toFixed(1)}%</b> percentile)
-                {candidatePercentile > 80 ? (
+                {candidatePercentile < 20 ? (
                   <span style={{ color: "green", marginLeft: 6 }}>
-                    Typical for winners
+                    Closer to historical spoke mix
                   </span>
-                ) : candidatePercentile < 20 ? (
+                ) : candidatePercentile > 80 ? (
                   <span style={{ color: "red", marginLeft: 6 }}>
-                    Atypical for winners
+                    Atypical spoke mix
                   </span>
                 ) : (
                   <span style={{ color: "#888", marginLeft: 6 }}>
@@ -143,7 +141,7 @@ export function OGAHistogram({
           >
             Hot zone
           </span>{" "}
-          = most common OGA range among past winners.
+          = most common OGA range in the selected history.
           <span style={{ color: "#d32f2f", marginLeft: 8 }}>
             Your set highlighted in red.
           </span>

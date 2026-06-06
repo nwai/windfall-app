@@ -1,4 +1,4 @@
-import { BatesParameterSet } from "./batesWeightsCore";
+import { BatesParameterSet, normalizeBatesParameters } from "./batesWeightsCore";
 
 export interface GuardrailResult {
   warnings: string[];
@@ -6,30 +6,31 @@ export interface GuardrailResult {
 }
 
 export function assessBatesGuardrails(p: BatesParameterSet): GuardrailResult {
+  const params = normalizeBatesParameters(p);
   const warnings: string[] = [];
 
-  if (p.betaHot + p.betaCold > 3.2) {
-    warnings.push(`High combined βHot + βCold = ${(p.betaHot + p.betaCold).toFixed(2)} (can over-amplify volatility).`);
+  if (params.betaHot + params.betaCold > 3.2) {
+    warnings.push(`High combined betaHot + betaCold = ${(params.betaHot + params.betaCold).toFixed(2)} (can over-amplify volatility).`);
   }
-  if (p.betaGlobal > 1.0) {
-    warnings.push(`βGlobal ${p.betaGlobal.toFixed(2)} is large (broad systemic tilt).`);
+  if (params.betaGlobal > 1.0) {
+    warnings.push(`betaGlobal ${params.betaGlobal.toFixed(2)} is large (broad systemic tilt).`);
   }
-  if (p.gammaConditional > 2.2) {
-    warnings.push(`γCond ${p.gammaConditional.toFixed(2)} very strong (may collapse diversity).`);
+  if (params.gammaConditional > 2.2) {
+    warnings.push(`gammaConditional ${params.gammaConditional.toFixed(2)} very strong (may collapse diversity).`);
   }
-  if (p.mixWeight < 0.15) {
-    warnings.push(`mixWeight ${p.mixWeight.toFixed(2)} heavily favors Bates only.`);
-  } else if (p.mixWeight > 0.85) {
-    warnings.push(`mixWeight ${p.mixWeight.toFixed(2)} heavily favors Triangles only.`);
+  if (params.mixWeight < 0.15) {
+    warnings.push(`mixWeight ${params.mixWeight.toFixed(2)} heavily favors Bates only.`);
+  } else if (params.mixWeight > 0.85) {
+    warnings.push(`mixWeight ${params.mixWeight.toFixed(2)} heavily favors Triangles only.`);
   }
-  if (p.dualTri && Math.abs(p.triMode - p.triMode2) < 0.05) {
-    warnings.push(`Dual Tri modes are very close (${p.triMode.toFixed(2)} vs ${p.triMode2.toFixed(2)}).`);
+  if (params.dualTri && Math.abs(params.triMode - params.triMode2) < 0.05) {
+    warnings.push(`Dual Tri modes are very close (${params.triMode.toFixed(2)} vs ${params.triMode2.toFixed(2)}).`);
   }
-  if (p.hotQuantile - p.coldQuantile < 0.25) {
-    warnings.push(`Narrow hot/cold gap (hotQ - coldQ = ${(p.hotQuantile - p.coldQuantile).toFixed(2)}).`);
+  if (params.hotQuantile - params.coldQuantile < 0.25) {
+    warnings.push(`Narrow hot/cold gap (hotQ - coldQ = ${(params.hotQuantile - params.coldQuantile).toFixed(2)}).`);
   }
-  if (p.k > 9) {
-    warnings.push(`k ${p.k.toFixed(2)} is high (central concentration).`);
+  if (params.k > 9) {
+    warnings.push(`k ${params.k.toFixed(2)} is high (central concentration).`);
   }
 
   let severity: GuardrailResult["severity"] = "ok";

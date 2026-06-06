@@ -1,0 +1,1362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Windfall App — User Manual</title>
+  <style>
+    :root {
+      --primary: #1565c0;
+      --accent:  #2e7d32;
+      --warn:    #c62828;
+      --gold:    #b8860b;
+      --teal:    #00695c;
+      --bg:      #f8f9fa;
+      --card:    #ffffff;
+      --border:  #dee2e6;
+      --text:    #212529;
+      --muted:   #6c757d;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 15px;
+      line-height: 1.7;
+      color: var(--text);
+      background: var(--bg);
+    }
+    /* ── Layout ─────────────────────────────────── */
+    .sidebar {
+      position: fixed;
+      top: 0; left: 0;
+      width: 240px;
+      height: 100vh;
+      overflow-y: auto;
+      background: #1a237e;
+      color: #fff;
+      padding: 20px 0;
+      z-index: 100;
+    }
+    .sidebar h2 { font-size: 14px; padding: 0 16px 12px; color: #90caf9; letter-spacing: 1px; text-transform: uppercase; }
+    .sidebar nav a {
+      display: block;
+      padding: 6px 20px;
+      color: #cfd8dc;
+      text-decoration: none;
+      font-size: 13px;
+      border-left: 3px solid transparent;
+      transition: all 0.15s;
+    }
+    .sidebar nav a:hover { color: #fff; border-left-color: #90caf9; background: rgba(255,255,255,0.08); }
+    .sidebar nav a.section { font-weight: 700; color: #fff; margin-top: 10px; }
+    main {
+      margin-left: 240px;
+      padding: 40px 48px 80px;
+      max-width: 960px;
+    }
+    @media (max-width: 760px) {
+      .sidebar { display: none; }
+      main { margin-left: 0; padding: 24px 20px; }
+    }
+    /* ── Typography ─────────────────────────────── */
+    h1 { font-size: 2rem; color: var(--primary); margin-bottom: 8px; }
+    h2 { font-size: 1.4rem; color: var(--primary); margin: 40px 0 12px; padding-bottom: 6px; border-bottom: 2px solid var(--border); }
+    h3 { font-size: 1.1rem; color: #333; margin: 24px 0 8px; }
+    h4 { font-size: 0.95rem; color: #444; margin: 16px 0 6px; font-weight: 700; }
+    p  { margin-bottom: 12px; }
+    ul, ol { margin: 0 0 12px 24px; }
+    li { margin-bottom: 4px; }
+    code {
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 0.88em;
+      background: #f0f4ff;
+      border: 1px solid #c5cae9;
+      border-radius: 3px;
+      padding: 1px 5px;
+    }
+    pre code { display: block; padding: 12px; white-space: pre-wrap; }
+    /* ── Components ─────────────────────────────── */
+    .subtitle { color: var(--muted); font-size: 1rem; margin-bottom: 32px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px 24px;
+      margin-bottom: 20px;
+    }
+    .note {
+      background: #e8f5e9;
+      border-left: 4px solid var(--accent);
+      border-radius: 0 6px 6px 0;
+      padding: 10px 16px;
+      margin: 12px 0;
+      font-size: 0.93em;
+    }
+    .warn-box {
+      background: #fff3cd;
+      border-left: 4px solid #f9a825;
+      border-radius: 0 6px 6px 0;
+      padding: 10px 16px;
+      margin: 12px 0;
+      font-size: 0.93em;
+    }
+    .tip {
+      background: #e3f2fd;
+      border-left: 4px solid var(--primary);
+      border-radius: 0 6px 6px 0;
+      padding: 10px 16px;
+      margin: 12px 0;
+      font-size: 0.93em;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 16px;
+      font-size: 0.93em;
+    }
+    th {
+      background: #e8eaf6;
+      color: #1a237e;
+      text-align: left;
+      padding: 8px 12px;
+      border: 1px solid #c5cae9;
+      font-size: 0.88em;
+      letter-spacing: 0.3px;
+    }
+    td { padding: 7px 12px; border: 1px solid var(--border); vertical-align: top; }
+    tr:nth-child(even) td { background: #fafbff; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 0.82em;
+      font-weight: 700;
+    }
+    .badge-A  { background: rgba(255,193,7,0.25); color: #7b5800; }
+    .badge-B  { background: rgba(192,192,192,0.3); color: #555; }
+    .badge-C  { background: rgba(205,133,63,0.2);  color: #7b3f00; }
+    .badge-D  { background: #f5f5f5; color: #888; }
+    .color-teal  { color: #00695c; font-weight: 700; }
+    .color-blue  { color: #1565c0; font-weight: 600; }
+    .color-green { color: #2e7d32; }
+    .color-grey  { color: #888; }
+    /* ── Top toolbar ─────────────────────────────── */
+    .toolbar {
+      position: sticky;
+      top: 0;
+      background: #1a237e;
+      color: #fff;
+      padding: 10px 48px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      z-index: 50;
+      margin-left: 240px;
+      font-size: 13px;
+    }
+    @media (max-width: 760px) { .toolbar { margin-left: 0; padding: 10px 16px; } }
+    .toolbar-title { font-weight: 700; font-size: 14px; color: #90caf9; }
+    .btn-dl {
+      display: inline-block;
+      background: #fff;
+      color: #1a237e;
+      border: none;
+      padding: 6px 16px;
+      border-radius: 20px;
+      font-weight: 700;
+      font-size: 12px;
+      cursor: pointer;
+      text-decoration: none;
+    }
+    .btn-dl:hover { background: #e3f2fd; }
+    /* ── Anchor offset for fixed header ────────── */
+    :target { scroll-margin-top: 60px; }
+  </style>
+</head>
+<body>
+
+<!-- Sidebar navigation -->
+<aside class="sidebar">
+  <h2>Contents</h2>
+  <nav>
+    <a class="section" href="#overview">Overview</a>
+    <a href="#getting-started">Getting Started</a>
+    <a href="#loading-history">Loading Draw History</a>
+    <a href="#smart-history-review">Smart History Review</a>
+    <a href="#official-source-compare">Official / Reference Source Comparison</a>
+
+    <a class="section" href="#generated-candidates">Generated Candidates</a>
+    <a href="#paste-weighted-generator">Paste-Weighted Generator</a>
+    <a href="#columns">Column Reference</a>
+    <a href="#ns-column">NS Column Styling</a>
+    <a href="#winscore">Win Column &amp; WinScore</a>
+    <a href="#nrr-column">Nrr Column</a>
+    <a href="#conv-column">Conv Column</a>
+    <a href="#idm-column">IDM Column</a>
+    <a href="#rdy-column">Rdy Column</a>
+    <a href="#bucket-columns">Bucket Columns (0x–8x+)</a>
+    <a href="#sorting">Sorting</a>
+    <a href="#rec-button">⭐ Rec — Recommended Ranking</a>
+    <a href="#filter">Filter Panel</a>
+    <a href="#filter-save">Saving &amp; Loading Filters</a>
+    <a href="#manual-sim">Manual Simulation</a>
+    <a href="#simulate-button">Simulate Button</a>
+
+    <a class="section" href="#generation">Candidate Generation</a>
+    <a href="#influences">Generation Influences</a>
+    <a href="#mian">MiAN (Must Include from Acceptance Needs)</a>
+    <a href="#repeat-bias">Monthly Repeat Bias</a>
+    <a href="#last-draw-match">Max Matches to Last Draw</a>
+    <a href="#ovr-gen">Over-generation Pool</a>
+
+    <a class="section" href="#monthly-summary">Monthly Draws Summary</a>
+    <a href="#acceptance-needs">Acceptance Needs</a>
+    <a href="#ideal-draw">Ideal Draw Row</a>
+    <a href="#needed-row">Needed Row</a>
+    <a href="#constructive-fill">Constructive Fill</a>
+    <a href="#ending-digit-sequences">Ending Digit Sequence Analyzer</a>
+    <a href="#draw-bucket-forecast">Draw Bucket Month Forecast</a>
+    <a href="#hot-cold-ranking">Hot vs Cold Ranking</a>
+
+    <a class="section" href="#undrawn-patterns">Undrawn Patterns</a>
+    <a href="#month-end-carry-over">Month-end carry-over</a>
+
+    <a class="section" href="#dga">DGA Grid</a>
+    <a href="#dga-overview">Overview</a>
+    <a href="#dga-columns">Column Structure</a>
+    <a href="#dga-next">The Next Column</a>
+    <a href="#dga-simulate-strip">Simulate Next Strip</a>
+    <a href="#dga-simulate">Simulating from Other Panels</a>
+
+    <a class="section" href="#scoring-reference">Scoring Reference</a>
+    <a href="#score-summary">Score Summary Table</a>
+    <a href="#analysis-findings">Analysis Findings</a>
+
+    <a class="section" href="#glossary">Glossary</a>
+  </nav>
+</aside>
+
+<!-- Sticky download bar -->
+<div class="toolbar">
+  <span class="toolbar-title">Windfall App — User Manual</span>
+  <a class="btn-dl" href="user-manual.html" download="Windfall_User_Manual.html">⬇ Download Manual</a>
+</div>
+
+<main>
+
+  <h1>Windfall App</h1>
+  <p class="subtitle">User Manual &nbsp;·&nbsp; Version 1.1 &nbsp;·&nbsp; May 2026</p>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <h2 id="overview">Overview</h2>
+
+  <p>The Windfall App is an analytical tool for Weekly Windfall lottery number analysis and candidate generation. It provides:</p>
+  <ul>
+    <li>Candidate set generation using configurable strategies and constraints</li>
+    <li>Multi-signal scoring of each candidate (Conv, IDM, Rdy, Win, Nrr, NS)</li>
+    <li>Monthly frequency analysis of drawn numbers</li>
+    <li>Zone pattern analysis, temperature transitions, and Monte Carlo simulation</li>
+    <li>DGA (Draw-Grid Analysis) visualisation</li>
+    <li>Historical prize back-testing</li>
+  </ul>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <h2 id="getting-started">Getting Started</h2>
+
+  <h3 id="loading-history">Loading Draw History</h3>
+  <p>The app requires draw history data to power analysis, scoring, simulation, and candidate generation. Use the <strong>Draw History Manager</strong> panel near the top of the app to load, maintain, and verify your history.</p>
+  <ol>
+    <li>Click <strong>Select CSV file…</strong>.</li>
+    <li>Choose your history file (typically <code>windfall_history_lottolyzer.csv</code>).</li>
+    <li>The app parses the file and populates the history-dependent panels automatically.</li>
+  </ol>
+  <p>You can also load history by using <strong>Import Draws (CSV/JSON)</strong> from the same Draw History section. This is useful when you receive draw history from another tool or from a saved export.</p>
+
+  <h4>Manual entry and maintenance buttons</h4>
+  <ul>
+    <li><strong>Load Next Draw</strong> — opens the entry form for manually entering a new draw.</li>
+    <li><strong>Save New Draw</strong> — writes the currently entered draw to the selected CSV file (or offers a download fallback if direct write access is not available).</li>
+    <li><strong>Select CSV file…</strong> — chooses or changes the active history CSV.</li>
+  </ul>
+
+  <div class="tip">
+    <strong>Duplicate protection:</strong> the app now blocks saving an <em>exact duplicate</em> draw and also blocks saving a second, different result for a date that already exists. This prevents the most common manual-entry mistakes before they reach your history file.
+  </div>
+
+  <div class="note">
+    <strong>Safari users:</strong> If the File System Access API is not available, a standard file picker will appear automatically as a fallback.
+  </div>
+
+  <h3 id="smart-history-review">Smart History Review</h3>
+  <p>Under the Draw History Manager, the app includes a <strong>Smart History Review</strong> panel. This is designed to help you correct human-made history problems without editing CSV files by hand.</p>
+
+  <h4>What it detects</h4>
+  <ul>
+    <li><strong>Exact duplicate draw</strong> — the same date and the same 6 main + 2 supplementary numbers appear more than once.</li>
+    <li><strong>Conflicting entries for one draw date</strong> — two or more rows share the same draw date but contain different numbers.</li>
+    <li><strong>Same number set appears on multiple dates</strong> — the exact same numbers appear on more than one date. This can happen naturally, but it is rare enough to review for copy/paste mistakes.</li>
+  </ul>
+
+  <h4>Available review actions</h4>
+  <ul>
+    <li><strong>Remove exact duplicates</strong> — safely removes repeated copies of identical rows while keeping the first occurrence.</li>
+    <li><strong>Keep this version</strong> — when two rows share a date, keep the correct one and remove the others for that date.</li>
+    <li><strong>Edit</strong> — opens an inline editor so you can correct the date and/or numbers directly inside the app.</li>
+    <li><strong>Delete</strong> — removes the selected row from the current loaded history.</li>
+  </ul>
+
+  <div class="warn-box">
+    <strong>Important:</strong> if Smart History Review shows <em>same-date conflicts</em>, review them before relying on analysis panels. Two different results on the same date will distort bucket counts, DGA columns, and any logic that depends on recent history.
+  </div>
+
+  <div class="note">
+    <strong>Saved across refresh:</strong> once you remove duplicates, keep a preferred version, edit a row, or delete a conflicting row in Smart History Review, the corrected draw history is cached locally by the app. That reviewed state is restored automatically after a browser refresh, even if you have not yet reloaded from an external source.
+  </div>
+
+  <h4>Typical correction workflow</h4>
+  <ol>
+    <li>Load or import your draw history.</li>
+    <li>Use <strong>Remove exact duplicates</strong> first if offered.</li>
+    <li>Review each same-date conflict and either <strong>Keep this version</strong> or <strong>Edit</strong> the mistaken row.</li>
+    <li>Review repeated-number warnings on different dates to rule out copy/paste errors.</li>
+  </ol>
+
+  <h4>Worked examples</h4>
+
+  <p><strong>Example 1 — removing an accidental duplicate</strong></p>
+  <p>Suppose your history contains these two rows:</p>
+  <ul>
+    <li><code>10/27/25 · Main 1, 8, 17, 25, 31, 44 · Supp 6, 39</code></li>
+    <li><code>10/27/25 · Main 1, 8, 17, 25, 31, 44 · Supp 6, 39</code></li>
+  </ul>
+  <p>Smart History Review will flag this as an <strong>Exact duplicate draw</strong>. Click <strong>Remove exact duplicates</strong> and the extra copy is removed while the first version is kept.</p>
+
+  <p><strong>Example 2 — correcting a same-date number-entry mistake</strong></p>
+  <p>Suppose the same draw date appears twice but one row contains a typo:</p>
+  <ul>
+    <li><code>10/29/25 · Main 3, 12, 18, 24, 33, 41 · Supp 7, 15</code></li>
+    <li><code>10/29/25 · Main 3, 12, 18, 26, 33, 41 · Supp 7, 15</code></li>
+  </ul>
+  <p>This is shown as a <strong>Conflicting entries for one draw date</strong> warning. If you know the first row is correct, click <strong>Keep this version</strong> on that row. If neither row is exactly right, click <strong>Edit</strong> and enter the correct numbers before saving the correction.</p>
+
+  <h3 id="official-source-compare">Official / Reference Source Comparison</h3>
+  <p>The Draw History Manager also includes <strong>Compare Against Official / Reference Source</strong>. This workflow is specifically designed for situations where direct live access to official sites may be blocked. Instead of relying on live fetches, you can paste or upload source material and compare it locally inside the app.</p>
+
+  <h4>Accepted source formats</h4>
+  <ul>
+    <li>Standard draw-history CSV</li>
+    <li>JSON exports, including <code>theLott</code>-style result payloads</li>
+    <li>Saved HTML pages or copied HTML table content</li>
+    <li>Copied plain-text table rows that contain a date followed by 8 numbers</li>
+  </ul>
+
+  <h4>How to compare a source</h4>
+  <ol>
+    <li>Open the Draw History Manager.</li>
+    <li>In <strong>Compare Against Official / Reference Source</strong>, either:
+      <ul>
+        <li>click <strong>Upload source file…</strong>, or</li>
+        <li>paste the source content into the large text area.</li>
+      </ul>
+    </li>
+    <li>Click <strong>Compare source to local history</strong>.</li>
+    <li>Review the comparison summary and the per-date actions.</li>
+  </ol>
+
+  <h4>Comparison result types</h4>
+  <table>
+    <thead>
+      <tr><th>Result</th><th>Meaning</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>Exact matches</strong></td><td>The same draw already exists locally for that date.</td></tr>
+      <tr><td><strong>Missing locally</strong></td><td>The source contains a draw date/result that does not exist in your local history.</td></tr>
+      <tr><td><strong>Same-date conflicts</strong></td><td>Your local history and the source both contain that date, but the numbers do not match.</td></tr>
+      <tr><td><strong>Local-only dates</strong></td><td>Your local history has dates that are not present in the pasted/uploaded source. These are shown for review only because the source may be incomplete.</td></tr>
+    </tbody>
+  </table>
+
+  <h4>Safe correction actions</h4>
+  <ul>
+    <li><strong>Add this draw</strong> — adds a source draw that is missing locally.</li>
+    <li><strong>Use source row for this date</strong> — replaces the local row for that date with the source row when the source provides one clear version.</li>
+    <li><strong>Apply safe corrections</strong> — batch-applies missing source rows and one-to-one same-date replacements.</li>
+  </ul>
+
+  <h4>Worked example</h4>
+  <p>Assume your local history says:</p>
+  <ul>
+    <li><code>10/31/25 · Main 4, 9, 16, 23, 35, 42 · Supp 7, 18</code></li>
+  </ul>
+  <p>But a copied result from an official/reference source says:</p>
+  <ul>
+    <li><code>10/31/25 · Main 4, 9, 16, 23, 36, 42 · Supp 7, 18</code></li>
+  </ul>
+  <ol>
+    <li>Paste or upload the source content.</li>
+    <li>Click <strong>Compare source to local history</strong>.</li>
+    <li>The app will show a <strong>Same-date conflict</strong> for <code>10/31/25</code>.</li>
+    <li>If the source row is the correct one, click <strong>Use source row for this date</strong>.</li>
+  </ol>
+  <p>For a broader refresh, you can instead click <strong>Apply safe corrections</strong>. That will add missing source rows and replace only the dates where the source gives one clear replacement row.</p>
+
+  <div class="note">
+    <strong>Why “safe” corrections?</strong> The app will <em>not</em> automatically delete local-only dates from a pasted/uploaded comparison, because your source may only cover part of history. Local-only dates are therefore treated as review items, not automatic removals.
+  </div>
+
+  <div class="tip">
+    <strong>Recommended use:</strong> if you copy results from <code>theLott</code> or <code>Lottolyzer</code>, paste them into this compare area first. Use it to confirm missing rows or date mismatches before making manual edits.
+  </div>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <h2 id="generated-candidates">Generated Candidates Panel</h2>
+
+  <p>The <strong>Generated Candidates</strong> panel is the main working area. After clicking <strong>Generate</strong>, it displays a table of candidate number sets with a rich set of analytical scores.</p>
+
+  <!-- ───────────────────────────────────────── -->
+  <h3 id="paste-weighted-generator">Paste-Weighted Candidate Generator</h3>
+
+  <p>The <strong>Paste-Weighted Candidate Generator</strong> lets you paste any number of six-number rows, counts how often each number appears, and then generates mains-only candidates weighted toward the most common pasted numbers.</p>
+
+  <h4>Adaptive shape</h4>
+  <p><strong>Adaptive shape</strong> is a history-aware profile for the six main numbers. It does not score individual numbers. Instead, it describes the candidate's structure by splitting the six mains into:</p>
+  <ul>
+    <li><strong>S</strong> — single-digit numbers, <code>1–9</code></li>
+    <li><strong>D</strong> — double-digit numbers, <code>10–45</code></li>
+  </ul>
+
+  <p>Each side is written as <strong>odd:even</strong>, so the full label is:</p>
+  <pre><code>S&lt;single-digit odd&gt;:&lt;single-digit even&gt; D&lt;double-digit odd&gt;:&lt;double-digit even&gt;</code></pre>
+
+  <table>
+    <thead>
+      <tr><th>Adaptive shape</th><th>Plain-English meaning</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>S0:0 D4:2</code></td><td>No single-digit numbers. Six double-digit numbers: 4 odd and 2 even.</td></tr>
+      <tr><td><code>S0:1 D2:3</code></td><td>One single-digit even number. Five double-digit numbers: 2 odd and 3 even.</td></tr>
+      <tr><td><code>S1:0 D3:2</code></td><td>One single-digit odd number. Five double-digit numbers: 3 odd and 2 even.</td></tr>
+      <tr><td><code>S0:0 D3:3</code></td><td>No single-digit numbers. Six double-digit numbers: 3 odd and 3 even.</td></tr>
+      <tr><td><code>S0:2 D2:2</code></td><td>Two single-digit even numbers. Four double-digit numbers: 2 odd and 2 even.</td></tr>
+      <tr><td><code>S0:0 D5:1</code></td><td>No single-digit numbers. Six double-digit numbers: 5 odd and 1 even.</td></tr>
+    </tbody>
+  </table>
+
+  <p>The percentage beside each profile, such as <code>S0:0 D4:2 (12%)</code>, is the learned target share from draw-history evidence. It is not a guaranteed probability of the next draw. The app builds this evidence from the active WFMQYH history; when that active window is small, it shrinks the estimate toward the latest 50 draws so the filter stays current without overreacting to a tiny sample.</p>
+
+  <h4>Observe only vs Quota filter</h4>
+  <ul>
+    <li><strong>Observe only</strong> — generates candidates normally and reports which adaptive shapes appeared in the output.</li>
+    <li><strong>Quota filter</strong> — uses the learned percentages as accept/reject quotas, so the final generated candidates try to follow the same shape distribution.</li>
+  </ul>
+
+  <div class="tip">
+    <strong>Quick reading:</strong> adaptive shape is a more detailed version of odd/even balance. It asks not only "how many odd and even numbers?", but also "are those odd/even numbers coming from single-digit or double-digit ranges?"
+  </div>
+
+  <!-- ───────────────────────────────────────── -->
+  <h3 id="columns">Column Reference</h3>
+
+  <table>
+    <thead>
+      <tr><th>Column</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>#</strong></td><td>Row number in the current sort order.</td></tr>
+      <tr><td><strong>Main (6)</strong></td><td>The six main numbers in the candidate set.</td></tr>
+      <tr><td><strong>Supp (2)</strong></td><td>The two supplementary numbers.</td></tr>
+      <tr><td><strong>M/S</strong></td><td>Dots showing how many of the Manual Simulation numbers match this candidate's mains (red) and supps (green).</td></tr>
+      <tr><td><strong>Prize</strong></td><td>Prize division achieved if the Manual Simulation numbers are the winning draw. Only meaningful when 8 numbers are selected in Manual Simulation.</td></tr>
+      <tr><td><strong>Odd:Even</strong></td><td>Ratio of odd to even numbers across all 8 numbers.</td></tr>
+      <tr><td><strong>Comp%</strong></td><td>Composite score from the OGA algorithm, expressed as a percentage. Higher = stronger composite alignment.</td></tr>
+      <tr><td><strong>OGA Raw</strong></td><td>Raw OGA (Octagonal Grid Analysis) score.</td></tr>
+      <tr><td><strong>OGA%</strong></td><td>OGA percentile rank against the generation window history.</td></tr>
+      <tr><td><strong>SelHits</strong></td><td>Count of candidate numbers that overlap with the user-selected and forced numbers.</td></tr>
+      <tr><td><strong>RcntHits</strong></td><td>Count of candidate numbers that appeared in the most recent draw.</td></tr>
+      <tr><td><strong>0x – 8x+</strong></td><td>Bucket columns — how many of the 8 candidate numbers fall into each monthly frequency bucket. See <a href="#bucket-columns">Bucket Columns</a>.</td></tr>
+      <tr><td><strong>Conv</strong></td><td>Convergence score. See <a href="#conv-column">Conv Column</a>.</td></tr>
+      <tr><td><strong>IDM%</strong></td><td>Ideal Draw Match percentage. See <a href="#idm-column">IDM Column</a>.</td></tr>
+      <tr><td><strong>Rdy%</strong></td><td>Readiness score — composite of IDM, Conv and OGA. See <a href="#rdy-column">Rdy Column</a>.</td></tr>
+      <tr><td><strong>Win</strong></td><td>WinScore — tier-gated prize-prediction score. See <a href="#winscore">Win Column</a>.</td></tr>
+      <tr><td><strong>Nrr</strong></td><td>Number Rarity Rank. See <a href="#nrr-column">Nrr Column</a>.</td></tr>
+      <tr><td><strong>NS</strong></td><td>NumSum Score — percentile rank of the candidate's number sum. See <a href="#ns-column">NS Column</a>.</td></tr>
+      <tr><td><strong>Simulate</strong></td><td>Loads this candidate's numbers into Manual Simulation and scrolls to the DGA grid.</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ───────────────────────────────────────── -->
+  <h3 id="ns-column">NS Column — Styling Guide</h3>
+
+  <p>The <strong>NS (NumSum Score)</strong> column shows a percentile rank (0–100) of the candidate's total number sum compared against all historical draws. A score of 50 represents the median historical sum.</p>
+
+  <p>The column uses colour and font weight to communicate signal strength at a glance:</p>
+
+  <table>
+    <thead>
+      <tr><th>Style</th><th>Condition</th><th>Meaning</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="color-teal">⭐ bold teal</span> on teal tint background</td>
+        <td>Highest NS in the current table</td>
+        <td>Best number-sum candidate in the pool</td>
+      </tr>
+      <tr>
+        <td><span class="color-teal">semi-bold teal</span> on light teal tint</td>
+        <td>NS ≥ 65 (not the single best)</td>
+        <td>Top-tier: sum is significantly above the historical median — historically associated with prize winners</td>
+      </tr>
+      <tr>
+        <td><span class="color-teal">Teal text</span></td>
+        <td>NS ≥ 72</td>
+        <td>Very high percentile — sum is in the upper ~28% of all historical draws</td>
+      </tr>
+      <tr>
+        <td><span class="color-blue">Blue text</span></td>
+        <td>60 ≤ NS &lt; 72</td>
+        <td>High — above median, in the upper 40%</td>
+      </tr>
+      <tr>
+        <td><span class="color-green">Green text</span></td>
+        <td>48 ≤ NS &lt; 60</td>
+        <td>Near-median — roughly average range</td>
+      </tr>
+      <tr>
+        <td><span class="color-grey">Grey text</span></td>
+        <td>NS &lt; 48</td>
+        <td>Below median — lower-valued numbers relative to history</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="tip">
+    <strong>In plain English:</strong> Teal / bold → the candidate's numbers add up to a total that is higher than most historical draws → historically this is where prize winners tend to cluster. Blue → above average total, good signal. Green → around the median, neutral. Grey → below-average number sum relative to history.<br><br>
+    The colour ramp goes: grey → green → blue → teal, where teal is the strongest positive signal.
+  </div>
+
+  <h4>How NS is calculated</h4>
+  <ol>
+    <li>For every historical draw, sum all 8 numbers (6 main + 2 supplementary).</li>
+    <li>Sort those sums into an ordered list.</li>
+    <li>For a candidate, compute its total sum and find what fraction of historical draws had a sum <em>less than or equal to</em> the candidate's sum.</li>
+    <li>Multiply by 100 to produce a percentile: <code>NS = (# historical sums ≤ candidate sum) / (# draws) × 100</code></li>
+  </ol>
+  <p>NS is wholly independent of Conv, IDM, Rdy and Nrr — it adds a pure "number-value gravity" axis derived from the actual draw history.</p>
+
+  <!-- ───────────────────────────────────────── -->
+  <h3 id="winscore">Win Column &amp; WinScore</h3>
+
+  <p>The <strong>Win</strong> column displays a tier letter (A / B / C / D) and a numeric score. It is designed to identify prize-worthy candidates <em>without</em> needing Manual Simulation.</p>
+
+  <h4>Recalibrated model (April 2026)</h4>
+  <p>Analysis of 71,000 candidates revealed that the <strong>2x bucket count</strong> (numbers drawn exactly twice in the current month) is the strongest single prize predictor — candidates with more 2x numbers win prizes at a 6.17× higher rate than the baseline.</p>
+
+  <table>
+    <thead>
+      <tr><th>Tier</th><th>Gate condition</th><th>Empirical lift</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><span class="badge badge-A">A</span></td><td>2x bucket count ≥ 3</td><td>~6× baseline</td></tr>
+      <tr><td><span class="badge badge-B">B</span></td><td>2x bucket count = 2</td><td>~4× baseline</td></tr>
+      <tr><td><span class="badge badge-C">C</span></td><td>2x bucket count = 1</td><td>~2× baseline</td></tr>
+      <tr><td><span class="badge badge-D">D</span></td><td>2x bucket count = 0</td><td>baseline</td></tr>
+    </tbody>
+  </table>
+
+  <p>Within each tier, the score is refined by <strong>|Conv| magnitude</strong> (how much the candidate would move the monthly distribution). Sort the Win column <strong>descending (▼)</strong> to bring the best candidates to the top.</p>
+
+  <div class="note">For the strongest combined signal, use the <a href="#rec-button">⭐ Rec button</a> which adds Nrr as a secondary tiebreaker.</div>
+
+  <!-- ───────────────────────────────────────── -->
+  <h3 id="nrr-column">Nrr Column — Number Rarity Rank</h3>
+
+  <p><strong>Nrr</strong> scores candidates by how <em>rare</em> their numbers are within the generated candidate pool.</p>
+  <p>Numbers that barely survive constraint filtering — "contrarian picks" — empirically correlate with actual winning numbers. Analysis showed a <strong>15× lift at the top-50</strong> Nrr candidates and a monotonically decreasing lift across the full pool.</p>
+
+  <h4>Algorithm</h4>
+  <ol>
+    <li>Count how often each number 1–45 appears across all generated candidates.</li>
+    <li>For each number: <code>Rarity = MaxFreq − Freq(number)</code></li>
+    <li>Nrr for a candidate = sum of Rarity scores for all 8 numbers, normalised to 0–100.</li>
+  </ol>
+
+  <p>Higher Nrr = rarer numbers = stronger predictive signal. Sort descending (▼) for best results.</p>
+
+  <h4>Colour scale</h4>
+  <table>
+    <thead><tr><th>Style</th><th>Nrr range</th></tr></thead>
+    <tbody>
+      <tr><td>Purple (bold, tinted background)</td><td>Best Nrr in the pool</td></tr>
+      <tr><td>Purple text</td><td>Nrr ≥ 80</td></tr>
+      <tr><td>Blue text</td><td>60 ≤ Nrr &lt; 80</td></tr>
+      <tr><td>Green text</td><td>40 ≤ Nrr &lt; 60</td></tr>
+      <tr><td>Grey text</td><td>Nrr &lt; 40</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ───────────────────────────────────────── -->
+  <h3 id="conv-column">Conv Column — Convergence Score</h3>
+
+  <p><strong>Conv</strong> measures how much drawing this candidate would move the current month's bucket distribution toward (+) or away from (−) the historical average.</p>
+  <ul>
+    <li>Green text = positive Conv (draw moves distribution <em>toward</em> the average)</li>
+    <li>Red text = negative Conv (draw moves distribution <em>away</em> from the average)</li>
+    <li>⭐ marks the highest absolute Conv in the table</li>
+  </ul>
+
+  <div class="warn-box">
+    <strong>Important:</strong> Statistical analysis showed that Conv <em>direction</em> (positive vs negative) does NOT predict prize-winning candidates — both positive and negative Conv winners occur at equal rates. A Div 2 winner was observed at Conv = −8.0. Conv is informational and shows distribution impact; it is not directionally predictive on its own. The <em>magnitude</em> of Conv (|Conv|) does carry a modest 2.25× lift.
+  </div>
+
+  <!-- ───────────────────────────────────────── -->
+  <h3 id="idm-column">IDM% Column — Ideal Draw Match</h3>
+
+  <p><strong>IDM%</strong> measures how closely the candidate's bucket composition matches the <em>optimal draw composition</em> computed by exhaustive SSD (Sum of Squared Deviations) search. The optimal composition is the allocation of 8 numbers across the 9 buckets that, if drawn, would minimise the distance from the historical average.</p>
+  <ul>
+    <li>100% = perfect match to the ideal composition</li>
+    <li>Blue text (≥ 87.5%) = excellent alignment</li>
+    <li>Green text (≥ 50%) = good alignment</li>
+    <li>Grey text (&lt; 50%) = poor alignment</li>
+  </ul>
+  <p>The <strong>Ideal draw composition (IDM target)</strong> banner above the table shows the current target composition (e.g., <code>0x=5, 1x=2, 2x=1</code>).</p>
+
+  <!-- ───────────────────────────────────────── -->
+  <h3 id="rdy-column">Rdy% Column — Readiness Score</h3>
+
+  <p><strong>Rdy%</strong> is a user-configurable composite of IDM, |Conv|, and OGA%:</p>
+
+  <pre><code>Rdy = (IDM_weight × IDM) + (Conv_weight × |Conv|_normalised) + (OGA_weight × OGA%_normalised)</code></pre>
+
+  <p>Default weights: IDM 70%, Conv 10%, OGA 20%. Adjust in <strong>Candidate Generation Influences → Readiness Score Weights</strong>.</p>
+
+  <ul>
+    <li>Gold text (≥ 70%) = excellent readiness</li>
+    <li>Green text (≥ 40%) = good readiness</li>
+    <li>Grey text (&lt; 40%) = low readiness</li>
+  </ul>
+
+  <!-- ───────────────────────────────────────── -->
+  <h3 id="bucket-columns">Bucket Columns (0x – 8x+)</h3>
+
+  <p>Each column shows how many of the 8 candidate numbers fall into a monthly frequency bucket based on the <em>most recent (partial) month</em> in Monthly Draws Summary:</p>
+  <ul>
+    <li><strong>0x (Undrawn)</strong> — not yet drawn this month</li>
+    <li><strong>1x</strong> — drawn exactly once this month</li>
+    <li><strong>2x</strong> — drawn exactly twice this month (<em>strongest prize-prediction signal</em>)</li>
+    <li><strong>3x – 8x+</strong> — drawn 3 or more times this month</li>
+  </ul>
+
+  <p>Cells that match the "Acceptance needs" required counts are visually highlighted. Sort any bucket column to group candidates by that frequency category.</p>
+
+  <!-- ───────────────────────────────────────── -->
+  <h3 id="sorting">Sorting</h3>
+
+  <p>Click any column header to sort by that column. A second click reverses the direction (▲/▼).</p>
+  <p>Within the Filter panel, each field also has ▲▼ mini sort buttons.</p>
+
+  <div class="tip">
+    <strong>Default sort:</strong> Prize (descending) when 8 Manual Simulation numbers are selected. When fewer than 8 are selected, the sort reverts to whatever was active before 8 numbers were chosen (stored in browser storage).
+  </div>
+
+  <!-- ───────────────────────────────────────── -->
+  <h3 id="rec-button">⭐ Rec — Recommended Ranking Strategy</h3>
+
+  <p>The <strong>⭐ Rec</strong> button (next to the 🔍 Filter button) applies the data-driven recommended multi-key ranking strategy, derived from analysis of 71,000 candidates:</p>
+
+  <ol>
+    <li><strong>2x bucket count ↓</strong> — primary sort (6.17× lift — the strongest single predictor)</li>
+    <li><strong>Nrr ↓</strong> — secondary tiebreaker (number rarity rank, 2× lift)</li>
+    <li><strong>|Conv| magnitude ↓</strong> — tertiary tiebreaker</li>
+  </ol>
+
+  <p>The button highlights green when the recommended sort is active. Hover the button for a tooltip summary of the strategy.</p>
+
+  <div class="note">This multi-key sort cannot be replicated by clicking any single column header. Use ⭐ Rec whenever you want the best statistical estimate of which candidates are most likely to win a prize.</div>
+
+  <!-- ───────────────────────────────────────── -->
+  <h3 id="filter">Filter Panel</h3>
+
+  <p>Click <strong>🔍 Filter ON/OFF</strong> to reveal the filter bar. Filters are applied when you click <strong>🔍 Search</strong> (or press <kbd>Enter</kbd> in any input).</p>
+
+  <h4>Exact-match fields</h4>
+  <ul>
+    <li><strong>Odd/Even</strong> — dropdown; select a ratio such as <code>5:3</code> to show only candidates with exactly that ratio.</li>
+    <li><strong>SelHits</strong> — integer; exact count of selected-number overlaps.</li>
+    <li><strong>RcntHits</strong> — integer; exact count of most-recent-draw overlaps.</li>
+  </ul>
+
+  <h4>Range (min – max) fields</h4>
+  <p>The following fields accept a minimum and/or maximum value. Leave either blank for an open-ended range:</p>
+  <p><em>Comp%, OGA Raw, OGA%, Conv, IDM%, Rdy%, Win, Nrr, NS</em></p>
+
+  <p><strong>Examples:</strong></p>
+  <ul>
+    <li><code>Conv min=−5 max=5</code> → only candidates near distribution-neutral</li>
+    <li><code>Win min=300</code> → only Tier B and above (2x ≥ 2)</li>
+    <li><code>Win min=400</code> → only Tier A (2x ≥ 3)</li>
+    <li><code>Nrr min=70</code> → only the top rarity percentile</li>
+    <li><code>NS min=65</code> → only above-median number sums</li>
+  </ul>
+
+  <p>All active filter fields are combined with AND logic — a candidate must satisfy every condition to match.</p>
+
+  <p>After a search, the <strong>↕ Sort matches</strong> button lets you float matched rows to the top (▼) or bottom (▲) of the full table without hiding non-matching rows.</p>
+
+  <!-- ───────────────────────────────────────── -->
+  <h3 id="filter-save">Saving &amp; Loading Filters</h3>
+
+  <p>The filter bar includes <strong>💾 Save</strong> and <strong>📂 Load</strong> buttons:</p>
+  <ul>
+    <li><strong>💾 Save</strong> — saves all current filter values to browser storage. A brief "✓ Saved" confirmation is shown.</li>
+    <li><strong>📂 Load</strong> — restores a previously saved filter and immediately applies it (no need to click Search again). Only visible once a filter has been saved.</li>
+  </ul>
+  <p>Saved filters persist across page refreshes and app restarts.</p>
+
+  <!-- ───────────────────────────────────────── -->
+  <h3 id="manual-sim">Manual Simulation</h3>
+
+  <p>The <strong>Manual Simulation</strong> grid (below the candidates table) lets you select up to 8 numbers — the first 6 become mains, the last 2 become supplementaries. Once 8 numbers are selected:</p>
+  <ul>
+    <li>The <strong>Prize</strong> column populates for all candidates.</li>
+    <li>A <strong>before/after bucket comparison table</strong> appears above the grid, showing the current month's bucket distribution, what it would become after this draw, the historical average, and the delta still needed.</li>
+    <li>Sort automatically switches to <strong>Prize ↓</strong> so prize-qualifying candidates surface immediately.</li>
+  </ul>
+
+  <p>When you deselect a number (dropping below 8), the app restores the sort and filter state that was active before you reached 8 selections.</p>
+
+  <!-- ───────────────────────────────────────── -->
+  <h3 id="simulate-button">Simulate Button</h3>
+
+  <p>Each candidate row has a <strong>Simulate</strong> button. Clicking it:</p>
+  <ol>
+    <li>Loads the candidate's 8 numbers into the DGA grid as a simulated draw.</li>
+    <li>Smooth-scrolls the page down to the DGA section.</li>
+    <li>A <strong>↑ Back</strong> button appears above the DGA grid to return you to the originating scroll position.</li>
+  </ol>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <h2 id="generation">Candidate Generation</h2>
+
+  <!-- ───────────────────────────────────────── -->
+  <h3 id="influences">Generation Influences</h3>
+
+  <p>Located in the <strong>Candidate Generation Influences</strong> panel. These settings control which candidates are accepted into the pool:</p>
+
+  <table>
+    <thead><tr><th>Setting</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td>Odd/Even Ratio</td><td>Restrict accepted candidates to specific odd:even ratios.</td></tr>
+      <tr><td>Lambda (λ)</td><td>OGA score lower-bound filter — rejects candidates below a percentile threshold.</td></tr>
+      <tr><td>HC3 / SDE1</td><td>Hard constraints that exclude numbers appearing in recent draws.</td></tr>
+      <tr><td>Entropy</td><td>Rejects candidates whose numbers are too clustered (low Shannon entropy).</td></tr>
+      <tr><td>Hamming Distance</td><td>Rejects candidates too similar to already-accepted candidates.</td></tr>
+      <tr><td>Jaccard Similarity</td><td>Similar to Hamming but uses set intersection ratio.</td></tr>
+      <tr><td>Must include ÷5</td><td>Requires at least one number divisible by 5.</td></tr>
+      <tr><td>Ending-digit boosts</td><td>Lets each ending-digit bucket use separate <strong>1-digit</strong> and <strong>2-digit</strong> boosts, so for example bucket <code>1</code> can weight <code>1</code> differently from <code>11, 21, 31, 41</code> across both main and supplementary picks.</td></tr>
+      <tr><td>Single-digit / two-digit share</td><td>Strictly enforces how many numbers must be 1-digit (1–9) versus 2-digit (10–45), with linked percentage selectors and a mains-only or main+supp counting scope.</td></tr>
+      <tr><td>MiAN</td><td>Must include minimum counts from each Acceptance needs bucket. See <a href="#mian">MiAN</a>.</td></tr>
+      <tr><td>Monthly Repeat Bias</td><td>Boosts numbers drawn exactly once this month. See <a href="#repeat-bias">Repeat Bias</a>.</td></tr>
+      <tr><td>Month-end carry-over bias</td><td>Uses the month-end carry-over study as a live weighting input for both generation and candidate ranking during the early part of a planning month.</td></tr>
+      <tr><td>Max Matches to Last Draw</td><td>Rejects candidates that share too many numbers with the most recent draw. See <a href="#last-draw-match">Last Draw Match</a>.</td></tr>
+    </tbody>
+  </table>
+
+  <h4>Single-digit / two-digit share</h4>
+  <p>This control lives inside <strong>Generation Constraints</strong>. It lets you enforce the percentage split between:</p>
+  <ul>
+    <li><strong>Single-digit numbers</strong> — numbers <code>1–9</code></li>
+    <li><strong>Two-digit numbers</strong> — numbers <code>10–45</code></li>
+  </ul>
+
+  <p>The two dropdowns are <strong>linked</strong>. If you choose a value in one selector, the other selector automatically updates to the remaining percentage so the total always stays at <strong>100%</strong>.</p>
+
+  <h4>Scope</h4>
+  <p>The <strong>Count against</strong> selector changes how many positions are included in the rule:</p>
+  <ul>
+    <li><strong>Mains only</strong> — the rule is applied over <strong>6</strong> numbers</li>
+    <li><strong>Main + supps</strong> — the rule is applied over <strong>8</strong> numbers</li>
+  </ul>
+
+  <h4>How the exact counts are derived</h4>
+  <p>The generator converts the selected percentage into exact counts per candidate:</p>
+  <ul>
+    <li><strong>Single-digit count</strong> = floor(percentage × counted slots)</li>
+    <li><strong>Two-digit count</strong> = remaining counted slots</li>
+  </ul>
+
+  <p><strong>Example:</strong> if <strong>Single-digit % = 25%</strong>, then <strong>Two-digit % = 75%</strong> automatically.</p>
+  <ul>
+    <li><strong>Mains only (6 numbers)</strong> → <code>1</code> single-digit + <code>5</code> two-digit</li>
+    <li><strong>Main + supps (8 numbers)</strong> → <code>2</code> single-digit + <code>6</code> two-digit</li>
+  </ul>
+
+  <div class="tip">
+    The app shows this exact target directly under the selectors so you can see the real candidate composition implied by the chosen percentage and scope.
+  </div>
+
+  <h4>Strict enforcement</h4>
+  <p>This is a <strong>hard generation rule</strong>. Candidates that do not match the exact single-digit / two-digit target are rejected during generation.</p>
+
+  <p>Because candidates are made of discrete slots, some percentage choices map to the same exact count. The displayed target is the real rule that will be enforced.</p>
+
+  <h4>Trace panel</h4>
+  <p>When this rule is enabled, the <strong>Trace</strong> panel records:</p>
+  <ul>
+    <li>the selected percentages</li>
+    <li>the selected scope</li>
+    <li>the derived exact target counts</li>
+    <li>the number of candidate rejections caused by this rule</li>
+  </ul>
+
+  <h4>Count and Attempts ×</h4>
+  <ul>
+    <li><strong>Count</strong> — number of candidates to keep in the final table.</li>
+    <li><strong>Attempts ×</strong> — multiplier applied to Count to set the total generation attempts budget (e.g., Count 100 × Attempts 400 = 40,000 attempts).</li>
+  </ul>
+
+  <h4>Ending-digit boosts</h4>
+  <p>Each row in <strong>Generation Constraints</strong> now has two separate boost inputs:</p>
+  <ul>
+    <li><strong>1-digit</strong> — boosts only the single-digit member of that ending-digit bucket, such as <code>1</code> in bucket <code>(1, 11, 21, 31, 41)</code></li>
+    <li><strong>2-digit</strong> — boosts only the two-digit members of that bucket, such as <code>11, 21, 31, 41</code></li>
+  </ul>
+
+  <p>These boost values still apply even if the bucket's <strong>Max</strong> toggle is OFF. They change the sampling weight used during <strong>candidate generation</strong> for both <strong>main and supplementary picks</strong>; they do not directly force numbers into every candidate.</p>
+
+  <div class="tip">
+    Example: if bucket <code>1</code> has <strong>1-digit = 5</strong> and <strong>2-digit = 0</strong>, the generator boosts number <code>1</code> without also boosting <code>11, 21, 31, 41</code>.
+  </div>
+
+  <p>When any split boost is active, the <strong>Trace</strong> panel records both:</p>
+  <ul>
+    <li>the configured split boosts, such as <code>bucket 1 single-digit +5, bucket 1 two-digit +2</code></li>
+    <li>the accepted-candidate results, showing how many boosted candidate hits actually appeared in the generated output</li>
+  </ul>
+
+  <h4 id="ovr-gen">Over-generation Pool</h4>
+  <p>The <strong>Overgen ×</strong> field sets how many times Count is generated as an initial pool before filtering down to Count. Higher values give the scorer more candidates to choose from and improve result quality, at the cost of memory and time.</p>
+  <div class="warn-box">Overgen &gt; 200× may use significant memory. A red warning appears if this threshold is exceeded.</div>
+
+  <!-- ───────────────────────────────────────── -->
+  <h3 id="mian">MiAN — Must Include from Acceptance Needs</h3>
+
+  <p>The <strong>Must Include from Acceptance Needs (MiAN)</strong> toggle requires every accepted candidate to contain at least a specified count of numbers from each monthly frequency bucket.</p>
+
+  <h4>Synced mode</h4>
+  <p>When <strong>"Use these counts when constructing candidates"</strong> is ON in Monthly Draws Summary, the MiAN values are automatically <em>synced</em> from the "Acceptance needs" row — they become read-only (shown with a green tint and 🔗 sync notice). This ensures MiAN always reflects the actual selections made in Monthly Draws Summary.</p>
+
+  <p>In this synced mode, the same bucket counts are used in <strong>two places</strong>:</p>
+  <ul>
+    <li><strong>Constructive fill</strong> — used while building candidates.</li>
+    <li><strong>MiAN post-filter</strong> — checked again after candidates are generated.</li>
+  </ul>
+
+  <p>This means constructive fill tries to steer candidates toward the required monthly bucket mix, and MiAN then acts as a final guard to reject any candidate that still misses those minimum bucket counts.</p>
+
+  <p>When constructive fill is OFF, the 9 bucket count inputs are fully editable.</p>
+
+  <h4>Hard exclude zero-count buckets</h4>
+  <p>When this sub-toggle is enabled, <em>all</em> numbers in buckets whose required count is 0 are excluded from the candidate number pool entirely <strong>before</strong> constructive fill and before the normal weighted generation step. This is a stronger constraint than the acceptance filter alone.</p>
+
+  <p><strong>Example:</strong> if the required counts are <code>2x = 0</code>, <code>3x = 0</code>, and <code>6x = 0</code>, then every currently eligible number in those monthly buckets is removed from the generator pool before any candidate numbers are chosen.</p>
+
+  <!-- ───────────────────────────────────────── -->
+  <h3 id="repeat-bias">Monthly Repeat Bias</h3>
+
+  <p>Boosts the selection probability of numbers drawn exactly <strong>once</strong> this month (the 1x bucket). These numbers haven't yet repeated in the current month and are statistically more likely to be drawn again before the month ends.</p>
+  <ul>
+    <li><strong>Boost factor</strong> — how many times more likely a 1x number is to be selected (1 = no boost, up to 10).</li>
+    <li><strong>Include supplementary numbers</strong> — if checked, the boost also applies when filling supplementary positions.</li>
+  </ul>
+
+  <h3 id="carry-over-bias">Month-end carry-over bias</h3>
+
+  <p>This toggle reuses the <a href="#month-end-carry-over">Month-end carry-over</a> study as an <strong>actual weighting signal</strong> rather than just a display panel.</p>
+  <ul>
+    <li><strong>When ON</strong> — numbers in the active carry-over pool can receive extra or reduced weighting during candidate generation, and candidate ranking can include a carry-over component.</li>
+    <li><strong>Influence</strong> — choose <strong>Light</strong>, <strong>Normal</strong>, or <strong>Strong</strong> to control how far carry-over weights move away from neutral and how much ranking influence they receive.</li>
+    <li><strong>Signal sources</strong> — use separate checkboxes for <strong>still-undrawn month-end numbers</strong> and <strong>last-to-first boundary repeats</strong>. This lets you keep the more direct undrawn signal while turning off boundary-repeat evidence if it feels too speculative.</li>
+    <li><strong>Clicked boost</strong> — when carry-over numbers are clicked from the month-end bucket panel, choose <strong>Normal</strong>, <strong>Strong</strong>, or <strong>Near-forced</strong> instead of always using one fixed massive boost.</li>
+    <li><strong>Automatic default</strong> — the toggle defaults <strong>ON</strong> only while the next draw still falls inside the <strong>first 3 draws</strong> of the planning month <em>and</em> at least one active carry-over number has a positive learned weight. If all active weights are neutral or penalties, the default stays OFF.</li>
+    <li><strong>Planning month logic</strong> — if the current calendar month already looks complete, the app can treat the <em>upcoming month</em> as the planning month, so the carry-over toggle can default on again for the next month boundary.</li>
+  </ul>
+
+  <div class="tip">
+    The panel now labels active weights as boosts or penalties. For example, <code>13×0.93 penalty</code> means number 13 is in the active carry-over pool, but the learned evidence slightly reduces its generation/ranking influence rather than favouring it.
+  </div>
+
+  <!-- ───────────────────────────────────────── -->
+  <h3 id="last-draw-match">Maximum Matches to Last Draw</h3>
+
+  <p>Rejects any candidate that shares more than a specified number of numbers with the most recent draw. Use this to avoid generating candidates that closely mirror the last result.</p>
+  <p>Toggle the constraint ON/OFF with the checkbox, then set the threshold (1–8) in the dropdown.</p>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <h2 id="monthly-summary">Monthly Draws Summary Panel</h2>
+
+  <p>The <strong>Monthly Draws Summary</strong> panel analyses how frequently each number (1–45) has been drawn in each calendar month. Numbers are grouped into nine <em>frequency buckets</em>: Undrawn (0x), and Drawn 1x through 8x+.</p>
+
+  <div class="note">
+    <strong>Partial opening month:</strong> The first visible history month, <strong>2024-05</strong>, remains visible in month-by-month tables, but it is excluded from all-history monthly baselines / averages because it is not a complete month.
+  </div>
+
+  <!-- ───────────────────────────────────────── -->
+  <h3 id="acceptance-needs">Acceptance Needs Row</h3>
+
+  <p>Each Acceptance Needs bucket shows <strong>selected count / available count</strong> for the latest real month bucket set.</p>
+
+  <p><strong>Examples:</strong></p>
+  <ul>
+    <li><code>Undrawn 2/3</code> means you selected <strong>2</strong> numbers from a bucket that currently has <strong>3</strong> available numbers.</li>
+    <li><code>1x 5/17</code> means you selected <strong>5</strong> numbers from a bucket that currently has <strong>17</strong> available numbers.</li>
+    <li><code>4x 1/5</code> means you selected <strong>1</strong> number from a bucket that currently has <strong>5</strong> available numbers.</li>
+  </ul>
+
+  <h4>Selected numbers vs selected counts</h4>
+  <p>This distinction is important:</p>
+  <ul>
+    <li>The <strong>selected numbers themselves</strong> are used by the <strong>Use selected</strong> button and the <strong>Simulate 8</strong> button.</li>
+    <li>The <strong>selected counts</strong> are what drive <strong>Constructive Fill</strong> and the synced <strong>MiAN</strong> values.</li>
+  </ul>
+
+  <div class="tip">
+    When <strong>Use counts when constructing candidates</strong> is ON, the generator does <strong>not</strong> force the exact bucket numbers you clicked. It uses the <em>count</em> you selected in each bucket and then chooses that many numbers from the full eligible bucket pool.
+  </div>
+
+  <!-- ───────────────────────────────────────── -->
+  <h3 id="ideal-draw">Ideal Draw Row</h3>
+
+  <p>Shows the bucket allocation that — if drawn — would bring the current month's distribution closest to the historical average, computed by exhaustive SSD minimisation over all possible 8-number bucket compositions. This is also the target used by the IDM score.</p>
+
+  <p>The Ideal pick mix is now <strong>date-smart</strong>:</p>
+  <ul>
+    <li>If the active month already exists in draw history, the ideal mix works from that observed month state.</li>
+    <li>If the calendar has moved into a new month and no draws from that month are loaded yet, the ideal mix automatically treats the planning month as a <strong>fresh all-undrawn month</strong>.</li>
+    <li>If the current observed month already appears complete, the ideal mix can automatically <strong>roll forward to the next planning month</strong> so it does not keep trying to optimise a finished month.</li>
+  </ul>
+
+  <div class="tip">
+    The <strong>Monthly Buckets</strong> table still shows only observed months. The date-smart reset is used internally for <strong>Robust Baseline and Ideal Draw</strong>, so the Ideal pick mix can behave correctly at month boundaries without needing to display a fake history row.
+  </div>
+
+  <!-- ───────────────────────────────────────── -->
+  <h3 id="needed-row">Needed Row</h3>
+
+  <p>Shows the gap between the current month's bucket totals and the historical average. Negative values mean the current month already exceeds the average in that bucket; positive values indicate how many more numbers from that bucket are needed to reach the average.</p>
+
+  <div class="note">
+    <strong>Like-months averaging:</strong> To keep averages honest, only months with the same number of draws as the <em>Draws per month</em> setting are included in the average. A warning is shown if some months are excluded. The current (partial) month is always included in the frequency display but excluded from the average calculation, and the opening partial month <strong>2024-05</strong> is also excluded from history-wide monthly baselines.
+  </div>
+
+  <!-- ───────────────────────────────────────── -->
+  <h3 id="constructive-fill">Constructive Fill</h3>
+
+  <p>The <strong>"Use these counts when constructing candidates"</strong> checkbox passes the Acceptance needs counts to the generator as hard requirements. When ON:</p>
+  <ul>
+    <li>Every generated candidate must contain at least the specified count from each bucket.</li>
+    <li>The MiAN values in Candidate Generation Influences are automatically synced (see <a href="#mian">MiAN</a>).</li>
+  </ul>
+
+  <h4>How numbers are chosen from a bucket</h4>
+  <p>During constructive fill, the generator receives:</p>
+  <ul>
+    <li><strong>bucket counts</strong> — how many numbers are needed from each bucket, and</li>
+    <li><strong>bucket sets</strong> — all currently eligible numbers in each bucket.</li>
+  </ul>
+
+  <p>If a bucket contains more numbers than required, the generator picks from that bucket by <strong>uniform random sampling without replacement</strong>.</p>
+
+  <p><strong>Examples:</strong></p>
+  <ul>
+    <li><code>1x 5/17</code> means the generator needs <strong>5</strong> numbers from the <code>1x</code> bucket, so it randomly samples <strong>5</strong> from the <strong>17</strong> currently eligible <code>1x</code> numbers.</li>
+    <li><code>4x 1/5</code> means the generator needs <strong>1</strong> number from the <code>4x</code> bucket, so it randomly samples <strong>1</strong> from the <strong>5</strong> currently eligible <code>4x</code> numbers.</li>
+  </ul>
+
+  <p>The exact constructive-fill order is fixed:</p>
+  <ol>
+    <li><code>Undrawn</code></li>
+    <li><code>1x</code></li>
+    <li><code>2x</code></li>
+    <li><code>3x</code></li>
+    <li><code>4x</code></li>
+    <li><code>5x</code></li>
+    <li><code>6x</code></li>
+    <li><code>7x</code></li>
+    <li><code>8x+</code></li>
+  </ol>
+
+  <p>As numbers are picked, the generator fills the candidate <strong>main numbers first</strong> until there are 6 mains, then fills the remaining supplementary positions until there are 2 supps.</p>
+
+  <h4>When constructive fill happens relative to other generation rules</h4>
+  <p>The order matters:</p>
+  <ol>
+    <li><strong>Exclusions are built first</strong> — including user exclusions, SDE1, HC3, and any <strong>Hard exclude zero-count buckets</strong> removals.</li>
+    <li><strong>Constructive fill runs next</strong> — bucket counts are used to seed the candidate.</li>
+    <li><strong>An early digit-width guard runs</strong> — if the seeded candidate already breaks the single-digit / two-digit target, that attempt is rejected immediately.</li>
+    <li><strong>Any remaining open slots</strong> are then filled by the normal weighted generator.</li>
+    <li><strong>Full-candidate constraints</strong> are checked after the 8 numbers are assembled.</li>
+  </ol>
+
+  <p>This means the constructive bucket picks happen <strong>before</strong> the later weighted-fill influences such as:</p>
+  <ul>
+    <li><strong>Digit decade boost / punish</strong></li>
+    <li><strong>n-ending numbers max allowed</strong> (checked later as a hard constraint)</li>
+    <li><strong>Single digit / two digit share</strong></li>
+    <li><strong>Selected-number boost</strong></li>
+    <li><strong>Monthly Repeat Bias</strong></li>
+  </ul>
+
+  <div class="note">
+    Constructive-fill picks themselves are <strong>not weighted</strong> by decade boosts or ending-digit boosts. Those weighting systems only influence the later <em>remaining-slot fill</em> stage if the candidate still has empty positions after constructive fill.
+  </div>
+
+  <h4>What happens when the selected counts already total 8</h4>
+  <p>If the selected bucket counts add up to all 8 candidate positions, constructive fill can populate the entire candidate before the normal weighted generator runs.</p>
+
+  <p>In that case:</p>
+  <ul>
+    <li>the candidate is driven almost entirely by the monthly bucket counts,</li>
+    <li>the generator randomly chooses within each eligible bucket, and</li>
+    <li>later weighting systems do not get a chance to choose additional numbers because there are no free slots left.</li>
+  </ul>
+
+  <p>However, the finished candidate is still checked against later hard rules such as:</p>
+  <ul>
+    <li><strong>n-ending numbers max allowed</strong></li>
+    <li><strong>Single digit / two digit share</strong></li>
+    <li><strong>Odd/Even ratio</strong></li>
+    <li><strong>Maximum matches to last draw</strong></li>
+    <li><strong>Entropy / Hamming / Jaccard</strong></li>
+  </ul>
+
+  <p>So even a fully constructive candidate can still be rejected and retried.</p>
+
+  <!-- ───────────────────────────────────────── -->
+  <h3 id="ending-digit-sequences">Ending Digit Sequence Analyzer</h3>
+
+  <p>The <strong>Ending Digit Sequence Analyzer</strong> checks whether the numbers in each draw form <em>consecutive ending-digit runs</em>. It works on the last digit of each number, not the full number itself.</p>
+
+  <p><strong>Example:</strong> <code>12, 23, 34, 45</code> has endings <code>2, 3, 4, 5</code>, so it contains a run of <code>2-3-4-5</code>. Endings are treated <strong>circularly</strong>, so <code>8-9-0</code> and <code>9-0-1-2</code> also count as consecutive runs.</p>
+
+  <div class="tip">
+    Each summary chip is shown as <strong>count · percentage</strong>. The percentage is based on the current analyzed window only. If the panel's <strong>Include supp (main + supp)</strong> checkbox is changed, these values can change because the analysis switches between main-only and main+supp numbers.
+  </div>
+
+  <h4>What the summary chips mean</h4>
+  <table>
+    <thead><tr><th>Chip</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>Run ≥ 3</strong></td>
+        <td>Counts draws whose <em>longest</em> ending-digit sequence is at least 3 digits long, such as <code>1-2-3</code> or <code>8-9-0</code>.</td>
+      </tr>
+      <tr>
+        <td><strong>Run ≥ 4</strong></td>
+        <td>Counts draws whose longest ending-digit sequence is at least 4 digits long, such as <code>2-3-4-5</code>.</td>
+      </tr>
+      <tr>
+        <td><strong>Covered ≥ 4</strong></td>
+        <td>Counts draws where the <em>strongest</em> ending-digit run explains at least 4 actual numbers in the draw. This is about how many numbers fall inside the run, not just how many distinct ending digits are in the run.</td>
+      </tr>
+      <tr>
+        <td><strong>Run ≥ 5</strong></td>
+        <td>Counts draws whose longest ending-digit sequence is at least 5 digits long, such as <code>8-9-0-1-2</code>.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h4>Run length vs covered numbers</h4>
+  <p><strong>Run length</strong> measures the number of <em>distinct consecutive ending digits</em> in the sequence. <strong>Covered numbers</strong> measures how many actual drawn numbers fall inside that strongest sequence.</p>
+
+  <p><strong>Example:</strong> if a draw has endings <code>2, 2, 3, 4, 5, 8</code>, the strongest run is still <code>2-3-4-5</code> with run length 4, but it <em>covers</em> 5 numbers because two numbers end in <code>2</code>. That is why <strong>Covered ≥ 4</strong> can be higher than <strong>Run ≥ 4</strong>.</p>
+
+  <div class="note">
+    A quick plain-English reading of the panel is: <em>how often moderate ending-digit runs appear, how often long runs appear, and how much of each draw is explained by the strongest run.</em>
+  </div>
+
+  <h3 id="draw-bucket-forecast">Draw Bucket Month Forecast</h3>
+
+  <p>The <strong>Draw Bucket Pattern Explorer</strong> now includes a <strong>Forecast blank current slots</strong> toggle inside the draw-month comparison heatmap. When turned on, the app attempts to fill any blank future columns in the <strong>Current</strong> heatmap with a modelled bucket hit count instead of leaving the cells empty.</p>
+
+  <p>The forecast is designed for <em>bucket hit counts</em>, not exact future numbers. For example, it predicts how many hits a bucket such as <strong>Divisible by 5</strong> or <strong>Ending in 1</strong> is likely to have in the missing month slots.</p>
+
+  <h4>Detailed bucket leaderboard</h4>
+  <p>The <strong>Draw Bucket Pattern Explorer</strong> also includes a <strong>Detailed bucket leaderboard</strong> that ranks every bucket explicitly, so you can see each bucket’s current position at a glance instead of inferring it only from the card order.</p>
+
+  <ul>
+    <li><strong>Pos</strong> shows the bucket’s current leaderboard position under the active <strong>Sort by</strong> mode.</li>
+    <li>Each metric cell shows both the <strong>value</strong> and a small <strong>#position badge</strong> for that metric.</li>
+    <li><strong>≥1 hit</strong> ranks buckets by how often they appear in draws.</li>
+    <li><strong>Avg / draw</strong> ranks buckets by average hits per draw.</li>
+    <li><strong>Recent avg</strong> ranks buckets by their average hit count across the recent rhythm window shown in the cards.</li>
+    <li><strong>Mode</strong> ranks buckets by the most common per-draw hit count.</li>
+    <li><strong>0 hit (low)</strong> ranks buckets by absence rate, where a <em>lower</em> zero-hit percentage is stronger.</li>
+    <li><strong>Max seen</strong> ranks buckets by the highest single-draw hit count observed in the active window.</li>
+    <li><strong>Total hits</strong> ranks buckets by total hits across the full active analysis window.</li>
+  </ul>
+
+  <div class="note">
+    The large position pill shows the bucket’s current place under the selected sort mode. The smaller badges inside each metric column show where that same bucket stands on that specific measure.
+  </div>
+
+  <h4>What the forecast uses</h4>
+  <ul>
+    <li><strong>Monthly Draws Summary</strong> style features such as how many numbers are still undrawn, drawn once, drawn twice, and so on in the current month so far.</li>
+    <li><strong>Monthly Numbers Overlap</strong> style features such as month-to-date repeat pressure and overlap with already-seen numbers.</li>
+    <li><strong>Ending Digit Sequence Analyzer</strong> features such as the current ending-digit run length and how much of recent draws those runs cover.</li>
+    <li><strong>Monthly 1-Digit vs 2-Digit Occurrences</strong> signals such as whether the current month is running more single-digit-heavy or two-digit-heavy than historical baseline.</li>
+  </ul>
+
+  <h4>How forecast cells are shown</h4>
+  <ul>
+    <li>Forecast cells use a <strong>dashed border</strong> and show a small <strong>F</strong> marker.</li>
+    <li>Hovering a forecast cell shows a tooltip with the most likely hit count, expected hit count, confidence, support months, and nearest historical month matches.</li>
+    <li>Forecast cells are <strong>not observed draw history</strong>; they are exploratory projections based on similar historical month progress.</li>
+  </ul>
+
+  <h3 id="hot-cold-ranking">Hot vs Cold Ranking</h3>
+
+  <p>The <strong>Hot vs Cold Ranking</strong> panel compares three different ideas that are often mixed together when people say a number is “hot”:</p>
+
+  <ul>
+    <li><strong>Historical frequency</strong> — how often the number has appeared across the full loaded history.</li>
+    <li><strong>Recent-window hotness</strong> — how often the number has appeared in the last selected number of draws.</li>
+    <li><strong>Recency-weighted hotness</strong> — a whole-history score that still favours newer draws more heavily than older draws.</li>
+  </ul>
+
+  <p>This makes it easier to compare the app’s long-run historical counts with the more recent “hot number” style rankings often shown on lottery websites.</p>
+
+  <h4>Controls</h4>
+  <ul>
+    <li><strong>Include supplementary numbers</strong> — switches the panel between main-only and main+supp analysis.</li>
+    <li><strong>Recent window</strong> — chooses how many of the newest draws are treated as the recent comparison window.</li>
+    <li><strong>Weighted half-life</strong> — controls how quickly older draws lose influence in the recency-weighted ranking.</li>
+    <li><strong>Digits</strong> — restricts the table to all numbers, one-digit numbers, or two-digit numbers only.</li>
+  </ul>
+
+  <h4>How to interpret the rankings</h4>
+  <ul>
+    <li>A number can rank highly in <strong>Historical</strong> but not be currently hot.</li>
+    <li>A number can rank highly in <strong>Recent</strong> even if it is not one of the most frequent numbers overall.</li>
+    <li><strong>Weighted</strong> sits between the two — it still uses the whole history, but recent draws matter more.</li>
+    <li><strong>Hot score</strong> combines recent-vs-prior change and recency-weighted lift to label numbers as <strong>Hot</strong>, <strong>Warm</strong>, <strong>Neutral</strong>, <strong>Cool</strong>, or <strong>Cold</strong>.</li>
+  </ul>
+
+  <h4>Breakdown table column definitions</h4>
+  <ul>
+    <li><strong>#</strong> — the overall <strong>hot rank</strong>. A lower number means the number currently looks hotter by the panel’s combined scoring model.</li>
+    <li><strong>Num</strong> — the lottery number itself.</li>
+    <li><strong>Type</strong> — whether the number is <strong>1-digit</strong> (1–9) or <strong>2-digit</strong> (10–45). This matches the <strong>Digits</strong> filter.</li>
+    <li><strong>Status</strong> — the label assigned from the hot score: <strong>Hot</strong>, <strong>Warm</strong>, <strong>Neutral</strong>, <strong>Cool</strong>, or <strong>Cold</strong>.</li>
+    <li><strong>Hist count</strong> — how many loaded draws included that number across the full history currently in the app.</li>
+    <li><strong>Hist rank</strong> — the number’s rank when sorted by full-history appearance count. Lower rank means more frequent historically.</li>
+    <li><strong>Recent N</strong> — how many times the number appeared in the most recent window, where <strong>N</strong> is the selected recent-window size (for example, 20 draws).</li>
+    <li><strong>Recent rank</strong> — the number’s rank when sorted by recent-window appearances. Lower rank means hotter in the current recent window.</li>
+    <li><strong>Prior rate</strong> — the hit rate in the older comparison window before the recent window. This is the baseline used to judge whether the number has sped up or cooled off.</li>
+    <li><strong>Recent Δ</strong> — the change between the recent hit rate and the prior hit rate, shown in percentage points. Positive values mean the number is appearing more often recently; negative values mean it is appearing less often recently.</li>
+    <li><strong>Weighted rate</strong> — the number’s whole-history hit rate after applying recency weighting, so newer draws count more than older draws.</li>
+    <li><strong>Weighted rank</strong> — the number’s rank when sorted by weighted rate. Lower rank means stronger recency-weighted hotness.</li>
+    <li><strong>Hot score</strong> — the combined score used to produce the overall hot/cold ordering. It blends recent-vs-prior change with recency-weighted lift, so higher positive values are hotter and lower negative values are colder.</li>
+  </ul>
+
+  <p>If you want the quickest reading: numbers near the top usually combine a strong <strong>Recent rank</strong>, a positive <strong>Recent Δ</strong>, and a strong <strong>Weighted rank</strong>. Numbers near the bottom usually show the opposite pattern.</p>
+
+  <!-- ───────────────────────────────────────── -->
+  <h2 id="undrawn-patterns">Undrawn Patterns</h2>
+
+  <p>The <strong>Undrawn Patterns (Empirical)</strong> panel analyses absence patterns <em>draw by draw</em>. A number can add multiple undrawn instances across the active window if it stays absent in multiple draws.</p>
+
+  <p>The panel always follows the active history window and the active <strong>Mode</strong>:</p>
+  <ul>
+    <li><strong>Mains only</strong> — counts only the 6 main numbers in each draw.</li>
+    <li><strong>Mains + supps</strong> — counts both the main and supplementary numbers.</li>
+  </ul>
+
+  <p>Besides the cold/hot absence lists and simulation snapshot, the panel now includes a dedicated month-boundary study.</p>
+
+  <h3 id="month-end-carry-over">Month-end carry-over</h3>
+
+  <p>The <strong>Month-end carry-over</strong> card tests a specific hypothesis: <em>numbers that finish a month undrawn may be more likely to appear early in the next month.</em></p>
+
+  <h4>How the analysis is built</h4>
+  <ol>
+    <li>For each completed month in the active window, the app builds that month’s <strong>month-end undrawn set</strong> — the numbers not seen anywhere in that month under the current mode.</li>
+    <li>It then checks the <strong>first 3 draws of the next consecutive month</strong>.</li>
+    <li>If a month-end undrawn number appears in those early next-month draws, it counts as an <strong>early carry-over hit</strong>.</li>
+    <li>Non-consecutive month gaps are skipped rather than treated as true carry-over transitions.</li>
+  </ol>
+
+  <h4>What the headline stats mean</h4>
+  <ul>
+    <li><strong>Transitions</strong> — how many consecutive month-to-month boundaries were actually evaluated.</li>
+    <li><strong>Month-end undrawn avg</strong> — the average size of the month-end undrawn set across those transitions.</li>
+    <li><strong>Early-next-month hit rate</strong> — the share of month-end undrawn instances that were drawn within the first 3 draws of the next month.</li>
+    <li><strong>Baseline</strong> — the ordinary per-slot draw rate over those same early-next-month draws.</li>
+    <li><strong>Lift</strong> — the early-hit rate divided by baseline. Values above <code>1.00x</code> suggest the month-end undrawn set was drawn early more often than a random number would be.</li>
+    <li><strong>95% range</strong> — the observed transition-to-transition range for early carry-over hit counts.</li>
+  </ul>
+
+  <h4>How to read the number lists</h4>
+  <ul>
+    <li><strong>Most likely to flip early next month</strong> — numbers that most often moved from month-end undrawn into an early next-month draw.</li>
+    <li><strong>Most persistent into next month</strong> — numbers that tended to remain undrawn even after the month changed.</li>
+    <li><strong>Early-hit timing</strong> — shows whether those flips happened more often in draw 1, draw 2, or draw 3 of the next month.</li>
+  </ul>
+
+  <div class="tip">
+    The analysis uses the active window only. If the window starts or ends mid-month, the boundary months may be partial, so full-history windows usually give the cleanest month-end interpretation.
+  </div>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <h2 id="dga">DGA Grid</h2>
+
+  <h3 id="dga-overview">Overview</h3>
+
+  <p>The <strong>DGA (Draw-Grid Analysis)</strong> grid provides a visual heat-map of number frequencies across the draw history. Each row represents one number (1–45) and each column represents one draw. The WFMQYH (Windfall Monthly Quarterly Yearly History) window is shown at full opacity; draws outside this window are shown at 35% opacity to provide context without visual dominance.</p>
+
+  <p>Clicking any column header focuses that column (all other columns dim to 30% opacity). Click the same header again, or click any other column, to change or clear the focus.</p>
+
+  <h3 id="dga-columns">Column Structure</h3>
+
+  <p>The grid contains exactly <strong>N + 1 columns</strong>, where <em>N</em> is the number of draws currently loaded in Draw History Manager:</p>
+
+  <ul>
+    <li><strong>Columns 1 – N</strong> — one column per historical draw, labelled with its sequential draw number.</li>
+    <li><strong>Next</strong> — a single synthetic column appended at the right edge, always labelled "Next". This column is used for simulation and diamond-prediction display.</li>
+  </ul>
+
+  <p>There are no intermediate columns between the last historical draw and "Next". If you have 303 draws loaded you will see exactly 303 history columns followed by one "Next" column.</p>
+
+  <h3 id="dga-next">The Next Column</h3>
+
+  <p>The <strong>Next</strong> column serves two purposes:</p>
+
+  <ul>
+    <li><strong>Diamond predictions</strong> — when the auto-detected diamond shapes project a number into the next draw position, that cell shows a <code>•</code> dot.</li>
+    <li><strong>Simulated numbers</strong> — when numbers are entered via the <em>Simulate Next</em> strip or via any Simulate button in another panel, the corresponding cells show the coloured number symbols:
+      <ul>
+        <li><span style="color:#c62828;font-weight:700;">⬢</span> red hexagon — main number in the simulated draw.</li>
+        <li><span style="color:#2e7d32;font-weight:700;">◯</span> green circle — supplementary number in the simulated draw.</li>
+      </ul>
+    </li>
+  </ul>
+
+  <p>The "Include Next column" checkbox in the DGA controls panel (below the grid) toggles the Next column on or off entirely.</p>
+
+  <h3 id="dga-simulate-strip">Simulate Next Strip</h3>
+
+  <p>The <strong>Simulate Next</strong> strip appears to the <em>right</em> of the DGA grid (never overlapping it). It contains a checkbox for each number 1–45, letting you manually toggle which numbers appear in the Next column.</p>
+
+  <ul>
+    <li>Check any number to place it into the Next column as a simulated main number (up to 6 main; numbers 7–8 become supplementary).</li>
+    <li>A maximum of 8 numbers can be selected. A warning banner appears when the limit is reached.</li>
+    <li>The simulated numbers are sorted ascending; the first 6 become main numbers (<span style="color:#c62828;">⬢</span>) and the remaining 1–2 become supplementary (<span style="color:#2e7d32;">◯</span>).</li>
+    <li>Press <strong>Clear</strong> (appears below the list when numbers are selected) to remove all simulated selections at once.</li>
+    <li>Deselecting all numbers cancels the simulation and the Next column reverts to showing diamond predictions only.</li>
+  </ul>
+
+  <h3 id="dga-simulate">Simulating from Other Panels</h3>
+
+  <p>When any <strong>Simulate</strong> button is pressed in the Generated Candidates, Pick Six, or other panels, the selected numbers are injected into the DGA Next column, allowing you to visualise how those numbers would appear against the full draw history. Use the <strong>↑ Back</strong> button that appears above the grid to return to the originating panel.</p>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <h2 id="scoring-reference">Scoring Reference</h2>
+
+  <h3 id="score-summary">Score Summary Table</h3>
+
+  <table>
+    <thead>
+      <tr><th>Score</th><th>Range</th><th>Best direction</th><th>Empirical lift</th><th>Primary signal</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>Win (2x tier)</strong></td><td>100–499</td><td>↓ High</td><td>~6× at Tier A</td><td>2x bucket count</td></tr>
+      <tr><td><strong>Nrr</strong></td><td>0–100</td><td>↓ High</td><td>15× at top-50</td><td>Number rarity in pool</td></tr>
+      <tr><td><strong>NS</strong></td><td>0–100</td><td>↓ High</td><td>Moderate</td><td>Number sum vs history</td></tr>
+      <tr><td><strong>Conv</strong></td><td>−∞ to +∞</td><td>|Conv| high</td><td>2.25× (magnitude only)</td><td>Distribution convergence</td></tr>
+      <tr><td><strong>IDM%</strong></td><td>0–100%</td><td>↓ High</td><td>5× (correlated with Rdy)</td><td>Ideal draw composition match</td></tr>
+      <tr><td><strong>Rdy%</strong></td><td>0–100%</td><td>↓ High</td><td>5× (same cluster as IDM)</td><td>Weighted IDM+Conv+OGA</td></tr>
+      <tr><td><strong>OGA%</strong></td><td>0–100%</td><td>↓ High</td><td>Signal when window ≥ 10</td><td>Octagonal grid alignment</td></tr>
+    </tbody>
+  </table>
+
+  <h3 id="analysis-findings">Key Analysis Findings</h3>
+
+  <div class="card">
+    <h4>What predicts prize winners (analysis of 71,000 candidates)</h4>
+    <ul>
+      <li><strong>2x bucket count</strong> is the single strongest predictor: candidates with 2x ≥ 3 win at 6.17× the baseline rate.</li>
+      <li><strong>Nrr</strong> is monotonically predictive: every decile increase in Nrr improves the win rate, with 15× lift at the top-50 candidates.</li>
+      <li><strong>Conv direction</strong> has <em>zero</em> predictive value — positive and negative Conv candidates win at identical rates.</li>
+      <li><strong>Conv magnitude (|Conv|)</strong> carries a modest 2.25× lift.</li>
+      <li><strong>IDM, Rdy, Conv</strong> are highly correlated with each other (same top-1,000 candidates) — using all three adds little independent signal.</li>
+      <li><strong>OGA%</strong> is only reliable when the generation window contains ≥ 10 draws.</li>
+    </ul>
+  </div>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <h2 id="glossary">Glossary</h2>
+
+  <table>
+    <thead><tr><th>Term</th><th>Definition</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Bucket</strong></td><td>A frequency category for the current month: Undrawn (0x), Drawn 1x, 2x … 8x+.</td></tr>
+      <tr><td><strong>Candidate</strong></td><td>A set of 8 numbers (6 main + 2 supplementary) generated for potential play.</td></tr>
+      <tr><td><strong>Conv</strong></td><td>Convergence score — how much drawing this candidate would move the monthly distribution toward the historical average.</td></tr>
+      <tr><td><strong>Constructive Fill</strong></td><td>Generation mode where the candidate is seeded from monthly bucket <em>counts</em> (not exact selected bucket numbers). The generator samples from each eligible bucket to satisfy the required mix before later weighted fill and hard-rule checks.</td></tr>
+      <tr><td><strong>DGA</strong></td><td>Draw-Grid Analysis — heat-map visualisation of number frequency across the draw history.</td></tr>
+      <tr><td><strong>Exact duplicate</strong></td><td>A repeated history row with the same date and the same main/supplementary numbers.</td></tr>
+      <tr><td><strong>IDM</strong></td><td>Ideal Draw Match — similarity of a candidate's bucket composition to the optimal draw composition.</td></tr>
+      <tr><td><strong>Local-only date</strong></td><td>A date present in your local history but absent from the pasted/uploaded comparison source. This is informational only unless you verify that the source is complete.</td></tr>
+      <tr><td><strong>MiAN</strong></td><td>Must Include from Acceptance Needs — post-generation filter requiring minimum counts from each bucket.</td></tr>
+      <tr><td><strong>Nrr</strong></td><td>Number Rarity Rank — how rare a candidate's numbers are within the generated pool.</td></tr>
+      <tr><td><strong>NS</strong></td><td>NumSum Score — percentile rank of the candidate's total number sum against historical draws.</td></tr>
+      <tr><td><strong>OGA</strong></td><td>Octagonal Grid Analysis — a pattern-alignment score computed from the draw history window.</td></tr>
+      <tr><td><strong>Rdy</strong></td><td>Readiness Score — user-weighted composite of IDM, |Conv|, and OGA.</td></tr>
+      <tr><td><strong>Same-date conflict</strong></td><td>Two rows that share the same draw date but contain different numbers. Usually indicates a manual-entry or copy/paste mistake.</td></tr>
+      <tr><td><strong>SSD</strong></td><td>Sum of Squared Deviations — metric used to measure how far a distribution is from the average.</td></tr>
+      <tr><td><strong>WFMQYH</strong></td><td>Windfall Monthly Quarterly Yearly History — the active analysis window in the DGA grid.</td></tr>
+      <tr><td><strong>WinScore</strong></td><td>Multi-tier score (A–D) gated on the 2x bucket count, the strongest known prize predictor.</td></tr>
+      <tr><td><strong>Zone</strong></td><td>A group of 5 consecutive numbers (Zone 1: 1–5, Zone 2: 6–10 … Zone 9: 41–45).</td></tr>
+    </tbody>
+  </table>
+
+  <hr style="margin: 40px 0; border: none; border-top: 1px solid var(--border);" />
+  <p style="color: var(--muted); font-size: 0.88em; text-align: center;">
+    Windfall App User Manual · Last updated May 2026 (draw history maintenance and source comparison update) ·
+    <a href="user-manual.html" download="Windfall_User_Manual.html" style="color: var(--primary);">Download this page</a>
+  </p>
+
+</main>
+
+<!-- Smooth scroll + active nav highlight -->
+<script>
+  document.querySelectorAll('.sidebar nav a').forEach(link => {
+    link.addEventListener('click', e => {
+      const href = link.getAttribute('href');
+      if (href && href.startsWith('#')) {
+        e.preventDefault();
+        const target = document.querySelector(href);
+        if (target) target.scrollIntoView({ behavior: 'smooth' });
+      }
+    });
+  });
+
+  // Highlight current section in sidebar
+  const headings = Array.from(document.querySelectorAll('h2[id], h3[id]'));
+  const navLinks = Array.from(document.querySelectorAll('.sidebar nav a'));
+  window.addEventListener('scroll', () => {
+    const scrollY = window.scrollY + 100;
+    let current = '';
+    for (const h of headings) {
+      if (h.offsetTop <= scrollY) current = h.id;
+    }
+    navLinks.forEach(a => {
+      a.style.color = a.getAttribute('href') === '#' + current ? '#ffffff' : '';
+      a.style.borderLeftColor = a.getAttribute('href') === '#' + current ? '#f9a825' : '';
+      a.style.background = a.getAttribute('href') === '#' + current ? 'rgba(255,255,255,0.12)' : '';
+    });
+  });
+</script>
+
+</body>
+</html>

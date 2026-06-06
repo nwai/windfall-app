@@ -4,34 +4,30 @@ interface CollapsibleSectionProps {
   title: string | React.ReactNode;
   children: React.ReactNode;
   defaultOpen?: boolean;
-  summaryHint?: string; // optional small hint text next to title
-  storageKey?: string; // optional key to persist open/closed state
+  summaryHint?: string;
+  storageKey?: string;
 }
-
-// Unified panel title style: bold, size 16, color unified
-const titleStyle: React.CSSProperties = {
-  fontWeight: 700,
-  fontSize: 16,
-  color: "#1a4fa3", // unified accent color
-};
 
 export const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({ title, children, defaultOpen = false, summaryHint, storageKey }) => {
   const derivedKey = storageKey ?? (typeof title === "string" ? `cs-${title.replace(/\s+/g, "-").toLowerCase()}` : undefined);
-  const effectiveDefault = derivedKey ? false : defaultOpen;
-
-  const [open, setOpen] = useState<boolean>(() => {
-    const key = derivedKey;
-    if (!key) return effectiveDefault;
-    const saved = typeof window !== "undefined" ? window.localStorage.getItem(key) : null;
-    if (saved === "true") return true;
-    if (saved === "false") return false;
-    return effectiveDefault;
-  });
+  const [open, setOpen] = useState<boolean>(defaultOpen);
+  const [loadedStorageKey, setLoadedStorageKey] = useState<string | undefined>(undefined);
 
   useEffect(() => {
-    if (!derivedKey) return;
+    if (!derivedKey || typeof window === "undefined") {
+      setLoadedStorageKey(undefined);
+      return;
+    }
+    const saved = window.localStorage.getItem(derivedKey);
+    if (saved === "true") setOpen(true);
+    if (saved === "false") setOpen(false);
+    setLoadedStorageKey(derivedKey);
+  }, [derivedKey]);
+
+  useEffect(() => {
+    if (!derivedKey || loadedStorageKey !== derivedKey || typeof window === "undefined") return;
     window.localStorage.setItem(derivedKey, open ? "true" : "false");
-  }, [open, derivedKey]);
+  }, [open, derivedKey, loadedStorageKey]);
 
   const handleToggle: React.ReactEventHandler<HTMLDetailsElement> = (e) => {
     const isOpen = e.currentTarget.open;
@@ -39,14 +35,14 @@ export const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({ title, c
   };
 
   return (
-    <details open={open} onToggle={handleToggle} style={{ marginTop: 10 }}>
-      <summary style={{ cursor: "pointer" }}>
-        <span style={titleStyle}>{title}</span>
+    <details className="windfall-section" open={open} onToggle={handleToggle}>
+      <summary className="windfall-section__summary">
+        <span className="windfall-section__title">{title}</span>
         {summaryHint ? (
-          <span style={{ fontWeight: 400, fontSize: 12, color: "#666", marginLeft: 8 }}>({summaryHint})</span>
+          <span className="windfall-section__hint">({summaryHint})</span>
         ) : null}
       </summary>
-      <div style={{ marginTop: 8 }}>
+      <div className="windfall-section__body">
         {children}
       </div>
     </details>

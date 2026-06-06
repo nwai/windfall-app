@@ -204,19 +204,14 @@ export function NumberTrendsTable({
                       <b>{trend.number}</b>
                       {isSelected && <span style={{ color: "#c62828", fontWeight: 900 }}> ●</span>}
                     </td>
-                    {/* New short windows */}
                     <td style={{ textAlign: "right", padding: "2px 8px" }}>{trend.d3}</td>
-                    {/* Existing windows */}
-                    <td style={{ textAlign: "right", padding: "2px 8px" }}>{trend.fortnight}</td> {/* 6D */}
+                    <td style={{ textAlign: "right", padding: "2px 8px" }}>{trend.fortnight}</td>
                     <td style={{ textAlign: "right", padding: "2px 8px" }}>{trend.d9}</td>
-                    <td style={{ textAlign: "right", padding: "2px 8px" }}>{trend.month}</td>     {/* 12D */}
-
+                    <td style={{ textAlign: "right", padding: "2px 8px" }}>{trend.month}</td>
                     <td style={{ textAlign: "right", padding: "2px 8px" }}>{trend.d15}</td>
-                    <td style={{ textAlign: "right", padding: "2px 8px" }}>{trend.quarter}</td>   {/* 36D */}
-                    <td style={{ textAlign: "right", padding: "2px 8px" }}>{trend.year}</td>      {/* 156D */}
+                    <td style={{ textAlign: "right", padding: "2px 8px" }}>{trend.quarter}</td>
+                    <td style={{ textAlign: "right", padding: "2px 8px" }}>{trend.year}</td>
                     <td style={{ textAlign: "right", padding: "2px 8px" }}>{trend.all}</td>
-
-                    {/* New Δ column (3→12) */}
                     <td
                       style={{
                         textAlign: "center",

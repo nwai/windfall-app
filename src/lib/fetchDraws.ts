@@ -21,6 +21,28 @@ export type FetchDrawsParams = {
   strictValidateDraws: (draws: Draw[]) => Draw[];
 };
 
+export function buildDemoDrawHistory(
+  count: number,
+  numMains: number,
+  mainMin: number,
+  mainMax: number,
+  rng: FetchDrawsParams["rng"],
+  now: number = Date.now()
+): Draw[] {
+  const rows: Draw[] = [];
+  for (let i = 0; i < count; i++) {
+    const main = rng(numMains, mainMin, mainMax);
+    const supp = rng(2, mainMin, mainMax, main);
+    rows.push({
+      main,
+      supp,
+      date: new Date(now - (count - 1 - i) * 86400 * 1000).toISOString().slice(0, 10),
+      isSimulated: true,
+    });
+  }
+  return rows;
+}
+
 // Local date parser tolerant to ISO and M/D/YY formats
 function parseCsvDateToEpoch(s: string): number {
   if (!s) return 0;
@@ -40,16 +62,24 @@ function parseCsvDateToEpoch(s: string): number {
   return Number.isNaN(t) ? 0 : t;
 }
 
-function tryLoadCsvFallback(strictValidateDraws: (draws: Draw[]) => Draw[], setTrace: FetchDrawsParams["setTrace"], setHighlights: FetchDrawsParams["setHighlights"], setHistory: FetchDrawsParams["setHistory"], minValidDraws: number): boolean {
+export function loadCsvFallbackDraws(strictValidateDraws: (draws: Draw[]) => Draw[]): Draw[] {
   try {
-    if (!fallbackCSV || typeof fallbackCSV !== "string") return false;
+    if (!fallbackCSV || typeof fallbackCSV !== "string") return [];
     const rows = parseCSVorJSON(fallbackCSV) as { date: string; main: number[]; supp: number[] }[];
     const mapped: Draw[] = rows
       .filter((r) => Array.isArray(r.main) && Array.isArray(r.supp) && r.date !== "")
       .map((r) => ({ date: r.date, main: r.main.map(Number), supp: r.supp.map(Number) }));
     const valid = strictValidateDraws(mapped);
-    if (valid.length === 0) return false;
-    const ordered = valid.slice().sort((a, b) => parseCsvDateToEpoch(a.date) - parseCsvDateToEpoch(b.date));
+    return valid.slice().sort((a, b) => parseCsvDateToEpoch(a.date) - parseCsvDateToEpoch(b.date));
+  } catch {
+    return [];
+  }
+}
+
+function tryLoadCsvFallback(strictValidateDraws: (draws: Draw[]) => Draw[], setTrace: FetchDrawsParams["setTrace"], setHighlights: FetchDrawsParams["setHighlights"], setHistory: FetchDrawsParams["setHistory"], minValidDraws: number): boolean {
+  try {
+    const ordered = loadCsvFallbackDraws(strictValidateDraws);
+    if (ordered.length === 0) return false;
     setHistory(ordered);
     setHighlights([]);
     setTrace((t) => [...t, `[TRACE] Loaded ${ordered.length} draws from bundled CSV fallback.`]);
@@ -112,17 +142,10 @@ export async function fetchDraws({
     if (ok) return;
   }
 
-  // Stub fallback
-  const stub: Draw[] = [];
-  const now = Date.now();
-  for (let i = 0; i < minValidDraws; i++) {
-    stub.push({
-      main: rng(numMains, mainMin, mainMax),
-      supp: rng(2, mainMin, mainMax),
-      date: new Date(now - (minValidDraws - 1 - i) * 86400 * 1000).toISOString().slice(0, 10),
-    });
-  }
+  // Last-resort demo fallback. Keep it explicit and mark rows simulated so
+  // downstream panels can avoid mistaking synthetic history for real draws.
+  const stub = buildDemoDrawHistory(minValidDraws, numMains, mainMin, mainMax, rng);
   setHistory(stub);
   setHighlights([]);
-  setTrace(t => [...t, `[TRACE] Stub history of ${stub.length} draws generated.`]);
+  setTrace(t => [...t, `[TRACE] DEMO MODE: generated ${stub.length} simulated fallback draws because no real history source was available.`]);
 }

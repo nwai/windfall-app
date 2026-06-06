@@ -21,6 +21,7 @@ import {
   type NormalizeMode,
 } from "../lib/zpaStorage";
 import { analyzeZoneTrends } from "../lib/zoneAnalysis";
+import { getMostRecentDraw } from "../lib/recentDraws";
 
 export function GroupPatternPanel({
   history,
@@ -57,7 +58,7 @@ export function GroupPatternPanel({
     setGroupsJSON(JSON.stringify(localGroups, null, 2));
   }, [editingOpen]); // refresh when opening
 
-  const lastDraw = history[history.length - 1];
+  const lastDraw = getMostRecentDraw(history);
   const lastPatternMain = lastDraw ? computePatternForDraw(lastDraw.main, localGroups) : Array(9).fill(0);
   const lastPatternSupp = lastDraw ? computePatternForDraw(lastDraw.supp, localGroups) : Array(9).fill(0);
 

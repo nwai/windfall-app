@@ -69,9 +69,18 @@ export interface DGAVisualizerProps {
   highlights: HighlightShape[];
   setHighlights: React.Dispatch<React.SetStateAction<HighlightShape[]>>;
   controlsPosition?: 'above' | 'below'; // default 'above'
-focusNumber?: number | null;
-focusedCol?: number | null;
-onColumnClick?: (col: number) => void;
+  focusNumber?: number | null;
+  focusedCol?: number | null;
+  onColumnClick?: (col: number) => void;
+  /**
+   * 0-based column index of the first draw that falls inside the WFMQYH
+   * window.  Columns strictly before this index are rendered at reduced
+   * opacity so the user can see the full history as context while still
+   * clearly identifying the active analysis window.
+   * Defaults to 0 (all columns at full opacity).
+   */
+  wfmqyhStart?: number;
+  cellSize?: number;
 }
 
 type SolveMode = 'center-and-targets' | 'targets-only';
@@ -206,9 +215,11 @@ export const DGAVisualizer: React.FC<DGAVisualizerProps> = ({
   highlights,
   setHighlights,
   controlsPosition = 'above',
-focusNumber = null,
-focusedCol = null,
-onColumnClick,
+  focusNumber = null,
+  focusedCol = null,
+  onColumnClick,
+  wfmqyhStart = 0,
+  cellSize = 20,
 }) => {
   // Defensive defaults
   grid = grid || [];
@@ -221,7 +232,9 @@ onColumnClick,
 
   /* Mode Toggles */
   const [includeNextCol, setIncludeNextCol] = useState(true);
-  const baseCols = grid[0]?.length || 0;
+  // baseCols = number of labelled historical columns; grid may have one extra
+  // synthetic column at index baseCols which becomes the "Next" column.
+  const baseCols = drawLabels.length;
   const effectiveCols = baseCols + (includeNextCol ? 1 : 0);
   const [useDigitalLine, setUseDigitalLine] = useState(true);
   const [useIndependentAngles, setUseIndependentAngles] = useState(true);
@@ -920,9 +933,26 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
         }`
     )
     .join('|');
-  const tableKey = `${gridKey}::${highlightsKey}::${diamondsKey}::next=${includeNextCol}`;
+  const tableKey = `${gridKey}::${highlightsKey}::${diamondsKey}::next=${includeNextCol}::wfmqyh=${wfmqyhStart}`;
+
+  /**
+   * Returns the CSS opacity for a given column index, combining:
+   *  - WFMQYH dimming: columns before wfmqyhStart are contextual history → 0.35
+   *  - Focus dimming: when a column is focused, all other columns → 0.3
+   * Focus takes precedence so the focused column is always clear.
+   */
+  const getColOpacity = (cIdx: number): number => {
+    const isFocusDimmed = focusedCol !== null && focusedCol !== cIdx;
+    const isHistoryDimmed = wfmqyhStart > 0 && cIdx < wfmqyhStart;
+    if (isFocusDimmed) return 0.3;
+    if (isHistoryDimmed) return 0.35;
+    return 1;
+  };
 
   const disableCenterInputs = solveMode === 'targets-only';
+  const tableCellSize = Math.max(18, Math.floor(cellSize));
+  const tableCellLineHeight = `${tableCellSize}px`;
+  const railCellWidth = Math.max(28, tableCellSize + 6);
 
   /* ------------------------------- Rendering ------------------------------ */
 
@@ -1582,17 +1612,33 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
       <table key={tableKey} style={{ borderCollapse: 'collapse', fontSize: 13 }}>
         <thead>
           <tr>
-            <th style={{ background: '#f9f9f9' }}></th>
+            <th
+              style={{
+                background: '#f9f9f9',
+                minWidth: railCellWidth,
+                width: railCellWidth,
+                height: tableCellSize,
+                lineHeight: tableCellLineHeight,
+                padding: 0,
+                boxSizing: 'border-box',
+                border: '1px solid #eee',
+              }}
+            ></th>
             {drawLabels.map((label, cIdx) => (
               <th
                 key={cIdx}
                 style={{
-                  minWidth: 20,
+                  minWidth: tableCellSize,
+                  width: tableCellSize,
+                  height: tableCellSize,
+                  lineHeight: tableCellLineHeight,
                   textAlign: 'center',
-                  background: '#f9f9f9',
+                  background: wfmqyhStart > 0 && cIdx < wfmqyhStart ? '#f5f5f5' : '#f9f9f9',
                   border: '1px solid #eee',
-                  opacity: focusedCol !== null && focusedCol !== cIdx ? 0.3 : 1,
+                  opacity: getColOpacity(cIdx),
                   cursor: 'pointer',
+                  padding: 0,
+                  boxSizing: 'border-box',
                 }}
                 onClick={() => onColumnClick?.(cIdx)}
               >
@@ -1602,13 +1648,17 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
             {includeNextCol && (
               <th
                 style={{
-                    width: 36,
-                    minWidth: 36,
+                  width: 36,
+                  minWidth: 36,
+                  height: tableCellSize,
+                  lineHeight: tableCellLineHeight,
                   textAlign: 'center',
                   background: '#f0f7ff',
                   border: '1px solid #dbeaff',
-                  opacity: focusedCol !== null && focusedCol !== drawLabels.length ? 0.3 : 1,
+                  opacity: getColOpacity(drawLabels.length),
                   cursor: 'pointer',
+                  padding: 0,
+                  boxSizing: 'border-box',
                 }}
                 title="Next draw (synthetic column)"
                 onClick={() => onColumnClick?.(drawLabels.length)}
@@ -1621,7 +1671,6 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
        <tbody>
   {grid.map((rowArr, rIdx) => {
     const isFocusedRow = focusNumber === rIdx + 1;
-    const dimCol = (c: number) => focusedCol !== null && focusedCol !== c;
 
     return (
       <tr key={rIdx}>
@@ -1632,6 +1681,12 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
             background: getHeatmapColor(numberCounts[rIdx], minCount, maxCount),
             border: isFocusedRow ? '2px solid #ff9800' : '1px solid #eee',
             fontWeight: 700,
+            height: tableCellSize,
+            lineHeight: tableCellLineHeight,
+            minWidth: railCellWidth,
+            width: railCellWidth,
+            padding: '0 6px 0 0',
+            boxSizing: 'border-box',
             position: 'sticky',
             left: 0,
             zIndex: 1,
@@ -1642,8 +1697,8 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
           {numberLabels[rIdx]}
         </td>
 
-        {/* Grid cells */}
-        {rowArr.map((cell, cIdx) => {
+        {/* Grid cells — only the labelled historical columns */}
+        {rowArr.slice(0, drawLabels.length).map((cell, cIdx) => {
           const highlightInfos = getHighlightInfos(rIdx, cIdx);
           const hasHighlight = highlightInfos.length > 0;
           const firstHighlight = hasHighlight ? highlights[highlightInfos[0].idx] : undefined;
@@ -1665,7 +1720,7 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
           let background = baseHeat;
           let bgImage: string | undefined;
           let border = '1px solid #eee';
-          const opacity = dimCol(cIdx) ? 0.3 : 1;
+          const opacity = getColOpacity(cIdx);
 
           if (hasHighlight) {
             if (firstHighlight?.renderStyle === 'hatch') {
@@ -1740,9 +1795,10 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
             <td
               key={cIdx}
               style={{
-                width: 20,
-                minWidth: 20,
-                height: 20,
+                width: tableCellSize,
+                minWidth: tableCellSize,
+                height: tableCellSize,
+                lineHeight: tableCellLineHeight,
                 textAlign: 'center',
                 verticalAlign: 'middle',
                 border,
@@ -1752,6 +1808,7 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
                 backgroundSize: '6px 6px',
                 padding: 0,
                 opacity,
+                boxSizing: 'border-box',
               }}
               title={cellTitle}
             >
@@ -1760,13 +1817,13 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
           );
         })}
 
-        {/* Next column */}
+        {/* Next column — uses the synthetic grid column at index drawLabels.length */}
         {includeNextCol && (
           <td
             key="next"
             style={(() => {
-              const cIdx = (grid[0]?.length || 1);
-              const opacity = focusedCol !== null && focusedCol !== cIdx ? 0.3 : 1;
+              const cIdx = drawLabels.length;
+              const opacity = getColOpacity(cIdx);
               const highlightInfos = getHighlightInfos(rIdx, cIdx);
               const hasHighlight = highlightInfos.length > 0;
               const firstHighlight = hasHighlight ? highlights[highlightInfos[0].idx] : undefined;
@@ -1786,14 +1843,17 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
 
               const baseHeat = getHeatmapColor(numberCounts[rIdx], minCount, maxCount);
               const style: React.CSSProperties = {
-                minWidth: 20,
-                height: 20,
+                minWidth: 36,
+                height: tableCellSize,
+                lineHeight: tableCellLineHeight,
                 textAlign: 'center',
                 position: 'relative',
                 cursor: 'pointer',
                 background: baseHeat,
                 border: '1px solid #eee',
                 opacity,
+                padding: 0,
+                boxSizing: 'border-box',
               };
 
               if (hasHighlight) {
@@ -1819,8 +1879,8 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
             })()}
             title={(() => {
               let tt = `Number: ${numberLabels[rIdx]}, Draw: Next`;
-              const cIdx = (grid[0]?.length || 1);
-              const opacity = focusedCol !== null && focusedCol !== cIdx ? 0.3 : 1;
+              const cIdx = drawLabels.length;
+              const opacity = getColOpacity(cIdx);
               const highlightInfos = getHighlightInfos(rIdx, cIdx);
               if (highlightInfos.length > 0) {
                 tt +=
@@ -1856,7 +1916,13 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
               return tt;
             })()}
           >
-            {predictions && predictions.includes(rIdx + 1) ? '•' : ''}
+            {(() => {
+              const nextCell = rowArr[drawLabels.length] ?? 0;
+              if (nextCell === 1) return <span style={{ color: '#c62828' }}>⬢</span>;
+              if (nextCell === 2) return <span style={{ color: '#2e7d32' }}>◯</span>;
+              if (predictions && predictions.includes(rIdx + 1)) return '•';
+              return '';
+            })()}
           </td>
         )}
       </tr>

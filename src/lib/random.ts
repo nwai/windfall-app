@@ -4,20 +4,21 @@ export function getUniqueRandomNumbers(
   max: number,
   exclude: number[] = [],
   pool?: number[]
-) {
-  let source: number[] = pool
-    ? pool.filter((x: number) => !exclude.includes(x))
+): number[] {
+  const excl = new Set(exclude);
+  const source: number[] = pool
+    ? pool.filter((x: number) => !excl.has(x))
     : [];
   if (!pool) {
     for (let i = min; i <= max; ++i) {
-      if (!exclude.includes(i)) source.push(i);
+      if (!excl.has(i)) source.push(i);
     }
   }
-  const nums: number[] = [];
-  while (nums.length < n && source.length) {
-    const idx = Math.floor(Math.random() * source.length);
-    nums.push(source[idx]);
-    source.splice(idx, 1);
+  const count = Math.min(n, source.length);
+  // Fisher-Yates partial shuffle: swap selected elements to the tail
+  for (let i = source.length - 1; i > source.length - 1 - count && i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [source[i], source[j]] = [source[j], source[i]];
   }
-  return nums.sort((a, b) => a - b);
+  return source.slice(source.length - count).sort((a, b) => a - b);
 }

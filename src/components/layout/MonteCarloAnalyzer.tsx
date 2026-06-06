@@ -44,7 +44,7 @@ export const AppLayout: React.FC = () => {
 
 function panelTitle(id: string) {
   switch (id) {
-    case 'phase0History': return 'Phase 0 Draw History';
+    case 'phase0History': return 'Draw History Manager';
     case 'oddEvenRatios': return 'Odd / Even Ratios';
     case 'numberFrequency': return 'Number Frequency';
     case 'candidateControls': return 'Candidate Generation Controls';

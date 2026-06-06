@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import type { Draw } from '../types';
+import { getMostRecentDraw } from '../lib/recentDraws';
 
 type Block = { start: number; end: number; label: string };
 type HeatCell = { blockIdx: number; drawIdx: number; value: number };
@@ -140,7 +141,7 @@ export const NextHotBlocksPanel: React.FC<NextHotBlocksPanelProps> = ({
   }, [blocks, simNumbers]);
 
   const latestMarkers = useMemo(() => {
-    const last = history[history.length - 1];
+    const last = getMostRecentDraw(history);
     const mainSet = new Set<number>();
     const suppSet = new Set<number>();
     if (!last) return { mainSet, suppSet };
