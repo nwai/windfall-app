@@ -270,7 +270,6 @@ export const MonthlyOverlapPanel: React.FC<{ history: Draw[] }> = ({ history }) 
   return (
     <div style={{ width: "100%", maxWidth: "100%", margin: "0 auto", display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-        <h4 style={{ margin: 0 }}>Monthly Numbers Overlap</h4>
         <label style={{ fontSize: 13 }}>
           <input
             type="checkbox"

@@ -856,7 +856,7 @@ const buildDrivers = (
     drivers.push("Hot/cold evidence: recent, recency-weighted, and mover ranks align with these endings.");
   }
   if (sequence.components.observedShape >= 0.65) {
-    drivers.push("Observed shape evidence: historical draws containing this run fit the current low/mid/high, even/odd, and mean-sum profile.");
+    drivers.push("Observed shape evidence: historical draws containing this run fit the current low/mid/high, odd/even, and mean-sum profile.");
   }
   if (sequence.components.runLengthPrior >= 0.65) {
     drivers.push("Run-length prior: this sequence length is common in the selected WFMQYH evidence.");

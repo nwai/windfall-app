@@ -104,10 +104,6 @@ export function TargetSetQuickStatsPanel({
         marginTop: "10px",
       }}
     >
-      <h3 style={{ marginTop: 0, marginBottom: "1rem" }}>
-        Target Set Quick Stats
-      </h3>
-
       {stats.total === 0 ? (
         <div
           style={{

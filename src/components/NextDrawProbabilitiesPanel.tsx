@@ -10,14 +10,6 @@ interface NextDrawProbabilitiesPanelProps {
   allHistory?: Draw[]; // pass full history for baseline toggle
 }
 
-// Simple helper to bin OGA into deciles for easy probability bands
-function toDecile(score: number): number {
-  if (!isFinite(score)) return -1;
-  // Scale roughly into 10 bands by empirical percentiles approximation
-  // We'll compute actual percentiles from the observed distribution below
-  return 0; // placeholder, not used directly
-}
-
 export const NextDrawProbabilitiesPanel: React.FC<NextDrawProbabilitiesPanelProps> = ({ history, mode = "window", title = "Next Draw Probabilities", allHistory }) => {
   // Compute Odd/Even ratio frequencies from observed history
   const ratioProbs = useMemo(() => {
@@ -95,7 +87,6 @@ export const NextDrawProbabilitiesPanel: React.FC<NextDrawProbabilitiesPanelProp
 
   return (
     <div style={panelStyle}>
-      <h4 style={h4}>{title}</h4>
       {history.length === 0 ? (
         <div style={{ fontSize: 12, color: "#666" }}>No history available.</div>
       ) : (

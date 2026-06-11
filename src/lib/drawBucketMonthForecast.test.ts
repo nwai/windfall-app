@@ -3,10 +3,11 @@ import { describe, expect, it } from "vitest";
 import type { Draw } from "../types";
 import { forecastDrawBucketMonth } from "./drawBucketMonthForecast";
 
-const buildDraw = (date: string, main: number[], supp: number[] = []): Draw => ({
+const buildDraw = (date: string, main: number[], supp: number[] = [], isSimulated = false): Draw => ({
   date,
   main,
   supp,
+  isSimulated,
 });
 
 describe("forecastDrawBucketMonth", () => {
@@ -82,5 +83,29 @@ describe("forecastDrawBucketMonth", () => {
     expect(forecast.forecastSlotCount).toBe(2);
     expect(forecast.slotForecasts.map((slot) => slot.slotIndex)).toEqual([3, 4]);
     expect(forecast.slotForecasts[1].bucketForecasts.end9.predictedHits).toBe(4);
+  });
+
+  it("ignores simulated fallback rows instead of counting them as observed current-month slots", () => {
+    const history: Draw[] = [
+      buildDraw("2026-01-01", [1, 2, 3, 4, 6, 7]),
+      buildDraw("2026-01-08", [11, 12, 13, 14, 16, 17]),
+      buildDraw("2026-01-15", [5, 10, 15, 20, 21, 31]),
+      buildDraw("2026-02-05", [1, 2, 3, 4, 6, 7]),
+      buildDraw("2026-02-12", [11, 12, 13, 14, 16, 17]),
+      buildDraw("2026-02-19", [5, 10, 15, 20, 21, 31]),
+      buildDraw("2026-03-05", [1, 2, 3, 4, 6, 7]),
+      buildDraw("2026-03-12", [11, 12, 13, 14, 16, 17]),
+      buildDraw("2026-03-19", [45, 44, 43, 42, 41, 40], [], true),
+    ];
+
+    const forecast = forecastDrawBucketMonth(history, {
+      includeSupp: false,
+      currentMonthKey: "2026-03",
+      targetSlotCount: 3,
+    });
+
+    expect(forecast.observedDrawCount).toBe(2);
+    expect(forecast.forecastSlotCount).toBe(1);
+    expect(forecast.warnings).toContain("Ignored 1 simulated fallback draw row; draw-bucket month forecasts use real historical draws only.");
   });
 });

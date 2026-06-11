@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import type { Draw } from "../types";
 import {
   analyzeMonthlyDrawSummary,
+  analyzeStageIdealDrawModel,
   bucketLabelForTimes,
   MONTHLY_BUCKET_KEYS,
   monthlyFrequencyConstraintsFromSelections,
@@ -18,6 +19,8 @@ import {
   type MonthlyDrawMonthRow,
   type MonthlyDrawSummary,
   type MonthlyFrequencyCount,
+  type MonthlyIdealDrawState,
+  type StageIdealDrawState,
 } from "../lib/monthlyDrawSummary";
 
 export type {
@@ -26,6 +29,8 @@ export type {
   MonthlyBucketSets,
   MonthlyConstraintPayload,
   MonthlyFrequencyConstraints,
+  MonthlyIdealDrawState,
+  StageIdealDrawState,
 } from "../lib/monthlyDrawSummary";
 
 interface MonthlyDrawsSummaryPanelProps {
@@ -37,6 +42,8 @@ interface MonthlyDrawsSummaryPanelProps {
   onBucketInfoChange?: (info: { labels: Record<number, string> }) => void;
   onBucketSetsChange?: (buckets: MonthlyBucketSets) => void;
   onAvgBucketsChange?: (avgBuckets: AvgBucketEntry[]) => void;
+  onIdealDrawStateChange?: (state: MonthlyIdealDrawState | null) => void;
+  onStageIdealDrawStateChange?: (state: StageIdealDrawState | null) => void;
 }
 
 type DrawLimit = number | "all";
@@ -335,9 +342,12 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
   onBucketInfoChange,
   onBucketSetsChange,
   onAvgBucketsChange,
+  onIdealDrawStateChange,
+  onStageIdealDrawStateChange,
 }) => {
   const [drawLimit, setDrawLimit] = useState<DrawLimit>("all");
   const [averageDrawCountFilter, setAverageDrawCountFilter] = useState<DrawLimit>("all");
+  const [stageExpectedDrawCount, setStageExpectedDrawCount] = useState<number | "auto">("auto");
   const [selectedByBucket, setSelectedByBucket] = useState<SelectedByBucket>(() => emptySelections());
   const [simulateResult, setSimulateResult] = useState<number[] | null>(null);
   const [selectedNumberBiasEnabled, setSelectedNumberBiasEnabled] = useState<boolean>(false);
@@ -348,6 +358,12 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
       averageDrawCountFilter,
     })
   ), [averageDrawCountFilter, drawLimit, history]);
+
+  const stageIdealDrawState = useMemo(() => analyzeStageIdealDrawModel(history, {
+    drawLimitPerMonth: "all",
+    averageDrawCountFilter,
+    expectedDrawCountOverride: stageExpectedDrawCount,
+  }), [averageDrawCountFilter, history, stageExpectedDrawCount]);
 
   const constraints = useMemo(
     () => monthlyFrequencyConstraintsFromSelections(selectedByBucket),
@@ -390,6 +406,32 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
   useEffect(() => {
     onAvgBucketsChange?.(summary.eligibleRows.length ? summary.bucketAverages : []);
   }, [onAvgBucketsChange, summary.bucketAverages, summary.eligibleRows.length]);
+
+  useEffect(() => {
+    onStageIdealDrawStateChange?.(stageIdealDrawState);
+  }, [onStageIdealDrawStateChange, stageIdealDrawState]);
+
+  useEffect(() => {
+    if (!summary.idealDraw || !summary.eligibleRows.length) {
+      onIdealDrawStateChange?.(null);
+      return;
+    }
+    onIdealDrawStateChange?.({
+      bucketSets: summary.effectiveBucketSets,
+      targetDistribution: [...summary.targetDistribution],
+      idealDrawBucketCounts: summary.idealDraw.bucketCounts.map(({ count }) => count),
+      effectiveMonthLabel: summary.effectiveMonthLabel,
+      effectiveMonthIsSynthetic: summary.effectiveMonthIsSynthetic,
+    });
+  }, [
+    onIdealDrawStateChange,
+    summary.effectiveBucketSets,
+    summary.effectiveMonthIsSynthetic,
+    summary.effectiveMonthLabel,
+    summary.eligibleRows.length,
+    summary.idealDraw,
+    summary.targetDistribution,
+  ]);
 
   useEffect(() => {
     if (!constructiveFillEnabled || !summary.latestRow) {
@@ -438,7 +480,6 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
     <div style={panelStyle}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
         <div>
-          <h4 style={{ margin: 0, color: "#0f172a", fontSize: 16 }}>Monthly Draws Summary</h4>
           <div style={{ marginTop: 2, color: "#64748b", fontSize: 12 }}>
             Observed monthly frequency buckets for numbers 1-45, including supplementary numbers.
           </div>
@@ -561,6 +602,41 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
                 {summary.idealDraw.freePicks > 0 && <span>{summary.idealDraw.freePicks} neutral 8x+ pick{summary.idealDraw.freePicks === 1 ? "" : "s"}</span>}
               </div>
             )}
+            <div style={{ marginTop: 10, borderTop: "1px solid #e2e8f0", paddingTop: 8 }}>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 6 }}>
+                <strong style={{ color: "#0f172a" }}>Stage IDM</strong>
+                <label style={{ ...controlLabelStyle, flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  Expected Draw Count
+                  <select
+                    value={stageExpectedDrawCount === "auto" ? "auto" : String(stageExpectedDrawCount)}
+                    onChange={(event) => setStageExpectedDrawCount(event.target.value === "auto" ? "auto" : Number(event.target.value))}
+                    style={{ ...selectStyle, minHeight: 32 }}
+                  >
+                    <option value="auto">Auto{stageIdealDrawState ? `: ${stageIdealDrawState.expectedDrawCount} draws` : ""}</option>
+                    {summary.drawCountOptions.map((count) => (
+                      <option key={count} value={count}>{count} draws</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              {stageIdealDrawState ? (
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", color: "#475569", fontSize: 12 }}>
+                  <span>
+                    {stageIdealDrawState.workingMonthLabel} · {stageIdealDrawState.expectedDrawCountSource === "auto" ? "Auto" : "Override"}: {stageIdealDrawState.expectedDrawCount}-draw month · planning draw {stageIdealDrawState.targetStageDrawCount} · baseline: {stageIdealDrawState.comparableMonthCount} comparable month{stageIdealDrawState.comparableMonthCount === 1 ? "" : "s"}
+                  </span>
+                  {stageIdealDrawState.idealDrawBucketCounts.map((count, times) => (
+                    <BucketChip key={times} times={times} value={count} muted={count === 0} />
+                  ))}
+                  {stageIdealDrawState.warnings.map((warning) => (
+                    <span key={warning} style={{ color: "#b45309", fontWeight: 700 }}>{warning}</span>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ color: "#64748b", fontSize: 12 }}>
+                  Stage IDM unavailable: no comparable months for the resolved draw count and next stage.
+                </div>
+              )}
+            </div>
           </div>
 
           <div style={sectionStyle}>

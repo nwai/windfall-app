@@ -33,8 +33,8 @@ describe("buildUndrawnForecast", () => {
     expect(forecast.simulation.topLikelyUndrawn[0].undrawnRate).toBeGreaterThan(
       forecast.simulation.topLikelyDrawn[0].undrawnRate,
     )
-    expect(forecast.next[0]).toContain("Most likely to stay undrawn next draw")
-    expect(forecast.next[1]).toContain("Most likely to show up next draw")
+    expect(forecast.next[0]).toContain("Highest simulated support for staying undrawn")
+    expect(forecast.next[1]).toContain("Lowest simulated undrawn rates")
   })
 
   it("changes its forecast when supplementary numbers are included", () => {

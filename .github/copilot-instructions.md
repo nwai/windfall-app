@@ -2,219 +2,56 @@
 
 ## Project Overview
 
-This is a React + TypeScript application for lottery number analysis and candidate generation. The app provides various analytical tools including zone pattern analysis, temperature transitions, Monte Carlo simulations, and candidate generation strategies.
-
-## Project Structure
-
-- **`src/`** - Main source directory
-  - **`components/`** - React components organized by feature
-    - `candidates/` - Candidate generation and analysis components
-    - `controls/` - UI control components
-    - `grid/` - Grid visualization components
-    - `layout/` - Layout and structural components
-    - `panels/` - Various analysis panels
-    - `shared/` - Shared UI components
-  - **`lib/`** - Core utilities and algorithms
-    - Zone analysis and weighting utilities
-    - Statistical functions (linear regression, p-values)
-    - Temperature transitions
-    - Pattern analysis
-    - Draw fetching and validation
-  - **`context/`** - React context providers
-  - **`constants/`** - Application constants
-  - **`shared/`** - Shared utilities and hooks
-  - **`types/`** - TypeScript type definitions
-  - **`utils/`** - General utility functions
+Windfall is a React + TypeScript application for lottery draw analysis, diagnostic backtesting, and candidate generation. The app is decision-support software for entertainment use, so mathematical honesty and data provenance are core requirements.
 
 ## Technology Stack
 
-- **React 19** with TypeScript
-- **Create React App** - Build tooling (based on project structure)
-- **ESLint** - Code linting
-- **TypeScript** (strict mode enabled)
+- React 18 with TypeScript
+- Vite build tooling
+- Vitest for tests
+- ESLint for source linting
+- Node `>=20.19.0 || >=22.12.0`
 
 ## Development Commands
 
-### Linting and Type Checking
 ```bash
-npm run lint          # Run ESLint on TypeScript files
-npm run lint:fix      # Auto-fix ESLint issues
-npm run typecheck     # Run TypeScript type checking
-npm run verify        # Run both typecheck and lint
+npm run dev        # Start Vite dev server
+npm run typecheck  # TypeScript no-emit check
+npm run lint       # ESLint source files
+npm run test       # Vitest test suite
+npm run build      # TypeScript build check + Vite production build
 ```
 
-### Running the Application
+## UI / Apple HIG-Inspired Standards
 
-**Note**: The package.json file appears to be incomplete - it currently only contains linting and type-checking scripts. This is a Create React App project (evident from the structure, `public/` folder, and `react-scripts` dependency), but the standard CRA scripts are not defined in the package.json. The standard scripts should be:
+- Follow HIG principles: clarity, deference to content, progressive disclosure, visible feedback, and accessible controls.
+- Use the Helvetica/system sans-serif design language defined in `src/index.css`.
+- Prefer shared UI primitives from `src/components/shared/HigControls.tsx` for new buttons, fields, and inline help.
+- Do not rely on hover-only `title` text for essential explanations. Use visible copy or `InfoHelp`.
+- Every input must have a visible label or an explicit accessible name.
+- Keep controls large enough to operate reliably: 32px minimum in dense desktop surfaces, 44px where touch use is likely.
+- Make panels responsive with wrapping controls and no overlapping text.
+- Use color as a secondary cue; pair it with text, labels, icons, or values.
+- Major workflow sections should be reachable from `AppWorkflowNav` and marked with `WorkflowAnchor`.
 
-```bash
-npm start             # Start development server (script missing from package.json)
-npm run build         # Build for production (script missing from package.json)
-npm test              # Run tests (script missing from package.json)
-```
+## Truthfulness Standards
 
-## Coding Standards
+- Do not describe heuristic rankings as predictions, probabilities, or certainty unless they are empirically calibrated.
+- Label simulated, synthetic, fallback, diagnostic, and backtested data explicitly.
+- Backtests must avoid lookahead bias by using only history available before the evaluated draw.
+- Prefer wording such as "evidence", "diagnostic", "observed", and "ranked support" when the result is not calibrated probability.
+- Do not add fake data, mock results, or placeholder logic.
 
-### TypeScript
-- Use **strict mode** (enabled in tsconfig.json)
-- Always provide explicit types for function parameters and return values
-- Use interfaces for object shapes, types for unions/primitives
-- Avoid `any` types - use `unknown` if truly needed
-- Use type assertions sparingly and only when necessary
+## Code Standards
 
-### React
-- Use **functional components** with hooks (no class components)
-- Explicitly type component props, including `children` when needed
-- Use `useMemo` and `useCallback` for performance optimization in complex components
-- Keep components focused and single-purpose
-- Extract complex logic into custom hooks or utility functions
+- Use functional React components and hooks.
+- Keep expensive derived values in `useMemo` when they operate over draw history, generated candidates, or large tables.
+- Prefer small, focused utility functions for statistical and parsing logic.
+- Avoid `any`; use domain types or `unknown` with explicit narrowing.
+- Keep edits scoped to the requested workflow and avoid unrelated refactors.
 
-### File Organization
-- Components: PascalCase (e.g., `GroupPatternPanel.tsx`)
-- Utilities: camelCase (e.g., `zoneAnalysis.ts`)
-- Tests: Match filename with `.test.ts` or `.test.tsx` extension
-- Keep related files together (component + tests + styles)
+## Verification
 
-### Code Style
-- Use clear, descriptive variable and function names
-- Add JSDoc comments for complex functions and algorithms
-- Keep functions small and focused (prefer < 50 lines)
-- Use early returns to reduce nesting
-- Prefer `const` over `let`, avoid `var`
-- Use arrow functions for callbacks and inline functions
-- Use template literals for string interpolation
-
-## Key Domain Concepts
-
-### Draws and History
-- **Draw**: A lottery draw with main numbers (1-45) and optional powerball
-- **History**: Array of draws ordered chronologically
-- Draws contain metadata like date, draw number, and results
-
-### Zone Pattern Analysis (ZPA)
-- Numbers 1-45 divided into 9 zones (Zone 1: 1-5, Zone 2: 6-10, etc.)
-- Analyzes frequency trends of zones over time
-- Uses linear regression for trend detection
-- Provides per-number weights based on zone trends
-
-### Candidates
-- **Candidate**: A set of numbers generated for potential play
-- Generated using various strategies (Monte Carlo, weighted selection, etc.)
-- Can be scored and ranked using multiple criteria
-
-### Temperature Transitions
-- Tracks "temperature" (frequency state) of numbers
-- Analyzes transitions between temperature states
-- Used for predictive modeling
-
-### Weighting Systems
-- Numbers can be weighted based on various factors
-- Common factors: zone trends, drought periods, historical patterns
-- Weights typically range from 0.1 to 2.0 (1.0 = neutral)
-
-## Testing Guidelines
-
-### Test Organization
-- Place test files next to the code they test
-- Some existing test files use custom testing approaches (e.g., `parseCSVorJSON.test.ts`)
-- If adding new tests, consider using standard testing frameworks like Jest with descriptive test names
-
-### Test Coverage
-- Test public APIs and exported functions
-- Test edge cases and boundary conditions
-- Test error handling and validation
-- Mock external dependencies appropriately
-
-### Running Tests
-
-Test files exist in the codebase (e.g., `*.test.ts`, `*.test.tsx`), but there are currently no npm scripts configured for running tests. Individual test files can be run directly with a test runner like Jest if needed.
-
-## Common Patterns
-
-### Memoization
-```typescript
-const expensiveResult = useMemo(() => {
-  return computeExpensiveValue(dependency);
-}, [dependency]);
-```
-
-### Context Usage
-```typescript
-const { value, setValue } = useContext(MyContext);
-```
-
-### Component Structure
-```typescript
-import { useState, useMemo, useCallback } from 'react';
-
-interface MyComponentProps {
-  data: SomeType[];
-  onUpdate: (value: number) => void;
-}
-
-export const MyComponent = ({ data, onUpdate }: MyComponentProps) => {
-  // Hooks first
-  const [state, setState] = useState(0);
-  
-  // Memoized values
-  const processedData = useMemo(() => processData(data), [data]);
-  
-  // Event handlers
-  const handleClick = useCallback(() => {
-    onUpdate(state);
-  }, [state, onUpdate]);
-  
-  // Render
-  return (
-    <div>{/* JSX */}</div>
-  );
-};
-```
-
-## Important Notes
-
-### Pre-existing Issues
-- The codebase has many TypeScript type errors that are **pre-existing**
-- Focus on not introducing new errors rather than fixing all existing ones
-- When making changes, ensure your code doesn't increase the error count
-- Use `npm run verify` to check your changes don't break linting
-
-### Performance Considerations
-- Use `useMemo` for expensive calculations
-- Use `useCallback` for event handlers passed to child components
-- Be mindful of re-render triggers in large lists
-- Consider virtualization for large datasets
-
-### Documentation
-- Update documentation when adding new features
-- Keep README files in sync with code changes
-- Document complex algorithms with comments
-- Include examples for new utilities
-
-## Making Changes
-
-### Before Starting
-1. Understand the issue requirements fully
-2. Explore related code and existing patterns
-3. Run `npm run verify` to check baseline state
-4. Identify minimal changes needed
-
-### During Development
-1. Make small, focused changes
-2. Run `npm run verify` frequently
-3. Test changes manually when possible
-4. Keep changes consistent with existing patterns
-5. Update tests if functionality changes
-
-### Before Committing
-1. Run `npm run verify` to check for errors
-2. Ensure no new linting errors were introduced
-3. Review all changed files
-4. Update documentation if needed
-
-## Getting Help
-
-- Check existing code for similar patterns
-- Review documentation in `docs/` directory
-- Look at test files for usage examples
-- Check component README files when available
+- Run relevant focused tests for changed code.
+- Run `npm run typecheck` and `npm run build` before reporting completion when practical.
+- For rendered UI changes, validate in the browser and check for console errors.

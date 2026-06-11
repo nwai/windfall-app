@@ -164,7 +164,6 @@ export const MonthEndCarryOverBucketsPanel: React.FC<MonthEndCarryOverBucketsPan
     <section style={panelStyle}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
         <div>
-          <h4 style={{ margin: 0, color: "#0f172a", fontSize: 16 }}>Month-End Carry-Over Buckets</h4>
           <div style={{ marginTop: 4, color: "#64748b", fontSize: 12, lineHeight: 1.45 }}>
             Groups numbers that appeared in the last draw of a month and the first draw of the next month by their source-month frequency bucket.
           </div>

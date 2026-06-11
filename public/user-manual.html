@@ -187,12 +187,15 @@
 
     <a class="section" href="#generated-candidates">Generated Candidates</a>
     <a href="#paste-weighted-generator">Paste-Weighted Generator</a>
+    <a href="#portfolio-compression">Portfolio Compression</a>
+    <a href="#portfolio-backtest-v1">Portfolio Backtest V1</a>
     <a href="#columns">Column Reference</a>
     <a href="#ns-column">NS Column Styling</a>
     <a href="#winscore">Win Column &amp; WinScore</a>
     <a href="#nrr-column">Nrr Column</a>
     <a href="#conv-column">Conv Column</a>
     <a href="#idm-column">IDM Column</a>
+    <a href="#stage-idm-column">Stage IDM Column</a>
     <a href="#rdy-column">Rdy Column</a>
     <a href="#bucket-columns">Bucket Columns (0x–8x+)</a>
     <a href="#sorting">Sorting</a>
@@ -212,6 +215,7 @@
     <a class="section" href="#monthly-summary">Monthly Draws Summary</a>
     <a href="#acceptance-needs">Acceptance Needs</a>
     <a href="#ideal-draw">Ideal Draw Row</a>
+    <a href="#stage-idm">Stage IDM</a>
     <a href="#needed-row">Needed Row</a>
     <a href="#constructive-fill">Constructive Fill</a>
     <a href="#ending-digit-sequences">Ending Digit Sequence Analyzer</a>
@@ -253,7 +257,7 @@
   <p>The Windfall App is an analytical tool for Weekly Windfall lottery number analysis and candidate generation. It provides:</p>
   <ul>
     <li>Candidate set generation using configurable strategies and constraints</li>
-    <li>Multi-signal scoring of each candidate (Conv, IDM, Rdy, Win, Nrr, NS)</li>
+    <li>Multi-signal scoring of each candidate (Conv, IDM, Stage IDM, Rdy, Win, Nrr, NS)</li>
     <li>Monthly frequency analysis of drawn numbers</li>
     <li>Zone pattern analysis, temperature transitions, and Monte Carlo simulation</li>
     <li>DGA (Draw-Grid Analysis) visualisation</li>
@@ -455,6 +459,83 @@
   </div>
 
   <!-- ───────────────────────────────────────── -->
+  <h3 id="portfolio-compression">Portfolio Compression / 12-Game Distiller</h3>
+
+  <p>The <strong>Portfolio Compression / 12-Game Distiller</strong> helps reduce a group of generated or pasted games into a six-number core plus alternates. It starts with count compression: numbers that appear more often across the supplied portfolio rows rise to the top.</p>
+
+  <p>This panel is best used as a decision-support layer. It helps answer: "if I already have a portfolio of candidate games, which numbers are carrying the most repeated support across that portfolio?" It does not prove that those six numbers will be drawn.</p>
+
+  <h4 id="portfolio-backtest-v1">Backtest Portfolio Compression V1</h4>
+
+  <p><strong>Backtest Portfolio Compression V1</strong> is a validation tool, not a number-picking oracle. It asks whether the compressed structural method performs better in historical walk-forward testing than simpler controls.</p>
+
+  <div class="note">
+    <strong>Core question:</strong> when this structural compression method is tested walk-forward, using only past draws at each point, does it behave better than simple frequency or random?
+  </div>
+
+  <table>
+    <thead>
+      <tr><th>Output</th><th>How to read it</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Walk-forward results</strong></td>
+        <td>The number of historical draws tested out-of-sample. More evaluated draws gives a more stable read.</td>
+      </tr>
+      <tr>
+        <td><strong>Compressed vs simple prize delta</strong></td>
+        <td>Compressed structural method minus simple historical-frequency method. Positive is encouraging, but should not be trusted by itself.</td>
+      </tr>
+      <tr>
+        <td><strong>Compressed advantage p-value</strong></td>
+        <td>The main honesty metric for compressed versus simple frequency. Below <code>0.05</code> is interesting, <code>0.05-0.10</code> is worth watching, and above <code>0.10</code> is weak evidence.</td>
+      </tr>
+      <tr>
+        <td><strong>Monte Carlo random-history p-value</strong></td>
+        <td>Checks whether the compressed strategy's historical score is unusual compared with random 6/45 histories. A high value means the result sits inside normal luck.</td>
+      </tr>
+      <tr>
+        <td><strong>Prize score</strong></td>
+        <td>Synthetic scoring using the backtest prize table. It is useful for comparing strategies, but it is not a money or profit claim.</td>
+      </tr>
+      <tr>
+        <td><strong>Mean matches</strong></td>
+        <td>Average number of matching mains per tested draw. This is often more stable than prize score.</td>
+      </tr>
+      <tr>
+        <td><strong>3+ hit rate</strong></td>
+        <td>Share of tested draws where the strategy matched at least three mains. Useful because one rare large hit can distort prize score.</td>
+      </tr>
+      <tr>
+        <td><strong>Sharpe / Sortino / Calmar</strong></td>
+        <td>Stability diagnostics in synthetic prize-score units. They help compare smoothness and drawdown, but they are not financial investment metrics.</td>
+      </tr>
+      <tr>
+        <td><strong>Equity and drawdown curves</strong></td>
+        <td>Visual stability checks. Look for whether compressed improves steadily or only spikes once and then gives the gain back.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h4>Recommended workflow</h4>
+  <ol>
+    <li>Use <strong>10,000</strong> Monte Carlo histories for serious reading.</li>
+    <li>Run several training-window settings, such as <code>24</code>, <code>36</code>, <code>50</code>, <code>75</code>, and <code>100</code>.</li>
+    <li>Look for stability across settings, not one lucky result.</li>
+    <li>Prefer results where compressed has a positive prize delta, higher mean matches, higher 3+ hit rate, lower or comparable drawdown, and a low p-value.</li>
+    <li>Be suspicious if prize score is the only strong metric. That can be caused by one lucky historical spike.</li>
+    <li>If simple frequency beats compressed, listen to that result. It means the structural layer is not currently adding evidence.</li>
+  </ol>
+
+  <div class="tip">
+    <strong>Rule of thumb:</strong> the useful signal is not "compressed won once." The useful signal is compressed repeatedly outperforming simple frequency across settings, with better 3+ hit rate and a respectable p-value.
+  </div>
+
+  <div class="warn-box">
+    <strong>Honesty note:</strong> use the backtest to decide whether Portfolio Compression deserves attention. Do not use it to force belief in the final six.
+  </div>
+
+  <!-- ───────────────────────────────────────── -->
   <h3 id="columns">Column Reference</h3>
 
   <table>
@@ -476,8 +557,9 @@
       <tr><td><strong>0x – 8x+</strong></td><td>Bucket columns — how many of the 8 candidate numbers fall into each monthly frequency bucket. See <a href="#bucket-columns">Bucket Columns</a>.</td></tr>
       <tr><td><strong>Conv</strong></td><td>Convergence score. See <a href="#conv-column">Conv Column</a>.</td></tr>
       <tr><td><strong>IDM%</strong></td><td>Ideal Draw Match percentage. See <a href="#idm-column">IDM Column</a>.</td></tr>
+      <tr><td><strong>Stage IDM</strong></td><td>Next-stage Ideal Draw Match percentage from comparable same-size months. See <a href="#stage-idm-column">Stage IDM Column</a>.</td></tr>
       <tr><td><strong>Rdy%</strong></td><td>Readiness score — composite of IDM, Conv and OGA. See <a href="#rdy-column">Rdy Column</a>.</td></tr>
-      <tr><td><strong>Win</strong></td><td>WinScore — tier-gated prize-prediction score. See <a href="#winscore">Win Column</a>.</td></tr>
+      <tr><td><strong>Win</strong></td><td>WinScore — tier-gated candidate-pool diagnostic. See <a href="#winscore">Win Column</a>.</td></tr>
       <tr><td><strong>Nrr</strong></td><td>Number Rarity Rank. See <a href="#nrr-column">Nrr Column</a>.</td></tr>
       <tr><td><strong>NS</strong></td><td>NumSum Score — percentile rank of the candidate's number sum. See <a href="#ns-column">NS Column</a>.</td></tr>
       <tr><td><strong>Simulate</strong></td><td>Loads this candidate's numbers into Manual Simulation and scrolls to the DGA grid.</td></tr>
@@ -546,14 +628,14 @@
   <!-- ───────────────────────────────────────── -->
   <h3 id="winscore">Win Column &amp; WinScore</h3>
 
-  <p>The <strong>Win</strong> column displays a tier letter (A / B / C / D) and a numeric score. It is designed to identify prize-worthy candidates <em>without</em> needing Manual Simulation.</p>
+  <p>The <strong>Win</strong> column displays a tier letter (A / B / C / D) and a numeric score. It ranks generated rows by candidate-pool diagnostics <em>without</em> needing Manual Simulation.</p>
 
   <h4>Recalibrated model (April 2026)</h4>
-  <p>Analysis of 71,000 candidates revealed that the <strong>2x bucket count</strong> (numbers drawn exactly twice in the current month) is the strongest single prize predictor — candidates with more 2x numbers win prizes at a 6.17× higher rate than the baseline.</p>
+  <p>Internal analysis of 71,000 generated candidates found that the <strong>2x bucket count</strong> (numbers drawn exactly twice in the current month) had the strongest observed association in that candidate sample. Treat the lift values below as sample diagnostics, not calibrated next-draw probabilities.</p>
 
   <table>
     <thead>
-      <tr><th>Tier</th><th>Gate condition</th><th>Empirical lift</th></tr>
+      <tr><th>Tier</th><th>Gate condition</th><th>Observed sample lift</th></tr>
     </thead>
     <tbody>
       <tr><td><span class="badge badge-A">A</span></td><td>2x bucket count ≥ 3</td><td>~6× baseline</td></tr>
@@ -563,7 +645,7 @@
     </tbody>
   </table>
 
-  <p>Within each tier, the score is refined by <strong>|Conv| magnitude</strong> (how much the candidate would move the monthly distribution). Sort the Win column <strong>descending (▼)</strong> to bring the best candidates to the top.</p>
+  <p>Within each tier, the score is refined by <strong>|Conv| magnitude</strong> (how much the candidate would move the monthly distribution). Sort the Win column <strong>descending (▼)</strong> to bring the highest diagnostic rows to the top.</p>
 
   <div class="note">For the strongest combined signal, use the <a href="#rec-button">⭐ Rec button</a> which adds Nrr as a secondary tiebreaker.</div>
 
@@ -571,7 +653,7 @@
   <h3 id="nrr-column">Nrr Column — Number Rarity Rank</h3>
 
   <p><strong>Nrr</strong> scores candidates by how <em>rare</em> their numbers are within the generated candidate pool.</p>
-  <p>Numbers that barely survive constraint filtering — "contrarian picks" — empirically correlate with actual winning numbers. Analysis showed a <strong>15× lift at the top-50</strong> Nrr candidates and a monotonically decreasing lift across the full pool.</p>
+  <p>Numbers that barely survive constraint filtering — "contrarian picks" — were overrepresented in one internal candidate-sample analysis. Treat any lift figure as sample-specific and uncalibrated unless confirmed by fresh walk-forward testing.</p>
 
   <h4>Algorithm</h4>
   <ol>
@@ -580,7 +662,7 @@
     <li>Nrr for a candidate = sum of Rarity scores for all 8 numbers, normalised to 0–100.</li>
   </ol>
 
-  <p>Higher Nrr = rarer numbers = stronger predictive signal. Sort descending (▼) for best results.</p>
+  <p>Higher Nrr = rarer numbers in the generated pool. Sort descending (▼) when you want a rarity-based tiebreaker, not a guaranteed predictive signal.</p>
 
   <h4>Colour scale</h4>
   <table>
@@ -597,10 +679,10 @@
   <!-- ───────────────────────────────────────── -->
   <h3 id="conv-column">Conv Column — Convergence Score</h3>
 
-  <p><strong>Conv</strong> measures how much drawing this candidate would move the current month's bucket distribution toward (+) or away from (−) the historical average.</p>
+  <p><strong>Conv</strong> measures how much drawing this candidate would move the current month's bucket distribution toward (+) or away from (−) the robust Monthly Draws Summary target.</p>
   <ul>
-    <li>Green text = positive Conv (draw moves distribution <em>toward</em> the average)</li>
-    <li>Red text = negative Conv (draw moves distribution <em>away</em> from the average)</li>
+    <li>Green text = positive Conv (draw moves distribution <em>toward</em> the Monthly Draws Summary target)</li>
+    <li>Red text = negative Conv (draw moves distribution <em>away</em> from the Monthly Draws Summary target)</li>
     <li>⭐ marks the highest absolute Conv in the table</li>
   </ul>
 
@@ -611,14 +693,32 @@
   <!-- ───────────────────────────────────────── -->
   <h3 id="idm-column">IDM% Column — Ideal Draw Match</h3>
 
-  <p><strong>IDM%</strong> measures how closely the candidate's bucket composition matches the <em>optimal draw composition</em> computed by exhaustive SSD (Sum of Squared Deviations) search. The optimal composition is the allocation of 8 numbers across the 9 buckets that, if drawn, would minimise the distance from the historical average.</p>
+  <p><strong>IDM%</strong> measures how closely the candidate's bucket composition matches the <em>Ideal pick mix</em> emitted by Monthly Draws Summary. That ideal mix is computed by exhaustive SSD (Sum of Squared Deviations) search against the panel's robust, reconciled monthly bucket target. IDM is a descriptive alignment score, not a probability or guarantee.</p>
   <ul>
     <li>100% = perfect match to the ideal composition</li>
     <li>Blue text (≥ 87.5%) = excellent alignment</li>
     <li>Green text (≥ 50%) = good alignment</li>
     <li>Grey text (&lt; 50%) = poor alignment</li>
   </ul>
-  <p>The <strong>Ideal draw composition (IDM target)</strong> banner above the table shows the current target composition (e.g., <code>0x=5, 1x=2, 2x=1</code>).</p>
+  <p>The <strong>Ideal draw composition (IDM target)</strong> banner above the table shows the shared Monthly Draws Summary ideal composition (e.g., <code>0x=5, 1x=2, 2x=1</code>), using the same effective month state as that panel.</p>
+
+  <!-- ───────────────────────────────────────── -->
+  <h3 id="stage-idm-column">Stage IDM Column — Stage-Conditioned Ideal Draw Match</h3>
+
+  <p><strong>Stage IDM</strong> measures how closely a candidate's bucket composition matches the <em>next draw-stage</em> ideal composition emitted by Monthly Draws Summary. It uses comparable historical months with the same expected number of draws, then looks only at the stage we are planning for.</p>
+
+  <p>Example: if the working month is a 13-draw month, five draws have already happened, and the next draw is draw 6, Stage IDM learns from historical 13-draw months after their sixth draw. The score then asks: "does this candidate have the bucket mix that would best align with that stage-conditioned target?"</p>
+
+  <ul>
+    <li>100% = perfect match to the Stage IDM target composition</li>
+    <li>Blue text (≥ 87.5%) = excellent stage alignment</li>
+    <li>Green text (≥ 50%) = good stage alignment</li>
+    <li>Grey text (&lt; 50%) = weak stage alignment</li>
+  </ul>
+
+  <div class="warn-box">
+    <strong>Honesty note:</strong> Stage IDM is not a calibrated next-draw probability. It is a descriptive alignment diagnostic that compares candidates against observed stage-conditioned bucket behaviour.
+  </div>
 
   <!-- ───────────────────────────────────────── -->
   <h3 id="rdy-column">Rdy% Column — Readiness Score</h3>
@@ -642,7 +742,7 @@
   <ul>
     <li><strong>0x (Undrawn)</strong> — not yet drawn this month</li>
     <li><strong>1x</strong> — drawn exactly once this month</li>
-    <li><strong>2x</strong> — drawn exactly twice this month (<em>strongest prize-prediction signal</em>)</li>
+    <li><strong>2x</strong> — drawn exactly twice this month (<em>strongest observed candidate-sample association</em>)</li>
     <li><strong>3x – 8x+</strong> — drawn 3 or more times this month</li>
   </ul>
 
@@ -661,17 +761,17 @@
   <!-- ───────────────────────────────────────── -->
   <h3 id="rec-button">⭐ Rec — Recommended Ranking Strategy</h3>
 
-  <p>The <strong>⭐ Rec</strong> button (next to the 🔍 Filter button) applies the data-driven recommended multi-key ranking strategy, derived from analysis of 71,000 candidates:</p>
+  <p>The <strong>⭐ Rec</strong> button (next to the 🔍 Filter button) applies the diagnostic multi-key ranking strategy, derived from internal analysis of 71,000 generated candidates:</p>
 
   <ol>
-    <li><strong>2x bucket count ↓</strong> — primary sort (6.17× lift — the strongest single predictor)</li>
-    <li><strong>Nrr ↓</strong> — secondary tiebreaker (number rarity rank, 2× lift)</li>
+    <li><strong>2x bucket count ↓</strong> — primary sort (strongest observed association in the internal candidate sample)</li>
+    <li><strong>Nrr ↓</strong> — secondary tiebreaker (number rarity rank within the generated pool)</li>
     <li><strong>|Conv| magnitude ↓</strong> — tertiary tiebreaker</li>
   </ol>
 
   <p>The button highlights green when the recommended sort is active. Hover the button for a tooltip summary of the strategy.</p>
 
-  <div class="note">This multi-key sort cannot be replicated by clicking any single column header. Use ⭐ Rec whenever you want the best statistical estimate of which candidates are most likely to win a prize.</div>
+  <div class="note">This multi-key sort cannot be replicated by clicking any single column header. Use ⭐ Rec when you want the highest diagnostic ranking under these historical candidate-sample signals; it is not a calibrated probability of winning a prize.</div>
 
   <!-- ───────────────────────────────────────── -->
   <h3 id="filter">Filter Panel</h3>
@@ -718,7 +818,7 @@
   <p>The <strong>Manual Simulation</strong> grid (below the candidates table) lets you select up to 8 numbers — the first 6 become mains, the last 2 become supplementaries. Once 8 numbers are selected:</p>
   <ul>
     <li>The <strong>Prize</strong> column populates for all candidates.</li>
-    <li>A <strong>before/after bucket comparison table</strong> appears above the grid, showing the current month's bucket distribution, what it would become after this draw, the historical average, and the delta still needed.</li>
+    <li>A <strong>before/after bucket comparison table</strong> appears above the grid, showing the current month's bucket distribution, what it would become after this draw, the robust Monthly Draws Summary target, and the delta still needed.</li>
     <li>Sort automatically switches to <strong>Prize ↓</strong> so prize-qualifying candidates surface immediately.</li>
   </ul>
 
@@ -863,7 +963,7 @@
   <!-- ───────────────────────────────────────── -->
   <h3 id="repeat-bias">Monthly Repeat Bias</h3>
 
-  <p>Boosts the selection probability of numbers drawn exactly <strong>once</strong> this month (the 1x bucket). These numbers haven't yet repeated in the current month and are statistically more likely to be drawn again before the month ends.</p>
+  <p>Boosts the selection probability of numbers drawn exactly <strong>once</strong> this month (the 1x bucket). Use this as a configurable historical bias toward possible monthly repeats, not as a guarantee that 1x numbers will repeat before month-end.</p>
   <ul>
     <li><strong>Boost factor</strong> — how many times more likely a 1x number is to be selected (1 = no boost, up to 10).</li>
     <li><strong>Include supplementary numbers</strong> — if checked, the boost also applies when filling supplementary positions.</li>
@@ -926,7 +1026,7 @@
   <!-- ───────────────────────────────────────── -->
   <h3 id="ideal-draw">Ideal Draw Row</h3>
 
-  <p>Shows the bucket allocation that — if drawn — would bring the current month's distribution closest to the historical average, computed by exhaustive SSD minimisation over all possible 8-number bucket compositions. This is also the target used by the IDM score.</p>
+  <p>Shows the bucket allocation that — if drawn — would bring the current month's distribution closest to the robust Monthly Draws Summary bucket target, computed by exhaustive SSD minimisation over all possible 8-number bucket compositions. This shared ideal composition is also the target used by the Generated Candidates IDM score.</p>
 
   <p>The Ideal pick mix is now <strong>date-smart</strong>:</p>
   <ul>
@@ -940,9 +1040,26 @@
   </div>
 
   <!-- ───────────────────────────────────────── -->
+  <h3 id="stage-idm">Stage IDM</h3>
+
+  <p><strong>Stage IDM</strong> is a second Ideal Draw Model that conditions the target on the current month stage. It first identifies the working month, estimates or uses the selected expected draw count for that month, then computes the next planning stage from the number of draws already loaded.</p>
+
+  <p>It then filters history to comparable prior months with the same expected draw count and enough draws to reach the planning stage. From those comparable partial-month states, it builds a robust bucket target and computes an ideal 8-number bucket mix by exhaustive SSD minimisation.</p>
+
+  <p>The <strong>Expected Draw Count</strong> selector can be left on <strong>Auto</strong> or set manually. Auto infers the expected count from the recent draw weekday rhythm; manual override is useful when you already know the month will contain a specific number of draws.</p>
+
+  <div class="note">
+    <strong>How to use it:</strong> compare the normal IDM target with the Stage IDM target. When they disagree, Stage IDM is usually answering the narrower question: "what does this stage of a like-sized month tend to need now?"
+  </div>
+
+  <div class="warn-box">
+    <strong>Thin evidence warning:</strong> if only a small number of comparable months exist, treat the Stage IDM target as exploratory. The panel will show a warning rather than pretending the evidence is stronger than it is.
+  </div>
+
+  <!-- ───────────────────────────────────────── -->
   <h3 id="needed-row">Needed Row</h3>
 
-  <p>Shows the gap between the current month's bucket totals and the historical average. Negative values mean the current month already exceeds the average in that bucket; positive values indicate how many more numbers from that bucket are needed to reach the average.</p>
+  <p>Shows the gap between the current month's bucket totals and the robust Monthly Draws Summary target. Negative values mean the current month already exceeds the target in that bucket; positive values indicate how many more numbers from that bucket are needed to reach the target.</p>
 
   <div class="note">
     <strong>Like-months averaging:</strong> To keep averages honest, only months with the same number of draws as the <em>Draws per month</em> setting are included in the average. A warning is shown if some months are excluded. The current (partial) month is always included in the frequency display but excluded from the average calculation, and the opening partial month <strong>2024-05</strong> is also excluded from history-wide monthly baselines.
@@ -1110,7 +1227,7 @@
   <h4>How forecast cells are shown</h4>
   <ul>
     <li>Forecast cells use a <strong>dashed border</strong> and show a small <strong>F</strong> marker.</li>
-    <li>Hovering a forecast cell shows a tooltip with the most likely hit count, expected hit count, confidence, support months, and nearest historical month matches.</li>
+    <li>Hovering a forecast cell shows a tooltip with the most-supported hit count, expected hit count, support share, support months, and nearest historical month matches.</li>
     <li>Forecast cells are <strong>not observed draw history</strong>; they are exploratory projections based on similar historical month progress.</li>
   </ul>
 
@@ -1198,7 +1315,7 @@
 
   <h4>How to read the number lists</h4>
   <ul>
-    <li><strong>Most likely to flip early next month</strong> — numbers that most often moved from month-end undrawn into an early next-month draw.</li>
+    <li><strong>Best-supported early next-month flips</strong> — numbers that most often moved from month-end undrawn into an early next-month draw.</li>
     <li><strong>Most persistent into next month</strong> — numbers that tended to remain undrawn even after the month changed.</li>
     <li><strong>Early-hit timing</strong> — shows whether those flips happened more often in draw 1, draw 2, or draw 3 of the next month.</li>
   </ul>
@@ -1274,6 +1391,7 @@
       <tr><td><strong>NS</strong></td><td>0–100</td><td>↓ High</td><td>Moderate</td><td>Number sum vs history</td></tr>
       <tr><td><strong>Conv</strong></td><td>−∞ to +∞</td><td>|Conv| high</td><td>2.25× (magnitude only)</td><td>Distribution convergence</td></tr>
       <tr><td><strong>IDM%</strong></td><td>0–100%</td><td>↓ High</td><td>5× (correlated with Rdy)</td><td>Ideal draw composition match</td></tr>
+      <tr><td><strong>Stage IDM</strong></td><td>0–100%</td><td>↓ High</td><td>Not yet calibrated</td><td>Stage-conditioned ideal draw match</td></tr>
       <tr><td><strong>Rdy%</strong></td><td>0–100%</td><td>↓ High</td><td>5× (same cluster as IDM)</td><td>Weighted IDM+Conv+OGA</td></tr>
       <tr><td><strong>OGA%</strong></td><td>0–100%</td><td>↓ High</td><td>Signal when window ≥ 10</td><td>Octagonal grid alignment</td></tr>
     </tbody>
@@ -1282,13 +1400,14 @@
   <h3 id="analysis-findings">Key Analysis Findings</h3>
 
   <div class="card">
-    <h4>What predicts prize winners (analysis of 71,000 candidates)</h4>
+    <h4>Observed candidate-sample diagnostics (analysis of 71,000 generated candidates)</h4>
     <ul>
-      <li><strong>2x bucket count</strong> is the single strongest predictor: candidates with 2x ≥ 3 win at 6.17× the baseline rate.</li>
-      <li><strong>Nrr</strong> is monotonically predictive: every decile increase in Nrr improves the win rate, with 15× lift at the top-50 candidates.</li>
+      <li><strong>2x bucket count</strong> had the strongest observed association in the internal candidate sample.</li>
+      <li><strong>Nrr</strong> showed a monotonic association in that sample, but should be treated as an uncalibrated rarity diagnostic.</li>
       <li><strong>Conv direction</strong> has <em>zero</em> predictive value — positive and negative Conv candidates win at identical rates.</li>
       <li><strong>Conv magnitude (|Conv|)</strong> carries a modest 2.25× lift.</li>
       <li><strong>IDM, Rdy, Conv</strong> are highly correlated with each other (same top-1,000 candidates) — using all three adds little independent signal.</li>
+      <li><strong>Stage IDM</strong> is deliberately labelled as an uncalibrated stage-alignment diagnostic until it has its own walk-forward evidence.</li>
       <li><strong>OGA%</strong> is only reliable when the generation window contains ≥ 10 draws.</li>
     </ul>
   </div>
@@ -1301,11 +1420,12 @@
     <tbody>
       <tr><td><strong>Bucket</strong></td><td>A frequency category for the current month: Undrawn (0x), Drawn 1x, 2x … 8x+.</td></tr>
       <tr><td><strong>Candidate</strong></td><td>A set of 8 numbers (6 main + 2 supplementary) generated for potential play.</td></tr>
-      <tr><td><strong>Conv</strong></td><td>Convergence score — how much drawing this candidate would move the monthly distribution toward the historical average.</td></tr>
+      <tr><td><strong>Conv</strong></td><td>Convergence score — how much drawing this candidate would move the monthly distribution toward the Monthly Draws Summary target.</td></tr>
       <tr><td><strong>Constructive Fill</strong></td><td>Generation mode where the candidate is seeded from monthly bucket <em>counts</em> (not exact selected bucket numbers). The generator samples from each eligible bucket to satisfy the required mix before later weighted fill and hard-rule checks.</td></tr>
       <tr><td><strong>DGA</strong></td><td>Draw-Grid Analysis — heat-map visualisation of number frequency across the draw history.</td></tr>
       <tr><td><strong>Exact duplicate</strong></td><td>A repeated history row with the same date and the same main/supplementary numbers.</td></tr>
-      <tr><td><strong>IDM</strong></td><td>Ideal Draw Match — similarity of a candidate's bucket composition to the optimal draw composition.</td></tr>
+      <tr><td><strong>IDM</strong></td><td>Ideal Draw Match — similarity of a candidate's bucket composition to the shared Monthly Draws Summary ideal composition.</td></tr>
+      <tr><td><strong>Stage IDM</strong></td><td>Stage-conditioned Ideal Draw Match — similarity of a candidate's bucket composition to the next-stage ideal composition from comparable same-size months.</td></tr>
       <tr><td><strong>Local-only date</strong></td><td>A date present in your local history but absent from the pasted/uploaded comparison source. This is informational only unless you verify that the source is complete.</td></tr>
       <tr><td><strong>MiAN</strong></td><td>Must Include from Acceptance Needs — post-generation filter requiring minimum counts from each bucket.</td></tr>
       <tr><td><strong>Nrr</strong></td><td>Number Rarity Rank — how rare a candidate's numbers are within the generated pool.</td></tr>
@@ -1313,9 +1433,9 @@
       <tr><td><strong>OGA</strong></td><td>Octagonal Grid Analysis — a pattern-alignment score computed from the draw history window.</td></tr>
       <tr><td><strong>Rdy</strong></td><td>Readiness Score — user-weighted composite of IDM, |Conv|, and OGA.</td></tr>
       <tr><td><strong>Same-date conflict</strong></td><td>Two rows that share the same draw date but contain different numbers. Usually indicates a manual-entry or copy/paste mistake.</td></tr>
-      <tr><td><strong>SSD</strong></td><td>Sum of Squared Deviations — metric used to measure how far a distribution is from the average.</td></tr>
+      <tr><td><strong>SSD</strong></td><td>Sum of Squared Deviations — metric used to measure how far a distribution is from the Monthly Draws Summary target.</td></tr>
       <tr><td><strong>WFMQYH</strong></td><td>Windfall Monthly Quarterly Yearly History — the active analysis window in the DGA grid.</td></tr>
-      <tr><td><strong>WinScore</strong></td><td>Multi-tier score (A–D) gated on the 2x bucket count, the strongest known prize predictor.</td></tr>
+      <tr><td><strong>WinScore</strong></td><td>Multi-tier diagnostic score (A–D) gated on the 2x bucket count, the strongest observed association in the internal candidate sample.</td></tr>
       <tr><td><strong>Zone</strong></td><td>A group of 5 consecutive numbers (Zone 1: 1–5, Zone 2: 6–10 … Zone 9: 41–45).</td></tr>
     </tbody>
   </table>

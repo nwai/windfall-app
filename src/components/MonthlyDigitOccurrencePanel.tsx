@@ -213,7 +213,6 @@ export const MonthlyDigitOccurrencePanel: React.FC<MonthlyDigitOccurrencePanelPr
     <section style={{ border: "1px solid #e5e7eb", borderRadius: 8, background: "#fff", padding: 12, display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
         <div>
-          <div style={{ fontWeight: 700, fontSize: 16, color: "#223" }}>Monthly 1-Digit vs 2-Digit Occurrences</div>
           <div style={{ fontSize: 12, color: "#667", marginTop: 2 }}>
             Counts monthly occurrences of one-digit numbers <b>(1–9)</b> versus two-digit numbers <b>(10–45)</b> across draw history.
           </div>

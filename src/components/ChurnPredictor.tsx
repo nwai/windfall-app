@@ -127,7 +127,7 @@ export const ChurnPredictor: React.FC<Props> = ({
 
   return (
     <section style={{ border: "1px solid #ccc", borderRadius: 8, padding: 12, marginTop: 10 }}>
-      <h4>Churn Predictor ({canRF ? "rf" : "logreg"})</h4>
+      <h4>Churn Diagnostic ({canRF ? "rf" : "logreg"})</h4>
       {wantRF && !rfAvailable && (
         <div style={{ color: "#b26a00", marginBottom: 6, fontSize: 13 }}>
           Random Forest not available; falling back to logistic regression.
@@ -139,7 +139,7 @@ export const ChurnPredictor: React.FC<Props> = ({
         </div>
       )}
       <button onClick={trainAndPredict} disabled={busy || !hasEnough}>
-        {busy ? "Training…" : "Train & Predict"}
+        {busy ? "Training…" : "Train & Score"}
       </button>
       {metrics && (
         <div style={{ marginTop: 6, fontSize: 13 }}>

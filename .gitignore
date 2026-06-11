@@ -24,6 +24,12 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+*.log
+
+# local agent scratch
+.superpowers/
+.tmp-*
+.tmp_*
 
 # editor directories and files
 .vscode/*

@@ -6,10 +6,11 @@ import {
 } from "./survivalAnalysis";
 import type { Draw } from "../types";
 
-const draw = (main: number[], supp: number[] = [], date = "2026-01-01"): Draw => ({
+const draw = (main: number[], supp: number[] = [], date = "2026-01-01", isSimulated = false): Draw => ({
   date,
   main,
   supp,
+  isSimulated,
 });
 
 describe("analyzeSurvival", () => {
@@ -38,6 +39,25 @@ describe("analyzeSurvival", () => {
     expect(analysis.quality.duplicateNumberEntries).toBe(2);
     expect(analysis.quality.drawsWithShortSelection).toBe(1);
     expect(analysis.summary.meanValidSelections).toBe(6);
+  });
+
+  it("ignores simulated fallback rows instead of treating them as survival evidence", () => {
+    const history = [
+      draw([1, 2, 3, 4, 5, 6], [], "2026-01-01"),
+      draw([7, 8, 9, 10, 11, 12], [], "2026-01-08"),
+      draw([13, 14, 15, 16, 17, 18], [], "2026-01-15"),
+      draw([45, 44, 43, 42, 41, 40], [], "2026-01-22", true),
+    ];
+
+    const analysis = analyzeSurvival(history, { includeSupp: false });
+    const numberFortyFive = analysis.rows.find((row) => row.number === 45);
+
+    expect(analysis.summary.draws).toBe(3);
+    expect(analysis.quality.drawsRead).toBe(4);
+    expect(analysis.quality.simulatedDrawsIgnored).toBe(1);
+    expect(numberFortyFive?.hits).toBe(0);
+    expect(numberFortyFive?.currentDrought).toBe(3);
+    expect(analysis.caveats.join(" ")).toContain("simulated fallback");
   });
 });
 

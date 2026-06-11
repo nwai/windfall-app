@@ -120,7 +120,7 @@ export const ReturnPredictor: React.FC<Props> = ({
 
   return (
     <section style={{ border: "1px solid #ccc", borderRadius: 8, padding: 12, marginTop: 10 }}>
-      <h4>Return Predictor ({canRF ? "rf" : "logreg"})</h4>
+      <h4>Return Diagnostic ({canRF ? "rf" : "logreg"})</h4>
       {wantRF && !rfAvailable && (
         <div style={{ color: "#b26a00", marginBottom: 6, fontSize: 13 }}>
           Random Forest not available; falling back to logistic regression.
@@ -133,11 +133,11 @@ export const ReturnPredictor: React.FC<Props> = ({
       )}
       {!hasLabels && (
         <div style={{ color: "#b26a00", marginBottom: 6, fontSize: 13 }}>
-          Return labels are not computed yet, so this model is disabled rather than producing placeholder predictions.
+          Return labels are not computed yet, so this model is disabled rather than producing unsupported scores.
         </div>
       )}
       <button onClick={trainAndPredict} disabled={busy || !hasEnough || !hasLabels}>
-        {busy ? "Training…" : "Train & Predict"}
+        {busy ? "Training…" : "Train & Score"}
       </button>
       {metrics && (
         <div style={{ marginTop: 6, fontSize: 13 }}>

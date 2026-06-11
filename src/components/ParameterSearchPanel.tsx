@@ -86,7 +86,6 @@ export const ParameterSearchPanel: React.FC<ParameterSearchPanelProps> = ({
   return (
     <section style={panel}>
       <OverfitBanner />
-      <h3 style={{ margin: "4px 0 10px" }}>Parameter Search Helper</h3>
       <div style={desc}>
         Finds parameter sets that increase probability of overlapping with selected numbers
         (no direct forcing). Uses random + local refinement.

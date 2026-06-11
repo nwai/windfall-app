@@ -147,9 +147,9 @@ npx tsx src/lib/zoneDemo.ts
 
 The zone weighting system is designed to integrate with:
 
-1. **TTP (Temperature Transition Predictions)**
-   - Multiply transition probabilities by zone weights
-   - Nudge predictions toward trending zones
+1. **TTP (Temperature Transition Diagnostics)**
+   - Multiply transition diagnostic scores by zone weights
+   - Nudge diagnostic scores toward trending zones
 
 2. **Candidate Generation**
    - Use weights in weighted random sampling
@@ -185,7 +185,7 @@ Potential improvements:
 - Moving window analysis for time-based trends
 - Multiple timescales (short-term vs long-term)
 - Zone correlation analysis
-- Pattern prediction capabilities
+- Pattern diagnostics with explicit out-of-sample validation
 - Export functionality (CSV, JSON)
 
 ## Documentation

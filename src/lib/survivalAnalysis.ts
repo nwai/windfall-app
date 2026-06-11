@@ -1,4 +1,5 @@
 import type { Draw } from "../types";
+import { filterRealDrawHistory } from "./realDrawHistory";
 
 export const SURVIVAL_NUMBER_COUNT = 45;
 
@@ -6,6 +7,7 @@ export type SurvivalEvidenceLevel = "exact" | "smoothed" | "prior";
 
 export interface SurvivalDataQuality {
   drawsRead: number;
+  simulatedDrawsIgnored: number;
   drawsWithInvalidNumbers: number;
   invalidNumberEntries: number;
   drawsWithDuplicateNumbers: number;
@@ -249,12 +251,14 @@ export function analyzeSurvival(
   history: Draw[],
   options: AnalyzeSurvivalOptions = {},
 ): SurvivalAnalysis {
+  const realHistory = filterRealDrawHistory(history, "survival analysis");
   const includeSupp = !!options.includeSupp;
   const expectedSelections = Math.max(1, Math.min(SURVIVAL_NUMBER_COUNT, Math.round(options.expectedSelections ?? (includeSupp ? 8 : 6))));
   const excludedSet = new Set(uniqueValidNumbers(options.excludedNumbers));
   const priorStrength = Math.max(0.25, Math.min(20, Number.isFinite(options.priorStrength ?? 2) ? options.priorStrength ?? 2 : 2));
   const quality: SurvivalDataQuality = {
     drawsRead: history.length,
+    simulatedDrawsIgnored: realHistory.simulatedRowsIgnored,
     drawsWithInvalidNumbers: 0,
     invalidNumberEntries: 0,
     drawsWithDuplicateNumbers: 0,
@@ -263,7 +267,7 @@ export function analyzeSurvival(
     drawsWithLongSelection: 0,
   };
 
-  const cleaned = history.map((draw) => {
+  const cleaned = realHistory.history.map((draw) => {
     const result = cleanDraw(draw, includeSupp);
     if (result.invalidEntries > 0) quality.drawsWithInvalidNumbers += 1;
     if (result.duplicateEntries > 0) quality.drawsWithDuplicateNumbers += 1;
@@ -341,6 +345,7 @@ export function analyzeSurvival(
   if (quality.drawsWithShortSelection > 0 || quality.drawsWithLongSelection > 0) {
     caveats.push("Some rows do not match the expected selection count; the probability budget uses the observed valid average.");
   }
+  caveats.push(...realHistory.warnings);
 
   return {
     summary: {

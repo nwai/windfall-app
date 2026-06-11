@@ -216,8 +216,6 @@ export const MonthlyFirstLastPanel: React.FC<{ history: Draw[] }> = ({ history }
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       {/* Controls */}
       <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap", fontSize: 13 }}>
-        <b style={{ fontSize: 14 }}>Monthly First ↔ Last Draw Hits</b>
-
         <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
           Compare:
           <select

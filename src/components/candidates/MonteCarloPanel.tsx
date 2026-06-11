@@ -188,8 +188,6 @@ export const MonteCarloPanel: React.FC<MonteCarloPanelProps> = ({
   return (
     <section style={{ border: '2px solid #4b72ff', borderRadius: 8, padding: 18, background: '#f4f7ff' }}>
       <header style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', marginBottom: 10 }}>
-        <h3 style={{ margin: 0 }}>Monte Carlo Simulation</h3>
-
         <label style={{ fontSize: 13 }}>
           Sort by:
           <select value={sortMode} onChange={e => setSortMode(e.target.value as SortMode)} style={{ marginLeft: 6 }}>
@@ -383,7 +381,7 @@ export const MonteCarloPanel: React.FC<MonteCarloPanelProps> = ({
       )}
 
       <div style={{ fontSize: 11, color: '#666', marginTop: 10 }}>
-        Simulation draws {drawSize} unique numbers (placeholder). Adjust for 6 + 2 logic if desired.
+        Simulation draws {drawSize} unique numbers from the displayed weighted probabilities; candidate generation handles main/supplementary structure separately.
       </div>
     </section>
   );

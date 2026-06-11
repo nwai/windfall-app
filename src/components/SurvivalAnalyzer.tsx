@@ -18,7 +18,7 @@ import { getSavedZoneWeights, type WeightsByNumber } from "../lib/zpaStorage";
 
 export { clampProbability };
 
-type WindowPattern = { low: number; high: number; even: number; odd: number; sum: number };
+type WindowPattern = { low: number; high: number; odd: number; even: number; sum: number };
 type SortMode = "biased" | "base" | "drought" | "number";
 type TrendMode = "diff" | "ratio";
 type SurvivalStatsRow = { number: number; baseProb: number; biasedProb: number };
@@ -107,7 +107,7 @@ function drawPattern(draw: Draw): WindowPattern {
   const even = all.filter((number) => number % 2 === 0).length;
   const odd = all.length - even;
   const sum = all.reduce((total, number) => total + number, 0);
-  return { low, high, even, odd, sum };
+  return { low, high, odd, even, sum };
 }
 
 function buildPatternBiasWeights(
@@ -411,9 +411,8 @@ export const SurvivalAnalyzer: React.FC<SurvivalAnalyzerProps> = ({
     <section style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
-          <h3 style={{ margin: 0, color: "#111827", fontSize: 18 }}>Survival Analysis</h3>
           <div style={{ ...mutedStyle, marginTop: 3 }}>
-            {probabilityHeading ?? "Discrete-time drought hazard with Bayesian shrinkage and calibrated bias scores."}
+            {probabilityHeading ?? "Discrete-time drought hazard with Bayesian shrinkage and budgeted bias scores."}
           </div>
         </div>
         <div style={{ display: "inline-flex", border: "1px solid #cbd5e1", borderRadius: 8, overflow: "hidden" }}>
@@ -427,7 +426,7 @@ export const SurvivalAnalyzer: React.FC<SurvivalAnalyzerProps> = ({
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8 }}>
         <Metric label="Draws" value={String(analysis.summary.draws)} detail={externalWindowSize ? "locked by WFMQY" : "local window"} />
         <Metric label="Mean Picks" value={formatNumber(analysis.summary.meanValidSelections, 1)} detail={`baseline ${formatPercent(analysis.summary.baselineRate, 1)}`} />
-        <Metric label="Biased Budget" value={formatNumber(totalBiasedProbability, 2)} detail="sum of calibrated probabilities" />
+        <Metric label="Biased Budget" value={formatNumber(totalBiasedProbability, 2)} detail="sum of budgeted probabilities" />
         <Metric label="Max Drought" value={String(maxDrought)} detail={`${exactEvidenceCount}/45 exact evidence`} />
         <Metric label="Selected" value={`${selectedList.length}/8`} detail={selectedList.length ? selectedList.join(", ") : "none"} />
       </div>
@@ -563,7 +562,7 @@ export const SurvivalAnalyzer: React.FC<SurvivalAnalyzerProps> = ({
             </tbody>
           </table>
           <div style={{ ...mutedStyle, marginTop: 8 }}>
-            Base hit is the posterior mean of the current drought hazard. Biased hit is calibrated so all displayed number probabilities sum to the observed draw size instead of being falsely clamped.
+            Base hit is the posterior mean of the current drought hazard. Biased hit is budgeted so all displayed number probabilities sum to the observed draw size instead of being falsely clamped.
           </div>
         </div>
       )}
@@ -572,6 +571,7 @@ export const SurvivalAnalyzer: React.FC<SurvivalAnalyzerProps> = ({
         <summary style={{ cursor: "pointer", fontWeight: 800, color: "#172033" }}>Data Quality</summary>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8, marginTop: 10 }}>
           <Metric label="Rows Read" value={String(analysis.quality.drawsRead)} />
+          <Metric label="Sim Ignored" value={String(analysis.quality.simulatedDrawsIgnored)} />
           <Metric label="Invalid Entries" value={String(analysis.quality.invalidNumberEntries)} detail={`${analysis.quality.drawsWithInvalidNumbers} rows`} />
           <Metric label="Duplicate Entries" value={String(analysis.quality.duplicateNumberEntries)} detail={`${analysis.quality.drawsWithDuplicateNumbers} rows`} />
           <Metric label="Short Rows" value={String(analysis.quality.drawsWithShortSelection)} />

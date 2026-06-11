@@ -316,7 +316,6 @@ export const AdjacentCombosPanel: React.FC<AdjacentCombosPanelProps> = ({ histor
   return (
     <div style={{ padding: 12, border: "1px solid #e5e7eb", borderRadius: 8, background: "white", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", marginBottom: 12 }}>
-        <div style={{ fontWeight: 700 }}>{title}</div>
         <label style={{ fontSize: 12 }}>
           History:
           <select value={useAll ? "all" : "window"} onChange={(e) => setUseAll(e.target.value === "all") } style={{ marginLeft: 6 }}>

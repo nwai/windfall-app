@@ -280,8 +280,6 @@ export function GroupPatternPanel({
 
   return (
     <section style={{ border: "2px solid #8e24aa", borderRadius: 8, padding: 16, background: "#faf5ff", margin: "18px 0", position: "relative" }}>
-      <h3 style={{ marginTop: 0 }}>{title}</h3>
-
       {/* Toast */}
       {toast && (
         <div style={{

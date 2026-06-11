@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { Draw } from "../types";
 import {
   analyzeMonthlyDrawSummary,
+  analyzeStageIdealDrawModel,
   computeIdealMonthlyDraw,
   createEmptyMonthlyBucketSets,
   MONTHLY_BUCKET_KEYS,
@@ -169,6 +170,78 @@ describe("analyzeMonthlyDrawSummary", () => {
     expect(seen.size).toBe(45);
     expect([...summary.latestBucketSets.times2]).toEqual([1, 2]);
     expect([...summary.latestBucketSets.times1]).toEqual([3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
+  });
+});
+
+describe("analyzeStageIdealDrawModel", () => {
+  const repeatDraws = (month: string, count: number, start = 1): Draw[] => (
+    Array.from({ length: count }, (_, index) => {
+      const day = String(index + 1).padStart(2, "0");
+      const base = ((start + index * 3 - 1) % 45) + 1;
+      return draw(`${month}-${day}`, [
+        base,
+        ((base + 1 - 1) % 45) + 1,
+        ((base + 2 - 1) % 45) + 1,
+        ((base + 3 - 1) % 45) + 1,
+        ((base + 4 - 1) % 45) + 1,
+        ((base + 5 - 1) % 45) + 1,
+      ], [
+        ((base + 6 - 1) % 45) + 1,
+        ((base + 7 - 1) % 45) + 1,
+      ]);
+    })
+  );
+
+  it("targets the next draw stage using only comparable same-size months", () => {
+    const history = [
+      ...repeatDraws("2026-01", 13, 1),
+      ...repeatDraws("2026-02", 12, 2),
+      ...repeatDraws("2026-03", 13, 3),
+      ...repeatDraws("2026-06", 5, 4),
+    ];
+
+    const state = analyzeStageIdealDrawModel(history, {
+      today: new Date("2026-06-11T12:00:00"),
+      expectedDrawCountOverride: 13,
+    });
+
+    expect(state).not.toBeNull();
+    expect(state?.workingMonthLabel).toBe("2026-06");
+    expect(state?.expectedDrawCount).toBe(13);
+    expect(state?.expectedDrawCountSource).toBe("override");
+    expect(state?.completedDrawCount).toBe(5);
+    expect(state?.targetStageDrawCount).toBe(6);
+    expect(state?.comparableMonthCount).toBe(2);
+    expect(state?.targetDistribution.reduce((sum, value) => sum + value, 0)).toBe(45);
+    expect(state?.idealDrawBucketCounts.reduce((sum, value) => sum + value, 0)).toBe(8);
+  });
+
+  it("returns null when no comparable months exist", () => {
+    const state = analyzeStageIdealDrawModel([
+      ...repeatDraws("2026-02", 12, 2),
+      ...repeatDraws("2026-06", 5, 4),
+    ], {
+      today: new Date("2026-06-11T12:00:00"),
+      expectedDrawCountOverride: 13,
+    });
+
+    expect(state).toBeNull();
+  });
+
+  it("clamps the target stage to the expected draw count", () => {
+    const state = analyzeStageIdealDrawModel([
+      ...repeatDraws("2026-01", 13, 1),
+      ...repeatDraws("2026-03", 13, 3),
+      ...repeatDraws("2026-06", 13, 4),
+    ], {
+      today: new Date("2026-06-30T12:00:00"),
+      expectedDrawCountOverride: 13,
+      forceWorkingMonthLabel: "2026-06",
+    });
+
+    expect(state?.completedDrawCount).toBe(13);
+    expect(state?.targetStageDrawCount).toBe(13);
+    expect(state?.warnings).toContain("Target stage was clamped to the expected 13 draws.");
   });
 });
 

@@ -1,221 +1,220 @@
-# Advanced Survival Analysis and Churn/Return Prediction Models
+# Advanced Survival Analysis and Churn/Return Diagnostic Models
 
-This document describes the advanced survival analysis and churn/return prediction models integrated into the Windfall app.
+This document describes the survival analysis and churn/return diagnostic models integrated into the Windfall app.
 
 ## Overview
 
-The Windfall app now includes multiple predictive models for analyzing number "churn" (departure/inactivity) and "return" (reactivation), along with consensus visualizations that compare outputs across all models for robust, interpretable insights.
+The Windfall app includes historical diagnostic models for analyzing number "churn" (departure/inactivity), "return" (reactivation), and absence duration. These tools compare historical evidence across methods and expose where the methods agree or disagree. Their outputs are descriptive scores from the selected draw history, not calibrated next-draw probabilities.
 
-## Phase 1: ML-based Churn & Return Predictors
+All diagnostic paths should use real historical draw rows only. Simulated fallback rows are excluded before the models build features or backtests.
 
-### Churn Predictor (`ChurnPredictor.tsx`)
+## Phase 1: ML-based Churn & Return Diagnostics
 
-**Purpose:** Predicts which numbers are likely to "churn" (disappear for an extended period, typically 15+ draws).
+### Churn Diagnostic (`ChurnPredictor.tsx`)
 
-**Method:** Logistic regression trained on historical appearance patterns.
+**Purpose:** Scores which numbers currently have stronger churn or inactivity evidence under the selected churn threshold.
+
+**Method:** Logistic regression by default, with optional random forest support when the optional dependency is available. The model is trained on historical appearance features and held-out labels from the active real-history window.
 
 **Features Used:**
-- Frequency of appearances in recent windows (last 5, 10, 20, 50 draws)
+- Appearances in recent count windows: `freqFortnight`, `freqMonth`, and `freqQuarter`
+- Tenure since first observed in the selected history
 - Time since last appearance
-- Average gap between appearances
-- Trend slope (increasing/decreasing frequency)
-- Volatility of appearance patterns
-- Current state (active/churned/returned)
+- ZPA group index when supplied
+- Current churn label under the selected threshold
 
 **Metrics:**
-- Accuracy: Percentage of correct predictions
-- Precision: Of predicted churns, how many actually churned
-- Recall: Of actual churns, how many were predicted
-- F1 Score: Harmonic mean of precision and recall
+- Accuracy: held-out label hit rate for the train/test split
+- Precision: of rows scored as churn, how many were churn labels in the held-out split
+- Recall: of held-out churn labels, how many were selected by the score threshold
 
-**Output:** Churn probability (0-100%) for each number with risk categorization (High/Medium/Low).
+**Output:** Churn score (0-100%) for each held-out number. The score is descriptive and model-relative; it is not a promise that the number will disappear next.
 
-### Return Predictor (`ReturnPredictor.tsx`)
+### Return Diagnostic (`ReturnPredictor.tsx`)
 
-**Purpose:** Predicts which currently churned numbers are likely to return (reactivate) soon.
+**Purpose:** Scores currently churned numbers by historical reactivation evidence when return labels have been computed.
 
-**Method:** Logistic regression trained specifically on churned numbers from historical data.
+**Method:** Logistic regression by default, with optional random forest support when available. The component stays disabled when return labels are absent, rather than emitting unsupported scores.
 
-**Features:** Same as Churn Predictor, but applied only to numbers that have been inactive for the churn threshold period.
+**Features:** Same current feature set as the churn diagnostic, applied only to rows with a churn label and a computed return label.
 
-**Output:** Return probability (0-100%) for churned numbers, showing which ones are most likely to reappear.
+**Output:** Return score (0-100%) for eligible churned numbers. The score is descriptive; it should be read as model support in the held-out split, not a calibrated next-draw probability.
 
 ### Multi-State Churn Panel (`MultiStateChurnPanel.tsx`)
 
 **Purpose:** Provides discrete-time multi-state analysis tracking numbers through lifecycle states.
 
 **States:**
-- **Active:** Appeared recently (within churn threshold)
-- **Churned:** Inactive for extended period (≥ churn threshold)
-- **Returned:** Was churned but came back
+- **Active:** Appeared recently within the churn threshold
+- **Churned:** Inactive for at least the churn threshold
+- **Returned:** Was churned and later appeared again
 
 **Metrics:**
 - Current state for each number
-- Times churned (number of times entered churned state)
-- Times returned (number of times reactivated after churning)
-- Current streak (consecutive draws in current state)
+- Times churned
+- Times returned
+- Current streak in the current state
 
-**State Transition Model:**
+**State Transition View:**
+
+```text
+Active -> Churned -> Returned
 ```
-Active → Churned (15+ draws) → Returned
-```
+
+This is a state accounting view. It summarizes observed movement between states and does not assert that the next transition is knowable.
 
 ## Phase 2: Classic Survival Models
 
 ### Cox Proportional Hazards (`SurvivalCoxPanel.tsx`)
 
-**Purpose:** Semi-parametric survival model estimating the hazard (risk) of a number not appearing.
+**Purpose:** Semi-parametric survival-style model estimating relative absence hazard.
 
-**Method:** Simplified JS approximation of Cox PH model. For full implementation with covariates, would use Pyodide + Python lifelines library.
+**Method:** Simplified JavaScript approximation of a Cox proportional-hazards style ranking. A full covariate-rich Cox implementation would require a survival-analysis library such as Python lifelines via Pyodide or a server-side runtime.
 
 **Output:**
-- **Hazard Ratio (HR):** Relative risk compared to baseline
-  - HR > 1: Higher risk of not appearing
-  - HR < 1: Lower risk (more likely to appear)
-- **Survival Probability:** Likelihood of continuing to appear
-- **Risk Score:** Combined metric for ranking
+- **Hazard Ratio (HR):** Relative modeled absence hazard compared with baseline
+  - HR > 1: higher modeled absence hazard
+  - HR < 1: lower modeled absence hazard
+- **Survival Estimate:** Historical estimate of continuing in the absence state
+- **Risk Score:** Combined ranking metric for comparison
 
-**Use Case:** Best for understanding relative risks between numbers and comparing covariate effects.
+**Use Case:** Useful for comparing relative absence behavior across numbers, not for claiming deterministic next-draw behavior.
 
 ### Frailty Model (`SurvivalFrailtyPanel.tsx`)
 
-**Purpose:** Models repeated appearances/disappearances using gamma frailty to capture unobserved heterogeneity.
+**Purpose:** Models repeated appearances and disappearances using gamma-frailty style estimates to capture unobserved heterogeneity.
 
-**Method:** Gamma frailty model for recurrent events.
+**Method:** Gamma frailty model for recurrent event diagnostics.
 
-**Key Concept:** "Frailty" represents unobserved factors that make some numbers more or less likely to appear regularly.
+**Key Concept:** "Frailty" represents unobserved factors that make some historical number patterns more variable than others.
 
 **Frailty Interpretation:**
-- High frailty (>1.5): More variable, less predictable patterns
-- Medium frailty (1.0-1.5): Moderate variability
-- Low frailty (<1.0): Consistent, regular appearance patterns
+- High frailty (>1.5): more variable historical spacing
+- Medium frailty (1.0-1.5): moderate historical variability
+- Low frailty (<1.0): more regular historical spacing
 
 **Parameters:**
-- θ (theta): Frailty variance parameter - higher values indicate more heterogeneity between numbers
+- theta: frailty variance parameter; higher values indicate more heterogeneity between numbers
 
 **Output:**
 - Frailty estimate for each number
-- Event count (total appearances)
+- Event count
 - Average inter-event time
 - Hazard rate
-- Next event probability
+- Next-event score
 
 ## Phase 3: Consensus Visualization & Model Comparison
 
 ### Consensus Panel (`ConsensusPanel.tsx`)
 
-**Purpose:** Aggregates predictions from all survival/churn models and visualizes agreements/disagreements.
+**Purpose:** Aggregates scores from survival/churn diagnostics and visualizes agreements or disagreements.
 
-**Consensus Score:** Average of all model predictions (normalized to 0-1 scale where 1 = high probability of appearing).
+**Consensus Score:** Average of normalized model scores. A high score means stronger shared support inside the selected diagnostics, not a calibrated future probability.
 
-**Agreement Metric:** Measures how much models agree (1.0 = perfect agreement, 0.0 = high disagreement).
+**Agreement Metric:** Measures how similar the model scores are.
 - Calculated as: `1 - coefficient_of_variation`
 
 **Features:**
 - **Model Comparison Table:** Shows per-number consensus ranks with individual model scores
-- **Agreement Filtering:** Filter to show only numbers where models agree (adjustable threshold)
+- **Agreement Filtering:** Filters to rows where model scores are similar
 - **Visual Indicators:**
-  - Green: High agreement (>80%)
-  - Yellow: Medium agreement (60-80%)
-  - Red: Low agreement (<60%)
-- **Top 10 Display:** Visual badges showing consensus top numbers color-coded by agreement
+  - Green: high agreement
+  - Yellow: medium agreement
+  - Red: low agreement
+- **Top Display:** Shows highest-scoring numbers color-coded by agreement
 
-**Supported Models:**
-- Churn ML (inverted - high churn = low appearance probability)
-- Return ML
-- Cox PH (survival probability)
-- Frailty (next event probability)
-- Kaplan-Meier Survival
+**Supported Inputs:**
+- Churn diagnostic score (inverted when interpreting appearance support)
+- Return diagnostic score
+- Cox PH survival estimate
+- Frailty next-event score
+- Kaplan-Meier survival estimate
 
 ## Feature Engineering
 
-All ML models use a common feature set defined in `churnFeatures.ts`:
+The current ML diagnostic feature set is defined in `churnFeatures.ts`.
 
-### Core Features:
-1. **Frequency Features:**
-   - `freqLast5`: Appearances in last 5 draws
-   - `freqLast10`: Appearances in last 10 draws
-   - `freqLast20`: Appearances in last 20 draws
-   - `freqLast50`: Appearances in last 50 draws
-   - `freqTotal`: Total appearances in history
+### Core Features
 
-2. **Tenure Features:**
-   - `timeSinceLast`: Draws since last appearance
-   - `longestGap`: Longest gap between appearances
-   - `avgGap`: Average gap between appearances
+1. **Frequency Features**
+   - `freqFortnight`: appearances in the recent 6-draw window
+   - `freqMonth`: appearances in the recent 12-draw window
+   - `freqQuarter`: appearances in the recent 36-draw window
 
-3. **Pattern Features:**
-   - `trendSlope`: Linear trend of recent appearances
-   - `volatility`: Standard deviation of inter-appearance gaps
+2. **Tenure Features**
+   - `tenure`: draws since first observed in the selected history
+   - `timeSinceLast`: draws since last observed
 
-4. **State Features:**
-   - `isActive`: Appeared recently
-   - `hasChurned`: Currently inactive for extended period
-   - `hasReturned`: Previously churned but came back
+3. **Grouping Feature**
+   - `zpaGroup`: optional zone-pattern group index
+
+4. **Labels**
+   - `churnLabel`: whether the number is inactive beyond the churn threshold
+   - `returnLabel`: reserved until a return-labeling pass computes it
 
 ## Usage Guide
 
-### Training Models:
-1. Ensure you have sufficient history (minimum 100 draws recommended)
-2. Click "Train Model" button on each panel
-3. Wait for training to complete
-4. Review model metrics (accuracy, precision, recall, F1)
+### Training and Scoring
 
-### Interpreting Results:
+1. Use a real-history window with enough rows for the selected model.
+2. Click "Train & Score" on the diagnostic panel.
+3. Review held-out metrics before interpreting score ranks.
+4. Treat scores as historical model diagnostics, not guarantees.
 
-**For Churn Predictor:**
-- High risk (>70%): Number likely to disappear
-- Medium risk (50-70%): Moderate churn probability
-- Low risk (<50%): Number likely to remain active
+### Interpreting Results
 
-**For Return Predictor:**
-- High probability (>70%): Churned number likely to return soon
-- Low probability (<50%): May remain inactive longer
+**For Churn Diagnostic:**
+- High score: stronger churn evidence under the selected threshold
+- Medium score: mixed churn evidence
+- Low score: weaker churn evidence
+
+**For Return Diagnostic:**
+- High score: stronger historical reactivation evidence when labels exist
+- Low score: weaker historical reactivation evidence
 
 **For Cox PH:**
 - Focus on hazard ratios relative to 1.0
-- Higher HR = higher risk of not appearing
+- Higher HR means higher modeled absence hazard
 
 **For Frailty:**
-- High frailty numbers have unpredictable patterns
-- Low frailty numbers are more consistent
+- High frailty numbers have more variable historical spacing
+- Low frailty numbers have more regular historical spacing
 
 **For Consensus:**
-- High agreement + high score = strong prediction
-- Low agreement = models disagree, use caution
-- Filter by agreement threshold to focus on reliable predictions
+- High agreement plus high score means several diagnostics are pointing in the same direction
+- Low agreement means the diagnostics disagree
+- Model agreement means shared evidence or shared assumptions, not reliability by itself
 
 ## Integration with WFMQY Data
 
-All models work with the standard WFMQY (Weekly/Fortnightly/Monthly/Quarterly/Yearly) windowing:
-- Models automatically use the `filteredHistory` from the current window selection
-- Excluded numbers are properly handled across all models
-- Main and supplementary numbers are tracked separately where applicable
+All diagnostics work with the standard WFMQYH windowing:
+- Models use the current filtered history window
+- Simulated fallback rows are ignored
+- Excluded numbers are handled by the calling panels where applicable
+- Main and supplementary numbers are tracked separately only where the specific panel supports that distinction
 
 ## Best Practices
 
-1. **Train models periodically:** As new draws are added, retrain to keep predictions current
-2. **Use consensus panel:** When models agree, predictions are more reliable
-3. **Consider multiple metrics:** Don't rely on a single model - compare across methods
-4. **Adjust churn threshold:** Default is 15 draws, but can be tuned based on your analysis needs
-5. **Check model metrics:** If accuracy is low (<60%), model may need more data or different features
+1. **Refresh diagnostics periodically:** New draws can change current-window scores.
+2. **Check provenance first:** Confirm how many real rows are being used and whether simulated rows were ignored.
+3. **Compare multiple methods:** Agreement is useful context, but not proof.
+4. **Tune churn threshold carefully:** The default threshold is a modeling choice, not a universal law.
+5. **Check held-out metrics:** Low metrics mean the score should be treated with extra caution.
 
 ## Technical Notes
 
-- All models run in-browser (no server required)
-- Training is performed client-side using vanilla JavaScript/TypeScript
-- For production use with large datasets, consider:
-  - Web Workers for training (avoid UI blocking)
-  - IndexedDB for caching trained models
-  - Pyodide integration for full Python lifelines/scikit-learn support
+- Models run in-browser.
+- Training is client-side TypeScript/JavaScript.
+- Optional random forest support depends on runtime availability.
+- Larger datasets may benefit from Web Workers, IndexedDB model caching, or a dedicated statistical runtime.
 
 ## Future Enhancements
 
 Potential improvements:
-- Random Forest models (via TensorFlow.js or ml.js)
-- Neural network approaches for sequence prediction
-- Full Pyodide integration for lifelines/scikit-learn
+- Walk-forward validation for each diagnostic model
+- Explicit return-label generation and tests
 - Cross-validation and hyperparameter tuning UI
-- Export/import trained models
+- Export/import trained model diagnostics
 - Rolling evaluation over time
-- Zone-aware predictions (integrate with ZPA groups)
+- Zone-aware diagnostics
+- Sequence diagnostics with clear out-of-sample validation

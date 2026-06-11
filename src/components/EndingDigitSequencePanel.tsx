@@ -334,8 +334,8 @@ const PredictionResult: React.FC<{ prediction: EndingDigitSequencePrediction }> 
             <span>Low {target.lowMidHigh.low.toFixed(1)}</span>
             <span>Mid {target.lowMidHigh.mid.toFixed(1)}</span>
             <span>High {target.lowMidHigh.high.toFixed(1)}</span>
-            <span>Even {target.evenOdd.even.toFixed(1)}</span>
             <span>Odd {target.evenOdd.odd.toFixed(1)}</span>
+            <span>Even {target.evenOdd.even.toFixed(1)}</span>
             <span>Mean {target.meanNumber.toFixed(1)}</span>
           </div>
         </div>

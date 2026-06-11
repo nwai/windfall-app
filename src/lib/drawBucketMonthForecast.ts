@@ -6,6 +6,7 @@ import {
   getDrawMonthKey,
   type DrawBucketDefinition,
 } from "./drawBucketPatterns";
+import { filterRealDrawHistory } from "./realDrawHistory";
 
 export interface ForecastTopMatch {
   monthKey: string;
@@ -36,6 +37,7 @@ export interface DrawBucketMonthForecastResult {
   targetSlotCount: number;
   forecastSlotCount: number;
   slotForecasts: SlotForecast[];
+  warnings: string[];
 }
 
 export interface ForecastDrawBucketMonthOptions {
@@ -332,7 +334,8 @@ export const forecastDrawBucketMonth = (
     topMatchCount = 3,
   } = options;
 
-  const months = groupDrawsByMonth(history);
+  const realHistory = filterRealDrawHistory(history, "draw-bucket month forecasts");
+  const months = groupDrawsByMonth(realHistory.history);
   const inferredCurrentMonthKey = currentMonthKey ?? months[months.length - 1]?.key ?? null;
   const currentMonth = inferredCurrentMonthKey
     ? months.find((month) => month.key === inferredCurrentMonthKey) ?? null
@@ -345,6 +348,7 @@ export const forecastDrawBucketMonth = (
       targetSlotCount: Math.max(0, targetSlotCount),
       forecastSlotCount: 0,
       slotForecasts: [],
+      warnings: realHistory.warnings,
     };
   }
 
@@ -436,5 +440,6 @@ export const forecastDrawBucketMonth = (
     targetSlotCount,
     forecastSlotCount: slotForecasts.length,
     slotForecasts,
+    warnings: realHistory.warnings,
   };
 };

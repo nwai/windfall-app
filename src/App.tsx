@@ -14,7 +14,6 @@ import { ZPASettingsProvider, useZPASettings } from "./context/ZPASettingsContex
 import { ErrorBoundary } from "./components/ErrorBoundary";
 
 import { MonteCarloPanel } from "./components/candidates/MonteCarloPanel";
-import { OperatorsPanel } from "./components/OperatorsPanel";
 import { NumberTrendsTable, NumberTrend } from "./components/NumberTrendsTable";
 import { entropy, minHamming, maxJaccard } from "./analytics";
 import { fetchDraws, loadCsvFallbackDraws } from "./lib/fetchDraws";
@@ -22,11 +21,13 @@ import { getUniqueRandomNumbers } from "./lib/random";
 import { parseCSVorJSON } from "./parseCSVorJSON";
 import { getSDE1FilteredPool } from "./sde1";
 import { buildDrawGrid, findDiamondsAllRadii, getPredictedNumbers } from "./dga";
+import { normalizeDgaSelectedNumbers } from "./lib/dgaSelectedNumbers";
 import { DGAVisualizer } from "./components/DGAVisualizer";
 import { computeOGA, getOGAPercentile } from "./utils/oga";
 import { Draw, Knobs, CandidateSet } from "./types";
 import { GeneratedCandidatesPanel, ExportSettings } from "./components/candidates/GeneratedCandidatesPanel";
 import { PasteWeightedCandidatesPanel } from "./components/candidates/PasteWeightedCandidatesPanel";
+import { PortfolioCompressionPanel, type PortfolioHotColdEvidenceRow } from "./components/candidates/PortfolioCompressionPanel";
 import { buildTrendWeights } from "./lib/trendBias";
 import { buildMonthlyRepeatBiasWeights, MRB_BUCKET_KEYS, MRB_BUCKET_LABELS, MRB_BUDGET } from "./lib/numberBiases";
 import { OGAHistogram } from "./components/OGAHistogram";
@@ -92,8 +93,13 @@ import { useGenerateWorker, serializeMonthlyBuckets, serializeTrendMap } from ".
 import type { GenerateWorkerArgs } from "./workers/generateWorker";
 import { ModulationDiagnosticsPanel } from "./components/ModulationDiagnosticsPanel";
 import { SelectionInsightsPanel } from "./components/SelectionInsightsPanel";
+import { OddEvenRatioCadencePanel } from "./components/OddEvenRatioCadencePanel";
 import { CollapsibleSection } from "./components/shared/CollapsibleSection";
 import { InlineCollapsibleCard } from "./components/shared/InlineCollapsibleCard";
+import { HigField, InfoHelp } from "./components/shared/HigControls";
+import { AppWorkflowNav, WorkflowAnchor } from "./components/layout/AppWorkflowNav";
+import { PanelFavoritesStrip } from "./components/layout/PanelFavoritesStrip";
+import { PanelFavoritesProvider } from "./context/PanelFavoritesContext";
 import { NextDrawProbabilitiesPanel } from "./components/NextDrawProbabilitiesPanel";
 import { forecastOGA } from "./lib/ogaForecast";
 import { MostLikelyNotDrawnPanel } from "./components/MostLikelyNotDrawnPanel";
@@ -101,7 +107,7 @@ import { BacktestPanel } from "./components/BacktestPanel";
 import { NextHotBlocksPanel } from "./components/NextHotBlocksPanel";
 import UndrawnPatternsPanel from "./components/UndrawnPatternsPanel";
 import MonthlyOverlapPanel from "./components/MonthlyOverlapPanel";
-import MonthlyDrawsSummaryPanel, { type MonthlyConstraintPayload, type MonthlyFrequencyConstraints, type MonthlyBucketSets } from "./components/MonthlyDrawsSummaryPanel";
+import MonthlyDrawsSummaryPanel, { type MonthlyConstraintPayload, type MonthlyFrequencyConstraints, type MonthlyBucketSets, type MonthlyIdealDrawState, type StageIdealDrawState } from "./components/MonthlyDrawsSummaryPanel";
 import MonthlyFirstLastPanel from "./components/MonthlyFirstLastPanel";
 import MonthlyDigitOccurrencePanel from "./components/MonthlyDigitOccurrencePanel";
 import MonthEndCarryOverBucketsPanel from "./components/MonthEndCarryOverBucketsPanel";
@@ -140,8 +146,18 @@ import {
   SELECTED_MONTH_END_CARRY_OVER_BOOST_FACTOR,
   scoreMonthEndCarryOverCandidate,
 } from "./lib/monthEndCarryOver";
+import { analyzeHotColdRanking } from "./lib/hotColdRanking";
+import { buildPortfolioWindowShapeEvidence } from "./lib/portfolioWindowShape";
+import { summarizeDrawHistoryProvenance } from "./lib/drawHistoryProvenance";
+import {
+  loadFavoritePanelIds,
+  normalizeFavoritePanelIds,
+  saveFavoritePanelIds,
+} from "./lib/panelFavorites";
 
 type DgaHeatmapViewMode = "temperature" | "monthlyBucketState";
+
+const DGA_HEATMAP_GUTTER = 15;
 
 type MonthEndCarryOverStrength = "light" | "normal" | "strong";
 type SelectedCarryOverBoostMode = "normal" | "strong" | "nearForced";
@@ -683,6 +699,7 @@ function AppInner(): JSX.Element {
 
   const [selectedNumbers, setSelectedNumbers] = useState<number[]>([]);
   const [candidates, setCandidates] = useState<CandidateSet[]>([]);
+  const [pasteWeightedPortfolioCandidates, setPasteWeightedPortfolioCandidates] = useState<CandidateSet[]>([]);
   const [ratioSummary, setRatioSummary] = useState<any>(null);
   const [quotaWarning, setQuotaWarning] = useState<string | undefined>(undefined);
   const [trace, setTrace] = useState<string[]>([]);
@@ -722,6 +739,8 @@ function AppInner(): JSX.Element {
   const [monthlyConstraintPayload, setMonthlyConstraintPayload] = useState<MonthlyConstraintPayload | null>(null);
   const [monthlyConstructiveEnabled, setMonthlyConstructiveEnabled] = useState<boolean>(false);
   const [monthlyBucketSetsAlways, setMonthlyBucketSetsAlways] = useState<MonthlyBucketSets | null>(null);
+  const [monthlyIdealDrawState, setMonthlyIdealDrawState] = useState<MonthlyIdealDrawState | null>(null);
+  const [stageIdealDrawState, setStageIdealDrawState] = useState<StageIdealDrawState | null>(null);
 
   // Readiness (Rdy) score weights — user-configurable in Candidate Generation Influences
   const [rdyWeights, setRdyWeights] = useState<{ idm: number; conv: number; oga: number }>({ idm: 0.70, conv: 0.10, oga: 0.20 });
@@ -877,6 +896,8 @@ function AppInner(): JSX.Element {
   const [presets, setPresets] = useState<AppPreset[]>(() => listPresets());
   const [selectedPresetId, setSelectedPresetId] = useState<string>("");
   const [newPresetName, setNewPresetName] = useState<string>("");
+  const [favoritePanelIds, setFavoritePanelIds] = useState<string[]>(() => loadFavoritePanelIds());
+  const [includePanelFavoritesInPreset, setIncludePanelFavoritesInPreset] = useState<boolean>(true);
   const [zpaReloadKey, setZpaReloadKey] = useState<number>(0);
   const [selectedWindowPatterns, setSelectedWindowPatterns] = useState<WindowPattern[]>([]);
   const [patternConstraintMode, setPatternConstraintModeode] = useState<'boost' | 'restrict'>('boost');
@@ -890,6 +911,19 @@ function AppInner(): JSX.Element {
   const [ogaPreferredDeciles, setOGAPreferredDeciles] = useState<{ index: number; weight: number }[]>([]);
 
   const { zoneGamma, setZoneGamma } = useZPASettings();
+
+  useEffect(() => {
+    saveFavoritePanelIds(favoritePanelIds);
+  }, [favoritePanelIds]);
+
+  const toggleFavoritePanel = useCallback((panelId: string) => {
+    setFavoritePanelIds((current) => {
+      const normalized = normalizeFavoritePanelIds(current);
+      return normalized.includes(panelId)
+        ? normalized.filter((id) => id !== panelId)
+        : normalizeFavoritePanelIds([...normalized, panelId]);
+    });
+  }, []);
 
   // ──── Auto-save / auto-restore settings ────
   // Restore saved settings on mount (before first render with defaults)
@@ -1006,6 +1040,16 @@ function AppInner(): JSX.Element {
       return history.slice(fromIdx - 1, toIdx);
     }
   }, [history, drawWindowMode, rangeFrom, rangeTo, windowEnabled, windowMode, customDrawCount]);
+
+  const drawHistoryProvenance = useMemo(
+    () => summarizeDrawHistoryProvenance(history),
+    [history],
+  );
+
+  const activeWindowProvenance = useMemo(
+    () => summarizeDrawHistoryProvenance(filteredHistory),
+    [filteredHistory],
+  );
 
   const wfmqyhMainNumberCounts = useMemo(
     () => buildWfmqyhNumberCounts(filteredHistory),
@@ -1222,6 +1266,29 @@ function AppInner(): JSX.Element {
     [filteredHistory]
   );
 
+  const portfolioHotColdRows = useMemo<PortfolioHotColdEvidenceRow[]>(() => {
+    if (filteredHistory.length === 0) return [];
+    const summary = analyzeHotColdRanking(filteredHistory, {
+      includeSupp: true,
+      recentWindow: Math.min(20, Math.max(1, filteredHistory.length)),
+      halfLife: Math.min(10, Math.max(1, filteredHistory.length)),
+    });
+    return summary.rows.map((row) => ({
+      number: row.number,
+      status: row.status,
+      hotScore: row.hotScore,
+      hotRank: row.hotRank,
+      recentRank: row.recentRank,
+      recentCount: row.recentCount,
+      weightedRank: row.weightedRank,
+    }));
+  }, [filteredHistory]);
+
+  const portfolioWindowShapeRows = useMemo(
+    () => buildPortfolioWindowShapeEvidence(filteredHistory, { includeSupp: false }).rows,
+    [filteredHistory],
+  );
+
   // Row simulation
   const [simulatedDraw, setSimulatedDraw] = useState<Draw | null>(null);
   const [simNumbers, setSimNumbers] = useState<number[]>([]);
@@ -1247,6 +1314,27 @@ function AppInner(): JSX.Element {
       setSimScrollOriginY(null);
     }
   }, [simScrollOriginY]);
+
+  const handleDgaStripChange = useCallback((nums: number[]) => {
+    const sorted = normalizeDgaSelectedNumbers(nums).slice(0, 8);
+    setDgaStripSelected(sorted);
+
+    if (sorted.length === 0) {
+      setSimulatedDraw(null);
+      setSimSource("none");
+      setSimCandidateIdx(null);
+      return;
+    }
+
+    setSimulatedDraw({
+      main: sorted.slice(0, 6),
+      supp: sorted.slice(6, 8),
+      date: "DGAStrip",
+      isSimulated: true,
+    } as any);
+    setSimSource("dga-strip");
+    setSimCandidateIdx(null);
+  }, []);
 
   // Manual simulation (heatmap/NextHotBlocks overlay only)
   const [manualSimSelected, setManualSimSelected] = useState<number[]>([]);
@@ -1325,6 +1413,22 @@ function AppInner(): JSX.Element {
 
     setSelectedCandidateIdx(-1);
     setSimulatedDraw({ main, supp: [], date: "PasteWeighted", isSimulated: true } as any);
+    setSimSource('candidate');
+    setSimCandidateIdx(null);
+    setDgaStripSelected([]);
+    scrollToDGA();
+  }, [scrollToDGA]);
+
+  const handleSimulatePortfolioCore = useCallback((numbers: number[]) => {
+    const main = numbers
+      .filter((value) => Number.isFinite(value))
+      .slice(0, 6)
+      .sort((left, right) => left - right);
+
+    if (main.length !== 6) return;
+
+    setSelectedCandidateIdx(-1);
+    setSimulatedDraw({ main, supp: [], date: "PortfolioCore", isSimulated: true } as any);
     setSimSource('candidate');
     setSimCandidateIdx(null);
     setDgaStripSelected([]);
@@ -2511,40 +2615,55 @@ function AppInner(): JSX.Element {
   }, [trendValueSeries]);
 
   return (
-    <div style={{ fontFamily: "monospace", padding: 20, maxWidth: 1700 }}>
+    <PanelFavoritesProvider favoritePanelIds={favoritePanelIds} onToggleFavorite={toggleFavoritePanel}>
+    <div className="windfall-app-shell">
       <ToastContainer position="top-right" duration={1600} />
-      <h2>
-        🇦🇺 Weekday Windfall – Set Generator{" "}
-        <span style={{ fontSize: 16, color: "#666" }}>for entertainment use only</span>
-        <label style={{ marginLeft: 12, fontSize: 12 }} title="Toggle verbose trace logging">
-          <input type="checkbox" checked={traceVerbose} onChange={(e) => setTraceVerbose(e.target.checked)} style={{ marginRight: 6 }} />
-          Trace verbose
-        </label>
+      <header className="windfall-app-header">
+        <div>
+          <h1 className="windfall-app-title">Weekday Windfall</h1>
+          <div className="windfall-app-subtitle">Set Generator · for entertainment use only</div>
+        </div>
+        <div className="windfall-app-actions">
+          <label className="windfall-trace-toggle">
+            <input type="checkbox" checked={traceVerbose} onChange={(e) => setTraceVerbose(e.target.checked)} />
+            Trace verbose
+          </label>
         <a
           href="/user-manual.html"
           target="_blank"
           rel="noopener noreferrer"
-          style={{
-            marginLeft: 16,
-            display: "inline-block",
-            padding: "4px 14px",
-            borderRadius: 20,
-            background: "#1a237e",
-            color: "#fff",
-            fontSize: 13,
-            fontWeight: 700,
-            textDecoration: "none",
-            fontFamily: "sans-serif",
-            letterSpacing: "0.3px",
-          }}
-          title="Open User Manual in a new tab (also downloadable from there)"
+          className="windfall-primary-button"
+          aria-label="Open user manual in a new tab"
         >
-          📖 Manual
+          Manual
         </a>
-      </h2>
+        </div>
+      </header>
+
+      <div
+        data-testid="draw-history-provenance"
+        role="status"
+        className={`windfall-provenance-strip ${drawHistoryProvenance.analysisReady ? "windfall-provenance-strip--ready" : "windfall-provenance-strip--warning"}`}
+      >
+        <b>Data provenance:</b> {drawHistoryProvenance.headline}. {drawHistoryProvenance.detail}{" "}
+        Active window: {activeWindowProvenance.realDraws} real / {activeWindowProvenance.totalDraws} loaded.
+        {drawHistoryProvenance.warning ? <> <b>Warning:</b> {drawHistoryProvenance.warning}</> : null}
+      </div>
+
+      <AppWorkflowNav />
+      <PanelFavoritesStrip
+        favoritePanelIds={favoritePanelIds}
+        onClearFavorites={() => setFavoritePanelIds([])}
+      />
+
+      <WorkflowAnchor
+        id="workflow-history"
+        title="History & Window"
+        summary="Load, validate, and choose the active draw window before interpreting any downstream signal."
+      />
 
       {/* [ORDER-ANCHOR] 01 Number Trends Table */}
-      <CollapsibleSection title={<b>Number Trends Table</b>} summaryHint="Click a number to mark for forced inclusion" defaultOpen={false}>
+      <CollapsibleSection panelId="number-trends" title={<b>Number Trends Table</b>} summaryHint="Click a number to mark for forced inclusion" defaultOpen={false}>
         <NumberTrendsTable trends={numberTrends} onToggle={(n) => setTrendSelectedNumbers(prev => prev.includes(n) ? prev.filter(x => x !== n) : [...prev, n])} selected={trendSelectedNumbers} />
         <div style={{ fontSize: 12, color: "#888", marginBottom: 8 }}>
           Colored rows indicate numbers you have selected for forced inclusion.
@@ -2552,7 +2671,7 @@ function AppInner(): JSX.Element {
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 02 Draw History Manager */}
-      <CollapsibleSection title={<b>Draw History Manager ({history.length} draws • latest {mostRecentDrawDateLabel})</b>} defaultOpen={false}>
+      <CollapsibleSection panelId="draw-history-manager" title={<b>Draw History Manager ({history.length} draws • latest {mostRecentDrawDateLabel})</b>} defaultOpen={false}>
         {/* In-app CSV updater */}
         <DrawHistoryManager
           csvPathHint="Bundled fallback: src/windfall_history_lottolyzer.csv"
@@ -2623,12 +2742,12 @@ function AppInner(): JSX.Element {
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 02.1 Next Draw Probabilities */}
-      <CollapsibleSection title={<b>Next Draw Probabilities</b>} defaultOpen={false}>
+      <CollapsibleSection panelId="next-draw-probabilities" title={<b>Next Draw Probabilities</b>} defaultOpen={false}>
         <NextDrawProbabilitiesPanel history={filteredHistory} allHistory={history} title={`Next Draw Probabilities (${historyWindowName})`} />
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 03 Windowed Draw Filtering (WFMQYH) */}
-      <CollapsibleSection title={<b>Windowed Draw Filtering (WFMQYH)</b>} defaultOpen={false}>
+      <CollapsibleSection panelId="windowed-draw-filtering" title={<b>Windowed Draw Filtering (WFMQYH)</b>} defaultOpen={false}>
         {(() => (
           <>
             <div
@@ -2967,8 +3086,14 @@ function AppInner(): JSX.Element {
         ))()}
       </CollapsibleSection>
 
+      <WorkflowAnchor
+        id="workflow-signals"
+        title="Signals"
+        summary="Review observed history, diagnostic rankings, and model evidence before using those signals in generation."
+      />
+
       {/* [ORDER-ANCHOR] 04 Odd/Even Ratio Filters */}
-      <CollapsibleSection title={<b>Odd/Even Ratio Filters</b>} summaryHint="Select one or more ratios, or use Tricky Rule" defaultOpen={false}>
+      <CollapsibleSection panelId="odd-even-ratio-filters" title={<b>Odd/Even Ratio Filters</b>} summaryHint="Select one or more ratios, or use Tricky Rule" defaultOpen={false}>
         <div style={{ marginBottom: 8 }}>
           <label style={{ fontWeight: "bold", display: "inline-block", marginRight: 16 }}>
             <input
@@ -3015,8 +3140,12 @@ function AppInner(): JSX.Element {
         </div>
       </CollapsibleSection>
 
+      <CollapsibleSection panelId="odd-even-ratio-cadence" title={<b>Odd/Even Ratio Cadence</b>} summaryHint="Observed ratio timeline and intervals" defaultOpen={false}>
+        <OddEvenRatioCadencePanel draws={filteredHistory} />
+      </CollapsibleSection>
+
       {/* [ORDER-ANCHOR] 05 Survival Analyzer */}
-      <CollapsibleSection title={<b>Survival Analyzer</b>} defaultOpen={false}>
+      <CollapsibleSection panelId="survival-analyzer" title={<b>Survival Analyzer</b>} defaultOpen={false}>
         <SurvivalAnalyzer
           history={filteredHistory}
           excludedNumbers={allExclusions}
@@ -3037,7 +3166,7 @@ function AppInner(): JSX.Element {
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 06 Temperature Transition */}
-      <CollapsibleSection title={<b>Temperature Transition</b>} defaultOpen={false}>
+      <CollapsibleSection panelId="temperature-transition" title={<b>Temperature Transition</b>} defaultOpen={false}>
         <TemperatureTransitionPanel
           history={filteredHistory}
           alpha={0.25}
@@ -3054,7 +3183,7 @@ function AppInner(): JSX.Element {
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 07 Monte Carlo Analyzer */}
-      <CollapsibleSection title={<b>Monte Carlo Analyzer</b>} defaultOpen={false}>
+      <CollapsibleSection panelId="monte-carlo-analyzer" title={<b>Monte Carlo Analyzer</b>} defaultOpen={false}>
         <MonteCarloPanel
           history={filteredHistory}
           enableSDE1={knobs.enableSDE1}
@@ -3070,17 +3199,23 @@ function AppInner(): JSX.Element {
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 07.1 Most Likely NOT Drawn */}
-      <CollapsibleSection title={<b>Most Likely NOT Drawn</b>} defaultOpen={false}>
+      <CollapsibleSection panelId="most-likely-not-drawn" title={<b>Most Likely NOT Drawn</b>} defaultOpen={false}>
         <MostLikelyNotDrawnPanel history={filteredHistory} title="Most Likely NOT Drawn" />
       </CollapsibleSection>
 
+      <WorkflowAnchor
+        id="workflow-validation"
+        title="Validation"
+        summary="Use backtests and diagnostics to separate promising evidence from pattern noise before trusting a workflow."
+      />
+
       {/* [ORDER-ANCHOR] 07.2 Backtest Validation Dashboard */}
-      <CollapsibleSection title={<b>Backtest Validation</b>} defaultOpen={false}>
+      <CollapsibleSection panelId="backtest-validation" title={<b>Backtest Validation</b>} defaultOpen={false}>
         <BacktestPanel history={filteredHistory} />
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 08 Trend Ratio History */}
-      <CollapsibleSection title={<b>Trend Ratio History</b>} defaultOpen={false}>
+      <CollapsibleSection panelId="trend-ratio-history" title={<b>Trend Ratio History</b>} defaultOpen={false}>
         <TrendRatioHistoryPanel
           stats={computeHistoricalTrendRatios({
             lookback: 4,
@@ -3098,46 +3233,46 @@ function AppInner(): JSX.Element {
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 09 Group Pattern Analyzer */}
-      <CollapsibleSection title={<b>Group Pattern Analyzer</b>} defaultOpen={false}>
+      <CollapsibleSection panelId="group-pattern-analyzer" title={<b>Group Pattern Analyzer</b>} defaultOpen={false}>
         <GroupPatternPanel key={zpaReloadKey} history={filteredHistory} groups={custom} />
         <GlobalZoneWeighting />
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 10 Pattern Stats */}
-      <CollapsibleSection title={<b>Pattern Stats</b>} summaryHint="collapsed" defaultOpen={false}>
+      <CollapsibleSection panelId="pattern-stats" title={<b>Pattern Stats</b>} summaryHint="collapsed" defaultOpen={false}>
         <div style={{ overflowX: "auto", fontSize: 12, marginTop: 8, background: "#fff", border: "1px solid #eee", borderRadius: 6, padding: 8 }}>
           <PatternStatsPanel draws={filteredHistory} numBins={10} />
         </div>
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 11 Number Frequency */}
-      <CollapsibleSection title={<b>Number Frequency</b>} summaryHint="compact, collapsed" defaultOpen={false}>
+      <CollapsibleSection panelId="number-frequency" title={<b>Number Frequency</b>} summaryHint="compact, collapsed" defaultOpen={false}>
         <div style={{ overflowX: "auto", fontSize: 12, marginTop: 8 }}>
           <NumberFrequencyPanel draws={filteredHistory} allDraws={history} />
         </div>
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 11.25 Draw Bucket Patterns */}
-      <CollapsibleSection title={<b>Draw Bucket Patterns</b>} summaryHint="div5, ending digits, main+supp" defaultOpen={false}>
+      <CollapsibleSection panelId="draw-bucket-patterns" title={<b>Draw Bucket Patterns</b>} summaryHint="div5, ending digits, main+supp" defaultOpen={false}>
         <div style={{ marginTop: 8 }}>
           <DrawBucketPatternPanel draws={filteredHistory} allDraws={history} />
         </div>
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 11.35 Ending Digit Sequences */}
-      <CollapsibleSection title={<b>Ending Digit Sequences</b>} summaryHint="consecutive ending-digit runs" defaultOpen={false}>
+      <CollapsibleSection panelId="ending-digit-sequences" title={<b>Ending Digit Sequences</b>} summaryHint="consecutive ending-digit runs" defaultOpen={false}>
         <div style={{ marginTop: 8 }}>
           <EndingDigitSequencePanel draws={filteredHistory} />
         </div>
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 11.5 Adjacent Combos (Pairs/Triples) */}
-      <CollapsibleSection title={<b>Adjacent Combos (Pairs / Triples)</b>} summaryHint="Runs, gaps, recent streaks" defaultOpen={false}>
+      <CollapsibleSection panelId="adjacent-combos" title={<b>Adjacent Combos (Pairs / Triples)</b>} summaryHint="Runs, gaps, recent streaks" defaultOpen={false}>
         <AdjacentCombosPanel history={filteredHistory} allHistory={history} />
       </CollapsibleSection>
 
-      {/* [ORDER-ANCHOR] 12 Window Stats (Low/Mid/High, Even/Odd, Sum) */}
-      <CollapsibleSection title={<b>Window Stats (Low/Mid/High, Even/Odd, Sum)</b>} summaryHint="WFMQY" defaultOpen={false}>
+      {/* [ORDER-ANCHOR] 12 Window Stats (Low/Mid/High, Odd/Even, Sum) */}
+      <CollapsibleSection panelId="window-stats" title={<b>Window Stats (Low/Mid/High, Odd/Even, Sum)</b>} summaryHint="WFMQY" defaultOpen={false}>
         <div style={{ marginTop: 8 }}>
           <WindowStatsPanel
             draws={filteredHistory}
@@ -3153,12 +3288,12 @@ function AppInner(): JSX.Element {
               setSelectedWindowPatterns(prev => {
                 const exists = prev.some(x => (
                   x.low === p.low && x.high === p.high &&
-                  x.even === p.even && x.odd === p.odd && x.sum === p.sum
+                  x.odd === p.odd && x.even === p.even && x.sum === p.sum
                 ));
                 return exists
                   ? prev.filter(x => !(
                     x.low === p.low && x.high === p.high &&
-                    x.even === p.even && x.odd === p.odd && x.sum === p.sum
+                    x.odd === p.odd && x.even === p.even && x.sum === p.sum
                   ))
                   : [...prev, p];
               });
@@ -3168,15 +3303,15 @@ function AppInner(): JSX.Element {
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 13 Target Set Quick Stats */}
-      <CollapsibleSection title={<b>Target Set Quick Stats</b>} defaultOpen={false}>
+      <CollapsibleSection panelId="target-set-quick-stats" title={<b>Target Set Quick Stats</b>} defaultOpen={false}>
         <TargetSetQuickStatsPanel forcedNumbers={trendSelectedNumbers} selectedNumbers={userSelectedNumbers} />
       </CollapsibleSection>
 
-      {/* [ORDER-ANCHOR] 14 Advanced Survival Analysis & Churn/Return Prediction Models */}
-      <CollapsibleSection title={<b>Advanced Survival Analysis & Churn/Return Prediction Models</b>} defaultOpen={false}>
+      {/* [ORDER-ANCHOR] 14 Advanced Survival Analysis & Churn/Return Diagnostic Models */}
+      <CollapsibleSection panelId="survival-churn-diagnostic-models" title={<b>Advanced Survival Analysis & Churn/Return Diagnostic Models</b>} defaultOpen={false}>
         <div style={{ marginTop: 12 }}>
-          <ChurnPredictor dataset={churnDataset} totalDraws={activeWindowSize} minDraws={36} modelType="rf" onPredictions={setChurnOut} />
-          <ReturnPredictor dataset={churnDataset} totalDraws={activeWindowSize} minDraws={36} modelType="rf" onPredictions={setReturnOut} />
+          <ChurnPredictor dataset={churnDataset} totalDraws={activeWindowProvenance.realDraws} minDraws={36} modelType="rf" onPredictions={setChurnOut} />
+          <ReturnPredictor dataset={churnDataset} totalDraws={activeWindowProvenance.realDraws} minDraws={36} modelType="rf" onPredictions={setReturnOut} />
 
           <UserExclusionsStrip
             title="User Exclusions"
@@ -3209,32 +3344,8 @@ function AppInner(): JSX.Element {
         </div>
       </CollapsibleSection>
 
-      {/* [ORDER-ANCHOR] 15 Operator’s Panel – Candidate Generation Controls */}
-      <CollapsibleSection title={<b>Operator’s Panel – Candidate Generation Controls</b>} defaultOpen={false}>
-         <OperatorsPanel
-           entropy={entropyThreshold} setEntropy={setEntropyThreshold}
-           entropyEnabled={entropyEnabled} setEntropyEnabled={setEntropyEnabled}
-           hamming={hammingThreshold} setHamming={setHammingThreshold}
-           hammingEnabled={hammingEnabled} setHammingEnabled={setHammingEnabled}
-           jaccard={jaccardThreshold} setJaccard={setJaccardThreshold}
-           jaccardEnabled={jaccardEnabled} setJaccardEnabled={setJaccardEnabled}
-           lambdaEnabled={lambdaEnabled} setLambdaEnabled={setLambdaEnabled}
-           lambda={lambda} setLambda={setLambda}
-           minRecentMatches={minRecentMatches} setMinRecentMatches={setMinRecentMatches}
-           recentMatchBias={recentMatchBias} setRecentMatchBias={setRecentMatchBias}
-           previewStats={previewStats}
-           gpwfEnabled={gpwfEnabled} setGPWFEnabled={setGPWFEnabled}
-           gpwf_window_size={gpwf_window_size} setGPWFWindowSize={setGPWFWindowSize}
-           maxGPWFWindow={Math.min(maxGPWFWindow, filteredHistory.length)}
-           gpwf_bias_factor={gpwf_bias_factor} setGPWFBiasFactor={setGPWFBiasFactor}
-           gpwf_floor={gpwf_floor} setGPWFFloor={setGPWFFloor}
-           gpwf_scale_multiplier={gpwf_scale_multiplier} setGPWFScaleMultiplier={setGPWFScaleMultiplier}
-           octagonal_top={octagonalTop} setOctagonalTop={setOctagonalTop}
-         />
-      </CollapsibleSection>
-
       {/* [ORDER-ANCHOR] 16 State Presets */}
-      <CollapsibleSection title={<b>State Presets</b>} summaryHint="Save and recall all current options" defaultOpen={false}>
+      <CollapsibleSection panelId="state-presets" title={<b>State Presets</b>} summaryHint="Save and recall all current options" defaultOpen={false}>
         <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", background: "#f7fafe", border: "1px solid #e3f2fd", padding: 10, borderRadius: 6, marginTop: 8 }}>
           <label>
             Preset:
@@ -3244,7 +3355,7 @@ function AppInner(): JSX.Element {
             </select>
           </label>
           <button onClick={() => { if (!selectedPresetId) return; const p = getPreset(selectedPresetId); if (!p) return; applySnapshot(p.state); }} disabled={!selectedPresetId}>Load</button>
-          <button onClick={() => { if (!selectedPresetId) return; const snap = buildSnapshot(); updatePreset(selectedPresetId, snap); setPresets(listPresets()); }} disabled={!selectedPresetId}>Update from current</button>
+          <button onClick={() => { if (!selectedPresetId) return; const snap = buildSnapshot({ includePanelFavorites: includePanelFavoritesInPreset }); updatePreset(selectedPresetId, snap); setPresets(listPresets()); }} disabled={!selectedPresetId}>Update from current</button>
           <button onClick={() => { if (!selectedPresetId) return; deletePresetLS(selectedPresetId); setPresets(listPresets()); setSelectedPresetId(""); }} disabled={!selectedPresetId}>Delete</button>
           <button onClick={async () => { if (!selectedPresetId) return; const json = exportPresetJSON(selectedPresetId); if (!json) return; const blob = new Blob([json], { type: "application/json" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = "windfall-preset.json"; a.click(); URL.revokeObjectURL(url); }} disabled={!selectedPresetId}>Export</button>
           <span style={{ marginLeft: 12 }}>
@@ -3252,8 +3363,16 @@ function AppInner(): JSX.Element {
               New name:
               <input type="text" value={newPresetName} onChange={(e) => setNewPresetName(e.target.value)} placeholder="e.g., Quarter+ZPA-G7" style={{ marginLeft: 6, width: 200 }} />
             </label>
-            <button onClick={() => { const name = newPresetName.trim() || `Preset ${presets.length + 1}`; const snap = buildSnapshot(); const created = saveNewPreset(name, snap); setPresets(listPresets()); setSelectedPresetId(created.id); setNewPresetName(""); }} style={{ marginLeft: 8 }}>Save Current</button>
+            <button onClick={() => { const name = newPresetName.trim() || `Preset ${presets.length + 1}`; const snap = buildSnapshot({ includePanelFavorites: includePanelFavoritesInPreset }); const created = saveNewPreset(name, snap); setPresets(listPresets()); setSelectedPresetId(created.id); setNewPresetName(""); }} style={{ marginLeft: 8 }}>Save Current</button>
           </span>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+            <input
+              type="checkbox"
+              checked={includePanelFavoritesInPreset}
+              onChange={(e) => setIncludePanelFavoritesInPreset(e.target.checked)}
+            />
+            Include panel favorites in preset
+          </label>
           <span style={{ marginLeft: "auto" }}>
             <label style={{ marginRight: 6 }}>
               Import:
@@ -3264,14 +3383,14 @@ function AppInner(): JSX.Element {
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 17 Trend Ratio Filter (UP / DOWN / FLAT) */}
-      <CollapsibleSection title={<b>Trend Ratio Filter (UP / DOWN / FLAT)</b>} defaultOpen={false}>
+      <CollapsibleSection panelId="trend-ratio-filter" title={<b>Trend Ratio Filter (UP / DOWN / FLAT)</b>} defaultOpen={false}>
         <div style={{ marginTop: 6, fontSize: 11, color: "#555" }}>
           Configure trend ratio filters in dedicated panel (omitted for brevity).
         </div>
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 18 Parameter Search */}
-      <CollapsibleSection title={<b>Parameter Search</b>} defaultOpen={false}>
+      <CollapsibleSection panelId="parameter-search" title={<b>Parameter Search</b>} defaultOpen={false}>
         <ParameterSearchPanel
           userSelectedNumbers={userSelectedNumbers}
           weightedTargets={weightedTargets}
@@ -3285,7 +3404,7 @@ function AppInner(): JSX.Element {
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 19 Bates Weighting Panel */}
-      <CollapsibleSection title={<b>Bates Weighting Panel</b>} defaultOpen={false}>
+      <CollapsibleSection panelId="bates-weighting" title={<b>Bates Weighting Panel</b>} defaultOpen={false}>
         <BatesPanel
           excludedNumbers={effectiveExcludedNumbers}
           forcedNumbers={trendSelectedNumbers}
@@ -3299,25 +3418,25 @@ function AppInner(): JSX.Element {
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 20 Weighted Target List */}
-      <CollapsibleSection title={<b>Weighted Target List</b>} defaultOpen={false}>
+      <CollapsibleSection panelId="weighted-target-list" title={<b>Weighted Target List</b>} defaultOpen={false}>
         <WeightedTargetListPanel userSelectedNumbers={userSelectedNumbers} weightedTargets={weightedTargets} setWeightedTargets={setWeightedTargets} />
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 21 Modulation Diagnostics */}
-      <CollapsibleSection title={<b>Modulation Diagnostics</b>} defaultOpen={false}>
+      <CollapsibleSection panelId="modulation-diagnostics" title={<b>Modulation Diagnostics</b>} defaultOpen={false}>
         <ModulationDiagnosticsPanel diagnostics={null} currentBatesParams={batesParams as any} />
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 21.5 Monthly Panels (relocated) */}
-      <CollapsibleSection title={<b>Monthly Numbers Overlap</b>} defaultOpen={false} summaryHint="Selected draw vs earlier draws each month">
+      <CollapsibleSection panelId="monthly-overlap" title={<b>Monthly Numbers Overlap</b>} defaultOpen={false} summaryHint="Selected draw vs earlier draws each month">
         <MonthlyOverlapPanel history={history} />
       </CollapsibleSection>
 
-      <CollapsibleSection title={<b>Monthly First ↔ Last Draw Hits</b>} defaultOpen={false} summaryHint="Hits between first & last draw within / across months">
+      <CollapsibleSection panelId="monthly-first-last-hits" title={<b>Monthly First ↔ Last Draw Hits</b>} defaultOpen={false} summaryHint="Hits between first & last draw within / across months">
         <MonthlyFirstLastPanel history={history} />
       </CollapsibleSection>
 
-      <CollapsibleSection title={<b>Monthly Draws Summary</b>} defaultOpen={false} summaryHint="All drawn numbers per month with counts">
+      <CollapsibleSection panelId="monthly-draws-summary" title={<b>Monthly Draws Summary</b>} defaultOpen={false} summaryHint="All drawn numbers per month with counts">
         <MonthlyDrawsSummaryPanel
           history={history}
           onConstraintsChange={setMonthlyConstraintPayload}
@@ -3327,10 +3446,12 @@ function AppInner(): JSX.Element {
           onBucketInfoChange={(info) => setMonthlyBucketLabels(info.labels)}
           onBucketSetsChange={setMonthlyBucketSetsAlways}
           onAvgBucketsChange={setMonthlyAvgBuckets}
+          onIdealDrawStateChange={setMonthlyIdealDrawState}
+          onStageIdealDrawStateChange={setStageIdealDrawState}
         />
       </CollapsibleSection>
 
-      <CollapsibleSection title={<b>Month-End Carry-Over Buckets</b>} defaultOpen={false} summaryHint="Last draw → first draw by monthly frequency bucket">
+      <CollapsibleSection panelId="month-end-carry-over-buckets" title={<b>Month-End Carry-Over Buckets</b>} defaultOpen={false} summaryHint="Last draw → first draw by monthly frequency bucket">
         <MonthEndCarryOverBucketsPanel
           history={history}
           selectedBoostNumbers={selectedCarryOverBoostNumbers}
@@ -3338,16 +3459,22 @@ function AppInner(): JSX.Element {
         />
       </CollapsibleSection>
 
-      <CollapsibleSection title={<b>Monthly 1-Digit vs 2-Digit Occurrences</b>} defaultOpen={false} summaryHint="Monthly counts for numbers 1–9 versus 10–45">
+      <CollapsibleSection panelId="monthly-digit-occurrences" title={<b>Monthly 1-Digit vs 2-Digit Occurrences</b>} defaultOpen={false} summaryHint="Monthly counts for numbers 1–9 versus 10–45">
         <MonthlyDigitOccurrencePanel history={history} />
       </CollapsibleSection>
 
-      <CollapsibleSection title={<b>Hot vs Cold Ranking</b>} defaultOpen={false} summaryHint="Historical vs recent vs weighted number heat">
+      <CollapsibleSection panelId="hot-cold-ranking" title={<b>Hot vs Cold Ranking</b>} defaultOpen={false} summaryHint="Historical vs recent vs weighted number heat">
         <HotColdRankingPanel history={history} wfmqyhWindowSize={activeWindowSize} />
       </CollapsibleSection>
 
+      <WorkflowAnchor
+        id="workflow-generation"
+        title="Generation"
+        summary="Create, compare, compress, and simulate candidate sets while keeping generation rules visible."
+      />
+
       {/* [ORDER-ANCHOR] 22 User Selected Numbers */}
-      <CollapsibleSection title={<b>User Selected Numbers</b>} defaultOpen={true}>
+      <CollapsibleSection panelId="user-selected-numbers" title={<b>User Selected Numbers</b>} defaultOpen={true}>
         <UserSelectedNumbersPanel
           userSelectedNumbers={userSelectedNumbers}
           setUserSelectedNumbers={setUserSelectedNumbers}
@@ -3380,7 +3507,7 @@ function AppInner(): JSX.Element {
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 23 Selection Insights */}
-      <CollapsibleSection title={<b>Selection Insights</b>} defaultOpen={false}>
+      <CollapsibleSection panelId="selection-insights" title={<b>Selection Insights</b>} defaultOpen={false}>
         <div style={{ marginTop: 8 }}>
           <label style={{ fontSize: 12 }}>
             <input
@@ -3436,6 +3563,7 @@ function AppInner(): JSX.Element {
 
       {/* [ORDER-ANCHOR] 23.5 Paste-Weighted Candidate Generator */}
       <CollapsibleSection
+        panelId="paste-weighted-candidate-generator"
         title={<b>Paste-Weighted Candidate Generator</b>}
         summaryHint="Paste rows, weight numbers, generate six-number candidates"
         defaultOpen={true}
@@ -3443,6 +3571,7 @@ function AppInner(): JSX.Element {
         <div style={{ marginTop: 8 }}>
           <PasteWeightedCandidatesPanel
             onSimulateCandidate={handleSimulatePasteWeightedCandidate}
+            onGeneratedCandidatesChange={setPasteWeightedPortfolioCandidates}
             activeSimulatedKey={activeSimulatedMainKey}
             initialCandidateCount={Math.max(4, Math.min(30, numCandidates || 12))}
             fullHistory={history}
@@ -3452,44 +3581,57 @@ function AppInner(): JSX.Element {
         </div>
       </CollapsibleSection>
 
+      {/* [ORDER-ANCHOR] 23.75 Portfolio Compression / 12-Game Distiller */}
+      <CollapsibleSection
+        panelId="portfolio-compression"
+        title={<b>Portfolio Compression / 12-Game Distiller</b>}
+        summaryHint="Paste portfolio rows, count unique numbers, distil a top-six core"
+        defaultOpen={true}
+      >
+        <div style={{ marginTop: 8 }}>
+          <PortfolioCompressionPanel
+            userSelectedNumbers={userSelectedNumbers}
+            monthEndCarryOverBiasEnabled={monthEndCarryOverBiasEnabled}
+            monthEndCarryOverWeights={monthEndCarryOverWeightsForGeneration}
+            hotColdRows={portfolioHotColdRows}
+            windowShapeRows={portfolioWindowShapeRows}
+            adjacentComboHistory={filteredHistory}
+            monthlyBuckets={dgaEffectiveMonthlyBuckets}
+            backtestHistory={history}
+            onSimulateCore={handleSimulatePortfolioCore}
+            activeSimulatedKey={activeSimulatedMainKey}
+            candidateSources={[
+              {
+                id: "generated-candidates",
+                label: "Generated Candidates",
+                candidates: candidates.map((candidate) => candidate.main),
+              },
+              {
+                id: "paste-weighted-candidates",
+                label: "Paste-Weighted Candidates",
+                candidates: pasteWeightedPortfolioCandidates.map((candidate) => candidate.main),
+              },
+            ]}
+          />
+        </div>
+      </CollapsibleSection>
+
       {/* [ORDER-ANCHOR] 24 Generated Candidates */}
-      <CollapsibleSection title={<b>Generated Candidates</b>} defaultOpen={true}>
+      <CollapsibleSection panelId="generated-candidates" title={<b>Generated Candidates</b>} defaultOpen={true}>
         <div style={{ padding: 32, fontFamily: "sans-serif" }}>
-          {/* OGA reference toggle */}
-          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
-            <label style={{ fontSize: 12 }}>
-              OGA reference:
-              <select value={ogaRefMode} onChange={(e) => setOgaRefMode(e.target.value as any)} style={{ marginLeft: 6 }}>
-                <option value="window">Windowed</option>
-                <option value="all">Full History</option>
-              </select>
-            </label>
-            <label style={{ fontSize: 12 }}>
-              Spokes:
-              <input
-                type="number"
-                min={3}
-                max={15}
-                step={1}
-                value={ogaSpokeCount}
-                onChange={(e) => setOgaSpokeCount(Math.max(1, Math.min(45, Number(e.target.value) || 9)))}
-                style={{ width: 70, marginLeft: 6 }}
-              />
-            </label>
-          </div>
-
-          <RankingWeightsPanel weights={rankingWeights} setWeights={setRankingWeights} />
-
-          <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "12px 0 18px" }}>
-            <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 6 }} title="Bias the generator to draw from your User Selected numbers more often">
+          <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "12px 0 18px", flexWrap: "wrap" }}>
+            <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
               <input
                 type="checkbox"
                 checked={selectedBoostEnabled}
                 onChange={(e) => setSelectedBoostEnabled(e.target.checked)}
               />
               Boost User Selected numbers during generation
+              <InfoHelp label="Selected-number boost help">
+                Biases generation toward your User Selected numbers before constraints are applied.
+              </InfoHelp>
             </label>
-            <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 6 }} title="Higher factor increases the odds of picking a selected number (applied before constraints).">
+            <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
               Factor
               <input
                 type="number"
@@ -3501,6 +3643,9 @@ function AppInner(): JSX.Element {
                 onChange={(e) => setSelectedBoostFactor(Math.max(1, Number(e.target.value) || 1))}
                 style={{ width: 70 }}
               />
+              <InfoHelp label="Selected boost factor help">
+                Higher values increase selected-number pick weight during generation, while exclusions and forced numbers still apply.
+              </InfoHelp>
             </label>
             <span style={{ fontSize: 12, color: "#555" }}>
               Applies only to generation (not ranking); still respects exclusions/forced numbers.
@@ -3542,6 +3687,8 @@ function AppInner(): JSX.Element {
             onSimulateNumbers={handleSimulatePickSixManual}
             monthlyAvgBuckets={monthlyAvgBuckets}
             monthlyBuckets={monthlyBucketSetsAlways ?? monthlyConstraintPayload?.buckets}
+            monthlyIdealDrawState={monthlyIdealDrawState}
+            stageIdealDrawState={stageIdealDrawState}
             historyForOGA={filteredHistory}
             fullHistory={history}
             ogaRefScores={pastOGAScoresRef}
@@ -3577,47 +3724,171 @@ function AppInner(): JSX.Element {
               jaccardThreshold,
             } as ExportSettings)}
           />
-          <CollapsibleSection title={<b>Candidate Generation Influences</b>} summaryHint="Toggle filters and boosts that affect generation" defaultOpen={true}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(260px, 1fr))", gap: 12 }}>
-              {/* Column 1: Generation Constraints */}
-              <div style={{ border: "1px solid #eee", borderRadius: 6, padding: 10 }}>
-                <div style={{ fontWeight: 700, marginBottom: 6 }}>Generation Constraints</div>
+          <CollapsibleSection panelId="candidate-generation-influences" title={<b>Candidate Generation Influences</b>} summaryHint="Toggle filters and boosts that affect generation" defaultOpen={true}>
+            <div className="windfall-influences-grid">
+              <div className="windfall-influence-card windfall-influence-card--wide">
+                <h3 className="windfall-influence-card__title">OGA Reference And Ranking</h3>
+                <p className="windfall-influence-card__subtitle">
+                  Geometry reference settings and ranking weights used when candidates are scored, sorted, and explained.
+                </p>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, alignItems: "end" }}>
+                  <HigField label="OGA reference" help="Windowed uses the active WFMQYH history. Full History uses every valid draw loaded in the app.">
+                    <select
+                      value={ogaRefMode}
+                      onChange={(e) => setOgaRefMode(e.target.value as any)}
+                      style={{ width: "100%" }}
+                    >
+                      <option value="window">Windowed</option>
+                      <option value="all">Full History</option>
+                    </select>
+                  </HigField>
+                  <HigField label="Windowed Spokes" help="Controls the number of spokes used by OGA geometry calculations and forecast bias diagnostics.">
+                    <input
+                      type="number"
+                      min={3}
+                      max={15}
+                      step={1}
+                      value={ogaSpokeCount}
+                      onChange={(e) => setOgaSpokeCount(Math.max(1, Math.min(45, Number(e.target.value) || 9)))}
+                      style={{ width: "100%" }}
+                    />
+                  </HigField>
+                  <HigField label="OGA Top" help="Post-process count retained by OGA ranking when the OGA path is active.">
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={octagonalTop}
+                      onChange={(e) => {
+                        const value = Number(e.target.value);
+                        if (Number.isFinite(value) && value >= 1) setOctagonalTop(Math.floor(value));
+                      }}
+                      style={{ width: "100%" }}
+                    />
+                  </HigField>
+                </div>
+                <RankingWeightsPanel weights={rankingWeights} setWeights={setRankingWeights} />
+              </div>
 
-                <div style={{
-                  marginTop: 8,
-                  display: "grid",
-                  gap: 6,
-                }}>
-                  <div style={{ fontSize: 11, color: "#666", lineHeight: 1.5 }}>
-                    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                      <span
-                        aria-hidden="true"
-                        style={{
-                          width: 10,
-                          height: 10,
-                          borderRadius: 999,
-                          background: "#f59e0b",
-                          border: "1px solid #d97706",
-                          display: "inline-block",
-                        }}
-                      />
-                      <span>Amber row = boosted during generation; any positive 1-digit or 2-digit boost keeps that bucket eligible even when Max is Off.</span>
-                    </span>
-                    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginLeft: 10 }}>
-                      <span
-                        aria-hidden="true"
-                        style={{
-                          width: 10,
-                          height: 10,
-                          borderRadius: 999,
-                          background: "#60a5fa",
-                          border: "1px solid #2563eb",
-                          display: "inline-block",
-                        }}
-                      />
-                      <span>Blue row = punished during generation; negative values reduce candidate weighting without fully excluding that decade.</span>
-                    </span>
-                  </div>
+              <div className="windfall-influence-card">
+                <h3 className="windfall-influence-card__title">Generation Engine Controls</h3>
+                <p className="windfall-influence-card__subtitle">
+                  Recency weighting and GPWF frequency weighting used inside the main generation engine.
+                </p>
+                <div className="windfall-influence-row-list">
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 800 }}>
+                    <input
+                      type="checkbox"
+                      checked={lambdaEnabled}
+                      onChange={(e) => setLambdaEnabled(e.target.checked)}
+                    />
+                    Lambda recency weighting
+                  </label>
+                  <HigField label={`Lambda ${lambda.toFixed(2)}`} help="Higher values shift more influence toward recent draws. Disabled means the generator receives no Lambda adjustment.">
+                    <input
+                      type="range"
+                      min={0.2}
+                      max={0.99}
+                      step={0.01}
+                      value={lambda}
+                      disabled={!lambdaEnabled}
+                      onChange={(e) => setLambda(Number(e.target.value))}
+                      style={{ width: "100%" }}
+                    />
+                  </HigField>
+                  <div style={{ height: 1, background: "#e5e7eb", margin: "2px 0" }} aria-hidden="true" />
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 800 }}>
+                    <input
+                      type="checkbox"
+                      checked={gpwfEnabled}
+                      onChange={(e) => setGPWFEnabled(e.target.checked)}
+                    />
+                    GPWF weighted frequency
+                  </label>
+                  {(() => {
+                    const gpwfMaxWindow = Math.max(3, Math.min(maxGPWFWindow, filteredHistory.length || maxGPWFWindow));
+                    return (
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 8 }}>
+                        <HigField label="Window" help={`Recent draws considered, capped at ${gpwfMaxWindow}.`}>
+                          <input
+                            type="number"
+                            min={3}
+                            max={gpwfMaxWindow}
+                            step={1}
+                            value={gpwf_window_size}
+                            disabled={!gpwfEnabled}
+                            onChange={(e) => setGPWFWindowSize(Math.max(3, Math.min(gpwfMaxWindow, Number(e.target.value) || 3)))}
+                            style={{ width: "100%" }}
+                          />
+                        </HigField>
+                        <HigField label="Bias" help="Strength of recent frequency weighting.">
+                          <input
+                            type="number"
+                            min={0}
+                            max={1}
+                            step={0.01}
+                            value={gpwf_bias_factor}
+                            disabled={!gpwfEnabled}
+                            onChange={(e) => setGPWFBiasFactor(Math.max(0, Math.min(1, Number(e.target.value) || 0)))}
+                            style={{ width: "100%" }}
+                          />
+                        </HigField>
+                        <HigField label="Floor" help="Minimum baseline weight retained for numbers.">
+                          <input
+                            type="number"
+                            min={0}
+                            max={1}
+                            step={0.01}
+                            value={gpwf_floor}
+                            disabled={!gpwfEnabled}
+                            onChange={(e) => setGPWFFloor(Math.max(0, Math.min(1, Number(e.target.value) || 0)))}
+                            style={{ width: "100%" }}
+                          />
+                        </HigField>
+                        <HigField label="Scale" help="Scales the effect of raw recent frequency.">
+                          <input
+                            type="number"
+                            min={0}
+                            max={1}
+                            step={0.01}
+                            value={gpwf_scale_multiplier}
+                            disabled={!gpwfEnabled}
+                            onChange={(e) => setGPWFScaleMultiplier(Math.max(0, Math.min(1, Number(e.target.value) || 0)))}
+                            style={{ width: "100%" }}
+                          />
+                        </HigField>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+
+              {/* Column 1: Generation Constraints */}
+              <div className="windfall-influence-card windfall-influence-card--wide">
+                <h3 className="windfall-influence-card__title">Generation Constraints</h3>
+                <p className="windfall-influence-card__subtitle">
+                  Ending-digit, decade, monthly bucket, and carry-over rules that affect generated candidates.
+                </p>
+
+                <div className="windfall-constraint-sections">
+                  <section className="windfall-constraint-section" aria-labelledby="ending-digit-limits-title">
+                    <div className="windfall-constraint-section__header">
+                      <div id="ending-digit-limits-title" className="windfall-constraint-section__title">Ending Digit Limits</div>
+                      <div className="windfall-constraint-section__subtitle">
+                        Cap ending buckets and add targeted 1-digit or 2-digit generation boosts.
+                      </div>
+                    </div>
+                    <div className="windfall-influence-legend">
+                      <span className="windfall-influence-legend__item">
+                        <span aria-hidden="true" className="windfall-influence-legend__dot windfall-influence-legend__dot--boost" />
+                        <span>Amber row = boosted during generation; any positive 1-digit or 2-digit boost keeps that bucket eligible even when Max is Off.</span>
+                      </span>
+                      <span className="windfall-influence-legend__item">
+                        <span aria-hidden="true" className="windfall-influence-legend__dot windfall-influence-legend__dot--punish" />
+                        <span>Blue row = punished during generation; negative values reduce candidate weighting without fully excluding that decade.</span>
+                      </span>
+                    </div>
+                    <div className="windfall-constraint-section__grid windfall-constraint-section__grid--ending">
                   {exactConstraintRows.map(({ key, label, helper, badge, max, enabled, setEnabled, count, setCount, singleDigitBoost, twoDigitBoost, setSingleDigitBoost, setTwoDigitBoost, title, bucketKey }) => {
                     const bucketSummary = generationConstraintBucketSummaries[bucketKey];
                     const bucketNumbers = generationConstraintNumberBuckets[bucketKey];
@@ -3671,14 +3942,7 @@ function AppInner(): JSX.Element {
                             {isBoosted ? " • boosted sub-buckets stay eligible for weighted candidate picks" : ""}
                           </div>
                         </div>
-                        <div
-                          style={{
-                            display: "grid",
-                            gridTemplateColumns: "auto auto auto auto minmax(260px, 1fr)",
-                            gap: 8,
-                            alignItems: "center",
-                          }}
-                        >
+                        <div className="windfall-influence-control-grid">
                           <label style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, color: "#555", whiteSpace: "nowrap" }}>
                             <input
                               type="checkbox"
@@ -3738,8 +4002,8 @@ function AppInner(): JSX.Element {
                               ))}
                             </select>
                           </label>
-                          <div style={{ minWidth: 0, fontSize: 11, color: "#555", lineHeight: 1.4 }}>
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                          <div className="windfall-influence-number-summary">
+                            <div className="windfall-influence-chip-row">
                               {bucketSummary.numberCounts.map(({ number, count: numberCount }) => (
                                 <span
                                   key={`${key}-n-${number}`}
@@ -3770,11 +4034,17 @@ function AppInner(): JSX.Element {
                       </div>
                     );
                   })}
-                </div>
+                    </div>
+                  </section>
 
-                <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px dashed #ddd" }}>
-                  <div style={{ fontWeight: 600, marginBottom: 6 }}>Digit decade boost / punish</div>
-                  <div style={{ display: "grid", gap: 6 }}>
+                  <section className="windfall-constraint-section" aria-labelledby="decade-bias-title">
+                    <div className="windfall-constraint-section__header">
+                      <div id="decade-bias-title" className="windfall-constraint-section__title">Decade Bias</div>
+                      <div className="windfall-constraint-section__subtitle">
+                        Boost or punish candidate-number decades without changing the hard ending limits above.
+                      </div>
+                    </div>
+                    <div className="windfall-constraint-section__grid windfall-constraint-section__grid--decade">
                     {mainDecadeConstraintRows.map(({ key, label, helper, badge, bias, setBias, title, bucketKey }) => {
                       const bucketSummary = generationConstraintDecadeSummaries[bucketKey];
                       const isBoosted = bias > 0;
@@ -3820,14 +4090,7 @@ function AppInner(): JSX.Element {
                               {isBoosted ? " • boosted in candidate-number sampling" : isPunished ? " • punished in candidate-number sampling" : ""}
                             </div>
                           </div>
-                          <div
-                            style={{
-                              display: "grid",
-                              gridTemplateColumns: "auto minmax(260px, 1fr)",
-                              gap: 8,
-                              alignItems: "center",
-                            }}
-                          >
+                          <div className="windfall-influence-bias-grid">
                             <label style={{ display: "grid", gap: 2, fontSize: 10, color: "#666", fontWeight: 600 }} title="Signed weight adjustment for this candidate-number decade. Positive boosts, negative punishes across main and supp picks.">
                               <span>Bias</span>
                               <select
@@ -3845,8 +4108,8 @@ function AppInner(): JSX.Element {
                                 ))}
                               </select>
                             </label>
-                            <div style={{ minWidth: 0, fontSize: 11, color: "#555", lineHeight: 1.4 }}>
-                              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                            <div className="windfall-influence-number-summary">
+                              <div className="windfall-influence-chip-row">
                                 {bucketSummary.numberCounts.map(({ number, count: numberCount }) => (
                                   <span
                                     key={`${key}-n-${number}`}
@@ -3877,10 +4140,16 @@ function AppInner(): JSX.Element {
                         </div>
                       );
                     })}
-                  </div>
-                </div>
+                    </div>
+                  </section>
 
-                <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px dashed #ddd" }}>
+                  <section className="windfall-constraint-section" aria-labelledby="shape-bucket-quotas-title">
+                    <div className="windfall-constraint-section__header">
+                      <div id="shape-bucket-quotas-title" className="windfall-constraint-section__title">Shape / Bucket Quotas</div>
+                      <div className="windfall-constraint-section__subtitle">
+                        Enforce digit-width share and monthly bucket acceptance requirements.
+                      </div>
+                    </div>
                   <div style={{ fontWeight: 600, marginBottom: 6 }}>Single-digit / two-digit share</div>
                   <div
                     style={{
@@ -3958,9 +4227,9 @@ function AppInner(): JSX.Element {
                       </div>
                     </div>
                   </div>
-                </div>
 
-                <div style={{ marginTop: 8 }}>
+                    <div className="windfall-constraint-subgroup">
+                      <div className="windfall-constraint-subgroup__title">Monthly bucket construction</div>
                   <label title="Require generated candidates to include a minimum number of numbers from each monthly frequency bucket">
                     <input type="checkbox" checked={acceptanceNeedsEnabled} onChange={(e) => setAcceptanceNeedsEnabled(e.target.checked)} style={{ marginRight: 6 }} />
                     Must include from Acceptance needs
@@ -3972,7 +4241,7 @@ function AppInner(): JSX.Element {
                           🔗 Synced from "Acceptance needs" in Monthly Draws Summary (read-only while "Use these counts when constructing candidates" is ON)
                         </div>
                       )}
-                      <div style={{ marginLeft: 18, marginTop: 4, display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "4px 10px", fontSize: 12 }}>
+                      <div className="windfall-influence-mini-grid" style={{ marginLeft: 18, marginTop: 4 }}>
                         {([
                           { key: "undrawn" as const, label: "Undrawn" },
                           { key: "times1" as const, label: "Drawn 1x" },
@@ -4026,10 +4295,18 @@ function AppInner(): JSX.Element {
                       )}
                     </div>
                   )}
-                </div>
+                    </div>
+                  </section>
 
                 {/* Monthly Repeat Bias */}
-                <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px dashed #ddd" }}>
+                  <section className="windfall-constraint-section windfall-constraint-section--timing" aria-labelledby="monthly-timing-bias-title">
+                    <div className="windfall-constraint-section__header">
+                      <div id="monthly-timing-bias-title" className="windfall-constraint-section__title">Monthly Timing Bias</div>
+                      <div className="windfall-constraint-section__subtitle">
+                        Tune month-position signals that can weight generated candidates up or down.
+                      </div>
+                    </div>
+                    <div className="windfall-constraint-subgroup">
                   <div style={{ fontWeight: 600, marginBottom: 4 }}>
                     Monthly Repeat Bias
                     {(() => {
@@ -4081,7 +4358,7 @@ function AppInner(): JSX.Element {
                           </div>
                         </div>
                         {/* Per-bucket grid */}
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: "3px 8px", alignItems: "center", fontSize: 12, marginBottom: 8 }}>
+                        <div className="windfall-influence-boost-grid">
                            <span style={{ fontWeight: 600, color: "#475569", fontSize: 11 }}>
                              Bucket ({mrbEffectiveDate.getFullYear()}-{String(mrbEffectiveDate.getMonth() + 1).padStart(2, "0")})
                            </span>
@@ -4172,7 +4449,7 @@ function AppInner(): JSX.Element {
                   })()}
                 </div>
 
-                <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px dashed #ddd" }}>
+                    <div className="windfall-constraint-subgroup">
                   <div style={{ fontWeight: 600, marginBottom: 4 }}>
                     Month-end carry-over bias
                     <span
@@ -4283,12 +4560,17 @@ function AppInner(): JSX.Element {
                       </div>
                     )}
                   </div>
+                    </div>
+                  </section>
                 </div>
               </div>
 
               {/* Column 2: Composition & Recency + OGA Bias */}
-              <div style={{ border: "1px solid #eee", borderRadius: 6, padding: 10 }}>
-                <div style={{ fontWeight: 700, marginBottom: 6 }}>Composition & Recency</div>
+              <div className="windfall-influence-card">
+                <h3 className="windfall-influence-card__title">Composition & Recency</h3>
+                <p className="windfall-influence-card__subtitle">
+                  Odd/even, last-draw overlap, repeat-window, and OGA forecast constraints.
+                </p>
                 <label>
                   <input type="checkbox" checked={useTrickyRule} onChange={(e) => setUseTrickyRule(e.target.checked)} style={{ marginRight: 6 }} />
                   Tricky Rule (reject 0:8 and 8:0)
@@ -4427,10 +4709,18 @@ function AppInner(): JSX.Element {
               </div>
 
               {/* Column 3: Core Filters + Readiness Scoring */}
-              <div style={{ border: "1px solid #eee", borderRadius: 6, padding: 10, display: "flex", flexDirection: "column", gap: 12 }}>
+              <div className="windfall-influence-card">
                 {/* Core Filters */}
                 <div>
-                  <div style={{ fontWeight: 700, marginBottom: 6 }}>Core Filters</div>
+                  <h3 className="windfall-influence-card__title">Core Filters</h3>
+                  <p className="windfall-influence-card__subtitle">
+                    Entropy, distance filters, and readiness scoring used after candidate creation.
+                  </p>
+                  <div style={{ display: "grid", gap: 4, marginBottom: 8, color: "#4b5563", fontSize: 12, lineHeight: 1.35 }}>
+                    <span>Entropy preview: {previewStats.entropy}/100 candidates pass</span>
+                    <span>Hamming preview: {previewStats.hamming}/100 candidates pass</span>
+                    <span>Jaccard preview: {previewStats.jaccard}/100 candidates pass</span>
+                  </div>
                   <label>
                     <input type="checkbox" checked={entropyEnabled} onChange={(e) => setEntropyEnabled(e.target.checked)} style={{ marginRight: 6 }} />
                     Entropy (threshold {entropyThreshold})
@@ -4463,19 +4753,19 @@ function AppInner(): JSX.Element {
                 </div>
 
                 <div style={{ marginBottom: 10 }}>
-                  <label style={{ display: "block", marginBottom: 2, fontSize: 12 }} title="Ideal Draw Match: How closely the candidate's bucket composition (0x, 1x, 2x…) matches the statistically optimal draw from the Ideal draw row in Monthly Draws Summary. High IDM = numbers drawn from the right frequency buckets.">
+                  <label style={{ display: "block", marginBottom: 2, fontSize: 12 }} title="Ideal Draw Match: How closely the candidate's bucket composition (0x, 1x, 2x…) matches the exhaustive ideal draw row in Monthly Draws Summary. High IDM = stronger descriptive bucket alignment, not a probability.">
                     <b>IDM</b> — Ideal Draw Match: <b>{Math.round(rdyWeights.idm / ( rdyWeights.idm + rdyWeights.conv + rdyWeights.oga || 1) * 100)}%</b>
                   </label>
                   <input type="range" min={0} max={1} step={0.05} value={rdyWeights.idm}
                     onChange={(e) => setRdyWeights(prev => ({ ...prev, idm: Number(e.target.value) }))}
                     style={{ width: "100%" }} />
                   <div style={{ fontSize: 11, color: "#888" }}>
-                    Measures bucket composition similarity to the optimal draw. Higher = candidate draws from the "right" frequency buckets to bring the month closer to the historical average.
+                    Measures bucket composition similarity to the exhaustive Monthly Draws Summary ideal draw. Higher = closer descriptive alignment to the robust monthly target, not a win forecast.
                   </div>
                 </div>
 
                 <div style={{ marginBottom: 10 }}>
-                  <label style={{ display: "block", marginBottom: 2, fontSize: 12 }} title="Convergence: How much this candidate moves the current month's frequency distribution toward the historical average (SSD reduction). High Conv = more convergent toward balance.">
+                  <label style={{ display: "block", marginBottom: 2, fontSize: 12 }} title="Convergence: How much this candidate moves the current month's frequency distribution toward the Monthly Draws Summary target (SSD reduction). High Conv = more convergent toward that diagnostic target.">
                     <b>Conv</b> — Convergence: <b>{Math.round(rdyWeights.conv / (rdyWeights.idm + rdyWeights.conv + rdyWeights.oga || 1) * 100)}%</b>
                   </label>
                   <input type="range" min={0} max={1} step={0.05} value={rdyWeights.conv}
@@ -4504,15 +4794,15 @@ function AppInner(): JSX.Element {
                 </div>{/* end readiness wrapper */}
               </div>{/* end column 3 */}
             </div>
-            <div style={{ marginTop: 10, fontSize: 12, color: "#555" }}>
+            <div className="windfall-influence-provenance">
               <b>Provenance:</b> Window={filteredHistory.length}; Entropy={entropyEnabled ? entropyThreshold : "off"}; Hamming={hammingEnabled ? hammingThreshold : "off"}; Jaccard={jaccardEnabled ? jaccardThreshold : "off"}; Tricky={useTrickyRule ? "on" : "off"}; Ratios={selectedRatios.length ? selectedRatios.join(" ") : "none"}; RecMin={minRecentMatches}; RecBias={recentMatchBias}; Repeat W={repeatWindowSizeW} M={minFromRecentUnionM}; GPWF={gpwfEnabled ? "on" : "off"}; λ={lambdaEnabled ? lambda.toFixed(2) : "off"}; Sum={sumFilter.enabled ? `${sumFilter.min}–${sumFilter.max}${sumFilter.includeSupp ? "+supp" : ""}` : "off"}; PatternMode={patternConstraintMode} Tol={patternSumTolerance} Boost={patternBoostFactor}; OGABias={enableOGAForecastBias ? `${ogaPreferredBand} @ ${ogaBaselineMode}` : "off"}; End0Set=${mainZeroSetEnabled ? `max ${maxMainZeroSetCount}` : "off"}; End1Set=${mainOneSetEnabled ? `max ${maxMainOneSetCount}` : "off"}; End2Set=${mainTwoSetEnabled ? `max ${maxMainTwoSetCount}` : "off"}; End3Set=${mainThreeSetEnabled ? `max ${maxMainThreeSetCount}` : "off"}; End4Set=${mainFourSetEnabled ? `max ${maxMainFourSetCount}` : "off"}; End5Set=${mainFiveSetEnabled ? `max ${maxMainFiveSetCount}` : "off"}; End6Set=${mainSixSetEnabled ? `max ${maxMainSixSetCount}` : "off"}; End7Set=${mainSevenSetEnabled ? `max ${maxMainSevenSetCount}` : "off"}; End8Set=${mainEightSetEnabled ? `max ${maxMainEightSetCount}` : "off"}; End9Set=${mainNineSetEnabled ? `max ${maxMainNineSetCount}` : "off"}; DigitWidth=${digitWidthConstraintTargets.enabled ? `${digitWidthConstraintTargets.singleDigitPercent}/${digitWidthConstraintTargets.twoDigitPercent} ${formatDigitWidthScopeLabel(digitWidthConstraintTargets.scope)} => ${digitWidthConstraintTargets.singleDigitCount}/${digitWidthConstraintTargets.twoDigitCount}` : "off"}; EndDigitBoosts={activeMainDigitBoostSummary || "none"}; DecadeBias={activeMainDecadeBiasSummary || "none"}; MRB={mrbEnabled ? `ON budget:${MRB_BUCKET_KEYS.reduce((s,k)=>s+Math.max(0,(mrbBucketBoosts[k]??1)-1),0).toFixed(1)}/${MRB_BUDGET}` : "off"}; CarryOver={monthEndCarryOverBiasEnabled ? `ON ${monthEndCarryOverStrengthSettings.label} ${monthEndCarryOverWeighting.targetMonthLabel} active:${monthEndCarryOverWeighting.activeNumbers.length}${monthEndCarryOverPoolBreakdown ? ` [${monthEndCarryOverPoolBreakdown}]` : ""} sources:undrawn=${monthEndCarryOverIncludeMonthEndUndrawn ? "on" : "off"},boundary=${monthEndCarryOverIncludeBoundaryRepeats ? "on" : "off"}${selectedCarryOverBoostSummary ? ` selected:${selectedCarryOverBoostSummary}×${selectedCarryOverBoostFactor}` : ""}` : `off default:${monthEndCarryOverWeighting.defaultEnabled ? "on" : "off"}`}
             </div>
             {/* Forced and Excluded reporting */}
-            <div style={{ marginTop: 8, fontSize: 12, color: "#333", background: "#fafafa", border: "1px solid #eee", borderRadius: 6, padding: 8 }}>
+            <div className="windfall-influence-report">
               <div style={{ marginBottom: 6 }}>
                 <b>Forced numbers</b> ({trendSelectedNumbers.length}): {trendSelectedNumbers.length ? trendSelectedNumbers.slice().sort((a,b)=>a-b).join(", ") : "— none —"}
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <div className="windfall-influence-report__grid">
                 <div>
                   <div style={{ fontWeight: 700, marginBottom: 4 }}>User Exclusions</div>
                   <div>
@@ -4548,7 +4838,7 @@ function AppInner(): JSX.Element {
 
           <div style={{ marginTop: 12 }}>
             {/* [ORDER-ANCHOR] 24.5 Pick Six */}
-            <CollapsibleSection title={<b>Pick Six</b>} defaultOpen={false} summaryHint="28 combos of 6 from 8">
+            <CollapsibleSection panelId="pick-six" title={<b>Pick Six</b>} defaultOpen={false} summaryHint="28 combos of 6 from 8">
               <PickSixPanel
                 source={pickSixSource}
                 onSourceChange={setPickSixSource}
@@ -4565,8 +4855,14 @@ function AppInner(): JSX.Element {
         
       </CollapsibleSection>
 
+      <WorkflowAnchor
+        id="workflow-dga"
+        title="Diamond Grid Analysis"
+        summary="Inspect spatial, simulated, and monthly-bucket views without changing the source draw history."
+      />
+
       {/* [ORDER-ANCHOR] 25 Diamond Grid Analysis (DGA) */}
-      <CollapsibleSection title={<b>Diamond Grid Analysis (DGA)</b>} defaultOpen={true}>
+      <CollapsibleSection panelId="diamond-grid-analysis" title={<b>Diamond Grid Analysis (DGA)</b>} defaultOpen={true}>
         <div style={{ width: "100%", marginTop: 18, marginBottom: 10 }}>
           {/* Next Hot Blocks above Temperature Heatmap */}
           <div style={{ marginBottom: 12 }}>
@@ -4579,8 +4875,8 @@ function AppInner(): JSX.Element {
           </div>
           <InlineCollapsibleCard
             title="DGA heatmap"
-            subtitle={`${filteredHistory.length} draw${filteredHistory.length === 1 ? "" : "s"} in the active window · heatmap view, drought hazard and exclusions strip`}
-            collapsedSummary="Shows the DGA heatmap with a view selector for temperature or monthly bucket-state mode, plus legend controls, the drought-break shortlist, and the aligned exclusions strip."
+            subtitle={`${filteredHistory.length} draw${filteredHistory.length === 1 ? "" : "s"} in the active window · heatmap view, drought hazard and simulation strip`}
+            collapsedSummary="Shows the DGA heatmap with a view selector for temperature or monthly bucket-state mode, plus legend controls, the drought-break shortlist, and the aligned simulation strip."
             defaultExpanded={true}
             expanded={dgaHeatmapExpanded}
             onExpandedChange={setDgaHeatmapExpanded}
@@ -4644,6 +4940,7 @@ function AppInner(): JSX.Element {
                       displayHistory={isMonthlyBucketHeatmapView ? dgaMonthlyBucketHeatmapHistory : undefined}
                       alpha={0.25}
                       cellSize={DGA_CELL_SIZE}
+                      gutter={DGA_HEATMAP_GUTTER}
                       showLegend={false}
                       metric={tempMetric}
                       buckets={dgaHeatmapBucketLabels.length}
@@ -4665,16 +4962,17 @@ function AppInner(): JSX.Element {
                       bucketLetters={dgaHeatmapBucketLetters}
                     />
                   </div>
-                  {/* Vertical user exclusions aligned to rows for Heatmap */}
+                  {/* Vertical simulation selections aligned to heatmap rows */}
                   <div style={{ position: "sticky", right: 0, top: 0 }}>
-                    <UserExclusionsStrip
-                      title={undefined}
-                      excludedNumbers={effectiveExcludedNumbers}
-                      setExcludedNumbers={setExcludedNumbers as any}
-                      orientation="vertical"
-                      labelPosition="right"
+                    <DGASimulateStrip
+                      selectedNumbers={dgaStripSelected}
                       cellSize={DGA_CELL_SIZE}
                       monthlyBuckets={dgaEffectiveMonthlyBuckets}
+                      hoveredNumber={dgaHoveredNumber}
+                      onHoverNumber={(value) => setDgaHoveredNumber(value)}
+                      onChange={handleDgaStripChange}
+                      includeHeaderSpacer={false}
+                      topOffsetPx={DGA_HEATMAP_GUTTER}
                     />
                   </div>
                 </div>
@@ -4753,22 +5051,9 @@ function AppInner(): JSX.Element {
                         monthlyBuckets={dgaEffectiveMonthlyBuckets}
                         hoveredNumber={dgaHoveredNumber}
                         onHoverNumber={(value) => setDgaHoveredNumber(value)}
-                        onChange={(nums) => {
-                          setDgaStripSelected(nums);
-                          // Simulate in the Next column when at least 1 number is selected
-                          if (nums.length === 0) {
-                            setSimulatedDraw(null);
-                            setSimSource('none');
-                            setSimCandidateIdx(null);
-                          } else {
-                            const sorted = [...nums].sort((a, b) => a - b);
-                            const main = sorted.slice(0, 6);
-                            const supp = sorted.slice(6, 8);
-                            setSimulatedDraw({ main, supp, date: "DGAStrip", isSimulated: true } as any);
-                            setSimSource('dga-strip');
-                            setSimCandidateIdx(null);
-                          }
-                        }}
+                        onChange={handleDgaStripChange}
+                        includeHeaderSpacer={false}
+                        topOffsetPx={DGA_CELL_SIZE}
                       />
                     </div>
                   </div>
@@ -4790,8 +5075,14 @@ function AppInner(): JSX.Element {
         </div>
       </CollapsibleSection>
 
+      <WorkflowAnchor
+        id="workflow-patterns"
+        title="Patterns"
+        summary="Explore empirical undrawn and carry-over behavior with explicit window and mains/supplementary context."
+      />
+
       {/* [ORDER-ANCHOR] 26 Undrawn Patterns (Empirical) */}
-      <CollapsibleSection title={<b>Undrawn Patterns (Empirical)</b>} defaultOpen={false} summaryHint="Mains vs mains+supps toggle">
+      <CollapsibleSection panelId="undrawn-patterns" title={<b>Undrawn Patterns (Empirical)</b>} defaultOpen={false} summaryHint="Mains vs mains+supps toggle">
         <UndrawnPatternsPanel
           history={filteredHistory}
           windowLabel={historyWindowName}
@@ -4801,14 +5092,16 @@ function AppInner(): JSX.Element {
 
       <TracePanel lines={trace} onClear={() => setTrace([])} />
     </div>
+    </PanelFavoritesProvider>
   );
 
   // Snapshot helpers used by Presets
-  function buildSnapshot(): AppPresetSnapshot {
+  function buildSnapshot(options: { includePanelFavorites?: boolean } = {}): AppPresetSnapshot {
+    const includePanelFavorites = options.includePanelFavorites ?? true;
     const zpaSelected = getSavedSelectedZones() ?? Array(9).fill(true);
     const zpaNorm = getSavedNormalizeMode() ?? "all";
     const zpaGroups = getSavedGroups() ?? custom;
-    return {
+    const snapshot: AppPresetSnapshot = {
       drawWindowMode,
       rangeFrom,
       rangeTo,
@@ -4908,6 +5201,12 @@ function AppInner(): JSX.Element {
       selectedCarryOverBoostMode,
       rdyWeights: { ...rdyWeights },
     };
+
+    if (includePanelFavorites) {
+      snapshot.favoritePanelIds = [...favoritePanelIds];
+    }
+
+    return snapshot;
   }
 
   function applySnapshot(s: AppPresetSnapshot) {
@@ -5064,6 +5363,9 @@ function AppInner(): JSX.Element {
     );
     setSelectedCarryOverBoostMode(normalizeSelectedCarryOverBoostMode(s.selectedCarryOverBoostMode));
     setRdyWeights(s.rdyWeights ?? { idm: 0.70, conv: 0.10, oga: 0.20 });
+    if (Array.isArray(s.favoritePanelIds)) {
+      setFavoritePanelIds(normalizeFavoritePanelIds(s.favoritePanelIds));
+    }
   }
 }
 
@@ -5103,6 +5405,8 @@ interface DGASimulateStripProps {
   monthlyBuckets?: MonthlyBucketSets | null;
   hoveredNumber?: number | null;
   onHoverNumber?: (value: number | null) => void;
+  includeHeaderSpacer?: boolean;
+  topOffsetPx?: number;
 }
 const DGASimulateStrip: React.FC<DGASimulateStripProps> = ({
   selectedNumbers,
@@ -5111,6 +5415,8 @@ const DGASimulateStrip: React.FC<DGASimulateStripProps> = ({
   monthlyBuckets,
   hoveredNumber,
   onHoverNumber,
+  includeHeaderSpacer = true,
+  topOffsetPx = 0,
 }) => {
   const MAX_SELECT = 8;
   const atMax = selectedNumbers.length >= MAX_SELECT;
@@ -5129,23 +5435,25 @@ const DGASimulateStrip: React.FC<DGASimulateStripProps> = ({
   return (
     <div style={{ marginTop: 0 }}>
       <div style={{ display: "flex", flexDirection: "column", gap: 0, paddingTop: 0, paddingBottom: 0, alignItems: "flex-start" }}>
-        <div style={{ border: "1px solid transparent", background: "transparent" }}>
-          <table style={{ borderCollapse: "collapse", fontSize: 11 }}>
-            <thead>
-              <tr>
-                <th
-                  style={{
-                    height: tableCellSize,
-                    minHeight: tableCellSize,
-                    lineHeight: tableCellLineHeight,
-                    padding: 0,
-                    border: "1px solid transparent",
-                    boxSizing: "border-box",
-                    background: "transparent",
-                  }}
-                ></th>
-              </tr>
-            </thead>
+        <div style={{ border: 0, background: "transparent", paddingTop: topOffsetPx }}>
+          <table style={{ borderCollapse: "collapse", borderSpacing: 0, fontSize: 11 }}>
+            {includeHeaderSpacer && (
+              <thead>
+                <tr>
+                  <th
+                    style={{
+                      height: tableCellSize,
+                      minHeight: tableCellSize,
+                      lineHeight: tableCellLineHeight,
+                      padding: 0,
+                      border: 0,
+                      boxSizing: "border-box",
+                      background: "transparent",
+                    }}
+                  ></th>
+                </tr>
+              </thead>
+            )}
             <tbody>
               {Array.from({ length: 45 }, (_, i) => i + 1).map((n) => {
                 const checked = selectedNumbers.includes(n);
@@ -5163,7 +5471,7 @@ const DGASimulateStrip: React.FC<DGASimulateStripProps> = ({
                         minHeight: tableCellSize,
                         lineHeight: tableCellLineHeight,
                         padding: 0,
-                        border: "1px solid transparent",
+                        border: 0,
                         boxSizing: "border-box",
                         background: "transparent",
                       }}

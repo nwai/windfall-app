@@ -90,12 +90,12 @@ function computeCandidatePattern(main: number[], supp: number[]) {
   const even = all.filter(n => n % 2 === 0).length;
   const odd = all.length - even;
   const sum = all.reduce((a, b) => a + b, 0);
-  return { low, high, even, odd, sum };
+  return { low, high, odd, even, sum };
 }
 
 function matchesAnyPattern(
-  pat: { low: number; high: number; even: number; odd: number; sum: number },
-  set: { low: number; high: number; even: number; odd: number; sum: number }[] | undefined,
+  pat: { low: number; high: number; odd: number; even: number; sum: number },
+  set: { low: number; high: number; odd: number; even: number; sum: number }[] | undefined,
   sumTol: number
 ): number {
   if (!set || set.length === 0) return 0;
@@ -143,9 +143,9 @@ export function generateCandidates(
   allowedTrendRatios?: string[],
   // NEW: optional sum filter
   sumFilter?: { enabled?: boolean; min?: number; max?: number; includeSupp?: boolean },
-  // NEW: optional pattern constraints (low/high/even/odd + sum tolerance)
+  // NEW: optional pattern constraints (low/high/odd/even + sum tolerance)
   patternOptions?: {
-    constraints?: { low: number; high: number; even: number; odd: number; sum: number }[];
+    constraints?: { low: number; high: number; odd: number; even: number; sum: number }[];
     mode?: 'boost' | 'restrict';
     boostFactor?: number;
     sumTolerance?: number;  // default 0 means exact sum

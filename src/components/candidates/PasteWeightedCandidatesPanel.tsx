@@ -10,6 +10,7 @@ import {
 
 interface PasteWeightedCandidatesPanelProps {
   onSimulateCandidate?: (numbers: number[]) => void;
+  onGeneratedCandidatesChange?: (candidates: PasteWeightedGenerationResult["candidates"]) => void;
   activeSimulatedKey?: string | null;
   initialPasteText?: string;
   initialCandidateCount?: number;
@@ -102,6 +103,7 @@ const selectStyle: React.CSSProperties = {
 
 export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanelProps> = ({
   onSimulateCandidate,
+  onGeneratedCandidatesChange,
   activeSimulatedKey = null,
   initialPasteText = "",
   initialCandidateCount = 12,
@@ -139,8 +141,13 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
   const needsOddEvenSelection = oddEvenEnabled && activeSelectedOddEvenRatios.length === 0;
   const canGenerate = parsed.uniqueNumbers >= 6 && !needsOddEvenSelection;
 
+  const clearResult = () => {
+    setResult(null);
+    onGeneratedCandidatesChange?.([]);
+  };
+
   const handleGenerate = () => {
-    setResult(generatePasteWeightedCandidates(pasteText, {
+    const nextResult = generatePasteWeightedCandidates(pasteText, {
       candidateCount,
       constraints: {
         ending5: ending5Mode,
@@ -156,22 +163,24 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
           profileOptions: adaptiveShapeProfiles,
         },
       },
-    }));
+    });
+    setResult(nextResult);
+    onGeneratedCandidatesChange?.(nextResult.candidates);
   };
 
   const handleClear = () => {
     setPasteText("");
-    setResult(null);
+    clearResult();
   };
 
   const updateEnding5Mode = (mode: PasteWeightedCandidateConstraintMode) => {
     setEnding5Mode(mode);
-    setResult(null);
+    clearResult();
   };
 
   const updateEnding0Mode = (mode: PasteWeightedCandidateConstraintMode) => {
     setEnding0Mode(mode);
-    setResult(null);
+    clearResult();
   };
 
   const updateOddEvenEnabled = (enabled: boolean) => {
@@ -179,7 +188,7 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
     if (enabled && activeSelectedOddEvenRatios.length === 0) {
       setSelectedOddEvenRatios(oddEvenRatioOptions.map((option) => option.ratio));
     }
-    setResult(null);
+    clearResult();
   };
 
   const toggleOddEvenRatio = (ratio: string) => {
@@ -188,17 +197,17 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
         ? current.filter((item) => item !== ratio)
         : [...current, ratio]
     ));
-    setResult(null);
+    clearResult();
   };
 
   const updateAdaptiveShapeEnabled = (enabled: boolean) => {
     setAdaptiveShapeEnabled(enabled);
-    setResult(null);
+    clearResult();
   };
 
   const updateAdaptiveShapeMode = (mode: "observe" | "quota") => {
     setAdaptiveShapeMode(mode);
-    setResult(null);
+    clearResult();
   };
 
   const oddEvenSummaryRows = result?.oddEvenRatioSummary?.targetRatios
@@ -219,10 +228,9 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
     : [];
 
   return (
-    <section className="windfall-ledger-panel" aria-label="Paste-Weighted Candidate Generator">
+    <section className="windfall-ledger-panel windfall-generator-panel" aria-label="Paste-Weighted Candidate Generator">
       <div style={headingStyle}>
         <div>
-          <div style={{ fontWeight: 800, fontSize: 15 }}>Paste-Weighted Candidate Generator</div>
           <div style={mutedStyle}>
             Paste candidate rows, count valid numbers, then generate six-number candidates weighted by those empirical counts.
           </div>
@@ -247,7 +255,7 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
           value={pasteText}
           onChange={(event) => {
             setPasteText(event.target.value);
-            setResult(null);
+            clearResult();
           }}
           placeholder="Paste one row per line. Commas, spaces, and punctuation typos are treated as separators."
           spellCheck={false}

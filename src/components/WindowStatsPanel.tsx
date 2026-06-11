@@ -2,13 +2,13 @@ import React, { useMemo, useState, useEffect } from "react";
 import { Draw } from "../types";
 
 /**
- * A pattern row: Low (<=22) count, High (>=23) count, Even count, Odd count, Sum (of mains+optional supp)
+ * A pattern row: Low (<=22) count, High (>=23) count, Odd count, Even count, Sum (of mains+optional supp)
  */
 export interface WindowPattern {
   low: number;
   high: number;
-  even: number;
   odd: number;
+  even: number;
   sum: number;
 }
 
@@ -43,14 +43,14 @@ function buildRow(draw: Draw, withSupp: boolean): WindowPattern & { date: string
   const even = all.filter(n => n % 2 === 0).length;
   const odd = all.length - even;
   const sum = all.reduce((a, b) => a + b, 0);
-  return { date: draw.date || "(unknown)", low, high, even, odd, sum };
+  return { date: draw.date || "(unknown)", low, high, odd, even, sum };
 }
 
 function patternEquals(a: WindowPattern, b: WindowPattern) {
   return a.low === b.low &&
          a.high === b.high &&
-         a.even === b.even &&
          a.odd === b.odd &&
+         a.even === b.even &&
          a.sum === b.sum;
 }
 
@@ -111,7 +111,6 @@ export const WindowStatsPanel: React.FC<WindowStatsPanelProps> = ({
         flexWrap: "wrap",
         marginBottom: 8
       }}>
-        <b>Window Stats (Low/High + Odd/Even + Sum)</b>
         <span style={{ fontSize: 12, color: "#444" }}>
           Mean sum {summary.meanSum.toFixed(1)} (min {summary.minSum}, max {summary.maxSum})
         </span>
@@ -189,8 +188,8 @@ export const WindowStatsPanel: React.FC<WindowStatsPanelProps> = ({
               <th style={thL}>Date</th>
               <th style={thR}>Low</th>
               <th style={thR}>High</th>
-              <th style={thR}>Even</th>
               <th style={thR}>Odd</th>
+              <th style={thR}>Even</th>
               <th style={thR}>Sum</th>
               <th style={thR}>Pattern</th>
             </tr>
@@ -200,8 +199,8 @@ export const WindowStatsPanel: React.FC<WindowStatsPanelProps> = ({
               const pattern: WindowPattern = {
                 low: r.low,
                 high: r.high,
-                even: r.even,
                 odd: r.odd,
+                even: r.even,
                 sum: r.sum
               };
               const sel = isSelected(pattern);
@@ -216,8 +215,8 @@ export const WindowStatsPanel: React.FC<WindowStatsPanelProps> = ({
                   <td style={tdL}>{r.date}</td>
                   <td style={tdR}>{r.low}</td>
                   <td style={tdR}>{r.high}</td>
-                  <td style={tdR}>{r.even}</td>
                   <td style={tdR}>{r.odd}</td>
+                  <td style={tdR}>{r.even}</td>
                   <td style={tdR}>{r.sum}</td>
                   <td style={tdR}>
                     {onTogglePattern && (
@@ -254,7 +253,7 @@ export const WindowStatsPanel: React.FC<WindowStatsPanelProps> = ({
       </div>
 
       <div style={{ marginTop: 8, fontSize: 11, color: "#555", lineHeight: 1.6 }}>
-        Patterns: (Low count ≤{LOW_MAX}) (High count ≥{LOW_MAX + 1}) (Even, Odd, Sum). Use "Add" to capture a row as a
+        Patterns: (Low count ≤{LOW_MAX}) (High count ≥{LOW_MAX + 1}) (Odd, Even, Sum). Use "Add" to capture a row as a
         pattern constraint. In <b>restrict</b> mode candidates must match at least one selected pattern (optionally
         allowing ±t sum tolerance). In <b>boost</b> mode each match multiplies candidate score by (1 + factor).
         Evolving odd/even dominance (e.g. shift 4:4 → 5:3) can be tracked by selecting recent rows with desired ratios.

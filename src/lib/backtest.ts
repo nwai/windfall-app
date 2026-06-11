@@ -7,6 +7,7 @@ export interface BacktestResult {
   deltaMean: number; // randomMean - methodMean (positive is good)
   deltaPerDraw: number[];
   bootstrapCI?: [number, number];
+  warnings?: string[];
 }
 
 export type PredictorFn = (historyWindow: Draw[]) => Set<number>;
@@ -25,7 +26,19 @@ function seededRng(seed: number) {
   };
 }
 
+function realHistoryOnly(history: Draw[]): { history: Draw[]; warnings: string[] } {
+  const simulatedCount = history.filter((draw) => draw.isSimulated).length;
+  return {
+    history: history.filter((draw) => !draw.isSimulated),
+    warnings: simulatedCount > 0
+      ? [`Ignored ${simulatedCount} simulated fallback draw row${simulatedCount === 1 ? "" : "s"}; backtests use real historical draws only.`]
+      : [],
+  };
+}
+
 export function runWalkForwardBacktest(history: Draw[], windowSize: number, predictor: PredictorFn, randomTrials = 100, bootstrapIters = 500, seed = 1): BacktestResult {
+  const provenance = realHistoryOnly(history);
+  history = provenance.history;
   const rng = seededRng(seed);
   const drawsEvaluated = Math.max(0, history.length - windowSize);
   if (drawsEvaluated <= 0) {
@@ -35,6 +48,7 @@ export function runWalkForwardBacktest(history: Draw[], windowSize: number, pred
       meanExcludedRandom: 0,
       deltaMean: 0,
       deltaPerDraw: [],
+      warnings: provenance.warnings,
     };
   }
 
@@ -104,14 +118,17 @@ export function runWalkForwardBacktest(history: Draw[], windowSize: number, pred
     deltaMean,
     deltaPerDraw,
     bootstrapCI: [lo, hi],
+    warnings: provenance.warnings,
   };
 }
 
 export function runLeaveOneOutBacktest(history: Draw[], predictor: PredictorFn, randomTrials = 100, bootstrapIters = 500, seed = 1): BacktestResult {
+  const provenance = realHistoryOnly(history);
+  history = provenance.history;
   const rng = seededRng(seed);
   const n = history.length;
   if (n <= 1) {
-    return { drawsEvaluated: 0, meanExcluded: 0, meanExcludedRandom: 0, deltaMean: 0, deltaPerDraw: [] };
+    return { drawsEvaluated: 0, meanExcluded: 0, meanExcludedRandom: 0, deltaMean: 0, deltaPerDraw: [], warnings: provenance.warnings };
   }
 
   const deltaPerDraw: number[] = [];
@@ -173,6 +190,7 @@ export function runLeaveOneOutBacktest(history: Draw[], predictor: PredictorFn, 
     meanExcludedRandom,
     deltaMean,
     deltaPerDraw,
-    bootstrapCI: [lo, hi]
+    bootstrapCI: [lo, hi],
+    warnings: provenance.warnings,
   };
 }

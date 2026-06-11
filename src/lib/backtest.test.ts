@@ -3,8 +3,8 @@ import { runWalkForwardBacktest } from './backtest';
 import type { Draw } from '../types';
 
 // helper to build a draw with given mains and supp
-function buildDraw(main: number[], supp: number[] = [], date = '2025-01-01'): Draw {
-  return { main, supp, date };
+function buildDraw(main: number[], supp: number[] = [], date = '2025-01-01', isSimulated = false): Draw {
+  return { main, supp, date, isSimulated };
 }
 
 describe('runWalkForwardBacktest', () => {
@@ -41,5 +41,21 @@ describe('runWalkForwardBacktest', () => {
     // bootstrapCI should be a tuple of two numbers
     expect(Array.isArray(res.bootstrapCI)).toBe(true);
     expect(res.bootstrapCI && res.bootstrapCI.length).toBe(2);
+  });
+
+  it('ignores simulated fallback rows instead of scoring them as real out-of-sample draws', () => {
+    const history: Draw[] = [];
+    for (let i = 0; i < 10; i++) {
+      history.push(buildDraw([1, 2, 3, 4, 5, 6], [7, 8], `2026-01-${String(i + 1).padStart(2, '0')}`));
+    }
+    for (let i = 0; i < 5; i++) {
+      history.push(buildDraw([40, 41, 42, 43, 44, 45], [], `2026-02-${String(i + 1).padStart(2, '0')}`, true));
+    }
+
+    const res = runWalkForwardBacktest(history, 10, () => new Set<number>([40, 41, 42, 43, 44, 45]));
+
+    expect(res.drawsEvaluated).toBe(0);
+    expect(res.deltaPerDraw).toEqual([]);
+    expect(res.warnings).toContain("Ignored 5 simulated fallback draw rows; backtests use real historical draws only.");
   });
 });

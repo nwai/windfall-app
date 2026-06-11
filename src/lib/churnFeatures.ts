@@ -1,4 +1,5 @@
 import type { Draw } from "../types";
+import { filterRealDrawHistory } from "./realDrawHistory";
 
 export type NumberExample = {
   number: number;
@@ -11,7 +12,7 @@ export type NumberExample = {
   zpaGroup: number;          // e.g., group index [0..8]
   // Labels
   churnLabel?: 0 | 1;        // 1 if “churned” in last K draws
-  returnLabel?: 0 | 1;       // placeholder if not computed
+  returnLabel?: 0 | 1;       // absent until a return-labeling pass computes it
 };
 
 export type NumberFeatures = {
@@ -46,6 +47,7 @@ function countInWindow(history: Draw[], endIdx: number, win: number, n: number) 
 }
 
 export function buildChurnDataset(history: Draw[], opts: BuildChurnOptions): NumberExample[] {
+  history = filterRealDrawHistory(history, "churn feature extraction").history;
   const K = opts.churnWindowK ?? 12;
 
   const total = history.length;
@@ -106,6 +108,7 @@ export function extractFeaturesForNumber(
   n: number,
   opts?: { churnThreshold?: number; zpaGroupOf?: (n: number) => number }
 ): ExtractedFeatures {
+  history = filterRealDrawHistory(history, "churn feature extraction").history;
   const total = history.length;
   const end = total - 1;
   const threshold = opts?.churnThreshold ?? 12;

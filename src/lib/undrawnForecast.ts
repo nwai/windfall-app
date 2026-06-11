@@ -214,8 +214,8 @@ const buildNextMessages = (simulation: UndrawnSimulationSnapshot): string[] => {
   }, null)
 
   return [
-    `Most likely to stay undrawn next draw: ${topUndrawn}.`,
-    `Most likely to show up next draw (lowest simulated undrawn rates): ${topDrawn}.`,
+    `Highest simulated support for staying undrawn: ${topUndrawn}.`,
+    `Lowest simulated undrawn rates: ${topDrawn}.`,
     `Expected next undrawn profile: ${simulation.meanUndrawn.toFixed(1)} undrawn numbers (95% ${formatRange95(simulation.undrawnRange95)}), with ${simulation.meanOddUndrawn.toFixed(1)} odd undrawn numbers on average (95% ${formatRange95(simulation.oddUndrawnRange95)}).`,
     strongestGroup && lightestGroup
       ? `Range pressure is strongest in ${strongestGroup.label} (${strongestGroup.averageUndrawn.toFixed(1)} undrawn on average) and lightest in ${lightestGroup.label} (${lightestGroup.averageUndrawn.toFixed(1)}). About ${simulation.meanLatestOverlap.toFixed(1)} of the latest undrawn numbers carry over on average (95% ${formatRange95(simulation.latestOverlapRange95)}).`

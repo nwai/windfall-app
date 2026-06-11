@@ -408,7 +408,7 @@ export const UndrawnPatternsPanel: React.FC<UndrawnPatternsPanelProps> = ({ hist
               </div>
             </>
           )}
-          <div style={{ marginTop: 10, fontWeight: 700 }}>What’s likely next</div>
+          <div style={{ marginTop: 10, fontWeight: 700 }}>Simulation next-step indicators</div>
           <ul style={{ paddingLeft: 16, margin: "6px 0" }}>
             {stats.next.map((n, idx) => (
               <li key={idx} style={{ marginBottom: 4 }}>{n}</li>

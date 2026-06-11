@@ -121,7 +121,6 @@ export const UserSelectedNumbersPanel: React.FC<UserSelectedNumbersPanelProps> =
     <section style={panel}>
       <div style={header}>
         <div>
-          <h3 style={titleStyle}>{title}</h3>
           <div style={subtleText}>
             {selectedCount > 0 ? `Selected set: ${selectedNumbers.join(", ")}` : "Selected set: none"}
           </div>

@@ -302,9 +302,9 @@ const HeatmapSection: React.FC<{
                 const forecastTitle = cellData.isForecast && cellData.forecast
                   ? [
                       `Forecast • ${stat.label} • ${slot.titleLabel}`,
-                      `Most likely hits: ${cellData.forecast.predictedHits}`,
+                      `Most-supported hit count: ${cellData.forecast.predictedHits}`,
                       `Expected hits: ${cellData.forecast.expectedHits.toFixed(2)}`,
-                      `Confidence: ${(cellData.forecast.confidence * 100).toFixed(1)}%`,
+                      `Support share: ${(cellData.forecast.confidence * 100).toFixed(1)}%`,
                       `Support months: ${cellData.forecast.support}`,
                       cellData.forecast.drivers.length > 0
                         ? `Drivers: ${cellData.forecast.drivers.join("; ")}`
@@ -812,7 +812,6 @@ export const DrawBucketPatternPanel: React.FC<DrawBucketPatternPanelProps> = ({ 
     >
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", marginBottom: 10 }}>
         <div>
-          <div style={{ fontWeight: 700, fontSize: 16, color: "#223" }}>Draw Bucket Pattern Explorer</div>
           <div style={{ fontSize: 12, color: "#667", marginTop: 2 }}>
             Shows how often each bucket appears per draw inside the active WFMQYH window.
           </div>
@@ -884,6 +883,11 @@ export const DrawBucketPatternPanel: React.FC<DrawBucketPatternPanelProps> = ({ 
           Forecast: <b>{showForecast ? `${forecastedSlotCount} slot${forecastedSlotCount === 1 ? "" : "s"}` : "off"}</b>
         </span>
       </div>
+      {currentMonthForecast?.warnings.length ? (
+        <div style={{ marginBottom: 12, fontSize: 12, color: "#6b4a00", background: "#fff9e8", border: "1px solid #e2b84f", borderRadius: 6, padding: "7px 9px" }}>
+          {currentMonthForecast.warnings.join(" ")}
+        </div>
+      ) : null}
 
       <div style={{ fontSize: 12, color: "#556", marginBottom: 12, lineHeight: 1.45 }}>
         Look for buckets whose distributions bunch up around a particular hit count. For example, if the

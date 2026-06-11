@@ -53,7 +53,6 @@ export const WeightedTargetListPanel: React.FC<WeightedTargetListPanelProps> = (
     <section style={panel}>
       <div style={header}>
         <div>
-          <h3 style={title}>Weighted Targets</h3>
           <div style={subtleText}>
             Parameter Search reads these weights after validation.
           </div>

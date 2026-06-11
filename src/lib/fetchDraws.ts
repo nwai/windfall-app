@@ -94,7 +94,7 @@ function tryLoadCsvFallback(strictValidateDraws: (draws: Draw[]) => Draw[], setT
 }
 
 /**
- * Fetch draw history from remote endpoint; falls back to local CSV, then stub history.
+ * Fetch draw history from remote endpoint; falls back to local CSV, then explicit demo history.
  */
 export async function fetchDraws({
   apiUrl,
@@ -144,8 +144,8 @@ export async function fetchDraws({
 
   // Last-resort demo fallback. Keep it explicit and mark rows simulated so
   // downstream panels can avoid mistaking synthetic history for real draws.
-  const stub = buildDemoDrawHistory(minValidDraws, numMains, mainMin, mainMax, rng);
-  setHistory(stub);
+  const demoRows = buildDemoDrawHistory(minValidDraws, numMains, mainMin, mainMax, rng);
+  setHistory(demoRows);
   setHighlights([]);
-  setTrace(t => [...t, `[TRACE] DEMO MODE: generated ${stub.length} simulated fallback draws because no real history source was available.`]);
+  setTrace(t => [...t, `[TRACE] DEMO MODE: generated ${demoRows.length} simulated fallback draws because no real history source was available.`]);
 }

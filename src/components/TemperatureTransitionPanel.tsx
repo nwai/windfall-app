@@ -9,6 +9,7 @@ import { computeTemperatureCategories, Temperature, TemperatureClassifierOptions
 import { sweepWindows, WindowSweepMode, SweepMetric } from "../lib/ttpWindowSweep";
 import { getSavedZoneWeights, WeightsByNumber } from "../lib/zpaStorage";
 import { useZPASettings } from "../context/ZPASettingsContext";
+import { filterRealDrawHistory } from "../lib/realDrawHistory";
 
 export interface TemperatureTransitionPanelProps {
   history: Draw[];
@@ -58,7 +59,7 @@ export const TemperatureTransitionPanel: React.FC<TemperatureTransitionPanelProp
   trendDelta = 0.02,
   trendReversal = true,
 }) => {
-  // Window and prediction controls
+  // Window and diagnostic-selection controls
   const [windowSize, setWindowSize] = useState(50);
   const [mode, setMode] = useState<PredictionMode>("threshold");
   const [predThreshold, setPredThreshold] = useState(0.5);
@@ -80,10 +81,15 @@ export const TemperatureTransitionPanel: React.FC<TemperatureTransitionPanelProp
     try { return getSavedZoneWeights(); } catch { return null; }
   }, []);
 
+  const realHistory = useMemo(
+    () => filterRealDrawHistory(history, "temperature-transition diagnostics"),
+    [history],
+  );
+
   // Slice the history for the live model table (always honor small windows; clamp at least 1)
   const windowed = useMemo(
-    () => history.slice(-Math.max(1, Math.min(windowSize, history.length))),
-    [history, windowSize]
+    () => realHistory.history.slice(-Math.max(1, Math.min(windowSize, realHistory.history.length))),
+    [realHistory, windowSize]
   );
 
   const classifierOptions: TemperatureClassifierOptions = useMemo(
@@ -155,16 +161,16 @@ export const TemperatureTransitionPanel: React.FC<TemperatureTransitionPanelProp
 
   // Backtest: honor small windows (min 3) and ensure we have a "next" draw (<= history.length - 1)
   const backtest = useMemo(() => {
-    const w = Math.max(3, Math.min(windowSize, history.length - 1));
+    const w = Math.max(3, Math.min(windowSize, realHistory.history.length - 1));
     if (mode === "threshold") {
-      return backtestTemperatureTransitionsThreshold(history, w, predThreshold, classifierOptions);
+      return backtestTemperatureTransitionsThreshold(realHistory.history, w, predThreshold, classifierOptions);
     } else {
-      return backtestTemperatureTransitionsTopK(history, w, topK, classifierOptions);
+      return backtestTemperatureTransitionsTopK(realHistory.history, w, topK, classifierOptions);
     }
-  }, [history, windowSize, mode, predThreshold, topK, classifierOptions]);
+  }, [realHistory, windowSize, mode, predThreshold, topK, classifierOptions]);
 
   const fmtPct = (x: number) => (x * 100).toFixed(1) + "%";
-  const safeDate = (idx: number) => history[idx]?.date ?? "(unknown)";
+  const safeDate = (idx: number) => realHistory.history[idx]?.date ?? "(unknown)";
 
   // Auto window (beta): sweep and suggest best window by meanF1
   async function onAutoWindow() {
@@ -172,7 +178,7 @@ export const TemperatureTransitionPanel: React.FC<TemperatureTransitionPanelProp
       setAutoBusy(true);
       const sweepMode: WindowSweepMode = mode === "topk" ? "topk" : "threshold";
       const outcome = sweepWindows(
-        history,
+        realHistory.history,
         [3, 5, 7, 9, 12, 15, 20, 25, 30, 40, 50],
         sweepMode,
         {
@@ -195,21 +201,27 @@ export const TemperatureTransitionPanel: React.FC<TemperatureTransitionPanelProp
 
   const HeaderStats = () => (
     <span style={{ marginLeft: "auto", fontSize: 13, color: "#555" }}>
-      Backtest over {history.length} draws: acc {fmtPct(backtest.meanAccuracy)}, prec {fmtPct(backtest.meanPrecision)}, rec {fmtPct(backtest.meanRecall)}, F1 {fmtPct(backtest.meanF1)}
+      Walk-forward over {realHistory.history.length} real draws: acc {fmtPct(backtest.meanAccuracy)}, prec {fmtPct(backtest.meanPrecision)}, rec {fmtPct(backtest.meanRecall)}, F1 {fmtPct(backtest.meanF1)}
     </span>
   );
 
   return (
-    <section style={{ border: "2px solid #3366cc", borderRadius: 8, padding: 18, margin: "24px 0", background: "#f3f7ff" }}>
-      <h3 style={{ marginTop: 0 }}>Temperature Transition Predictions</h3>
-
+    <section
+      aria-label="Temperature Transition Diagnostics"
+      style={{ border: "2px solid #3366cc", borderRadius: 8, padding: 18, margin: "24px 0", background: "#f3f7ff" }}
+    >
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 12, color: "#475569" }}>
+          Empirical transition evidence only; not a calibrated next-draw probability.
+        </div>
+      </div>
       <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
         <label>
           Window size:{" "}
           <input
             type="number"
             min={3}
-            max={history.length}
+            max={realHistory.history.length}
             value={windowSize}
             onChange={(e) => setWindowSize(Number(e.target.value))}
             style={{ width: 80 }}
@@ -310,6 +322,11 @@ export const TemperatureTransitionPanel: React.FC<TemperatureTransitionPanelProp
 
         <HeaderStats />
       </div>
+      {(realHistory.warnings.length > 0 || backtest.warnings.length > 0) && (
+        <div style={{ marginTop: 10, fontSize: 12, color: "#6b4a00", background: "#fff9e8", border: "1px solid #e2b84f", borderRadius: 6, padding: "7px 9px" }}>
+          {[...new Set([...realHistory.warnings, ...backtest.warnings])].join(" ")}
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 24, flexWrap: "wrap", marginTop: 14 }}>
         <table style={{ borderCollapse: "collapse", minWidth: 420, background: "#fff", border: "1px solid #cfd8dc" }}>
@@ -317,8 +334,8 @@ export const TemperatureTransitionPanel: React.FC<TemperatureTransitionPanelProp
             <tr>
               <th style={{ textAlign: "left", padding: "4px 8px" }}>#</th>
               <th style={{ textAlign: "left", padding: "4px 8px" }}>Curr Temp</th>
-              <th style={{ textAlign: "right", padding: "4px 8px" }}>P(V | Temp)</th>
-              <th style={{ textAlign: "center", padding: "4px 8px" }}>Predict</th>
+              <th style={{ textAlign: "right", padding: "4px 8px" }}>Empirical hit rate</th>
+              <th style={{ textAlign: "center", padding: "4px 8px" }}>Selected</th>
             </tr>
           </thead>
           <tbody>
@@ -359,7 +376,7 @@ export const TemperatureTransitionPanel: React.FC<TemperatureTransitionPanelProp
       </div>
 
       <div style={{ fontSize: 12, color: "#666", marginTop: 10 }}>
-        Mode tips: Threshold controls the cut-off probability for marking a number as a predicted hit. Top-K always selects the K highest-probability numbers.
+        Mode tips: Threshold controls the cut-off empirical hit rate for marking a number as selected by the diagnostic. Top-K selects the K highest empirical hit-rate numbers.
       </div>
     </section>
   );

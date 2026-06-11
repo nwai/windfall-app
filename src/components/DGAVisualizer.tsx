@@ -953,6 +953,8 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
   const tableCellSize = Math.max(18, Math.floor(cellSize));
   const tableCellLineHeight = `${tableCellSize}px`;
   const railCellWidth = Math.max(28, tableCellSize + 6);
+  const gridLineShadow = (color = '#eee', width = 1) => `inset 0 0 0 ${width}px ${color}`;
+  const mergeBoxShadows = (...shadows: Array<string | undefined>) => shadows.filter(Boolean).join(', ');
 
   /* ------------------------------- Rendering ------------------------------ */
 
@@ -1608,7 +1610,7 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
   );
 
   const renderGrid = () => (
-    <div style={{ overflowX: 'auto', border: '1px solid #ccc', background: '#fff' }}>
+    <div style={{ overflowX: 'auto', border: 0, boxShadow: gridLineShadow('#ccc'), background: '#fff' }}>
       <table key={tableKey} style={{ borderCollapse: 'collapse', fontSize: 13 }}>
         <thead>
           <tr>
@@ -1621,7 +1623,8 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
                 lineHeight: tableCellLineHeight,
                 padding: 0,
                 boxSizing: 'border-box',
-                border: '1px solid #eee',
+                border: 0,
+                boxShadow: gridLineShadow(),
               }}
             ></th>
             {drawLabels.map((label, cIdx) => (
@@ -1634,11 +1637,12 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
                   lineHeight: tableCellLineHeight,
                   textAlign: 'center',
                   background: wfmqyhStart > 0 && cIdx < wfmqyhStart ? '#f5f5f5' : '#f9f9f9',
-                  border: '1px solid #eee',
                   opacity: getColOpacity(cIdx),
                   cursor: 'pointer',
                   padding: 0,
                   boxSizing: 'border-box',
+                  border: 0,
+                  boxShadow: gridLineShadow(),
                 }}
                 onClick={() => onColumnClick?.(cIdx)}
               >
@@ -1654,11 +1658,12 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
                   lineHeight: tableCellLineHeight,
                   textAlign: 'center',
                   background: '#f0f7ff',
-                  border: '1px solid #dbeaff',
                   opacity: getColOpacity(drawLabels.length),
                   cursor: 'pointer',
                   padding: 0,
                   boxSizing: 'border-box',
+                  border: 0,
+                  boxShadow: gridLineShadow('#dbeaff'),
                 }}
                 title="Next draw (synthetic column)"
                 onClick={() => onColumnClick?.(drawLabels.length)}
@@ -1679,7 +1684,7 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
           style={{
             textAlign: 'right',
             background: getHeatmapColor(numberCounts[rIdx], minCount, maxCount),
-            border: isFocusedRow ? '2px solid #ff9800' : '1px solid #eee',
+            border: 0,
             fontWeight: 700,
             height: tableCellSize,
             lineHeight: tableCellLineHeight,
@@ -1690,7 +1695,10 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
             position: 'sticky',
             left: 0,
             zIndex: 1,
-            boxShadow: isFocusedRow ? 'inset 0 0 0 9999px rgba(255,235,59,0.08)' : undefined,
+            boxShadow: mergeBoxShadows(
+              gridLineShadow(isFocusedRow ? '#ff9800' : '#eee', isFocusedRow ? 2 : 1),
+              isFocusedRow ? 'inset 0 0 0 9999px rgba(255,235,59,0.08)' : undefined,
+            ),
           }}
           title={isFocusedRow ? 'Focused number' : undefined}
         >
@@ -1719,7 +1727,7 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
           const baseHeat = getHeatmapColor(numberCounts[rIdx], minCount, maxCount);
           let background = baseHeat;
           let bgImage: string | undefined;
-          let border = '1px solid #eee';
+          let borderColor = '#eee';
           const opacity = getColOpacity(cIdx);
 
           if (hasHighlight) {
@@ -1734,7 +1742,7 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
           }
 
           if (!hasHighlight && usedDiamond && showDiamonds && diamondBoundary) {
-            border = `1px solid ${usedDiamond.edgeColor || DEFAULT_DIAMOND_EDGE}`;
+            borderColor = usedDiamond.edgeColor || DEFAULT_DIAMOND_EDGE;
             if (usedDiamond.boundaryOnly) {
               background = baseHeat;
             }
@@ -1801,7 +1809,7 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
                 lineHeight: tableCellLineHeight,
                 textAlign: 'center',
                 verticalAlign: 'middle',
-                border,
+                border: 0,
                 position: 'relative',
                 background,
                 backgroundImage: bgImage,
@@ -1809,6 +1817,7 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
                 padding: 0,
                 opacity,
                 boxSizing: 'border-box',
+                boxShadow: gridLineShadow(borderColor),
               }}
               title={cellTitle}
             >
@@ -1842,6 +1851,7 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
               }
 
               const baseHeat = getHeatmapColor(numberCounts[rIdx], minCount, maxCount);
+              let borderColor = '#eee';
               const style: React.CSSProperties = {
                 minWidth: 36,
                 height: tableCellSize,
@@ -1850,10 +1860,11 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
                 position: 'relative',
                 cursor: 'pointer',
                 background: baseHeat,
-                border: '1px solid #eee',
+                border: 0,
                 opacity,
                 padding: 0,
                 boxSizing: 'border-box',
+                boxShadow: gridLineShadow(borderColor),
               };
 
               if (hasHighlight) {
@@ -1867,13 +1878,16 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
               }
 
               if (!hasHighlight && usedDiamond && showDiamonds && diamondBoundary) {
-                style.border = `1px solid ${usedDiamond.edgeColor || DEFAULT_DIAMOND_EDGE}`;
+                borderColor = usedDiamond.edgeColor || DEFAULT_DIAMOND_EDGE;
                 if (usedDiamond.boundaryOnly) {
                   style.background = baseHeat;
                 }
               }
 
-              if (isFocusedRow) style.boxShadow = 'inset 0 0 0 9999px rgba(255,235,59,0.08)';
+              style.boxShadow = mergeBoxShadows(
+                gridLineShadow(isFocusedRow ? '#ff9800' : borderColor, isFocusedRow ? 2 : 1),
+                isFocusedRow ? 'inset 0 0 0 9999px rgba(255,235,59,0.08)' : undefined,
+              );
 
               return style;
             })()}

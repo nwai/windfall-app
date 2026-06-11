@@ -69,7 +69,8 @@ describe("UndrawnPatternsPanel", () => {
 
     expect(html).toContain("Trials: 2500");
     expect(html).toContain("Most often undrawn in simulation");
-    expect(html).toContain("Most likely to stay undrawn next draw");
+    expect(html).toContain("Simulation next-step indicators");
+    expect(html).toContain("Highest simulated support for staying undrawn");
     expect(html).not.toContain("Empirical (no simulation); stats derived from observed history.");
   });
 

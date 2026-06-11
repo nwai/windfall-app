@@ -19,6 +19,13 @@ import {
   normalizeUserSelectedNumbers,
   toggleUserSelectedNumber,
 } from "../../lib/userSelectedNumbers";
+import {
+  computeIdealMonthlyDraw,
+  type MonthlyBucketSets,
+  type MonthlyIdealDrawState,
+  type StageIdealDrawState,
+} from "../../lib/monthlyDrawSummary";
+import { HigButton, InfoHelp } from "../shared/HigControls";
 
 /** Settings snapshot captured at export time — written as ## comment rows in CSV */
 export interface ExportSettings {
@@ -107,17 +114,9 @@ export interface GeneratedCandidatesPanelProps {
   batchSessionAggregate?: { n: number; count: number }[];
   onSimulateNumbers?: (nums: number[]) => void;
   monthlyAvgBuckets?: { times: number; avg: number }[];
-  monthlyBuckets?: {
-    undrawn: Set<number>;
-    times1: Set<number>;
-    times2: Set<number>;
-    times3: Set<number>;
-    times4: Set<number>;
-    times5: Set<number>;
-    times6: Set<number>;
-    times7: Set<number>;
-    times8: Set<number>;
-  };
+  monthlyBuckets?: MonthlyBucketSets;
+  monthlyIdealDrawState?: MonthlyIdealDrawState | null;
+  stageIdealDrawState?: StageIdealDrawState | null;
   historyForOGA?: Draw[];
   /** Full unfiltered draw history — used for the Historical Prize Backtest so all draws
    *  are checked regardless of the active generation window. Falls back to historyForOGA. */
@@ -135,6 +134,16 @@ export interface GeneratedCandidatesPanelProps {
   /** Odd/Even ratio options from draw history — used to populate the filter dropdown */
   ratioOptions?: { ratio: string }[];
 }
+
+const MONTHLY_BUCKET_LABELS = ["0x", "1x", "2x", "3x", "4x", "5x", "6x", "7x", "8x+"] as const;
+
+const toNineBucketDistribution = (values: readonly number[] | null | undefined): number[] | null => {
+  if (!values?.length) return null;
+  return Array.from({ length: 9 }, (_, index) => {
+    const value = values[index] ?? 0;
+    return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+  });
+};
 
 export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> = ({
   onGenerate,
@@ -174,6 +183,8 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
   onSimulateNumbers,
   monthlyAvgBuckets = [],
   monthlyBuckets,
+  monthlyIdealDrawState = null,
+  stageIdealDrawState = null,
   historyForOGA,
   fullHistory,
   ogaRefScores,
@@ -232,7 +243,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
     }, []);
 
     // --- Column sorting ---
-    type SortKey = "nrr" | "ns" | "win" | "rdy" | "idm" | "conv" | "comp" | "ogaRaw" | "ogaPct" | "selHits" | "recentHits" | "oddEven" | "prize" | "b0x" | "b1x" | "b2x" | "b3x" | "b4x" | "b5x" | "b6x" | "b7x" | "b8x" | "recommended" | null;
+    type SortKey = "nrr" | "ns" | "win" | "rdy" | "idm" | "stageIdm" | "conv" | "comp" | "ogaRaw" | "ogaPct" | "selHits" | "recentHits" | "oddEven" | "prize" | "b0x" | "b1x" | "b2x" | "b3x" | "b4x" | "b5x" | "b6x" | "b7x" | "b8x" | "recommended" | null;
     const [sortKey, setSortKey] = useState<SortKey>("prize");
     const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
     const toggleSort = (key: SortKey) => {
@@ -240,11 +251,30 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
         setSortDir((d) => (d === "asc" ? "desc" : "asc"));
       } else {
         setSortKey(key);
-        setSortDir(key === "nrr" || key === "ns" || key === "win" || key === "rdy" || key === "idm" || key === "conv" || key === "comp" || key === "ogaPct" || key === "selHits" || key === "recentHits" || key === "prize" || key?.startsWith("b") ? "desc" : "asc");
+        setSortDir(key === "nrr" || key === "ns" || key === "win" || key === "rdy" || key === "idm" || key === "stageIdm" || key === "conv" || key === "comp" || key === "ogaPct" || key === "selHits" || key === "recentHits" || key === "prize" || key?.startsWith("b") ? "desc" : "asc");
       }
     };
     const sortIndicator = (key: SortKey): string => (sortKey === key ? (sortDir === "asc" ? " ▲" : " ▼") : "");
     const sortableStyle: React.CSSProperties = { cursor: "pointer", userSelect: "none" };
+    const sortAria = (key: SortKey): "ascending" | "descending" | "none" => (
+      sortKey === key ? (sortDir === "asc" ? "ascending" : "descending") : "none"
+    );
+    const renderMetricHeader = (key: Exclude<SortKey, null>, label: string, help: React.ReactNode) => (
+      <th key={key} scope="col" aria-sort={sortAria(key)} style={th}>
+        <span className="windfall-sortable-header">
+          <button
+            type="button"
+            className="windfall-sortable-header__button"
+            onClick={() => toggleSort(key)}
+          >
+            {label}{sortIndicator(key)}
+          </button>
+          <InfoHelp label={`${label} metric explanation`}>
+            {help}
+          </InfoHelp>
+        </span>
+      </th>
+    );
 
     const recentSet = useMemo(
       () => new Set([...(mostRecentDraw?.main || []), ...(mostRecentDraw?.supp || [])]),
@@ -551,8 +581,10 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
     times8: number;
   };
 
+  const effectiveMonthlyBuckets = monthlyIdealDrawState?.bucketSets ?? monthlyBuckets;
+
   const getMonthlyBucketCounts = (numbers: number[]): MonthlyBucketCounts | null => {
-    if (!monthlyBuckets) return null;
+    if (!effectiveMonthlyBuckets) return null;
     const counts: MonthlyBucketCounts = {
       undrawn: 0,
       times1: 0,
@@ -565,46 +597,47 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
       times8: 0,
     };
     numbers.forEach((n) => {
-      if (monthlyBuckets.undrawn.has(n)) counts.undrawn += 1;
-      else if (monthlyBuckets.times1.has(n)) counts.times1 += 1;
-      else if (monthlyBuckets.times2.has(n)) counts.times2 += 1;
-      else if (monthlyBuckets.times3.has(n)) counts.times3 += 1;
-      else if (monthlyBuckets.times4.has(n)) counts.times4 += 1;
-      else if (monthlyBuckets.times5.has(n)) counts.times5 += 1;
-      else if (monthlyBuckets.times6.has(n)) counts.times6 += 1;
-      else if (monthlyBuckets.times7.has(n)) counts.times7 += 1;
-      else if (monthlyBuckets.times8.has(n)) counts.times8 += 1;
+      if (effectiveMonthlyBuckets.undrawn.has(n)) counts.undrawn += 1;
+      else if (effectiveMonthlyBuckets.times1.has(n)) counts.times1 += 1;
+      else if (effectiveMonthlyBuckets.times2.has(n)) counts.times2 += 1;
+      else if (effectiveMonthlyBuckets.times3.has(n)) counts.times3 += 1;
+      else if (effectiveMonthlyBuckets.times4.has(n)) counts.times4 += 1;
+      else if (effectiveMonthlyBuckets.times5.has(n)) counts.times5 += 1;
+      else if (effectiveMonthlyBuckets.times6.has(n)) counts.times6 += 1;
+      else if (effectiveMonthlyBuckets.times7.has(n)) counts.times7 += 1;
+      else if (effectiveMonthlyBuckets.times8.has(n)) counts.times8 += 1;
     });
     return counts;
   };
 
   // --- Convergence score ---
-  // For each number 1–45, determine its current bucket index (0–8) from monthlyBuckets.
-  // Build the current frequency-of-frequencies distribution and a target from monthlyAvgBuckets.
+  // For each number 1–45, determine its current bucket index (0–8) from the
+  // effective Monthly Draws Summary state, then compare candidate impact against
+  // the robust Monthly Draws Summary target distribution.
   // For each candidate, simulate drawing its 8 numbers (each moves up one bucket)
   // and compute how much the distribution moves closer to the target.
   // Score = pre-draw SSD − post-draw SSD.  Higher is better (more convergent).
 
   /** Map a number to its current bucket index (0 = undrawn, 1 = times1, ..., 8 = times8+) */
   const numberToBucket = useMemo((): Map<number, number> | null => {
-    if (!monthlyBuckets) return null;
+    if (!effectiveMonthlyBuckets) return null;
     const m = new Map<number, number>();
     const bucketSets = [
-      monthlyBuckets.undrawn,
-      monthlyBuckets.times1,
-      monthlyBuckets.times2,
-      monthlyBuckets.times3,
-      monthlyBuckets.times4,
-      monthlyBuckets.times5,
-      monthlyBuckets.times6,
-      monthlyBuckets.times7,
-      monthlyBuckets.times8,
+      effectiveMonthlyBuckets.undrawn,
+      effectiveMonthlyBuckets.times1,
+      effectiveMonthlyBuckets.times2,
+      effectiveMonthlyBuckets.times3,
+      effectiveMonthlyBuckets.times4,
+      effectiveMonthlyBuckets.times5,
+      effectiveMonthlyBuckets.times6,
+      effectiveMonthlyBuckets.times7,
+      effectiveMonthlyBuckets.times8,
     ];
     bucketSets.forEach((s, idx) => {
       s.forEach((n) => m.set(n, idx));
     });
     return m;
-  }, [monthlyBuckets]);
+  }, [effectiveMonthlyBuckets]);
 
   /** Current distribution: how many numbers sit in each bucket (index 0–8) */
   const currentDist = useMemo((): number[] | null => {
@@ -614,12 +647,13 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
     return dist;
   }, [numberToBucket]);
 
-  /** Target distribution from rounded monthly averages.
-   *  monthlyAvgBuckets may contain entries for times > 8 (when drawsPerMonth > 8).
-   *  All such entries must be ACCUMULATED (+=) into bucket 8, not overwritten (=),
-   *  otherwise only the last (smallest) entry survives and the target is badly wrong.
-   *  After accumulating raw averages, round each bucket and derive 0x as the complement. */
+  /** Target distribution from Monthly Draws Summary.
+   *  The shared state is authoritative because it uses the summary panel's
+   *  robust/reconciled target. The rounded-average path is kept only as a
+   *  legacy fallback for isolated renders and older tests. */
   const targetDist = useMemo((): number[] | null => {
+    const sharedTarget = toNineBucketDistribution(monthlyIdealDrawState?.targetDistribution);
+    if (sharedTarget) return sharedTarget;
     if (!monthlyAvgBuckets.length) return null;
     // Accumulate raw (un-rounded) averages per bucket to avoid overwrite loss
     const rawDist = Array(9).fill(0);
@@ -632,7 +666,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
     const drawnTotal = dist.slice(1).reduce((a, v) => a + v, 0);
     dist[0] = Math.max(0, 45 - drawnTotal);
     return dist;
-  }, [monthlyAvgBuckets]);
+  }, [monthlyAvgBuckets, monthlyIdealDrawState]);
 
   /** SSD helper */
   const ssd = (a: number[], b: number[]): number => {
@@ -654,7 +688,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
    * Compute convergence score for a candidate's numbers.
    *
    * Returns preSSD − postSSD: positive means the draw moves the monthly
-   * frequency distribution closer to the historical average, negative means
+   * frequency distribution closer to the Monthly Draws Summary target, negative means
    * it moves further away.
    *
    * IMPORTANT: Empirical analysis of 30,000 candidates shows Conv direction
@@ -676,7 +710,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
       postDist[newBucket] += 1;
     });
     const postSSD = ssd(postDist, targetDist);
-    return preSSD - postSSD; // positive = closer to average = good
+    return preSSD - postSSD; // positive = closer to the target = more convergent
   };
 
   /** Compute all convergence scores for candidates to find the best */
@@ -695,40 +729,17 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
     return Math.max(...valid);
   }, [convergenceScores]);
 
-  // --- Ideal Draw composition (same greedy SSD algorithm as MonthlyDrawsSummaryPanel) ---
+  // --- Ideal Draw composition (shared exhaustive SSD target from Monthly Draws Summary) ---
   const idealDrawComp = useMemo((): number[] | null => {
+    const sharedIdeal = toNineBucketDistribution(monthlyIdealDrawState?.idealDrawBucketCounts);
+    if (sharedIdeal) return sharedIdeal;
     if (!currentDist || !targetDist) return null;
-    const maxBucket = 8;
-    // Save original counts so we never recommend drawing more from a bucket than
-    // actually exist in the real current distribution.  Without this cap the greedy
-    // simulation inflates higher buckets (simDist[b+1] += 1 each pick), letting it
-    // appear to "draw" from a bucket that had zero (or too few) real numbers — an
-    // impossible composition.
-    const originalDist = [...currentDist];
-    const simDist = [...currentDist];
-    const drawFrom = new Array(maxBucket + 1).fill(0);
-    for (let pick = 0; pick < 8; pick++) {
-      let bestBucket = -1;
-      let bestImprovement = -Infinity;
-      for (let b = 0; b <= maxBucket; b++) {
-        if (simDist[b] <= 0) continue;
-        // Never recommend more picks from bucket b than were originally available
-        if (drawFrom[b] >= originalDist[b]) continue;
-        const dest = Math.min(b + 1, maxBucket);
-        const oldSrcGap = (simDist[b] - targetDist[b]) ** 2;
-        const newSrcGap = (simDist[b] - 1 - targetDist[b]) ** 2;
-        const oldDestGap = (simDist[dest] - targetDist[dest]) ** 2;
-        const newDestGap = (simDist[dest] + 1 - targetDist[dest]) ** 2;
-        const improvement = b === maxBucket ? 0 : (oldSrcGap - newSrcGap) + (oldDestGap - newDestGap);
-        if (improvement > bestImprovement) { bestImprovement = improvement; bestBucket = b; }
-      }
-      if (bestBucket < 0) break;
-      simDist[bestBucket] -= 1;
-      simDist[Math.min(bestBucket + 1, maxBucket)] += 1;
-      drawFrom[bestBucket] += 1;
-    }
-    return drawFrom;
-  }, [currentDist, targetDist]);
+    return computeIdealMonthlyDraw({
+      currentDistribution: currentDist,
+      targetDistribution: targetDist,
+      drawSize: 8,
+    }).bucketCounts.map(({ count }) => count);
+  }, [currentDist, monthlyIdealDrawState, targetDist]);
 
   /** Ideal Draw Match (IDM): similarity between candidate bucket composition and ideal draw.
    *  1.0 = perfect match, 0.0 = completely different. */
@@ -743,6 +754,46 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
     for (let i = 0; i < 9; i++) totalDiff += Math.abs(candidateComp[i] - idealDrawComp[i]);
     return Math.max(0, 1 - totalDiff / 16);
   }, [idealDrawComp, numberToBucket]);
+
+  /** Stage IDM uses the current-month stage snapshot from Monthly Draws Summary:
+   *  it compares candidate bucket composition against the ideal draw for the next
+   *  draw stage in comparable same-size months. Descriptive only. */
+  const stageNumberToBucket = useMemo((): Map<number, number> | null => {
+    if (!stageIdealDrawState?.bucketSets) return null;
+    const m = new Map<number, number>();
+    const bucketSets = [
+      stageIdealDrawState.bucketSets.undrawn,
+      stageIdealDrawState.bucketSets.times1,
+      stageIdealDrawState.bucketSets.times2,
+      stageIdealDrawState.bucketSets.times3,
+      stageIdealDrawState.bucketSets.times4,
+      stageIdealDrawState.bucketSets.times5,
+      stageIdealDrawState.bucketSets.times6,
+      stageIdealDrawState.bucketSets.times7,
+      stageIdealDrawState.bucketSets.times8,
+    ];
+    bucketSets.forEach((set, idx) => {
+      set.forEach((n) => m.set(n, idx));
+    });
+    return m;
+  }, [stageIdealDrawState]);
+
+  const stageIdealDrawComp = useMemo(
+    (): number[] | null => toNineBucketDistribution(stageIdealDrawState?.idealDrawBucketCounts),
+    [stageIdealDrawState],
+  );
+
+  const getStageIdealDrawMatch = useCallback((numbers: number[]): number | null => {
+    if (!stageIdealDrawComp || !stageNumberToBucket) return null;
+    const candidateComp = new Array(9).fill(0);
+    numbers.forEach((n) => {
+      const bucket = stageNumberToBucket.get(n);
+      if (bucket !== undefined) candidateComp[bucket] += 1;
+    });
+    let totalDiff = 0;
+    for (let i = 0; i < 9; i++) totalDiff += Math.abs(candidateComp[i] - stageIdealDrawComp[i]);
+    return Math.max(0, 1 - totalDiff / 16);
+  }, [stageIdealDrawComp, stageNumberToBucket]);
 
   /** Readiness (Rdy) score: weighted composite of IDM, Conv, and OGA.
    *  When OGA is disabled, its weight is redistributed to IDM and Conv
@@ -794,22 +845,34 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
     return Math.max(...valid);
   }, [idmScores]);
 
+  /** Per-candidate Stage IDM scores for next-stage bucket alignment. */
+  const stageIdmScores = useMemo((): (number | null)[] => {
+    return candidates.map((c) => getStageIdealDrawMatch([...c.main, ...c.supp]));
+  }, [candidates, getStageIdealDrawMatch]);
+
+  const bestStageIdm = useMemo((): number | null => {
+    const valid = stageIdmScores.filter((s): s is number => s !== null);
+    if (!valid.length) return null;
+    return Math.max(...valid);
+  }, [stageIdmScores]);
+
   /**
-   * WinScore (recalibrated) — Multi-signal composite designed to identify
-   * prize-worthy candidates WITHOUT needing Manual Simulation.
+   * WinScore (recalibrated) — candidate-pool diagnostic designed to rank
+   * generated rows without requiring Manual Simulation.
    *
-   * Data-driven recalibration from 71K-candidate analysis:
-   *   - 2x bucket count (numbers drawn exactly 2× this month) → 6.17× lift
-   *     (strongest discriminator found; previous RH/3x gates were anti-correlated)
+   * Internal candidate-sample recalibration from 71K generated candidates:
+   *   - 2x bucket count (numbers drawn exactly 2× this month) was the strongest
+   *     observed association in that sample.
    *   - |Conv| magnitude used as within-tier tiebreaker
    *
    * Algorithm: Gate tier on 2x count (major) + |Conv| rank (minor)
-   *   Tier A:  2x ≥ 3  → highest-signal cluster  (6× lift)
-   *   Tier B:  2x = 2  → strong signal            (4× lift)
-   *   Tier C:  2x = 1  → moderate signal          (2× lift)
+   *   Tier A:  2x ≥ 3  → highest observed-association cluster
+   *   Tier B:  2x = 2  → elevated observed-association cluster
+   *   Tier C:  2x = 1  → moderate observed-association cluster
    *   Tier D:  2x = 0  → baseline
    *
-   * Sort Win DESCENDING for best candidates first (higher = better).
+   * This is not a calibrated next-draw probability. Sort Win DESCENDING to rank
+   * candidates by this diagnostic.
    * Use the Recommended button for the full multi-signal recommended sort.
    */
   const winScores = useMemo((): (number | null)[] => {
@@ -822,7 +885,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
       const bc = getMonthlyBucketCounts(nums);
       if (bc === null) return null;
 
-      const t2 = bc.times2; // primary signal: 6.17× lift
+      const t2 = bc.times2; // primary observed-association signal
 
       // Gate tier (each tier separated by 100 points)
       let tierBonus: number;
@@ -864,13 +927,10 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
    * Nrr (Number Rarity Rank) — Scores candidates by how RARE their numbers
    * are within the generated candidate pool.
    *
-   * Statistical analysis of 30,000 candidates showed that winning numbers
-   * consistently appear in the BOTTOM THIRD of the pool by frequency
-   * (ranks 28–45 out of 45). This is because the generator's constraints
-   * systematically over-weight certain numbers — the numbers that barely
-   * survive filtering ("contrarian" picks) turn out to be the actual winners.
-   *
-   * Empirical performance: 15× lift at top-50, 12.5× at top-100, 7× at top-500.
+   * Internal candidate-sample analysis found that prize-matching numbers were
+   * overrepresented among rarer generated-pool numbers. Treat this as an
+   * uncalibrated batch diagnostic, not as a guaranteed lift or next-draw
+   * probability.
    *
    * Algorithm:
    *   1. Count appearances of each number 1–45 across all candidates
@@ -993,6 +1053,10 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
           va = idmScores[a.origIdx] ?? -Infinity;
           vb = idmScores[b.origIdx] ?? -Infinity;
           break;
+        case "stageIdm":
+          va = stageIdmScores[a.origIdx] ?? -Infinity;
+          vb = stageIdmScores[b.origIdx] ?? -Infinity;
+          break;
         case "conv":
           va = convergenceScores[a.origIdx] ?? -Infinity;
           vb = convergenceScores[b.origIdx] ?? -Infinity;
@@ -1041,8 +1105,8 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
         }
         case "recommended": {
           // Multi-signal recommended ranking (always descending):
-          //   1st: 2x bucket count (strongest signal, 6.17× lift)
-          //   2nd: Nrr (number rarity rank, 2× lift)
+          //   1st: 2x bucket count (strongest observed sample association)
+          //   2nd: Nrr (number rarity rank within the generated pool)
           //   3rd: |Conv| magnitude
           const bc2xA = getMonthlyBucketCounts(numsA)?.times2 ?? 0;
           const bc2xB = getMonthlyBucketCounts(numsB)?.times2 ?? 0;
@@ -1060,7 +1124,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
       return (va - vb) * dir;
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [candidates, sortKey, sortDir, convergenceScores, readinessScores, idmScores, winScores, nrrScores, nsScores]);
+  }, [candidates, sortKey, sortDir, convergenceScores, readinessScores, idmScores, stageIdmScores, winScores, nrrScores, nsScores]);
 
   // --- Multi-column range filter applied to sorted candidates ---
   const filteredCandidates = useMemo((): Required<GeneratedCandidateViewRow>[] => {
@@ -1612,7 +1676,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
          "#", "Main (6)", "Supp (2)", "Prize", "Odd/Even",
          "Comp%", "OGA Raw", "OGA%", "SelHits", "RecentHits",
          "0x", "1x", "2x", "3x", "4x", "5x", "6x", "7x", "8x+",
-          "Conv", "IDM", "Rdy", "Win", "WinTier", "Nrr", "NS",
+          "Conv", "IDM", "StageIDM", "Rdy", "Win", "WinTier", "Nrr", "NS",
         ];
        const rows = exportData.map(({ c, origIdx }, displayIdx) => {
          const i = origIdx;
@@ -1627,6 +1691,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
          const bc = getMonthlyBucketCounts(nums);
          const convScore = convergenceScores[i];
          const idmScore = idmScores[i];
+         const stageIdmScore = stageIdmScores[i];
          const rdyScore = readinessScores[i];
          return [
            displayIdx + 1,
@@ -1650,6 +1715,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
            bc ? bc.times8 : "",
            convScore !== null ? convScore.toFixed(1) : "",
            idmScore !== null ? (idmScore * 100).toFixed(1) : "",
+           stageIdmScore !== null ? (stageIdmScore * 100).toFixed(1) : "",
             rdyScore !== null ? (rdyScore * 100).toFixed(1) : "",
             winScores[i] !== null ? (winScores[i] as number).toFixed(1) : "",
             getWinTier(winScores[i]),
@@ -1768,16 +1834,13 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
        a.click();
        URL.revokeObjectURL(url);
      // eslint-disable-next-line react-hooks/exhaustive-deps
-      }, [sortedCandidates, filteredCandidates, isFilteringActive, matchedCount, convergenceScores, idmScores, readinessScores, winScores, nrrScores, nsScores, exportSettings, enableOGA, numCandidates, overgenFactor, attemptMultiplier, ogaSpokeCount, forcedNumbers, userSelectedNumbers, monthlyBuckets, historyForOGA]);
+      }, [sortedCandidates, filteredCandidates, isFilteringActive, matchedCount, convergenceScores, idmScores, stageIdmScores, readinessScores, winScores, nrrScores, nsScores, exportSettings, enableOGA, numCandidates, overgenFactor, attemptMultiplier, ogaSpokeCount, forcedNumbers, userSelectedNumbers, monthlyBuckets, historyForOGA]);
 
      return (
      <section style={panel}>
        <header style={hdr}>
-         <div style={{ fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }}>
-           Generated Candidates
-         </div>
-          <label style={{ fontSize: 12 }} title="Defaults to the active draw window size until you type a manual count.">
-           Count:
+          <label style={{ fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6 }}>
+           Count
             <input
               type="number"
               min={1}
@@ -1785,30 +1848,23 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
               onChange={(e) =>
                 setNumCandidates(Math.max(1, Number(e.target.value) || 1))
               }
-             style={{ width: 80, marginLeft: 6 }}
+             style={{ width: 80 }}
            />
+            <InfoHelp label="Candidate count help">
+              Defaults to the active draw window size until you type a manual count.
+            </InfoHelp>
          </label>
-           <button type="button" disabled={isGenerating} onClick={onGenerate} style={genBtn(isGenerating)}>
+           <HigButton variant="primary" disabled={isGenerating} onClick={onGenerate}>
              {isGenerating ? "Generating…" : "Generate"}
-           </button>
-           <button
-             type="button"
+           </HigButton>
+           <HigButton
+             variant="quiet"
              disabled={candidates.length === 0}
              onClick={exportCSV}
-             style={{
-               padding: "6px 12px",
-               borderRadius: 6,
-               border: "1px solid #ccc",
-               background: candidates.length > 0 ? "#f5f5f5" : "#e0e0e0",
-               color: candidates.length > 0 ? "#333" : "#999",
-               cursor: candidates.length > 0 ? "pointer" : "default",
-               fontSize: 12,
-               fontWeight: 600,
-             }}
-             title="Export all candidates to CSV file (current sort order)"
+             aria-label="Export all candidates to CSV in the current sort order"
            >
              Export CSV
-           </button>
+           </HigButton>
           {(isGenerating || elapsedMs > 0) && (
             <span
               style={{
@@ -1819,13 +1875,13 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                 minWidth: 50,
                 textAlign: "center",
               }}
-              title={isGenerating ? "Generation in progress…" : "Last generation time"}
+              aria-label={isGenerating ? "Generation in progress" : "Last generation time"}
             >
              {formatElapsed(elapsedMs)}
            </span>
           )}
          {onAttemptMultiplierChange && (
-           <label style={{ fontSize: 12 }} title="Attempt budget = Count × multiplier; increase if constraints are tight">
+           <label style={{ fontSize: 12, display: "inline-flex", alignItems: "center", gap: 5 }}>
              Attempts ×
               <input
                 type="number"
@@ -1836,8 +1892,11 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                   const next = Number(e.target.value) || 400;
                   onAttemptMultiplierChange(Math.max(1, next));
                 }}
-               style={{ width: 70, marginLeft: 4 }}
+               style={{ width: 70 }}
              />
+              <InfoHelp label="Attempt multiplier help">
+                Attempt budget equals Count times multiplier. Increase it when constraints are tight and generation cannot fill the requested count.
+              </InfoHelp>
            </label>
          )}
          {attemptMultiplier > 50 && (
@@ -1846,7 +1905,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
             </span>
           )}
           {onOvergenFactorChange && (
-            <label style={{ fontSize: 12 }} title="Over-generation pool = Count × Overgen. A larger pool gives post-filters (MiAN, monthly, OGA cap) more candidates to choose from.">
+            <label style={{ fontSize: 12, display: "inline-flex", alignItems: "center", gap: 5 }}>
               Overgen ×
               <input
                 type="number"
@@ -1857,8 +1916,11 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                   const next = Number(e.target.value) || 50;
                   onOvergenFactorChange(Math.max(1, next));
                 }}
-                style={{ width: 70, marginLeft: 4 }}
+                style={{ width: 70 }}
               />
+              <InfoHelp label="Over-generation help">
+                Over-generation pool equals Count times Overgen. A larger pool gives post-filters more candidates to choose from.
+              </InfoHelp>
             </label>
           )}
          {overgenFactor > 200 && (
@@ -1981,7 +2043,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                  color: sortKey === "recommended" ? "#2e7d32" : "#555",
                  cursor: "pointer",
                }}
-               title={`Recommended Ranking Strategy (data-driven):\n1. 2x bucket count ↓  (6.17× lift — strongest signal)\n2. Nrr ↓  (number rarity rank, 2× lift)\n3. |Conv| magnitude ↓  (distribution impact)\n\nBased on analysis of 71K candidates: candidates with more numbers drawn exactly twice this month statistically win most often. Nrr breaks ties by preferring rarer numbers in the pool.`}
+               title={`Recommended Ranking Strategy (diagnostic):\n1. 2x bucket count ↓  (strongest observed association in the internal candidate sample)\n2. Nrr ↓  (number rarity rank within this generated pool)\n3. |Conv| magnitude ↓  (distribution impact)\n\nThis ranks candidates by historical candidate-sample diagnostics. It is not a calibrated next-draw win probability.`}
              >
                Recommended
              </button>
@@ -2199,7 +2261,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
               borderRadius: 5, padding: "6px 10px", marginBottom: 8, display: "flex", alignItems: "center", gap: 8,
             }}>
               <b style={{ color: "#1565c0" }}>Ideal draw composition (IDM target):</b>
-              {["0x","1x","2x","3x","4x","5x","6x","7x","8x+"].map((label, idx) => (
+              {MONTHLY_BUCKET_LABELS.map((label, idx) => (
                 <span key={label} style={{
                   background: idx === 0 ? "#f0f0f0" : "#e3f2fd",
                   border: idx === 0 ? "1px solid #ccc" : "1px solid #90caf9",
@@ -2211,8 +2273,34 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                 </span>
               ))}
               <span style={{ color: "#888", marginLeft: 4 }}>
-                (draw {idealDrawComp.reduce((a: number, b: number) => a + b, 0)} numbers from these buckets to best match the historical average)
+                (draw {idealDrawComp.reduce((a: number, b: number) => a + b, 0)} numbers from these buckets to best match the Monthly Draws Summary robust target{monthlyIdealDrawState?.effectiveMonthLabel ? ` for ${monthlyIdealDrawState.effectiveMonthLabel}` : ""}; descriptive, not predictive)
               </span>
+            </div>
+          )}
+          {stageIdealDrawState && stageIdealDrawComp && (
+            <div style={{
+              fontSize: 12, color: "#333", background: "#f4fbff", border: "1px solid #9fd3ee",
+              borderRadius: 5, padding: "6px 10px", marginBottom: 8, display: "flex", alignItems: "center", gap: 8,
+              flexWrap: "wrap",
+            }}>
+              <b style={{ color: "#0f5f8f" }}>Stage IDM target:</b>
+              <span style={{ color: "#445", fontWeight: 600 }}>
+                {stageIdealDrawState.workingMonthLabel} · draw {stageIdealDrawState.targetStageDrawCount} of a {stageIdealDrawState.expectedDrawCount}-draw month
+              </span>
+              <span style={{ color: "#667" }}>
+                · {stageIdealDrawState.comparableMonthCount} comparable month{stageIdealDrawState.comparableMonthCount === 1 ? "" : "s"} · descriptive alignment only
+              </span>
+              {MONTHLY_BUCKET_LABELS.map((label, idx) => (
+                <span key={`stage-${label}`} style={{
+                  background: stageIdealDrawComp[idx] > 0 ? "#e0f2fe" : "#f3f4f6",
+                  border: stageIdealDrawComp[idx] > 0 ? "1px solid #7dd3fc" : "1px solid #d1d5db",
+                  borderRadius: 3, padding: "1px 6px",
+                  fontWeight: stageIdealDrawComp[idx] > 0 ? 700 : 400,
+                  color: stageIdealDrawComp[idx] > 0 ? "#0f172a" : "#9ca3af",
+                }}>
+                  {label}={stageIdealDrawComp[idx]}
+                </span>
+              ))}
             </div>
           )}
           <div style={{
@@ -2409,18 +2497,19 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                  <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("b6x")}>6x{sortIndicator("b6x")}</th>
                  <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("b7x")}>7x{sortIndicator("b7x")}</th>
                  <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("b8x")}>8x+{sortIndicator("b8x")}</th>
-                 <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("conv")} title="Convergence: how much this draw moves the month's distribution toward (+) or away from (−) the historical average. NOTE: direction (positive vs negative) does NOT predict prize-winning candidates — both positive and negative Conv winners occur at equal rates. Conv is informational (shows distribution impact), not predictive.">Conv{sortIndicator("conv")}</th>
-                 <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("idm")} title="Ideal Draw Match: how closely this candidate's bucket composition matches the statistically optimal draw. 100% = perfect match, 0.0 = completely different.">IDM{sortIndicator("idm")}</th>
-                 <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("rdy")} title="Readiness score: composite of Ideal Draw Match (bucket composition vs optimal), Convergence, and OGA%. Higher = more statistically ready. Weights configurable in Candidate Generation Influences.">Rdy{sortIndicator("rdy")}</th>
-                 <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("win")} title="WinScore (recalibrated): tier-gate based on 2x bucket count — the strongest prize predictor found (6.17× lift at top tier). Tier A: 2x≥3. Tier B: 2x=2. Tier C: 2x=1. Tier D: 2x=0. Within-tier, ranked by |Conv| magnitude. Sort Win ↓ for best-first. Use Recommended for full multi-signal sorting.">Win{sortIndicator("win")}</th>
-                 <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("nrr")} title="Number Rarity Rank: scores candidates by how rare their numbers are within the generated pool. Numbers that barely survive constraint filtering (contrarian picks) empirically correlate with actual winning numbers. Higher = rarer numbers = 15× lift at top-50.">Nrr{sortIndicator("nrr")}</th>
-                 <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("ns")} title="NumSum Score: percentile rank of the candidate's number sum against the historical draw distribution (windfall_history_lottolyzer.csv). 50 = median historical sum. Higher = more high-value numbers vs history. Prize-winning candidates trend toward the upper percentiles. Complements Conv/IDM/Rdy/Nrr.">NS{sortIndicator("ns")}</th>
+                 {renderMetricHeader("conv", "Conv", "Convergence measures how much this candidate moves the month's distribution toward (+) or away from (-) the Monthly Draws Summary target. Direction is informational only and is not a prize-winning prediction.")}
+                 {renderMetricHeader("idm", "IDM", "Ideal Draw Match measures how closely this candidate's bucket composition matches the empirical target composition. 100% is a perfect descriptive match, not a win probability.")}
+                 {renderMetricHeader("stageIdm", "Stage IDM", "Stage IDM measures how closely this candidate's bucket composition matches the next draw-stage target from comparable same-size months. It is descriptive alignment, not a probability.")}
+                 {renderMetricHeader("rdy", "Rdy", "Readiness is a configurable diagnostic blend of Ideal Draw Match, Convergence, and OGA%. Higher means stronger alignment under those weights, not calibrated prediction.")}
+                 {renderMetricHeader("win", "Win", "WinScore is a candidate-pool diagnostic tiered by 2x bucket count and then absolute Convergence magnitude. It is not a calibrated next-draw probability.")}
+                 {renderMetricHeader("nrr", "Nrr", "Number Rarity Rank scores how rare the candidate's numbers are within the current generated pool. It is useful for batch compression, not a guaranteed lift.")}
+                 {renderMetricHeader("ns", "NS", "NumSum Score is the percentile rank of the candidate's number sum against historical draw sums. A score near 50 is historically median; this is descriptive support only.")}
                  <th style={th}>Actions</th>
               </tr>
            </thead>
             <tbody>
               {shouldVirtualise && topPad > 0 && (
-                <tr style={{ height: topPad }} aria-hidden="true"><td colSpan={26} /></tr>
+                <tr style={{ height: topPad }} aria-hidden="true"><td colSpan={27} /></tr>
               )}
               {visibleCandidates.map(({ c, origIdx, matched: isMatched }, sliceIdx) => {
                 const displayIdx = startIdx + sliceIdx;
@@ -2451,6 +2540,8 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                  const isBestRdy = rdyScore !== null && bestReadiness !== null && rdyScore === bestReadiness && rdyScore > 0;
                  const idmScore = idmScores[i];
                  const isBestIdm = idmScore !== null && bestIdm !== null && idmScore === bestIdm && idmScore > 0;
+                 const stageIdmScore = stageIdmScores[i];
+                 const isBestStageIdm = stageIdmScore !== null && bestStageIdm !== null && stageIdmScore === bestStageIdm && stageIdmScore > 0;
                  // Gold tint for best-Rdy candidate(s), green for best-Conv, gold takes priority
                  const rdyShade = isBestRdy ? "rgba(255,193,7,0.18)" : undefined;
                  const convShade = isBestConv ? "rgba(46,125,50,0.15)" : undefined;
@@ -2471,7 +2562,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                    <React.Fragment key={i}>
                    {showSeparator && (
                      <tr aria-hidden="true">
-                       <td colSpan={26} style={{ padding: 0, border: "none" }}>
+                       <td colSpan={27} style={{ padding: 0, border: "none" }}>
                          <div style={{
                            height: 4,
                            background: "linear-gradient(90deg, #e65100 0%, #ff9800 50%, #e65100 100%)",
@@ -2500,7 +2591,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                        borderLeft: isDimmed ? "3px solid #ccc" : undefined,
                      }}
                      onClick={() => onSelectCandidate(i)}
-                        title={`#${i + 1} SelHits=${selHits} RecentHits=${recentHits}${convScore !== null ? ` Conv=${convScore.toFixed(1)}` : ""}${idmScore !== null ? ` IDM=${(idmScore * 100).toFixed(1)}%` : ""}${rdyScore !== null ? ` Rdy=${(rdyScore * 100).toFixed(1)}%` : ""}${winScores[origIdx] !== null ? ` Win=${getWinTier(winScores[origIdx])} ${(winScores[origIdx] as number).toFixed(0)}` : ""}${nrrScores[origIdx] !== null ? ` Nrr=${(nrrScores[origIdx] as number).toFixed(1)}` : ""} NS=${nsScores[origIdx].toFixed(1)}`}
+                     title={`#${i + 1} SelHits=${selHits} RecentHits=${recentHits}${convScore !== null ? ` Conv=${convScore.toFixed(1)}` : ""}${idmScore !== null ? ` IDM=${(idmScore * 100).toFixed(1)}%` : ""}${stageIdmScore !== null ? ` StageIDM=${(stageIdmScore * 100).toFixed(1)}%` : ""}${rdyScore !== null ? ` Rdy=${(rdyScore * 100).toFixed(1)}%` : ""}${winScores[origIdx] !== null ? ` Win=${getWinTier(winScores[origIdx])} ${(winScores[origIdx] as number).toFixed(0)}` : ""}${nrrScores[origIdx] !== null ? ` Nrr=${(nrrScores[origIdx] as number).toFixed(1)}` : ""} NS=${nsScores[origIdx].toFixed(1)}`}
                   >
                     <td style={tdCenter}>{displayIdx + 1}</td>
                     <td style={mainTd}>{c.main.map((n: number) => renderNumber(
@@ -2563,6 +2654,16 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                       color: idmScore !== null ? (idmScore >= 0.875 ? "#1565c0" : idmScore >= 0.5 ? "#2e7d32" : "#888") : undefined,
                     }}>
                       {idmScore !== null ? (isBestIdm ? `Top ${(idmScore * 100).toFixed(1)}%` : `${(idmScore * 100).toFixed(1)}%`) : "—"}
+                    </td>
+                    <td style={{
+                      ...tdCenter,
+                      fontWeight: isBestStageIdm ? 700 : undefined,
+                      color: stageIdmScore !== null ? (stageIdmScore >= 0.875 ? "#0f5f8f" : stageIdmScore >= 0.5 ? "#2e7d32" : "#888") : undefined,
+                      background: isBestStageIdm ? "rgba(14,165,233,0.12)" : undefined,
+                    }}
+                    title={stageIdmScore !== null ? `Stage IDM ${(stageIdmScore * 100).toFixed(1)}% — next-stage bucket alignment only` : "Stage IDM unavailable"}
+                    >
+                      {stageIdmScore !== null ? (isBestStageIdm ? `Top ${(stageIdmScore * 100).toFixed(1)}%` : `${(stageIdmScore * 100).toFixed(1)}%`) : "—"}
                     </td>
                     <td style={{
                       ...tdCenter,
@@ -2645,7 +2746,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                );
              })}
               {shouldVirtualise && bottomPad > 0 && (
-                <tr style={{ height: bottomPad }} aria-hidden="true"><td colSpan={26} /></tr>
+                <tr style={{ height: bottomPad }} aria-hidden="true"><td colSpan={27} /></tr>
               )}
            </tbody>
           </table>
@@ -2915,9 +3016,9 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
              Page size
              <input type="number" min={10} max={500} value={exPageSize} onChange={(e) => setExPageSize(Math.max(10, Math.min(500, Number(e.target.value) || 10)))} style={{ width: 70, marginLeft: 6 }} />
            </label>
-           <button type="button" onClick={handleExhaustiveGenerate} disabled={!poolHasEnough} style={genBtn(!poolHasEnough)}>
+           <HigButton variant="primary" onClick={handleExhaustiveGenerate} disabled={!poolHasEnough}>
              {poolHasEnough ? "Generate exhaustive" : `Need at least 8 numbers (have ${exhaustivePool.length})`}
-           </button>
+           </HigButton>
          </div>
          {exSource === "custom" && (
            <div style={{ marginTop: 8 }}>
@@ -3064,17 +3165,14 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                style={{ width: 80, marginLeft: 6 }}
              />
            </label>
-           <button
-             type="button"
+           <HigButton
+             variant="primary"
              onClick={onRunBatch}
              disabled={isBatching || isBatchSessionRunning}
-             style={{
-               ...genBtn(isBatching || isBatchSessionRunning),
-               width: 120,
-             }}
+             style={{ width: 120 }}
            >
              {isBatching ? "Running batch..." : "Run batch"}
-           </button>
+           </HigButton>
            <label style={{ fontSize: 12 }}>
              Session runs:
              <input
@@ -3086,14 +3184,14 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                style={{ width: 70, marginLeft: 6 }}
              />
            </label>
-           <button
-             type="button"
+           <HigButton
+             variant="primary"
              onClick={onRunBatchSession}
              disabled={isBatching || isBatchSessionRunning}
-             style={{ ...genBtn(isBatching || isBatchSessionRunning), width: 140 }}
+             style={{ width: 140 }}
            >
              {isBatchSessionRunning ? "Session running..." : "Run session"}
-           </button>
+           </HigButton>
            {batchSessionProgress > 0 && (
              <span style={{ fontSize: 12, color: "#1976d2" }}>
                Session progress: {batchSessionProgress}/{batchSessionRuns}
@@ -3342,7 +3440,7 @@ const ManualSim: React.FC<{
             </thead>
             <tbody>
               <tr>
-                <td style={{ padding: "3px 6px", fontWeight: 600, color: "#555", borderBottom: "1px solid #eee", whiteSpace: "nowrap" }}>Avg (target)</td>
+                <td style={{ padding: "3px 6px", fontWeight: 600, color: "#555", borderBottom: "1px solid #eee", whiteSpace: "nowrap" }}>Target</td>
                 {targetDist.map((v, idx) => (
                   <td key={idx} style={{ padding: "3px 6px", textAlign: "center", borderBottom: "1px solid #eee", color: "#1565c0", fontWeight: 600 }}>{v}</td>
                 ))}
@@ -3447,11 +3545,13 @@ const ManualSim: React.FC<{
 
 /* Styles */
 const panel: React.CSSProperties = {
-  border: "1px solid #eee",
-  borderRadius: 8,
+  border: "1px solid #d49b2a",
+  borderLeft: "5px solid #d49b2a",
+  borderRadius: 4,
   padding: 16,
-  background: "#fff",
+  background: "#fff8ea",
   marginTop: 18,
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.7), 0 1px 0 rgba(92,59,0,0.06)",
 };
 const hdr: React.CSSProperties = {
   display: "flex",
@@ -3467,10 +3567,10 @@ const summaryStrip: React.CSSProperties = {
   margin: "8px 0 10px",
 };
 const summaryItem: React.CSSProperties = {
-  border: "1px solid #e5e7eb",
+  border: "1px solid rgba(212,155,42,0.46)",
   borderRadius: 6,
   padding: "6px 8px",
-  background: "#fafafa",
+  background: "rgba(255,255,255,0.72)",
   minWidth: 0,
 };
 const summaryLabel: React.CSSProperties = {
@@ -3494,9 +3594,9 @@ const summaryValue: React.CSSProperties = {
 const numberCountDisclosure: React.CSSProperties = {
   marginBottom: 10,
   padding: "8px 10px",
-  border: "1px solid #e5e7eb",
+  border: "1px solid rgba(212,155,42,0.46)",
   borderRadius: 6,
-  background: "#fff",
+  background: "rgba(255,255,255,0.72)",
   fontSize: 12,
 };
 const userSelectionStrip: React.CSSProperties = {
@@ -3564,15 +3664,6 @@ const userSelectionClearButton = (disabled: boolean): React.CSSProperties => ({
   fontSize: 11,
   fontWeight: 700,
   whiteSpace: "nowrap",
-});
-const genBtn = (disabled: boolean): React.CSSProperties => ({
-  padding: "6px 14px",
-  background: disabled ? "#bbb" : "#1976d2",
-  color: "#fff",
-  border: "none",
-  borderRadius: 4,
-  fontWeight: 600,
-  cursor: disabled ? "default" : "pointer",
 });
 const tbl: React.CSSProperties = {
   borderCollapse: "collapse",

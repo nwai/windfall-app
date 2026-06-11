@@ -210,9 +210,9 @@ Test coverage includes:
 
 The zone weighting system is designed to integrate with:
 
-1. **TTP (Temperature Transition Predictions)**
+1. **TTP (Temperature Transition Diagnostics)**
    - Use `getNumberWeightsFromTrends()` to nudge probabilities
-   - Apply weights as multipliers to transition probabilities
+   - Apply weights as multipliers to transition diagnostic scores
 
 2. **Candidate Generation**
    - Pass weights to `generateCandidates()` or similar functions
@@ -229,5 +229,5 @@ Potential improvements:
 - Moving window analysis (trends over recent N draws)
 - Multiple timescales (short-term vs long-term trends)
 - Zone correlation analysis
-- Pattern prediction (which patterns likely to appear next)
+- Pattern diagnostics with explicit out-of-sample validation
 - Export functionality (CSV, JSON)

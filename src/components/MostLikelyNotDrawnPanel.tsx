@@ -332,7 +332,6 @@ export const MostLikelyNotDrawnPanel: React.FC<MostLikelyNotDrawnPanelProps> = (
   
     <div style={{ background: '#f8fafc', padding: 12, border: '1px solid #eee', borderRadius: 6 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        <h3 style={{ margin: 0 }}>{title}</h3>
         <span style={{ fontSize: 12, color: '#666' }}>
           Window: {analysis.totalDraws} draws • Recent (WFMQY): {analysis.recentLen}
         </span>

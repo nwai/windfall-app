@@ -116,7 +116,6 @@ export function PatternStatsPanel({
         marginTop: "10px",
       }}
     >
-      <h3 style={{ marginTop: 0, marginBottom: "1rem" }}>Pattern Stats</h3>
       <div style={{ fontSize: "0.9rem", color: "#555", marginBottom: "1rem" }}>
         Distribution analysis over {draws.length} draws
       </div>

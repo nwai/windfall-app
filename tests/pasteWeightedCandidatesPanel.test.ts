@@ -110,4 +110,42 @@ describe("PasteWeightedCandidatesPanel", () => {
     });
     container.remove();
   });
+
+  it("reports generated rows for portfolio compression", async () => {
+    const generatedCounts: number[] = [];
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(React.createElement(PasteWeightedCandidatesPanel, {
+        initialPasteText: "1,2,3,4,5,6\n1,2,3,4,5,7\n8,9,10,11,12,13",
+        initialCandidateCount: 4,
+        onGeneratedCandidatesChange: (candidates) => generatedCounts.push(candidates.length),
+      }));
+    });
+
+    const generateButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent === "Generate paste-weighted candidates");
+    expect(generateButton).toBeDefined();
+    await act(async () => {
+      generateButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(generatedCounts.at(-1)).toBeGreaterThan(0);
+
+    const clearButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent === "Clear");
+    expect(clearButton).toBeDefined();
+    await act(async () => {
+      clearButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(generatedCounts.at(-1)).toBe(0);
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
 });

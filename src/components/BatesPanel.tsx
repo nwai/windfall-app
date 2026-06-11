@@ -147,7 +147,6 @@ export const BatesPanel: React.FC<BatesPanelProps> = ({
     <section style={panel}>
       <div style={header}>
         <div>
-          <h3 style={title}>Bates Weighting Panel</h3>
           <p style={subtitle}>
             Weighted sampling from the current historical signals. It describes the configured distribution; it does not predict future draws.
           </p>

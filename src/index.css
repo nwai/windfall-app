@@ -4,6 +4,7 @@
   --wf-charcoal: #171a1f;
   --wf-text: #111827;
   --wf-muted: #66707d;
+  --wf-section-title: #0752b8;
   --wf-page: #f7f8fa;
   --wf-surface: #ffffff;
   --wf-rule: #d5d9df;
@@ -15,6 +16,11 @@
   --wf-radius: 4px;
   --wf-radius-tight: 2px;
   --wf-shadow-subtle: 0 1px 0 rgba(9, 11, 13, 0.04);
+  --wf-press-shadow: inset 0 2px 4px rgba(9, 11, 13, 0.18);
+  --wf-generator-bg: #fff8ea;
+  --wf-generator-bg-strong: #fff1cf;
+  --wf-generator-rule: #d49b2a;
+  --wf-generator-ink: #5c3b00;
 }
 
 * {
@@ -33,7 +39,7 @@ body {
   background: var(--wf-page);
   color: var(--wf-text);
   font-family: var(--wf-font-sans);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.45;
 }
 
@@ -46,6 +52,73 @@ textarea {
 
 button {
   border-radius: var(--wf-radius-tight);
+}
+
+button:not(:disabled),
+[role="button"],
+.windfall-primary-button,
+.windfall-secondary-button,
+.windfall-hig-button,
+.windfall-inline-card__button,
+.windfall-section__favorite-button,
+.windfall-favorites-strip__link {
+  transition:
+    transform 80ms ease,
+    filter 80ms ease,
+    box-shadow 80ms ease,
+    border-color 80ms ease,
+    background-color 80ms ease;
+  touch-action: manipulation;
+}
+
+button:not(:disabled):active,
+[role="button"]:active,
+.windfall-primary-button:not([aria-disabled="true"]):active,
+.windfall-secondary-button:not([aria-disabled="true"]):active,
+.windfall-hig-button:not(:disabled):active,
+.windfall-inline-card__button:not(:disabled):active,
+.windfall-section__favorite-button:not(:disabled):active,
+.windfall-favorites-strip__link:active {
+  transform: translateY(1px) scale(0.985);
+  filter: brightness(0.96) saturate(1.04);
+  box-shadow: var(--wf-press-shadow);
+}
+
+button:disabled,
+[aria-disabled="true"] {
+  transform: none;
+  filter: none;
+  box-shadow: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button:not(:disabled),
+  [role="button"],
+  .windfall-primary-button,
+  .windfall-secondary-button,
+  .windfall-hig-button,
+  .windfall-inline-card__button,
+  .windfall-section__favorite-button,
+  .windfall-favorites-strip__link {
+    transition:
+      filter 80ms ease,
+      box-shadow 80ms ease,
+      border-color 80ms ease,
+      background-color 80ms ease;
+  }
+
+  button:not(:disabled):active,
+  [role="button"]:active,
+  .windfall-primary-button:not([aria-disabled="true"]):active,
+  .windfall-secondary-button:not([aria-disabled="true"]):active,
+  .windfall-hig-button:not(:disabled):active,
+  .windfall-inline-card__button:not(:disabled):active,
+  .windfall-section__favorite-button:not(:disabled):active,
+  .windfall-favorites-strip__link:active {
+    transform: none;
+    filter: brightness(0.94) saturate(1.04);
+    box-shadow: var(--wf-press-shadow);
+  }
 }
 
 input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]):not([type="button"]):not([type="submit"]):not([type="reset"]),
@@ -73,6 +146,7 @@ table {
 
 .windfall-app-shell {
   max-width: 1720px;
+  margin: 0 auto;
   padding: 18px;
   color: var(--wf-text);
   font-family: var(--wf-font-sans);
@@ -113,6 +187,18 @@ table {
   gap: 10px;
 }
 
+.windfall-trace-toggle {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 7px;
+  color: var(--wf-muted);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .windfall-micro-label {
   color: var(--wf-muted);
   font-size: 10px;
@@ -124,13 +210,13 @@ table {
 .windfall-primary-button,
 .windfall-secondary-button {
   display: inline-flex;
-  min-height: 30px;
+  min-height: 34px;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  padding: 7px 11px;
+  padding: 8px 12px;
   border-radius: var(--wf-radius-tight);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.04em;
   text-decoration: none;
@@ -150,23 +236,265 @@ table {
   color: var(--wf-ink);
 }
 
+.windfall-provenance-strip {
+  margin: 0 0 12px;
+  padding: 9px 10px;
+  border-radius: var(--wf-radius);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.windfall-provenance-strip--ready {
+  border: 1px solid #b9d8bd;
+  background: #f4fbf5;
+  color: #1f6230;
+}
+
+.windfall-provenance-strip--warning {
+  border: 1px solid #e2b84f;
+  background: #fff9e8;
+  color: #6b4a00;
+}
+
+.windfall-workflow-nav {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 0 0 14px;
+  padding: 8px 0 10px;
+  border-bottom: 1px solid var(--wf-rule);
+  background: rgba(247, 248, 250, 0.96);
+  backdrop-filter: blur(12px);
+}
+
+.windfall-workflow-nav__link {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  padding: 7px 11px;
+  border: 1px solid var(--wf-rule);
+  border-radius: var(--wf-radius-tight);
+  background: var(--wf-surface);
+  color: var(--wf-ink);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-decoration: none;
+  text-transform: uppercase;
+}
+
+.windfall-workflow-nav__link:hover {
+  border-color: var(--wf-ink);
+}
+
+.windfall-workflow-anchor {
+  scroll-margin-top: 72px;
+  margin: 18px 0 8px;
+  padding: 12px 0 8px;
+  border-top: 3px solid var(--wf-ink);
+}
+
+.windfall-workflow-anchor__eyebrow {
+  color: var(--wf-muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.windfall-workflow-anchor__title {
+  margin: 2px 0 0;
+  color: var(--wf-ink);
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.05;
+}
+
+.windfall-workflow-anchor__summary {
+  max-width: 780px;
+  margin: 5px 0 0;
+  color: var(--wf-muted);
+  font-size: 13px;
+}
+
+.windfall-hig-button {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 8px 12px;
+  border-radius: var(--wf-radius-tight);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.windfall-hig-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+}
+
+.windfall-hig-button--compact {
+  min-height: 32px;
+  padding: 6px 10px;
+  font-size: 11px;
+}
+
+.windfall-hig-button--primary {
+  border: 1px solid var(--wf-primary);
+  background: var(--wf-primary);
+  color: #ffffff;
+}
+
+.windfall-hig-button--secondary {
+  border: 1px solid var(--wf-ink);
+  background: var(--wf-surface);
+  color: var(--wf-ink);
+}
+
+.windfall-hig-button--quiet {
+  border: 1px solid var(--wf-rule);
+  background: #fbfcfd;
+  color: var(--wf-text);
+}
+
+.windfall-hig-button--danger {
+  border: 1px solid var(--wf-danger);
+  background: var(--wf-danger);
+  color: #ffffff;
+}
+
+.windfall-hig-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.windfall-hig-field__label {
+  color: var(--wf-ink);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.windfall-hig-field__control {
+  min-width: 0;
+}
+
+.windfall-hig-field__help {
+  color: var(--wf-muted);
+  font-size: 12px;
+}
+
+.windfall-hig-field__error {
+  color: var(--wf-danger);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.windfall-info-help {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+}
+
+.windfall-info-help__button {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--wf-rule);
+  border-radius: 999px;
+  background: var(--wf-surface);
+  color: var(--wf-ink);
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.windfall-info-help__panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  width: min(280px, calc(100vw - 32px));
+  padding: 9px 10px;
+  border: 1px solid var(--wf-ink);
+  border-radius: var(--wf-radius);
+  background: var(--wf-surface);
+  color: var(--wf-text);
+  box-shadow: 0 12px 28px rgba(9, 11, 13, 0.14);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.45;
+  text-align: left;
+  text-transform: none;
+}
+
+.windfall-sortable-header {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.windfall-sortable-header__button {
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.windfall-sortable-header .windfall-info-help__button {
+  width: 20px;
+  height: 20px;
+  font-size: 11px;
+}
+
 .windfall-section {
   margin-top: 12px;
   border-top: 1px solid var(--wf-rule);
+  scroll-margin-top: 74px;
 }
 
 .windfall-section__summary {
   display: flex;
+  justify-content: space-between;
   align-items: baseline;
   gap: 8px;
   padding: 10px 0;
   cursor: pointer;
 }
 
+.windfall-section__heading {
+  display: inline-flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
 .windfall-section__title {
-  color: var(--wf-ink);
+  color: var(--wf-section-title);
   font-size: 16px;
   font-weight: 800;
+}
+
+.windfall-section[open] > .windfall-section__summary .windfall-section__title {
+  color: #053f8f;
 }
 
 .windfall-section__hint {
@@ -177,6 +505,129 @@ table {
 
 .windfall-section__body {
   padding: 2px 0 8px;
+}
+
+.windfall-section--favorite {
+  border-top-color: var(--wf-primary);
+}
+
+.windfall-section:focus {
+  outline: 2px solid rgba(7, 95, 216, 0.42);
+  outline-offset: 3px;
+}
+
+.windfall-section--focus-pulse {
+  animation: windfall-section-focus-pulse 1.35s ease-out;
+}
+
+@keyframes windfall-section-focus-pulse {
+  0% {
+    box-shadow: inset 4px 0 0 var(--wf-primary);
+    background: rgba(7, 95, 216, 0.08);
+  }
+  100% {
+    box-shadow: inset 0 0 0 rgba(7, 95, 216, 0);
+    background: transparent;
+  }
+}
+
+.windfall-section__favorite-button {
+  display: inline-flex;
+  min-height: 30px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  margin-left: auto;
+  padding: 4px 8px;
+  border: 1px solid var(--wf-rule);
+  border-radius: 999px;
+  background: var(--wf-surface);
+  color: var(--wf-muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.windfall-section__favorite-button[aria-pressed="true"] {
+  border-color: #b88700;
+  background: #fff7d1;
+  color: #6f4d00;
+}
+
+.windfall-section__favorite-icon {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.windfall-favorites-strip {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  margin: -4px 0 14px;
+  padding: 8px 10px;
+  border: 1px solid var(--wf-rule);
+  border-left: 4px solid #b88700;
+  border-radius: var(--wf-radius);
+  background: #fffdf2;
+}
+
+.windfall-favorites-strip__label {
+  color: #6f4d00;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.windfall-favorites-strip__links {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.windfall-favorites-strip__link {
+  display: inline-flex;
+  min-height: 30px;
+  max-width: 260px;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border: 1px solid rgba(184, 135, 0, 0.32);
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--wf-ink);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.windfall-favorites-strip__link span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.windfall-favorites-strip__marker {
+  color: #b88700;
+  line-height: 1;
+}
+
+.windfall-favorites-strip__clear {
+  min-height: 30px;
+  border: 1px solid rgba(184, 135, 0, 0.36);
+  border-radius: var(--wf-radius-tight);
+  background: transparent;
+  color: #6f4d00;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
 }
 
 .windfall-inline-card,
@@ -246,6 +697,261 @@ table {
   padding: 12px;
 }
 
+.windfall-generator-panel {
+  border-color: var(--wf-generator-rule);
+  border-left: 5px solid var(--wf-generator-rule);
+  background: var(--wf-generator-bg);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    0 1px 0 rgba(92, 59, 0, 0.06);
+}
+
+.windfall-generator-panel .windfall-status-chip,
+.windfall-generator-panel .windfall-action-band {
+  border-color: rgba(212, 155, 42, 0.46);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.windfall-generator-panel textarea,
+.windfall-generator-panel input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]):not([type="button"]):not([type="submit"]):not([type="reset"]),
+.windfall-generator-panel select {
+  border-color: rgba(212, 155, 42, 0.58);
+}
+
+.windfall-generator-panel table {
+  background: #ffffff;
+}
+
+.windfall-influences-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+.windfall-influence-card {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--wf-rule);
+  border-radius: var(--wf-radius);
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: var(--wf-shadow-subtle);
+}
+
+.windfall-influence-card--wide {
+  grid-column: span 2;
+}
+
+.windfall-influence-card__title {
+  margin: 0;
+  color: var(--wf-ink);
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.15;
+}
+
+.windfall-influence-card__subtitle {
+  margin: -4px 0 0;
+  color: var(--wf-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.windfall-influence-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  color: var(--wf-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.windfall-influence-legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 220px;
+}
+
+.windfall-influence-legend__dot {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+.windfall-influence-legend__dot--boost {
+  border: 1px solid #d97706;
+  background: #f59e0b;
+}
+
+.windfall-influence-legend__dot--punish {
+  border: 1px solid #2563eb;
+  background: #60a5fa;
+}
+
+.windfall-influence-row-list {
+  display: grid;
+  gap: 8px;
+}
+
+.windfall-constraint-sections {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.windfall-constraint-section {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--wf-soft-rule);
+  border-radius: var(--wf-radius);
+  background: rgba(255, 255, 255, 0.56);
+}
+
+.windfall-constraint-section--timing {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  align-items: start;
+}
+
+.windfall-constraint-section__header {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.windfall-constraint-section--timing .windfall-constraint-section__header {
+  grid-column: 1 / -1;
+}
+
+.windfall-constraint-section__title,
+.windfall-constraint-subgroup__title {
+  color: var(--wf-ink);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.windfall-constraint-section__subtitle {
+  color: var(--wf-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.windfall-constraint-section__grid {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.windfall-constraint-section__grid > * {
+  min-width: 0;
+}
+
+.windfall-constraint-section__grid--ending,
+.windfall-constraint-section__grid--decade {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+}
+
+.windfall-constraint-section .windfall-influence-control-grid {
+  grid-template-columns: repeat(4, minmax(58px, max-content));
+}
+
+.windfall-constraint-section .windfall-influence-bias-grid {
+  grid-template-columns: minmax(70px, max-content) minmax(0, 1fr);
+}
+
+.windfall-constraint-section .windfall-influence-number-summary {
+  grid-column: 1 / -1;
+}
+
+.windfall-constraint-subgroup {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--wf-soft-rule);
+  background: rgba(251, 252, 253, 0.72);
+}
+
+.windfall-influence-control-grid,
+.windfall-influence-bias-grid {
+  display: grid;
+  gap: 8px;
+  align-items: center;
+}
+
+.windfall-influence-control-grid {
+  grid-template-columns: repeat(4, minmax(64px, max-content)) minmax(220px, 1fr);
+}
+
+.windfall-influence-bias-grid {
+  grid-template-columns: minmax(74px, max-content) minmax(220px, 1fr);
+}
+
+.windfall-influence-number-summary {
+  min-width: 0;
+  color: #555555;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.windfall-influence-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.windfall-influence-mini-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 4px 10px;
+  font-size: 12px;
+}
+
+.windfall-influence-boost-grid {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(48px, max-content) minmax(72px, max-content);
+  gap: 3px 8px;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.windfall-influence-provenance {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--wf-rule);
+  border-radius: var(--wf-radius);
+  background: #fbfcfd;
+  color: #4b5563;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.windfall-influence-report {
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid var(--wf-rule);
+  border-radius: var(--wf-radius);
+  background: #fbfcfd;
+  color: #333333;
+  font-size: 12px;
+}
+
+.windfall-influence-report__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+}
+
 .windfall-evidence-panel {
   padding: 14px;
 }
@@ -300,6 +1006,20 @@ table {
   color: var(--wf-danger);
 }
 
+@media (max-width: 1180px) {
+  .windfall-influence-card--wide {
+    grid-column: 1 / -1;
+  }
+
+  .windfall-influence-control-grid {
+    grid-template-columns: repeat(4, minmax(64px, max-content));
+  }
+
+  .windfall-influence-number-summary {
+    grid-column: 1 / -1;
+  }
+}
+
 @media (max-width: 760px) {
   .windfall-app-shell {
     padding: 12px;
@@ -316,5 +1036,67 @@ table {
 
   .windfall-app-title {
     font-size: 27px;
+  }
+
+  .windfall-workflow-nav {
+    position: static;
+    gap: 6px;
+  }
+
+  .windfall-workflow-nav__link {
+    flex: 1 1 calc(50% - 6px);
+  }
+
+  .windfall-workflow-anchor {
+    scroll-margin-top: 12px;
+  }
+
+  .windfall-workflow-anchor__title {
+    font-size: 20px;
+  }
+
+  .windfall-section__favorite-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .windfall-section__favorite-button {
+    width: 32px;
+    padding: 4px;
+  }
+
+  .windfall-favorites-strip {
+    grid-template-columns: 1fr auto;
+  }
+
+  .windfall-favorites-strip__label {
+    grid-column: 1 / -1;
+  }
+
+  .windfall-influence-card--wide {
+    grid-column: 1 / -1;
+  }
+
+  .windfall-influence-control-grid,
+  .windfall-influence-bias-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .windfall-constraint-section .windfall-influence-control-grid,
+  .windfall-constraint-section .windfall-influence-bias-grid,
+  .windfall-constraint-section--timing {
+    grid-template-columns: 1fr;
+  }
+
+  .windfall-influence-number-summary {
+    width: 100%;
+  }
+
+  .windfall-influence-boost-grid {
+    grid-template-columns: 1fr;
   }
 }

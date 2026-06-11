@@ -271,7 +271,6 @@ export const SelectionInsightsPanel: React.FC<SelectionInsightsPanelProps> = ({
   if (isComputing && !info) {
     return (
       <section style={sectionStyle}>
-        <h3 style={{ margin: 0, fontSize: 16 }}>Selection Insights</h3>
         <div style={{ fontSize: 12, color: "#666", marginTop: 6 }}>
           Computing co-occurrence analytics…
         </div>
@@ -288,7 +287,6 @@ export const SelectionInsightsPanel: React.FC<SelectionInsightsPanelProps> = ({
   return (
     <section style={sectionStyle}>
       <div style={{ display: "flex", gap: 16, alignItems: "center", marginBottom: 10 }}>
-        <h3 style={{ margin: 0, fontSize: 16 }}>Selection Insights</h3>
         {historyWindowName && (
           <span style={{ fontSize: 12, color: "#1a4fa3", background: "#e8eefc", padding: "2px 8px", borderRadius: 6, fontWeight: 600 }}>
             {historyWindowName}

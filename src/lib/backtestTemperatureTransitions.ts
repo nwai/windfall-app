@@ -8,6 +8,7 @@ import {
   Temperature,
   TemperatureClassifierOptions,
 } from "./temperatureCategories";
+import { filterRealDrawHistory } from "./realDrawHistory";
 
 export interface BacktestWindowResult {
   windowStart: number;   // index into history
@@ -28,7 +29,17 @@ export interface BacktestSummary {
   meanPrecision: number;
   meanRecall: number;
   meanF1: number;
+  warnings: string[];
 }
+
+const emptySummary = (warnings: string[] = []): BacktestSummary => ({
+  windows: [],
+  meanAccuracy: 0,
+  meanPrecision: 0,
+  meanRecall: 0,
+  meanF1: 0,
+  warnings,
+});
 
 /**
  * Legacy/compat wrapper: threshold-based backtest (kept for backward compatibility).
@@ -43,7 +54,7 @@ export function backtestTemperatureTransitions(
 }
 
 /**
- * Threshold mode: predict "hit" if P(V | currentTemp) >= threshold.
+ * Threshold mode: select a row if the empirical hit rate is at or above the threshold.
  * Honors small windows; caller should ensure windowSize <= history.length - 1.
  */
 export function backtestTemperatureTransitionsThreshold(
@@ -52,9 +63,11 @@ export function backtestTemperatureTransitionsThreshold(
   threshold: number = 0.5,
   classifierOptions: TemperatureClassifierOptions = {}
 ): BacktestSummary {
+  const realHistory = filterRealDrawHistory(history, "temperature-transition backtests");
+  history = realHistory.history;
   const windows: BacktestWindowResult[] = [];
   if (history.length <= windowSize) {
-    return { windows, meanAccuracy: 0, meanPrecision: 0, meanRecall: 0, meanF1: 0 };
+    return emptySummary(realHistory.warnings);
   }
 
   const heightNumbers = classifierOptions.heightNumbers ?? 45;
@@ -81,15 +94,15 @@ export function backtestTemperatureTransitionsThreshold(
 
     for (let n = 1; n <= heightNumbers; n++) {
       const p = getTransitionProbability(matrix, n, latestCat[n]);
-      const predictHit = p >= threshold;
+      const selectHit = p >= threshold;
       const actualHit = nextDraw.main.includes(n) || nextDraw.supp.includes(n);
 
-      if (predictHit) positivesPredicted++;
+      if (selectHit) positivesPredicted++;
       if (actualHit) positivesActual++;
 
-      if (predictHit && actualHit) TP++;
-      else if (predictHit && !actualHit) FP++;
-      else if (!predictHit && actualHit) FN++;
+      if (selectHit && actualHit) TP++;
+      else if (selectHit && !actualHit) FP++;
+      else if (!selectHit && actualHit) FN++;
       else TN++;
     }
 
@@ -122,11 +135,12 @@ export function backtestTemperatureTransitionsThreshold(
     meanPrecision: mean("precision"),
     meanRecall: mean("recall"),
     meanF1: mean("f1"),
+    warnings: realHistory.warnings,
   };
 }
 
 /**
- * Top-K mode: predict the top K numbers by P(V | currentTemp).
+ * Top-K mode: select the top K numbers by empirical hit rate.
  * Honors small windows; caller ensures windowSize <= history.length - 1.
  */
 export function backtestTemperatureTransitionsTopK(
@@ -135,9 +149,11 @@ export function backtestTemperatureTransitionsTopK(
   topK: number = 8,
   classifierOptions: TemperatureClassifierOptions = {}
 ): BacktestSummary {
+  const realHistory = filterRealDrawHistory(history, "temperature-transition backtests");
+  history = realHistory.history;
   const windows: BacktestWindowResult[] = [];
   if (history.length <= windowSize) {
-    return { windows, meanAccuracy: 0, meanPrecision: 0, meanRecall: 0, meanF1: 0 };
+    return emptySummary(realHistory.warnings);
   }
 
   const heightNumbers = classifierOptions.heightNumbers ?? 45;
@@ -169,13 +185,13 @@ export function backtestTemperatureTransitionsTopK(
     let positivesActual = 0;
 
     for (let n = 1; n <= heightNumbers; n++) {
-      const predictHit = selected.has(n);
+      const selectHit = selected.has(n);
       const actualHit = nextDraw.main.includes(n) || nextDraw.supp.includes(n);
       if (actualHit) positivesActual++;
 
-      if (predictHit && actualHit) TP++;
-      else if (predictHit && !actualHit) FP++;
-      else if (!predictHit && actualHit) FN++;
+      if (selectHit && actualHit) TP++;
+      else if (selectHit && !actualHit) FP++;
+      else if (!selectHit && actualHit) FN++;
       else TN++;
     }
 
@@ -208,5 +224,6 @@ export function backtestTemperatureTransitionsTopK(
     meanPrecision: mean("precision"),
     meanRecall: mean("recall"),
     meanF1: mean("f1"),
+    warnings: realHistory.warnings,
   };
 }

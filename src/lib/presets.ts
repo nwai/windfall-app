@@ -2,6 +2,7 @@
 // v1 keeps data purely client-side and exportable/importable.
 
 import { normalizeBatesParameters, type BatesParameterSet } from "./batesWeightsCore";
+import { normalizeFavoritePanelIds } from "./panelFavorites";
 import { normalizeWeightedTargetNumbers, normalizeWeightedTargets } from "./weightedTargets";
 
 export type UUID = string;
@@ -225,7 +226,7 @@ export interface AppPresetSnapshot {
   patternConstraintMode?: "boost" | "restrict";
   patternBoostFactor?: number;
   patternSumTolerance?: number;
-  selectedWindowPatterns?: { low: number; high: number; even: number; odd: number; sum: number }[];
+  selectedWindowPatterns?: { low: number; high: number; odd: number; even: number; sum: number }[];
   insightsEnabled?: boolean;
   dgaHeatmapView?: "temperature" | "monthlyBucketState";
   tempMetric?: "ema" | "recency" | "hybrid";
@@ -258,6 +259,9 @@ export interface AppPresetSnapshot {
   // Pick-Six conversion panel
   pickSixSource?: PresetPickSixSource;
   pickSixManual?: number[];
+
+  // Attention / favorites
+  favoritePanelIds?: string[];
 }
 
 const KEY = "app:presets:v1";
@@ -352,7 +356,7 @@ function normalizeProbabilityOverlay(value: unknown): PresetProbabilityOverlay |
 export function normalizeAppPresetSnapshot(snapshot: AppPresetSnapshot): AppPresetSnapshot {
   const userSelectedNumbers = normalizeWeightedTargetNumbers(snapshot.userSelectedNumbers);
 
-  return {
+  const normalized: AppPresetSnapshot = {
     ...snapshot,
     userSelectedNumbers,
     weightedTargets: normalizeWeightedTargets(userSelectedNumbers, snapshot.weightedTargets),
@@ -377,6 +381,12 @@ export function normalizeAppPresetSnapshot(snapshot: AppPresetSnapshot): AppPres
     pickSixSource: normalizePickSixSource(snapshot.pickSixSource),
     pickSixManual: normalizePickSixManual(snapshot.pickSixManual),
   };
+
+  if (Array.isArray(snapshot.favoritePanelIds)) {
+    normalized.favoritePanelIds = normalizeFavoritePanelIds(snapshot.favoritePanelIds);
+  }
+
+  return normalized;
 }
 
 function uid(): UUID {

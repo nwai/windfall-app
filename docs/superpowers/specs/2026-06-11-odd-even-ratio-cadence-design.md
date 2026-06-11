@@ -41,7 +41,7 @@ Inputs:
 - `draws`: chronological draw history.
 - `scope`: `"mains-plus-supps"` or `"mains"`.
 - `recentWindow`: default `50`, clamped to available valid draws.
-- `rarePercentThreshold`: default `5`.
+- `rarePercentThreshold`: default `5`, configurable from `1` to `5`.
 
 Validation:
 
@@ -123,6 +123,8 @@ Create `src/components/OddEvenRatioCadencePanel.tsx`.
 The panel should contain:
 
 - A compact control row with scope selector, recent-window selector, and rare-threshold selector.
+  - The rare-threshold selector must offer `1%`, `2%`, `3%`, `4%`, and `5%`.
+  - It defaults to `5%`.
 - A pure SVG timeline chart:
   - x-axis: valid draw order from older to newer.
   - y-axis: odd/even ratio rows, ordered odd-heavy at the top and even-heavy at the bottom.

@@ -140,7 +140,6 @@ export const HotColdRankingPanel: React.FC<HotColdRankingPanelProps> = ({ histor
     <section style={{ border: "1px solid #e5e7eb", borderRadius: 8, background: "#fff", padding: 12, display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
         <div>
-          <div style={{ fontWeight: 700, fontSize: 16, color: "#223" }}>Hot vs Cold Ranking</div>
           <div style={{ fontSize: 12, color: "#667", marginTop: 2 }}>
             Compares <b>historical frequency</b>, <b>recent-window hotness</b>, and <b>recency-weighted hotness</b> so you can see when those rankings agree or diverge.
           </div>

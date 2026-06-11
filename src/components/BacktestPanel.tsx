@@ -225,6 +225,22 @@ export const BacktestPanel: React.FC<BacktestPanelProps> = ({ history }) => {
       {/* Results summary */}
       {result && (
         <div style={{ marginTop: 10 }}>
+          {result.warnings && result.warnings.length > 0 && (
+            <div
+              style={{
+                marginBottom: 8,
+                padding: '8px 10px',
+                border: '1px solid #e2b84f',
+                background: '#fff9e8',
+                color: '#6b4a00',
+                borderRadius: 6,
+                fontSize: 12,
+                lineHeight: 1.45,
+              }}
+            >
+              <b>Analytical warning:</b> {result.warnings.join(' ')}
+            </div>
+          )}
           <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '2px 12px', fontSize: 13, maxWidth: 420 }}>
             <span style={{ color: '#888' }}>Draws evaluated:</span>
             <span>{result.drawsEvaluated}</span>
