@@ -71,4 +71,17 @@ describe("HIG contributor guardrails", () => {
     expect(cssSource).toContain(".windfall-favorites-strip");
     expect(cssSource).toContain(".windfall-section__favorite-text");
   });
+
+  it("keeps the iCloud-informed visual-system tokens on shared surfaces", () => {
+    const cssSource = readRepoFile("src/index.css");
+
+    expect(cssSource).toContain("--wf-glass-surface");
+    expect(cssSource).toContain("--wf-panel-shadow");
+    expect(cssSource).toContain("--wf-control-radius");
+    expect(cssSource).toContain("--wf-backdrop-blur");
+    expect(cssSource).toContain(".windfall-app-shell");
+    expect(cssSource).toContain(".windfall-workflow-nav");
+    expect(cssSource).toContain(".windfall-section");
+    expect(cssSource).toContain(".windfall-generator-panel");
+  });
 });

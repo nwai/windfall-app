@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   generatePasteWeightedCandidates,
   parsePastedCandidateNumbers,
+  reconcileStageIdmTargetCounts,
 } from "./pasteWeightedCandidates";
+import type { MonthlyBucketSets } from "./monthlyDrawSummary";
 
 const seededRng = (seed: number): (() => number) => {
   let state = seed >>> 0;
@@ -11,6 +13,34 @@ const seededRng = (seed: number): (() => number) => {
     state = (1664525 * state + 1013904223) >>> 0;
     return state / 0x100000000;
   };
+};
+
+const monthlyBuckets = (bucketNumbers: Partial<Record<keyof MonthlyBucketSets, number[]>>): MonthlyBucketSets => ({
+  undrawn: new Set(bucketNumbers.undrawn ?? []),
+  times1: new Set(bucketNumbers.times1 ?? []),
+  times2: new Set(bucketNumbers.times2 ?? []),
+  times3: new Set(bucketNumbers.times3 ?? []),
+  times4: new Set(bucketNumbers.times4 ?? []),
+  times5: new Set(bucketNumbers.times5 ?? []),
+  times6: new Set(bucketNumbers.times6 ?? []),
+  times7: new Set(bucketNumbers.times7 ?? []),
+  times8: new Set(bucketNumbers.times8 ?? []),
+});
+
+const countCandidateBuckets = (numbers: number[], buckets: MonthlyBucketSets): number[] => {
+  const counts = new Array(9).fill(0);
+  for (const number of numbers) {
+    if (buckets.undrawn.has(number)) counts[0] += 1;
+    else if (buckets.times1.has(number)) counts[1] += 1;
+    else if (buckets.times2.has(number)) counts[2] += 1;
+    else if (buckets.times3.has(number)) counts[3] += 1;
+    else if (buckets.times4.has(number)) counts[4] += 1;
+    else if (buckets.times5.has(number)) counts[5] += 1;
+    else if (buckets.times6.has(number)) counts[6] += 1;
+    else if (buckets.times7.has(number)) counts[7] += 1;
+    else if (buckets.times8.has(number)) counts[8] += 1;
+  }
+  return counts;
 };
 
 describe("parsePastedCandidateNumbers", () => {
@@ -236,5 +266,64 @@ describe("generatePasteWeightedCandidates", () => {
       "S1:0 D0:5": 6,
       "S0:0 D0:6": 4,
     });
+  });
+
+  it("rescales an eight-slot Stage IDM mix into an exact six-main target", () => {
+    expect(reconcileStageIdmTargetCounts([0, 2, 3, 2, 1, 0, 0, 0, 0], 6)).toEqual([
+      0, 2, 2, 1, 1, 0, 0, 0, 0,
+    ]);
+  });
+
+  it("enforces exact mains-only Stage IDM bucket composition when enabled", () => {
+    const input = Array.from({ length: 45 }, (_, index) => index + 1).join(",");
+    const buckets = monthlyBuckets({
+      undrawn: [1, 2, 3, 4, 5, 6, 7, 8],
+      times1: [9, 10, 11, 12, 13, 14, 15, 16],
+      times2: [17, 18, 19, 20, 21, 22, 23, 24],
+      times3: [25, 26, 27, 28, 29, 30, 31, 32],
+      times4: [33, 34, 35, 36, 37, 38],
+      times5: [39, 40, 41],
+      times6: [42],
+      times7: [43],
+      times8: [44, 45],
+    });
+    const targetCounts = [1, 2, 2, 1, 0, 0, 0, 0, 0];
+
+    const result = generatePasteWeightedCandidates(input, {
+      candidateCount: 8,
+      rng: seededRng(7070),
+      constraints: {
+        stageIdm: {
+          enabled: true,
+          bucketSets: buckets,
+          targetCounts,
+        },
+      },
+    });
+
+    expect(result.candidates).toHaveLength(8);
+    expect(result.stageIdmSummary?.targetCounts).toEqual(targetCounts);
+    expect(result.stageIdmSummary?.totalAccepted).toBe(8);
+    for (const candidate of result.candidates) {
+      expect(countCandidateBuckets(candidate.main, buckets)).toEqual(targetCounts);
+    }
+  });
+
+  it("warns honestly when the Stage IDM target is not six mains", () => {
+    const input = Array.from({ length: 45 }, (_, index) => index + 1).join(",");
+    const result = generatePasteWeightedCandidates(input, {
+      candidateCount: 4,
+      rng: seededRng(8080),
+      constraints: {
+        stageIdm: {
+          enabled: true,
+          bucketSets: monthlyBuckets({ undrawn: [1, 2, 3, 4, 5, 6] }),
+          targetCounts: [1, 1, 1, 0, 0, 0, 0, 0, 0],
+        },
+      },
+    });
+
+    expect(result.candidates).toEqual([]);
+    expect(result.warnings).toContain("Stage IDM bucket mix must total exactly six mains before it can filter paste-weighted candidates.");
   });
 });

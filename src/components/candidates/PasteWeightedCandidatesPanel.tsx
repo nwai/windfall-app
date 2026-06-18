@@ -2,8 +2,15 @@ import React, { useMemo, useState } from "react";
 import type { Draw } from "../../types";
 import { buildAdaptiveShapeEvidence } from "../../lib/adaptiveCandidateShapes";
 import {
+  bucketLabelForTimes,
+  MONTHLY_BUCKET_KEYS,
+  type MonthlyFrequencyConstraints,
+  type StageIdealDrawState,
+} from "../../lib/monthlyDrawSummary";
+import {
   generatePasteWeightedCandidates,
   parsePastedCandidateNumbers,
+  reconcileStageIdmTargetCounts,
   type PasteWeightedGenerationResult,
   type PasteWeightedCandidateConstraintMode,
 } from "../../lib/pasteWeightedCandidates";
@@ -17,9 +24,12 @@ interface PasteWeightedCandidatesPanelProps {
   fullHistory?: Draw[];
   activeHistory?: Draw[];
   activeWindowLabel?: string;
+  stageIdealDrawState?: StageIdealDrawState | null;
+  monthlyAcceptanceNeeds?: MonthlyFrequencyConstraints | null;
 }
 
 const candidateCountOptions = Array.from({ length: 27 }, (_, index) => index + 4);
+const stageBucketCountOptions = Array.from({ length: 7 }, (_, index) => index);
 
 const headingStyle: React.CSSProperties = {
   display: "flex",
@@ -101,6 +111,16 @@ const selectStyle: React.CSSProperties = {
   background: "#fff",
 };
 
+const compactBucketLabel = (times: number): string => (
+  times <= 0 ? "0x" : bucketLabelForTimes(times)
+);
+
+const formatStageIdmCounts = (counts: readonly number[]): string => (
+  counts
+    .map((count, times) => `${compactBucketLabel(times)} ${count}`)
+    .join(" · ")
+);
+
 export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanelProps> = ({
   onSimulateCandidate,
   onGeneratedCandidatesChange,
@@ -110,6 +130,8 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
   fullHistory = [],
   activeHistory = [],
   activeWindowLabel = "WFMQYH",
+  stageIdealDrawState = null,
+  monthlyAcceptanceNeeds = null,
 }) => {
   const [pasteText, setPasteText] = useState(initialPasteText);
   const [candidateCount, setCandidateCount] = useState(initialCandidateCount);
@@ -119,6 +141,8 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
   const [selectedOddEvenRatios, setSelectedOddEvenRatios] = useState<string[]>([]);
   const [adaptiveShapeEnabled, setAdaptiveShapeEnabled] = useState(false);
   const [adaptiveShapeMode, setAdaptiveShapeMode] = useState<"observe" | "quota">("observe");
+  const [stageIdmEnabled, setStageIdmEnabled] = useState(false);
+  const [stageIdmTargetCounts, setStageIdmTargetCounts] = useState<number[] | null>(null);
   const [result, setResult] = useState<PasteWeightedGenerationResult | null>(null);
 
   const parsed = useMemo(() => parsePastedCandidateNumbers(pasteText), [pasteText]);
@@ -131,6 +155,13 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
   const oddEvenRatioOptions = parsed.oddEvenRatios;
   const adaptiveShapeProfiles = adaptiveShapeEvidence?.profileOptions ?? [];
   const adaptiveShapeProfileRows = adaptiveShapeProfiles.slice(0, 8);
+  const defaultStageIdmTargetCounts = useMemo(
+    () => reconcileStageIdmTargetCounts(stageIdealDrawState?.idealDrawBucketCounts, 6),
+    [stageIdealDrawState],
+  );
+  const activeStageIdmTargetCounts = stageIdmTargetCounts ?? defaultStageIdmTargetCounts;
+  const stageIdmTargetTotal = activeStageIdmTargetCounts.reduce((sum, count) => sum + count, 0);
+  const stageIdmAvailable = stageIdealDrawState !== null;
   const availableOddEvenRatioSet = new Set(oddEvenRatioOptions.map((option) => option.ratio));
   const activeSelectedOddEvenRatios = selectedOddEvenRatios.filter((ratio) => availableOddEvenRatioSet.has(ratio));
   const maxCount = countsForDisplay[0]?.count ?? 0;
@@ -139,7 +170,12 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
     && (!row.expectedSixNumbers || row.duplicateNumbers.length > 0 || row.outOfRangeNumbers.length > 0)
   ));
   const needsOddEvenSelection = oddEvenEnabled && activeSelectedOddEvenRatios.length === 0;
-  const canGenerate = parsed.uniqueNumbers >= 6 && !needsOddEvenSelection;
+  const needsStageIdmState = stageIdmEnabled && !stageIdmAvailable;
+  const needsStageIdmSixMains = stageIdmEnabled && stageIdmTargetTotal !== 6;
+  const canGenerate = parsed.uniqueNumbers >= 6
+    && !needsOddEvenSelection
+    && !needsStageIdmState
+    && !needsStageIdmSixMains;
 
   const clearResult = () => {
     setResult(null);
@@ -161,6 +197,11 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
           enabled: adaptiveShapeEnabled && adaptiveShapeEvidence !== null,
           mode: adaptiveShapeMode,
           profileOptions: adaptiveShapeProfiles,
+        },
+        stageIdm: {
+          enabled: stageIdmEnabled,
+          bucketSets: stageIdealDrawState?.bucketSets ?? null,
+          targetCounts: activeStageIdmTargetCounts,
         },
       },
     });
@@ -210,6 +251,25 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
     clearResult();
   };
 
+  const updateStageIdmEnabled = (enabled: boolean) => {
+    setStageIdmEnabled(enabled);
+    clearResult();
+  };
+
+  const updateStageIdmTargetCount = (times: number, count: number) => {
+    setStageIdmTargetCounts((current) => {
+      const next = [...(current ?? defaultStageIdmTargetCounts)];
+      next[times] = count;
+      return next;
+    });
+    clearResult();
+  };
+
+  const resetStageIdmTargetCounts = () => {
+    setStageIdmTargetCounts(null);
+    clearResult();
+  };
+
   const oddEvenSummaryRows = result?.oddEvenRatioSummary?.targetRatios
     ? Object.entries(result.oddEvenRatioSummary.targetRatios)
       .map(([ratio, target]) => ({
@@ -226,6 +286,7 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
         accepted: result.adaptiveShapeSummary?.acceptedRatios[profile] ?? targetOrAccepted,
       }))
     : [];
+  const stageIdmSummary = result?.stageIdmSummary;
 
   return (
     <section className="windfall-ledger-panel windfall-generator-panel" aria-label="Paste-Weighted Candidate Generator">
@@ -461,6 +522,85 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
               <div style={mutedStyle}>Connects to WFMQYH history when draw history is available.</div>
             )}
           </div>
+          <div style={{ ...constraintControlStyle, gridColumn: "1 / -1" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 800, color: "#334155" }}>
+                <input
+                  type="checkbox"
+                  checked={stageIdmEnabled}
+                  disabled={!stageIdmAvailable}
+                  onChange={(event) => updateStageIdmEnabled(event.target.checked)}
+                />
+                Stage IDM bucket mix
+              </label>
+              <button
+                type="button"
+                className="windfall-secondary-button"
+                onClick={resetStageIdmTargetCounts}
+                disabled={!stageIdmAvailable}
+                style={{
+                  padding: "4px 9px",
+                  opacity: stageIdmAvailable ? 1 : 0.55,
+                  cursor: stageIdmAvailable ? "pointer" : "not-allowed",
+                }}
+              >
+                Reset to Stage IDM
+              </button>
+            </div>
+            {stageIdealDrawState ? (
+              <>
+                <div style={mutedStyle}>
+                  Descriptive next-stage monthly bucket composition. Mains-only quota; not a probability.
+                  {" "}{stageIdealDrawState.workingMonthLabel} · draw {stageIdealDrawState.targetStageDrawCount} of {stageIdealDrawState.expectedDrawCount}.
+                </div>
+                <div style={mutedStyle}>
+                  Mains-only default: {formatStageIdmCounts(defaultStageIdmTargetCounts)}
+                </div>
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(108px, 1fr))",
+                  gap: 8,
+                }}>
+                  {MONTHLY_BUCKET_KEYS.map((key, times) => {
+                    const acceptanceNeed = monthlyAcceptanceNeeds?.[key] ?? null;
+                    return (
+                      <label key={key} style={{ display: "grid", gap: 3, fontSize: 11, color: "#334155", fontWeight: 700 }}>
+                        {compactBucketLabel(times)}
+                        <select
+                          value={activeStageIdmTargetCounts[times] ?? 0}
+                          disabled={!stageIdmEnabled}
+                          onChange={(event) => updateStageIdmTargetCount(times, Number(event.target.value))}
+                          style={{ ...selectStyle, minHeight: 32, opacity: stageIdmEnabled ? 1 : 0.58 }}
+                          aria-label={`Stage IDM ${bucketLabelForTimes(times)} main count`}
+                        >
+                          {stageBucketCountOptions.map((option) => (
+                            <option key={option} value={option}>
+                              {option}{acceptanceNeed === option ? " (Acceptance needs)" : ""}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    );
+                  })}
+                </div>
+                <div style={{
+                  ...mutedStyle,
+                  color: stageIdmTargetTotal === 6 ? "#166534" : "#92400e",
+                  background: stageIdmTargetTotal === 6 ? "#f0fdf4" : "#fffbeb",
+                  border: `1px solid ${stageIdmTargetTotal === 6 ? "#bbf7d0" : "#fde68a"}`,
+                  borderRadius: 6,
+                  padding: 8,
+                }}>
+                  Selected Stage IDM mains total: <b>{stageIdmTargetTotal}</b>/6.
+                  {stageIdmTargetTotal === 6
+                    ? " Enabled generation will require every candidate to match this exact bucket mix."
+                    : " Adjust the dropdowns to total exactly six before generating with this filter."}
+                </div>
+              </>
+            ) : (
+              <div style={mutedStyle}>Stage IDM appears here after Monthly Draws Summary has comparable month-stage evidence.</div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -485,7 +625,11 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
           <span style={mutedStyle}>
             {needsOddEvenSelection
               ? "Select at least one mains-only odd/even ratio."
-              : "Paste at least six distinct valid numbers to generate."}
+              : needsStageIdmState
+                ? "Stage IDM is unavailable from Monthly Draws Summary."
+                : needsStageIdmSixMains
+                  ? "Stage IDM bucket mix must total exactly six mains."
+                  : "Paste at least six distinct valid numbers to generate."}
           </span>
         )}
       </div>
@@ -514,6 +658,13 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
                 : `${row.profile} ${row.accepted}/${row.target}`
             ))
             .join(" | ")}
+        </div>
+      )}
+
+      {stageIdmSummary && (
+        <div style={{ ...mutedStyle, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 6, padding: 8 }}>
+          Stage IDM accepted: {formatStageIdmCounts(stageIdmSummary.targetCounts)}
+          {" "}· {stageIdmSummary.totalAccepted}/{stageIdmSummary.requested} candidate{stageIdmSummary.requested === 1 ? "" : "s"}
         </div>
       )}
 

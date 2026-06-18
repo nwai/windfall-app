@@ -9,7 +9,12 @@ import {
   scoreMonthEndCarryOverCandidate,
 } from "./monthEndCarryOver";
 
-const draw = (date: string, main: number[], supp: number[] = []): Draw => ({ date, main, supp });
+const draw = (date: string, main: number[], supp: number[] = [], isSimulated = false): Draw => ({
+  date,
+  main,
+  supp,
+  isSimulated,
+});
 const allNumbers = Array.from({ length: 45 }, (_, index) => index + 1);
 
 const coveredMonth = (monthLabel: string, omitted: number[], firstDrawStartsWith: number[] = []): Draw[] => {
@@ -59,6 +64,36 @@ describe("analyzeMonthEndCarryOver", () => {
     expect(analysis.timing).toHaveLength(1);
     expect(analysis.timing[0]).toMatchObject({ drawOffset: 1, hitCount: 16 });
     expect(analysis.topEarlyHitNumbers[0].number).toBe(17);
+  });
+
+  it("ignores simulated fallback rows instead of treating them as month-end carry-over evidence", () => {
+    const realHistory: Draw[] = [
+      draw("2026-01-02", [1, 2, 3, 4, 5, 6], [7, 8]),
+      draw("2026-01-09", [9, 10, 11, 12, 13, 14], [15, 16]),
+      draw("2026-02-03", [17, 18, 19, 20, 21, 22], [23, 24]),
+      draw("2026-02-10", [25, 26, 27, 28, 29, 30], [31, 32]),
+      draw("2026-03-05", [33, 34, 35, 36, 37, 38], [39, 40]),
+      draw("2026-03-12", [41, 42, 43, 44, 45, 1], [2, 3]),
+    ];
+    const contaminatedHistory = [
+      ...realHistory,
+      draw("2026-04-01", [1, 2, 3, 4, 5, 6], [7, 8], true),
+    ];
+
+    const clean = analyzeMonthEndCarryOver(realHistory, { includeSupp: true, earlyDrawLimit: 1, topNumbers: 5 });
+    const contaminated = analyzeMonthEndCarryOver(contaminatedHistory, { includeSupp: true, earlyDrawLimit: 1, topNumbers: 5 });
+    const weighting = buildMonthEndCarryOverWeighting(contaminatedHistory, {
+      includeSupp: true,
+      referenceDate: new Date("2026-03-15T00:00:00Z"),
+    });
+
+    expect(contaminated.notes).toContain(
+      "Ignored 1 simulated fallback draw row; month-end carry-over diagnostics use real historical draws only.",
+    );
+    expect(contaminated.summary).toEqual(clean.summary);
+    expect(weighting.notes).toContain(
+      "Ignored 1 simulated fallback draw row; month-end carry-over weighting calculations use real historical draws only.",
+    );
   });
 
   it("reflects supplementary inclusion in early-next-month hit rates", () => {

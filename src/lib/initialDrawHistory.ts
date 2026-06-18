@@ -20,9 +20,24 @@ export function chooseInitialDrawHistory(
 ): InitialDrawHistoryChoice {
   const cached = cachedHistory ?? [];
   const bundled = bundledCsvHistory ?? [];
+  const cachedIsSimulatedOnly = cached.length > 0 && cached.every((draw) => draw.isSimulated);
 
   if (cached.length === 0 && bundled.length === 0) {
     return { history: [], source: "none", reason: "No cached or bundled draw history is available." };
+  }
+  if (cachedIsSimulatedOnly) {
+    if (bundled.length > 0) {
+      return {
+        history: bundled,
+        source: "bundled-csv",
+        reason: "Ignored simulated-only browser cache and loaded bundled real draw history instead.",
+      };
+    }
+    return {
+      history: [],
+      source: "none",
+      reason: "Ignored simulated-only browser cache; no bundled real draw history is available.",
+    };
   }
   if (cached.length === 0) {
     return { history: bundled, source: "bundled-csv", reason: "No reviewed browser cache exists." };

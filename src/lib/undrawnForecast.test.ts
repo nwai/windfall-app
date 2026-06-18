@@ -3,7 +3,12 @@ import { describe, expect, it } from "vitest"
 import type { Draw } from "../types"
 import { buildUndrawnForecast } from "./undrawnForecast"
 
-const draw = (date: string, main: number[], supp: number[] = []): Draw => ({ date, main, supp })
+const draw = (date: string, main: number[], supp: number[] = [], isSimulated = false): Draw => ({
+  date,
+  main,
+  supp,
+  isSimulated,
+})
 
 describe("buildUndrawnForecast", () => {
   it("returns an empty simulation when there is no history", () => {
@@ -55,5 +60,29 @@ describe("buildUndrawnForecast", () => {
     expect(mainsAndSupps45?.undrawnRate ?? 1).toBeLessThan((mainsOnly45?.undrawnRate ?? 1) - 0.18)
     expect(mainsAndSupps45?.drawnRate ?? 0).toBeGreaterThan(0.25)
     expect(drawnMode45?.number).toBe(45)
+  })
+
+  it("ignores simulated fallback rows instead of using them as undrawn forecast evidence", () => {
+    const realHistory: Draw[] = [
+      draw("2026-04-01", [1, 2, 3, 4, 5, 6]),
+      draw("2026-04-08", [7, 8, 9, 10, 11, 12]),
+      draw("2026-04-15", [13, 14, 15, 16, 17, 18]),
+      draw("2026-04-22", [19, 20, 21, 22, 23, 24]),
+    ]
+    const contaminatedHistory = [
+      ...realHistory,
+      draw("2026-04-29", [40, 41, 42, 43, 44, 45], [], true),
+    ]
+
+    const clean = buildUndrawnForecast(realHistory, { includeSupp: false, trials: 600, topNumbers: 4, seed: 101 })
+    const contaminated = buildUndrawnForecast(contaminatedHistory, { includeSupp: false, trials: 600, topNumbers: 4, seed: 101 })
+
+    expect(contaminated.simulation.notes).toContain(
+      "Ignored 1 simulated fallback draw row; undrawn forecast diagnostics use real historical draws only.",
+    )
+    expect(contaminated.simulation.meanUndrawn).toBe(clean.simulation.meanUndrawn)
+    expect(contaminated.simulation.topLikelyUndrawn.map((item) => item.number)).toEqual(
+      clean.simulation.topLikelyUndrawn.map((item) => item.number),
+    )
   })
 })

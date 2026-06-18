@@ -191,7 +191,7 @@ export function useGenerateWorker() {
               trendMap, args.allowedTrendRatios, args.sumFilter,
               args.patternOptions, args.ogaBiasOptions, args.div5Options, args.mainZeroOptions, args.mainFiveOptions, args.mainOneOptions, args.mainTwoOptions, args.mainThreeOptions, args.mainFourOptions, args.mainSixOptions, args.mainSevenOptions, args.mainEightOptions, args.mainNineOptions, args.digitWidthConstraint,
               monthlyBucketOptions, args.attemptMultiplier, args.ogaSpokeCount,
-                args.maxLastDrawMatches, args.monthlyRepeatBiasWeights, args.mainDecadeBiases, args.monthEndCarryOverWeights
+                args.maxLastDrawMatches, args.monthlyRepeatBiasWeights, args.mainDecadeBiases, args.monthEndCarryOverWeights, args.scoringGenerationProfile
             );
             onResult(result);
           } catch (e: any) {

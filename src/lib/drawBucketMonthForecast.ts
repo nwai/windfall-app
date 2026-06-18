@@ -360,7 +360,7 @@ export const forecastDrawBucketMonth = (
 
   const trainingMonths = months.filter((month) => month.key !== currentMonth.key);
   const trainingHistory = trainingMonths.flatMap((month) => month.draws);
-  const referenceHistory = trainingHistory.length > 0 ? trainingHistory : history;
+  const referenceHistory = trainingHistory.length > 0 ? trainingHistory : realHistory.history;
   const currentFeatures = buildMonthProgressFeatures(
     currentMonth.draws.slice(0, conditioningDrawCount),
     includeSupp,

@@ -1,4 +1,5 @@
-import React from "react";
+import React, { act } from "react";
+import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
@@ -6,6 +7,9 @@ import {
   GeneratedCandidatesPanel,
   type GeneratedCandidatesPanelProps,
 } from "../src/components/candidates/GeneratedCandidatesPanel";
+import type { CandidateSet } from "../src/types";
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 function buildProps(overrides: Partial<GeneratedCandidatesPanelProps> = {}): GeneratedCandidatesPanelProps {
   return {
@@ -28,6 +32,15 @@ function buildProps(overrides: Partial<GeneratedCandidatesPanelProps> = {}): Gen
     setBatchSessionRuns: vi.fn(),
     onRunBatchSession: vi.fn(),
     ...overrides,
+  };
+}
+
+function buildCandidate(index: number): CandidateSet {
+  const numbers = Array.from({ length: 8 }, (_, offset) => ((index * 8 + offset) % 45) + 1);
+  return {
+    main: numbers.slice(0, 6),
+    supp: numbers.slice(6, 8),
+    finalCompositeAdj: index / 1000,
   };
 }
 
@@ -62,7 +75,7 @@ describe("GeneratedCandidatesPanel", () => {
     expect(strip?.querySelector('[aria-label="Toggle user selected number 4"]')?.getAttribute("aria-pressed")).toBe("false");
   });
 
-  it("renders diagnostic metric explanations as accessible help instead of hover-only header titles", () => {
+  it("renders the compact generated-candidate table with only decision-useful visible diagnostics", () => {
     const html = renderToStaticMarkup(
       React.createElement(GeneratedCandidatesPanel, buildProps({
         candidates: [
@@ -87,20 +100,40 @@ describe("GeneratedCandidatesPanel", () => {
       })),
     );
     const document = new DOMParser().parseFromString(html, "text/html");
+    const table = document.querySelector('[data-testid="generated-candidates-scroll"] table');
+    const headers = Array.from(table?.querySelectorAll("thead th") ?? []).map((th) => {
+      const explicitButtonLabel = th.querySelector(".windfall-sortable-header__button")?.textContent;
+      return (explicitButtonLabel ?? th.childNodes[0]?.textContent ?? th.textContent ?? "").replace(/[▲▼]/g, "").trim();
+    });
 
     expect(document.querySelector('[aria-label="Conv metric explanation"]')).not.toBeNull();
-    expect(document.querySelector('[aria-label="IDM metric explanation"]')).not.toBeNull();
-    expect(document.querySelector('[aria-label="Rdy metric explanation"]')).not.toBeNull();
-    expect(document.querySelector('[aria-label="Win metric explanation"]')).not.toBeNull();
-    expect(document.querySelector('[aria-label="Nrr metric explanation"]')).not.toBeNull();
-    expect(document.querySelector('[aria-label="NS metric explanation"]')).not.toBeNull();
-    expect(html).toContain("not a calibrated next-draw probability");
+    expect(document.querySelector('[aria-label="Stage IDM metric explanation"]')).not.toBeNull();
+    expect(document.querySelector('[aria-label="IDM metric explanation"]')).toBeNull();
+    expect(document.querySelector('[aria-label="Rdy metric explanation"]')).toBeNull();
+    expect(document.querySelector('[aria-label="Win metric explanation"]')).toBeNull();
+    expect(document.querySelector('[aria-label="Nrr metric explanation"]')).toBeNull();
+    expect(document.querySelector('[aria-label="NS metric explanation"]')).toBeNull();
+    expect(headers).toHaveLength(23);
+    expect(headers).toEqual(expect.arrayContaining([
+      "#", "Main (6)", "Supp (2)", "Manual (M/S)", "Prize", "Odd/Even",
+      "SelHits", "RecentHits", "Prev±1", "Dup±1", "Sing±1",
+      "0x", "1x", "2x", "3x", "4x", "5x", "6x", "7x", "8x+",
+      "Conv", "Stage IDM", "Actions",
+    ]));
+    for (const hiddenHeader of ["Comp%", "OGA Raw", "OGA%", "IDM", "Rdy", "Win", "Nrr", "NS"]) {
+      expect(headers).not.toContain(hiddenHeader);
+    }
+    const firstRowCells = table?.querySelectorAll("tbody tr td") ?? [];
+    expect(firstRowCells[1]?.getAttribute("style")).toContain("white-space:nowrap");
+    expect(firstRowCells[2]?.getAttribute("style")).toContain("white-space:nowrap");
+    expect(html).toContain("next draw-stage target");
+    expect(html).not.toContain("not a calibrated next-draw probability");
     expect(html).not.toContain('title="Convergence:');
     expect(html).not.toContain('title="Ideal Draw Match:');
     expect(html).not.toContain('title="Readiness score:');
   });
 
-  it("uses the shared Monthly Draws Summary ideal state for the IDM target and score", () => {
+  it("renders the shared Monthly Draws Summary ideal state as the hidden IDM target", () => {
     const buckets = monthlyBucketSets({
       undrawn: [1, 2],
       times1: [3, 4, 5, 6, 7],
@@ -131,7 +164,6 @@ describe("GeneratedCandidatesPanel", () => {
     expect(html).toContain("0x=2");
     expect(html).toContain("1x=5");
     expect(html).toContain("2x=1");
-    expect(html).toContain("Top 100.0%");
   });
 
   it("renders Stage IDM target and score when stage ideal state is available", () => {
@@ -171,5 +203,85 @@ describe("GeneratedCandidatesPanel", () => {
     expect(html).toContain("draw 6 of a 13-draw month");
     expect(html).toContain("Stage IDM");
     expect(html).toContain("Top 100.0%");
+  });
+
+  it("renders previous-draw ±1 neighbour diagnostics as observe-only columns", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(GeneratedCandidatesPanel, buildProps({
+        candidates: [
+          {
+            main: [20, 5, 34, 22, 13, 14],
+            supp: [12, 29],
+            previousNeighbourHits: 3,
+            previousNeighbourDuplicateHits: 1,
+            previousNeighbourSingletonHits: 2,
+          },
+        ],
+      })),
+    );
+
+    expect(html).toContain("Prev±1");
+    expect(html).toContain("Dup±1");
+    expect(html).toContain("Sing±1");
+    expect(html).toContain("title=\"Total candidate numbers that are ±1 from the latest draw");
+    expect(html).toContain(">3</td>");
+    expect(html).toContain(">1</td>");
+    expect(html).toContain(">2</td>");
+  });
+
+  it("updates the virtualized row window only after crossing row-window boundaries", async () => {
+    const previousAnimationFrame = window.requestAnimationFrame;
+    const previousCancelAnimationFrame = window.cancelAnimationFrame;
+    const rafCallbacks: FrameRequestCallback[] = [];
+    window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+      rafCallbacks.push(callback);
+      return rafCallbacks.length;
+    }) as typeof window.requestAnimationFrame;
+    window.cancelAnimationFrame = ((id: number) => {
+      rafCallbacks[id - 1] = () => undefined;
+    }) as typeof window.cancelAnimationFrame;
+    const flushAnimationFrame = () => {
+      const callback = rafCallbacks.shift();
+      callback?.(0);
+    };
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    try {
+      await act(async () => {
+        root.render(React.createElement(GeneratedCandidatesPanel, buildProps({
+          candidates: Array.from({ length: 120 }, (_, index) => buildCandidate(index)),
+        })));
+      });
+
+      expect(container.textContent).toContain("Showing rows 1–29 of 120");
+      const scroller = container.querySelector('[data-testid="generated-candidates-scroll"]') as HTMLDivElement | null;
+      expect(scroller).not.toBeNull();
+
+      await act(async () => {
+        Object.defineProperty(scroller, "scrollTop", { value: 31, configurable: true });
+        scroller?.dispatchEvent(new Event("scroll", { bubbles: true }));
+        flushAnimationFrame();
+      });
+
+      expect(container.textContent).toContain("Showing rows 1–29 of 120");
+
+      await act(async () => {
+        Object.defineProperty(scroller, "scrollTop", { value: 200, configurable: true });
+        scroller?.dispatchEvent(new Event("scroll", { bubbles: true }));
+        flushAnimationFrame();
+      });
+
+      expect(container.textContent).toContain("Showing rows 2–30 of 120");
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+      window.requestAnimationFrame = previousAnimationFrame;
+      window.cancelAnimationFrame = previousCancelAnimationFrame;
+    }
   });
 });

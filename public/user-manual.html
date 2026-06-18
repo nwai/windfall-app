@@ -182,6 +182,7 @@
     <a class="section" href="#overview">Overview</a>
     <a href="#getting-started">Getting Started</a>
     <a href="#loading-history">Loading Draw History</a>
+    <a href="#number-trends-table">Number Trends Table</a>
     <a href="#smart-history-review">Smart History Review</a>
     <a href="#official-source-compare">Official / Reference Source Comparison</a>
 
@@ -234,6 +235,7 @@
 
     <a class="section" href="#scoring-reference">Scoring Reference</a>
     <a href="#score-summary">Score Summary Table</a>
+    <a href="#previous-neighbour-backtest">Previous ±1 Neighbour Backtest</a>
     <a href="#analysis-findings">Analysis Findings</a>
 
     <a class="section" href="#glossary">Glossary</a>
@@ -290,6 +292,32 @@
   <div class="note">
     <strong>Safari users:</strong> If the File System Access API is not available, a standard file picker will appear automatically as a fallback.
   </div>
+
+  <h3 id="number-trends-table">Number Trends Table</h3>
+  <p>The <strong>Number Trends Table</strong> shows the 45 numbers in nine compact blocks of five numbers. Each row is designed for quick scanning: the number pill, direction arrow, and <strong>Δ 3→13</strong> value share the same colour so the recent movement signal is visible at a glance.</p>
+
+  <h4>What the draw-window counts mean</h4>
+  <ul>
+    <li><strong>3D</strong>, <strong>6D</strong>, <strong>9D</strong>, <strong>13D</strong>, and <strong>15D</strong> count how many of the latest 3, 6, 9, 13, or 15 draws contained that number.</li>
+    <li><strong>36D</strong>, <strong>156D</strong>, and <strong>All</strong> extend the same count across broader history windows.</li>
+    <li>A number is counted once per draw if it appears in the loaded history for that draw.</li>
+  </ul>
+
+  <h4>What the arrow and + / - number mean</h4>
+  <p>The direction arrow compares the number's latest-week rate with its typical-month rate:</p>
+  <p><code>(3D count / 3 × 100) - (13D count / 13 × 100)</code></p>
+  <ul>
+    <li><strong>Up arrow</strong> — the number's latest 3-draw rate is meaningfully higher than its latest 13-draw rate.</li>
+    <li><strong>Down arrow</strong> — the number's latest 3-draw rate is meaningfully lower than its latest 13-draw rate.</li>
+    <li><strong>Flat arrow</strong> — the difference is small enough to treat as broadly stable.</li>
+    <li>The <strong>+</strong> or <strong>-</strong> value beside the arrow is the percentage-point difference between those two rates. For example, if a number appears in 2 of the last 3 draws and 3 of the last 13 draws, the calculation is <code>66.7% - 23.1% = +43.6</code>. A negative value means the latest 3-draw rate is below the 13-draw rate.</li>
+  </ul>
+
+  <div class="note">
+    <strong>Truthfulness note:</strong> this is a recent-vs-broader-history diagnostic, not a calibrated probability or guarantee that a number is due to appear. Use it as movement evidence alongside the other panels.
+  </div>
+
+  <p>Clicking a number row marks or unmarks that number for forced inclusion in candidate generation.</p>
 
   <h3 id="smart-history-review">Smart History Review</h3>
   <p>Under the Draw History Manager, the app includes a <strong>Smart History Review</strong> panel. This is designed to help you correct human-made history problems without editing CSV files by hand.</p>
@@ -858,8 +886,28 @@
       <tr><td>Monthly Repeat Bias</td><td>Boosts numbers drawn exactly once this month. See <a href="#repeat-bias">Repeat Bias</a>.</td></tr>
       <tr><td>Month-end carry-over bias</td><td>Uses the month-end carry-over study as a live weighting input for both generation and candidate ranking during the early part of a planning month.</td></tr>
       <tr><td>Max Matches to Last Draw</td><td>Rejects candidates that share too many numbers with the most recent draw. See <a href="#last-draw-match">Last Draw Match</a>.</td></tr>
+      <tr><td>Latest Draw ±1/±2 Constraint Builder</td><td>Default-off selector that lets you choose exact <code>-2</code>, <code>-1</code>, <code>+1</code>, or <code>+2</code> target numbers from the latest draw. Selected targets are passed into generation as required forced numbers.</td></tr>
     </tbody>
   </table>
+
+  <h4>Latest Draw ±1/±2 Constraint Builder</h4>
+  <p>This control lives in <strong>Candidate Generation Influences → Composition &amp; Recency</strong>. It shows the most recent draw in the active WFMQYH window and offers each valid nearby target: <code>source - 2</code>, <code>source - 1</code>, <code>source + 1</code>, and <code>source + 2</code>.</p>
+
+  <p>When you select a target number, it joins the generator's forced-number list together with any Number Trends forced numbers. The table columns <strong>Prev±1</strong>, <strong>Dup±1</strong>, and <strong>Sing±1</strong> remain observe-only diagnostics that show how generated rows relate to the latest draw's adjacent-neighbour targets.</p>
+
+  <h5>Colour and status legend</h5>
+  <ul>
+    <li><strong>White source pills</strong> show the latest-draw numbers used as the starting points for the offset calculation.</li>
+    <li><strong>White target buttons</strong> are valid generated targets that are not currently selected.</li>
+    <li><strong>Amber target buttons</strong> mark duplicated targets: the same target number can be reached from more than one latest-draw source number.</li>
+    <li><strong>Green target buttons</strong> are selected and become required forced targets during candidate generation.</li>
+    <li><strong>Magenta numbers</strong> are the calculated <code>-2</code>, <code>-1</code>, <code>+1</code>, or <code>+2</code> target values.</li>
+    <li><strong>Grey/dash entries</strong> mean the target is outside the valid <code>1–45</code> number range or cannot be selected because the forced-number limit has already been reached.</li>
+  </ul>
+
+  <div class="note">
+    <strong>Truthfulness note:</strong> colour in this builder is a status cue only. It is not a probability or prediction signal. Leave it empty unless the backtest/history evidence and your own workflow justify forcing specific nearby targets.
+  </div>
 
   <h4>Single-digit / two-digit share</h4>
   <p>This control lives inside <strong>Generation Constraints</strong>. It lets you enforce the percentage split between:</p>
@@ -1396,6 +1444,29 @@
       <tr><td><strong>OGA%</strong></td><td>0–100%</td><td>↓ High</td><td>Signal when window ≥ 10</td><td>Octagonal grid alignment</td></tr>
     </tbody>
   </table>
+
+  <h3 id="previous-neighbour-backtest">Previous ±1 Neighbour Backtest</h3>
+
+  <p>The <strong>Previous ±1 Neighbour Backtest</strong> panel tests whether a draw tends to include numbers that are exactly one step above or below numbers from the preceding draw. The panel itself is an <strong>observe-only</strong> diagnostic and does not alter candidate generation; the separate default-off <strong>Latest Draw ±1 Constraint Builder</strong> in Candidate Generation Influences is where you can deliberately force selected adjacent target numbers into generation.</p>
+
+  <h4>How the neighbour set is built</h4>
+  <p>For each number in the previous draw, the app creates up to two adjacent targets: <code>n - 1</code> and <code>n + 1</code>. Boundary numbers only produce one target, so <code>1</code> produces <code>2</code> and <code>45</code> produces <code>44</code>.</p>
+
+  <p>If two previous-draw numbers nominate the same adjacent target, that target is marked as a <strong>duplicated neighbour</strong>. For example, previous numbers <code>33</code> and <code>35</code> both nominate <code>34</code>.</p>
+
+  <h4>What the panel reports</h4>
+  <ul>
+    <li><strong>Observed vs random</strong> compares the average number of ±1 hits per next draw with the exact random expectation for the available neighbour target count.</li>
+    <li><strong>Duplicated neighbours</strong> compares the duplicated-target hit rate with the ordinary random single-number hit rate.</li>
+    <li><strong>Soft-rule candidate check</strong> samples candidate pools and asks whether candidates ranked by historical neighbour-shape fit score better than random candidates.</li>
+  </ul>
+
+  <h4>Anti-lookahead rule</h4>
+  <p>For each historical target draw, the soft-rule model is calibrated only from transitions that occurred before that target draw. The target draw and all later draws are hidden from the calibration step.</p>
+
+  <div class="note">
+    <strong>Truthfulness note:</strong> a positive result here is diagnostic evidence, not a guarantee. The panel is intentionally separated from generator controls until backtesting shows that the signal improves candidate quality out of sample.
+  </div>
 
   <h3 id="analysis-findings">Key Analysis Findings</h3>
 

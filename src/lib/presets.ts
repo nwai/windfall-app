@@ -198,6 +198,9 @@ export interface AppPresetSnapshot {
   // Over-generation pool multiplier (pool = Count × overgenFactor)
   overgenFactor?: number;
 
+  // Scoring System Diagnostics generation evidence weighting
+  scoringGenerationInfluence?: "off" | "light" | "normal" | "strong";
+
   // MiAN hard-exclusion toggle
   acceptanceNeedsEnabled?: boolean;
   acceptanceNeedsCounts?: Partial<PresetMonthlyFrequencyConstraints>;
@@ -218,6 +221,7 @@ export interface AppPresetSnapshot {
   manualSimSelected?: number[];
   minRecentMatches?: number;
   recentMatchBias?: number;
+  previousNeighbourConstraintNumbers?: number[];
   maxLastDrawMatchesEnabled?: boolean;
   maxLastDrawMatchesValue?: number;
   repeatWindowSizeW?: number;
@@ -366,6 +370,7 @@ export function normalizeAppPresetSnapshot(snapshot: AppPresetSnapshot): AppPres
     acceptanceNeedsEnabled: !!snapshot.acceptanceNeedsEnabled,
     acceptanceNeedsCounts: normalizeMonthlyCounts(snapshot.acceptanceNeedsCounts),
     acceptanceNeedsHardExclude: !!snapshot.acceptanceNeedsHardExclude,
+    previousNeighbourConstraintNumbers: normalizeWeightedTargetNumbers(snapshot.previousNeighbourConstraintNumbers).slice(0, 8),
     maxLastDrawMatchesEnabled: !!snapshot.maxLastDrawMatchesEnabled,
     maxLastDrawMatchesValue: clampInteger(snapshot.maxLastDrawMatchesValue, 0, 6, DEFAULT_LAST_DRAW_MATCH_CAP),
     numCandidates: clampInteger(snapshot.numCandidates, 1, 1000, DEFAULT_NUM_CANDIDATES),
@@ -378,6 +383,9 @@ export function normalizeAppPresetSnapshot(snapshot: AppPresetSnapshot): AppPres
     mrbEnabled: !!snapshot.mrbEnabled,
     mrbIncludeSupp: snapshot.mrbIncludeSupp ?? true,
     mrbBucketBoosts: normalizeMRBBoosts(snapshot.mrbBucketBoosts),
+    scoringGenerationInfluence: snapshot.scoringGenerationInfluence === "light" || snapshot.scoringGenerationInfluence === "normal" || snapshot.scoringGenerationInfluence === "strong"
+      ? snapshot.scoringGenerationInfluence
+      : "off",
     pickSixSource: normalizePickSixSource(snapshot.pickSixSource),
     pickSixManual: normalizePickSixManual(snapshot.pickSixManual),
   };

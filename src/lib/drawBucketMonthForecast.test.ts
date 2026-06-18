@@ -108,4 +108,22 @@ describe("forecastDrawBucketMonth", () => {
     expect(forecast.forecastSlotCount).toBe(1);
     expect(forecast.warnings).toContain("Ignored 1 simulated fallback draw row; draw-bucket month forecasts use real historical draws only.");
   });
+
+  it("does not fall back to raw simulated rows when no separate training months exist", () => {
+    const history: Draw[] = [
+      buildDraw("2026-03-05", [1, 2, 3, 4, 6, 7]),
+      buildDraw("2026-03-12", [11, 12, 13, 14, 16, 17]),
+      buildDraw("2026-03-19", [40, 41, 42, 43, 44, 45], [], true),
+    ];
+
+    const forecast = forecastDrawBucketMonth(history, {
+      includeSupp: false,
+      currentMonthKey: "2026-03",
+      targetSlotCount: 3,
+    });
+
+    expect(forecast.warnings).toContain("Ignored 1 simulated fallback draw row; draw-bucket month forecasts use real historical draws only.");
+    expect(forecast.observedDrawCount).toBe(2);
+    expect(forecast.slotForecasts[0]?.bucketForecasts.div5.support).toBe(0);
+  });
 });

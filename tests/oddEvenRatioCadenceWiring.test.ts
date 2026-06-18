@@ -11,6 +11,6 @@ describe("Odd/Even Ratio Cadence app wiring", () => {
     expect(appSource.indexOf('panelId="odd-even-ratio-filters"')).toBeLessThan(
       appSource.indexOf('panelId="odd-even-ratio-cadence"'),
     );
-    expect(appSource).toContain("<OddEvenRatioCadencePanel draws={filteredHistory} />");
+    expect(appSource).toContain("<OddEvenRatioCadencePanel draws={realFilteredHistory} />");
   });
 });

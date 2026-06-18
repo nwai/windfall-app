@@ -1,4 +1,5 @@
 import type { Draw } from "../types"
+import { filterRealDrawHistory } from "./realDrawHistory"
 import { sortDrawsChronologically } from "./recentDraws"
 
 const TOTAL_NUMBERS = 45
@@ -227,10 +228,15 @@ export function buildUndrawnForecast(
   history: Draw[],
   options: BuildUndrawnForecastOptions,
 ): UndrawnForecastResult {
-  const cleaned = buildCleanHistory(history, options.includeSupp)
+  const realHistory = filterRealDrawHistory(history, "undrawn forecast diagnostics")
+  const cleaned = buildCleanHistory(realHistory.history, options.includeSupp)
   if (cleaned.length === 0) {
+    const empty = buildEmptySnapshot()
     return {
-      simulation: buildEmptySnapshot(),
+      simulation: {
+        ...empty,
+        notes: [...realHistory.warnings, ...empty.notes],
+      },
       next: [],
     }
   }
@@ -358,6 +364,7 @@ export function buildUndrawnForecast(
       expectedUndrawn: ((group.high - group.low + 1) / TOTAL_NUMBERS) * mean(simulatedUndrawnCounts),
     })),
     notes: [
+      ...realHistory.warnings,
       `${trials.toLocaleString()} seeded trials sampled the next undrawn set using a blended absence score for each number.`,
       `Each number’s score combines latest-state transition tendency (50%), recent-window absence over the last ${recentWindow} draws (30%), and full-window absence rate (20%).`,
       `Each trial reuses an observed undrawn-count template from the active window (mean ${mean(undrawnTemplates).toFixed(1)}, 95% ${formatRange95(quantileRange95(undrawnTemplates))}); percentages below are the share of trials where a number stayed undrawn.`,

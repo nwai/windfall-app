@@ -1,5 +1,6 @@
 import type { Draw } from "../types";
 import { getExcludedMonthLabelsForHistoryBaselines } from "./monthlyAverageScope";
+import { filterRealDrawHistory } from "./realDrawHistory";
 import { parseDrawDateToEpoch, sortDrawsChronologically } from "./recentDraws";
 
 const TOTAL_NUMBERS = 45;
@@ -226,7 +227,8 @@ export function analyzeMonthEndCarryOver(
   const includeSupp = options.includeSupp;
   const earlyDrawLimit = Math.max(1, Math.floor(options.earlyDrawLimit ?? DEFAULT_EARLY_DRAW_LIMIT));
   const topNumbers = Math.max(1, Math.floor(options.topNumbers ?? DEFAULT_TOP_NUMBERS));
-  const segments = buildMonthlySegments(history, includeSupp);
+  const realHistory = filterRealDrawHistory(history, "month-end carry-over diagnostics");
+  const segments = buildMonthlySegments(realHistory.history, includeSupp);
   const excludedMonthLabels = new Set(
     getExcludedMonthLabelsForHistoryBaselines(segments, (segment) => segment.monthLabel),
   );
@@ -252,7 +254,10 @@ export function analyzeMonthEndCarryOver(
         hitCount: 0,
         hitRate: 0,
       })),
-      notes: ["Need at least two complete months in the active history window to analyse month-end carry-over."],
+      notes: [
+        ...realHistory.warnings,
+        "Need at least two complete months in the active history window to analyse month-end carry-over.",
+      ],
     };
   }
 
@@ -373,6 +378,7 @@ export function analyzeMonthEndCarryOver(
   }));
 
   const notes = [
+    ...realHistory.warnings,
     `This analysis tracks numbers that finished a month in the month-end undrawn set, then checks whether they were drawn in the first ${earlyDrawLimit} draw${earlyDrawLimit === 1 ? "" : "s"} of the next month.`,
     `Baseline hit rate is the ordinary chance that a number appeared at least once in those same early-next-month windows (${(baselineHitRate * 100).toFixed(1)}%). Lift above 1.00 means month-end undrawn numbers were drawn early more often than a random number would be.`,
     "Number rankings use beta-binomial shrinkage toward the early-window baseline, so isolated 1/1 or 0/1 records do not outrank better-supported evidence by default.",
@@ -432,14 +438,15 @@ export function buildMonthEndCarryOverWeighting(
   const includeBoundaryRepeats = options.includeBoundaryRepeats ?? true;
   const targetMonthLabel = toMonthLabel(referenceEpoch);
   const sourceMonthLabel = previousMonthLabel(targetMonthLabel) || null;
-  const segments = buildMonthlySegments(history, includeSupp);
+  const realHistory = filterRealDrawHistory(history, "month-end carry-over weighting calculations");
+  const segments = buildMonthlySegments(realHistory.history, includeSupp);
   const currentSegment = segments.find((segment) => segment.monthLabel === targetMonthLabel) ?? null;
   const sourceSegment = sourceMonthLabel
     ? segments.find((segment) => segment.monthLabel === sourceMonthLabel) ?? null
     : null;
   const drawsSoFarThisMonth = currentSegment?.drawnSets.length ?? 0;
   const weights = emptyWeightMap();
-  const analysis = analyzeMonthEndCarryOver(history, { includeSupp, earlyDrawLimit, topNumbers: TOTAL_NUMBERS });
+  const analysis = analyzeMonthEndCarryOver(realHistory.history, { includeSupp, earlyDrawLimit, topNumbers: TOTAL_NUMBERS });
   const statsByNumber = new Map(analysis.numberStats.map((item) => [item.number, item]));
   const currentMonthSeen = currentSegment?.union ?? new Set<number>();
   const monthEndUndrawnNumbers = sourceSegment
@@ -494,6 +501,7 @@ export function buildMonthEndCarryOverWeighting(
     sourceSegment
       ? `${activeNumbers.length} active number${activeNumbers.length === 1 ? "" : "s"}: ${activeMonthEndUndrawnNumbers.length} enabled still-undrawn from ${sourceSegment.monthLabel}'s month-end undrawn set and ${activeBoundaryRepeatNumbers.length} enabled last-draw → first-draw carry-over number${activeBoundaryRepeatNumbers.length === 1 ? "" : "s"} into ${targetMonthLabel}.`
       : `No ${sourceMonthLabel ?? "previous-month"} segment is available in history, so no active month-end carry-over pool could be derived for ${targetMonthLabel}.`,
+    ...realHistory.warnings,
     ...analysis.notes,
   ];
 

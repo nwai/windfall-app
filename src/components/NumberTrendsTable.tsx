@@ -1,6 +1,9 @@
 import React, { useMemo } from "react";
 import type { Draw } from "../types";
 
+export const NUMBER_TREND_WEEK_DRAW_WINDOW = 3;
+export const NUMBER_TREND_MONTH_DRAW_WINDOW = 13;
+
 export type NumberTrend = {
   number: number;   // 1..45
   // New short windows
@@ -9,7 +12,7 @@ export type NumberTrend = {
   d15: number;      // last 15 draws
   // Existing windows (now measured in draws)
   fortnight: number; // 6 draws
-  month: number;     // 12 draws
+  month: number;     // 13 draws, the typical calendar-month window for a 3-draw/week game
   quarter: number;   // 36 draws
   year: number;      // 156 draws
   all: number;       // all draws in the provided history
@@ -58,7 +61,7 @@ export function NumberTrendsTable({
     const d9 = counts(9);
     const d15 = counts(15);
     const d6 = counts(6); // fortnight
-    const d12 = counts(12); // month
+    const d13 = counts(NUMBER_TREND_MONTH_DRAW_WINDOW); // typical month
     const d36 = counts(36); // quarter
     const d156 = counts(156); // year
     const res: NumberTrend[] = Array.from({ length: 45 }, (_, i) => i + 1).map((n) => ({
@@ -67,22 +70,34 @@ export function NumberTrendsTable({
       d9: d9[n] || 0,
       d15: d15[n] || 0,
       fortnight: d6[n] || 0,
-      month: d12[n] || 0,
+      month: d13[n] || 0,
       quarter: d36[n] || 0,
       year: d156[n] || 0,
       all: allCounts[n] || 0,
     }));
-    // Simple sort by month desc then number asc to keep table stable
-    return res.sort((a, b) => b.month - a.month || a.number - b.number);
+    return res;
   }, [history, trends]);
 
   const activeSelected = trendSelectedNumbers || selected || [];
 
-  // 3-column layout
-  const columns = 3;
-  const rowsPerCol = Math.ceil((computedTrends.length) / columns);
-  const cols = Array.from({ length: columns }, (_, i) =>
-    computedTrends.slice(i * rowsPerCol, (i + 1) * rowsPerCol)
+  const trendByNumber = useMemo(() => {
+    const map = new Map<number, NumberTrend>();
+    computedTrends.forEach((trend) => map.set(trend.number, trend));
+    return map;
+  }, [computedTrends]);
+
+  const trendBlocks = useMemo(
+    () =>
+      Array.from({ length: 9 }, (_, blockIndex) => {
+        const start = blockIndex * 5 + 1;
+        const end = start + 4;
+        const blockTrends = Array.from({ length: 5 }, (_, offset) => {
+          const number = start + offset;
+          return trendByNumber.get(number) ?? emptyTrend(number);
+        });
+        return { start, end, trends: blockTrends };
+      }),
+    [trendByNumber],
   );
 
   // Data for chart (only selected numbers)
@@ -93,21 +108,21 @@ export function NumberTrendsTable({
     });
     return Array.from(pick.values()).map((t) => ({
       number: t.number,
-      values: [t.d3, t.month, t.d9, t.d15, t.fortnight, t.quarter, t.year, t.all],
+      values: [t.d3, t.fortnight, t.d9, t.month, t.d15, t.quarter, t.year, t.all],
     }));
   }, [computedTrends, activeSelected]);
 
-  // Helpers for Δ column: use 3→12
+  // Helpers for Δ column: latest week versus a typical calendar month.
   const colorForNumber = (n: number) => `hsl(${(n * 23) % 360}, 70%, 45%)`;
   const shortTermDeltaPP = (t: NumberTrend) => {
-    const r3 = t.d3 / 3;
-    const r12 = t.month / 12;
-    const delta = r3 - r12;
+    const r3 = t.d3 / NUMBER_TREND_WEEK_DRAW_WINDOW;
+    const r13 = t.month / NUMBER_TREND_MONTH_DRAW_WINDOW;
+    const delta = r3 - r13;
     const deltaPP = delta * 100;
     const THRESH = 0.055;
     const dir: "up" | "down" | "flat" =
       delta > THRESH ? "up" : delta < -THRESH ? "down" : "flat";
-    return { r3, r12, deltaPP, dir };
+    return { r3, r13, deltaPP, dir };
   };
 
   const Arrow = ({
@@ -150,101 +165,111 @@ export function NumberTrendsTable({
   };
 
   return (
-    <div style={{ margin: "12px 0" }}>
-      {/* 3-column tables */}
-      <div style={{ display: "flex", gap: 24, alignItems: "flex-start", flexWrap: "wrap" }}>
-        {cols.map((col, colIdx) => (
-          <table
-            key={colIdx}
-            style={{
-              fontSize: 13,
-              borderCollapse: "collapse",
-              minWidth: 540,
-              background: "#fff",
-              border: "1px solid #eee",
-            }}
+    <section className="windfall-number-trends" aria-label="Number trends by five-number range">
+      <div className="windfall-number-trends__grid">
+        {trendBlocks.map((block) => (
+          <section
+            key={block.start}
+            className="windfall-number-trend-block"
+            data-testid="number-trend-block"
+            aria-label={`Number trends ${block.start}-${block.end}`}
           >
-            <thead>
-              <tr>
-                <th style={{ textAlign: "left", padding: "4px 8px" }}>#</th>
-                {/* New short windows */}
-                <th style={{ textAlign: "right", padding: "4px 8px" }}>3D</th>
-                <th style={{ textAlign: "right", padding: "4px 8px" }}>6D</th>
-                <th style={{ textAlign: "right", padding: "4px 8px" }}>9D</th>
-                {/* Existing windows */}
-                <th style={{ textAlign: "right", padding: "4px 8px" }}>12D</th>
-                <th style={{ textAlign: "right", padding: "4px 8px" }}>15D</th>
-                <th style={{ textAlign: "right", padding: "4px 8px" }}>36D</th>
-                <th style={{ textAlign: "right", padding: "4px 8px" }}>156D</th>
-                <th style={{ textAlign: "right", padding: "4px 8px" }}>All</th>
-                <th style={{ textAlign: "center", padding: "4px 8px", whiteSpace: "nowrap" }}>
-                  Δ 3→12(pp)
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {col.map((trend) => {
+            <div className="windfall-number-trend-block__header">
+              <div>
+                <div className="windfall-number-trend-block__eyebrow">Range</div>
+                <h3 className="windfall-number-trend-block__title">{block.start}-{block.end}</h3>
+              </div>
+              <div className="windfall-number-trend-block__count">5 numbers</div>
+            </div>
+
+            <div className="windfall-number-trend-block__rows">
+              {block.trends.map((trend) => {
                 const isSelected = activeSelected.includes(trend.number);
-                const { r3, r12, deltaPP, dir } = shortTermDeltaPP(trend);
+                const { r3, r13, deltaPP, dir } = shortTermDeltaPP(trend);
                 const clr = colorForNumber(trend.number);
-                const tooltip = `#${trend.number} short-term rate: 3D ${(r3 * 100).toFixed(1)}% vs 12D ${(r12 * 100).toFixed(1)}% • Δ ${deltaPP.toFixed(1)} pp (${dir})`;
+                const arrowColor = dir === "flat" ? "#666666" : clr;
+                const directionLabel = dir === "up" ? "Up" : dir === "down" ? "Down" : "Flat";
+                const signedDelta = `${deltaPP >= 0 ? "+" : ""}${deltaPP.toFixed(1)}`;
 
                 return (
-                  <tr
+                  <button
                     key={trend.number}
-                    style={{
-                      background: isSelected ? "#FFEBEE" : undefined,
-                      cursor: "pointer",
-                      userSelect: "none",
-                    }}
+                    type="button"
+                    className="windfall-number-trend-row"
+                    data-testid="number-trend-row"
+                    data-direction={dir}
+                    aria-pressed={isSelected}
+                    aria-label={`Toggle forced inclusion for number ${trend.number}`}
+                    style={{ "--number-trend-color": arrowColor } as React.CSSProperties}
                     onClick={() => handleToggle(trend.number)}
-                    title="Click to (de)select number for forced inclusion"
                   >
-                    <td style={{ padding: "2px 8px" }}>
-                      <b>{trend.number}</b>
-                      {isSelected && <span style={{ color: "#c62828", fontWeight: 900 }}> ●</span>}
-                    </td>
-                    <td style={{ textAlign: "right", padding: "2px 8px" }}>{trend.d3}</td>
-                    <td style={{ textAlign: "right", padding: "2px 8px" }}>{trend.fortnight}</td>
-                    <td style={{ textAlign: "right", padding: "2px 8px" }}>{trend.d9}</td>
-                    <td style={{ textAlign: "right", padding: "2px 8px" }}>{trend.month}</td>
-                    <td style={{ textAlign: "right", padding: "2px 8px" }}>{trend.d15}</td>
-                    <td style={{ textAlign: "right", padding: "2px 8px" }}>{trend.quarter}</td>
-                    <td style={{ textAlign: "right", padding: "2px 8px" }}>{trend.year}</td>
-                    <td style={{ textAlign: "right", padding: "2px 8px" }}>{trend.all}</td>
-                    <td
-                      style={{
-                        textAlign: "center",
-                        padding: "2px 8px",
-                        fontVariantNumeric: "tabular-nums",
-                        whiteSpace: "nowrap",
-                      }}
-                      title={tooltip}
-                    >
-                      <Arrow dir={dir} color={clr} sizePx={18} />
-                      <span style={{ marginLeft: 6, color: dir === "flat" ? "#444" : clr }}>
-                        {deltaPP >= 0 ? "+" : ""}
-                        {deltaPP.toFixed(1)}
+                    <span className="windfall-number-trend-row__identity">
+                      <span className="windfall-number-trend-row__number">{trend.number}</span>
+                      <span className="windfall-number-trend-row__status">
+                        {isSelected ? "Forced" : "Available"}
                       </span>
-                    </td>
-                  </tr>
+                    </span>
+
+                    <span className="windfall-number-trend-row__metrics" aria-label={`Trend counts for number ${trend.number}`}>
+                      <Metric label="3D" value={trend.d3} />
+                      <Metric label="6D" value={trend.fortnight} />
+                      <Metric label="9D" value={trend.d9} />
+                      <Metric label="13D" value={trend.month} />
+                      <Metric label="15D" value={trend.d15} />
+                      <Metric label="36D" value={trend.quarter} />
+                      <Metric label="156D" value={trend.year} />
+                      <Metric label="All" value={trend.all} />
+                    </span>
+
+                    <span
+                      className="windfall-number-trend-row__delta"
+                      aria-label={`Short-term rate ${directionLabel}: 3D ${(r3 * 100).toFixed(1)} percent versus 13D ${(r13 * 100).toFixed(1)} percent, delta ${signedDelta} percentage points`}
+                    >
+                      <Arrow dir={dir} color={clr} sizePx={16} />
+                      <span>{directionLabel}</span>
+                      <strong>{signedDelta}</strong>
+                    </span>
+                  </button>
                 );
               })}
-            </tbody>
-          </table>
+            </div>
+          </section>
         ))}
       </div>
 
       {/* Mini chart with slope arrows */}
-      <div style={{ marginTop: 18 }}>
+      <div className="windfall-number-trends__chartScroller">
         <TrendMiniChart series={selectedSeries} />
       </div>
 
       {/* Optional legend for the new column */}
-      <div style={{ marginTop: 6, fontSize: 12, color: "#777" }}>
-        Δ 3→12 (pp) = (3D count / 3) − (12D count / 12). Positive = heating; negative = cooling.
+      <div className="windfall-number-trends__note">
+        Δ 3→13 (pp) = (3D count / 3) − (13D count / 13). Positive = heating; negative = cooling.
       </div>
-    </div>
+    </section>
+  );
+}
+
+function emptyTrend(number: number): NumberTrend {
+  return {
+    number,
+    d3: 0,
+    d9: 0,
+    d15: 0,
+    fortnight: 0,
+    month: 0,
+    quarter: 0,
+    year: 0,
+    all: 0,
+  };
+}
+
+function Metric({ label, value }: { label: string; value: number }) {
+  return (
+    <span className="windfall-number-trend-metric">
+      <span className="windfall-number-trend-metric__label">{label}</span>
+      <span className="windfall-number-trend-metric__value">{value}</span>
+    </span>
   );
 }
 
@@ -279,7 +304,7 @@ function TrendMiniChart({
   }
 
   // Labels aligned with selectedSeries order
-  const labels = ["3D", "6D", "9D", "12D", "15D", "36D", "156D", "All"];
+  const labels = ["3D", "6D", "9D", "13D", "15D", "36D", "156D", "All"];
   const margin = { top: 12, right: 16, bottom: 32, left: 12 };
   const innerW = Math.max(1, width - margin.left - margin.right);
   const innerH = Math.max(1, height - margin.top - margin.bottom);
@@ -297,7 +322,7 @@ function TrendMiniChart({
   const buildPath = (vals: number[]) =>
     vals.map((v, i) => `${i === 0 ? "M" : "L"} ${xToPx(i)} ${yToPx(v)}`).join(" ");
 
-  // Threshold for Δ 3→12 in pp per draw
+  // Threshold for Δ 3→13 in pp per draw
   const THRESH = 0.055;
 
   // Arrow utility with tooltip
@@ -365,19 +390,19 @@ function TrendMiniChart({
         ))
       )}
 
-      {/* Short-term slope arrows (rates: 3D/3 vs 12D/12) */}
+      {/* Short-term slope arrows (rates: 3D/3 vs 13D/13) */}
       {series.map((s) => {
         const c = colorForNumber(s.number);
         const v3 = s.values[0];   // first label is 3D
-        const v12 = s.values[1];  // second label is 12D
-        const r3 = v3 / 3;
-        const r12 = v12 / 12;
-        const delta = r3 - r12;
+        const v13 = s.values[3];  // fourth label is 13D
+        const r3 = v3 / NUMBER_TREND_WEEK_DRAW_WINDOW;
+        const r13 = v13 / NUMBER_TREND_MONTH_DRAW_WINDOW;
+        const delta = r3 - r13;
         const dir: "up" | "down" | "flat" = delta > THRESH ? "up" : delta < -THRESH ? "down" : "flat";
         const size = 8 + Math.min(6, Math.abs(delta) * 100); // scale with pp magnitude, capped
         const x = arrowX === arrowXBase - 12 ? arrowX : arrowXAlt;
         const y = yToPx(v3);
-        const tooltip = `#${s.number} short-term rate: 3D ${(r3 * 100).toFixed(1)}% vs 12D ${(r12 * 100).toFixed(1)}% • Δ ${(delta * 100).toFixed(1)} pp (${dir})`;
+        const tooltip = `#${s.number} short-term rate: 3D ${(r3 * 100).toFixed(1)}% vs 13D ${(r13 * 100).toFixed(1)}% • Δ ${(delta * 100).toFixed(1)} pp (${dir})`;
 
         return (
           <g key={`arrow-${s.number}`}>

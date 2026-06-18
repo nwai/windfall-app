@@ -1,26 +1,32 @@
 :root {
   --wf-font-sans: Helvetica, "Helvetica Neue", Arial, sans-serif;
-  --wf-ink: #090b0d;
-  --wf-charcoal: #171a1f;
-  --wf-text: #111827;
-  --wf-muted: #66707d;
-  --wf-section-title: #0752b8;
-  --wf-page: #f7f8fa;
+  --wf-ink: #111318;
+  --wf-charcoal: #1f232b;
+  --wf-text: #18202b;
+  --wf-muted: #6f7a89;
+  --wf-section-title: #1d5fbf;
+  --wf-page: #f4f7fb;
   --wf-surface: #ffffff;
-  --wf-rule: #d5d9df;
-  --wf-soft-rule: #eceff3;
-  --wf-primary: #075fd8;
-  --wf-valid: #057a41;
-  --wf-caution: #a86400;
-  --wf-danger: #bc2020;
-  --wf-radius: 4px;
-  --wf-radius-tight: 2px;
-  --wf-shadow-subtle: 0 1px 0 rgba(9, 11, 13, 0.04);
-  --wf-press-shadow: inset 0 2px 4px rgba(9, 11, 13, 0.18);
-  --wf-generator-bg: #fff8ea;
-  --wf-generator-bg-strong: #fff1cf;
-  --wf-generator-rule: #d49b2a;
-  --wf-generator-ink: #5c3b00;
+  --wf-glass-surface: rgba(255, 255, 255, 0.82);
+  --wf-glass-surface-strong: rgba(255, 255, 255, 0.94);
+  --wf-rule: rgba(82, 94, 115, 0.2);
+  --wf-soft-rule: rgba(82, 94, 115, 0.12);
+  --wf-primary: #0a63ce;
+  --wf-focus-ring: rgba(10, 99, 206, 0.28);
+  --wf-valid: #087443;
+  --wf-caution: #9b6500;
+  --wf-danger: #b42318;
+  --wf-radius: 8px;
+  --wf-radius-tight: 6px;
+  --wf-control-radius: 7px;
+  --wf-panel-shadow: 0 14px 38px rgba(15, 23, 42, 0.08);
+  --wf-shadow-subtle: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --wf-press-shadow: inset 0 2px 5px rgba(15, 23, 42, 0.16);
+  --wf-backdrop-blur: saturate(180%) blur(18px);
+  --wf-generator-bg: #fffaf0;
+  --wf-generator-bg-strong: #fff4da;
+  --wf-generator-rule: #d19a24;
+  --wf-generator-ink: #5f4306;
 }
 
 * {
@@ -31,6 +37,7 @@ html {
   background: var(--wf-page);
   color: var(--wf-text);
   font-family: var(--wf-font-sans);
+  overflow-x: clip;
 }
 
 body {
@@ -41,6 +48,7 @@ body {
   font-family: var(--wf-font-sans);
   font-size: 14px;
   line-height: 1.45;
+  overflow-x: clip;
 }
 
 button,
@@ -51,7 +59,7 @@ textarea {
 }
 
 button {
-  border-radius: var(--wf-radius-tight);
+  border-radius: var(--wf-control-radius);
 }
 
 button:not(:disabled),
@@ -125,7 +133,7 @@ input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="
 select,
 textarea {
   border: 1px solid var(--wf-rule);
-  border-radius: var(--wf-radius-tight);
+  border-radius: var(--wf-control-radius);
   background: var(--wf-surface);
   color: var(--wf-text);
 }
@@ -137,17 +145,36 @@ button:focus-visible,
 summary:focus-visible,
 a:focus-visible {
   outline: 2px solid var(--wf-primary);
-  outline-offset: 2px;
+  outline-offset: 3px;
+  box-shadow: 0 0 0 4px var(--wf-focus-ring);
 }
 
 table {
   font-family: var(--wf-font-sans);
 }
 
+th {
+  color: var(--wf-muted);
+}
+
+tbody tr:hover {
+  background: rgba(10, 99, 206, 0.035);
+}
+
+.windfall-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .windfall-app-shell {
   max-width: 1720px;
   margin: 0 auto;
-  padding: 18px;
+  padding: 22px;
   color: var(--wf-text);
   font-family: var(--wf-font-sans);
 }
@@ -156,10 +183,14 @@ table {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 18px;
-  align-items: end;
+  align-items: center;
   margin-bottom: 18px;
-  padding-bottom: 14px;
-  border-bottom: 3px solid var(--wf-ink);
+  padding: 18px;
+  border: 1px solid var(--wf-rule);
+  border-radius: var(--wf-radius);
+  background: var(--wf-glass-surface);
+  box-shadow: var(--wf-shadow-subtle);
+  backdrop-filter: var(--wf-backdrop-blur);
 }
 
 .windfall-app-title {
@@ -215,7 +246,7 @@ table {
   justify-content: center;
   gap: 6px;
   padding: 8px 12px;
-  border-radius: var(--wf-radius-tight);
+  border-radius: var(--wf-control-radius);
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.04em;
@@ -231,8 +262,8 @@ table {
 }
 
 .windfall-secondary-button {
-  border: 1px solid var(--wf-ink);
-  background: var(--wf-surface);
+  border: 1px solid var(--wf-rule);
+  background: var(--wf-glass-surface-strong);
   color: var(--wf-ink);
 }
 
@@ -264,11 +295,13 @@ table {
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
-  margin: 0 0 14px;
-  padding: 8px 0 10px;
-  border-bottom: 1px solid var(--wf-rule);
-  background: rgba(247, 248, 250, 0.96);
-  backdrop-filter: blur(12px);
+  margin: 0 0 16px;
+  padding: 7px;
+  border: 1px solid var(--wf-rule);
+  border-radius: var(--wf-radius);
+  background: var(--wf-glass-surface);
+  box-shadow: var(--wf-shadow-subtle);
+  backdrop-filter: var(--wf-backdrop-blur);
 }
 
 .windfall-workflow-nav__link {
@@ -277,26 +310,35 @@ table {
   align-items: center;
   justify-content: center;
   padding: 7px 11px;
-  border: 1px solid var(--wf-rule);
-  border-radius: var(--wf-radius-tight);
-  background: var(--wf-surface);
-  color: var(--wf-ink);
+  border: 1px solid transparent;
+  border-radius: var(--wf-control-radius);
+  background: transparent;
+  color: var(--wf-charcoal);
   font-size: 12px;
   font-weight: 800;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.03em;
   text-decoration: none;
   text-transform: uppercase;
 }
 
 .windfall-workflow-nav__link:hover {
-  border-color: var(--wf-ink);
+  border-color: var(--wf-rule);
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--wf-primary);
 }
 
 .windfall-workflow-anchor {
   scroll-margin-top: 72px;
-  margin: 18px 0 8px;
-  padding: 12px 0 8px;
-  border-top: 3px solid var(--wf-ink);
+  margin: 20px 0 8px;
+  padding: 13px 0 8px;
+  border-top: 1px solid rgba(10, 99, 206, 0.24);
+}
+
+.windfall-workflow-anchor:focus {
+  outline: 2px solid var(--wf-primary);
+  outline-offset: 2px;
+  border-radius: var(--wf-control-radius);
+  box-shadow: inset 0 0 0 2px var(--wf-focus-ring);
 }
 
 .windfall-workflow-anchor__eyebrow {
@@ -309,8 +351,8 @@ table {
 
 .windfall-workflow-anchor__title {
   margin: 2px 0 0;
-  color: var(--wf-ink);
-  font-size: 22px;
+  color: var(--wf-section-title);
+  font-size: 21px;
   font-weight: 800;
   line-height: 1.05;
 }
@@ -329,7 +371,7 @@ table {
   justify-content: center;
   gap: 7px;
   padding: 8px 12px;
-  border-radius: var(--wf-radius-tight);
+  border-radius: var(--wf-control-radius);
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.04em;
@@ -355,14 +397,14 @@ table {
 }
 
 .windfall-hig-button--secondary {
-  border: 1px solid var(--wf-ink);
-  background: var(--wf-surface);
+  border: 1px solid var(--wf-rule);
+  background: var(--wf-glass-surface-strong);
   color: var(--wf-ink);
 }
 
 .windfall-hig-button--quiet {
   border: 1px solid var(--wf-rule);
-  background: #fbfcfd;
+  background: rgba(255, 255, 255, 0.58);
   color: var(--wf-text);
 }
 
@@ -414,30 +456,35 @@ table {
   justify-content: center;
   border: 1px solid var(--wf-rule);
   border-radius: 999px;
-  background: var(--wf-surface);
-  color: var(--wf-ink);
+  background: var(--wf-glass-surface-strong);
+  color: var(--wf-primary);
   font-size: 12px;
   font-weight: 800;
   cursor: pointer;
 }
 
 .windfall-info-help__panel {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  z-index: 40;
-  width: min(280px, calc(100vw - 32px));
+  position: fixed;
+  z-index: 10000;
+  max-height: min(360px, calc(100vh - 24px));
+  overflow: auto;
   padding: 9px 10px;
-  border: 1px solid var(--wf-ink);
+  border: 1px solid var(--wf-rule);
   border-radius: var(--wf-radius);
-  background: var(--wf-surface);
+  background: var(--wf-glass-surface-strong);
   color: var(--wf-text);
-  box-shadow: 0 12px 28px rgba(9, 11, 13, 0.14);
+  box-shadow: var(--wf-panel-shadow);
+  backdrop-filter: var(--wf-backdrop-blur);
   font-size: 12px;
   font-weight: 500;
   line-height: 1.45;
   text-align: left;
   text-transform: none;
+}
+
+.windfall-previous-neighbour-target-value {
+  color: #c026d3;
+  font-weight: 900;
 }
 
 .windfall-sortable-header {
@@ -465,8 +512,8 @@ table {
 }
 
 .windfall-section {
-  margin-top: 12px;
-  border-top: 1px solid var(--wf-rule);
+  margin-top: 14px;
+  border-top: 1px solid var(--wf-soft-rule);
   scroll-margin-top: 74px;
 }
 
@@ -475,7 +522,7 @@ table {
   justify-content: space-between;
   align-items: baseline;
   gap: 8px;
-  padding: 10px 0;
+  padding: 11px 0;
   cursor: pointer;
 }
 
@@ -489,7 +536,7 @@ table {
 
 .windfall-section__title {
   color: var(--wf-section-title);
-  font-size: 16px;
+  font-size: 16.5px;
   font-weight: 800;
 }
 
@@ -507,8 +554,12 @@ table {
   padding: 2px 0 8px;
 }
 
+.windfall-section:not([open]) > .windfall-section__body {
+  display: none;
+}
+
 .windfall-section--favorite {
-  border-top-color: var(--wf-primary);
+  border-top-color: rgba(10, 99, 206, 0.42);
 }
 
 .windfall-section:focus {
@@ -542,7 +593,7 @@ table {
   padding: 4px 8px;
   border: 1px solid var(--wf-rule);
   border-radius: 999px;
-  background: var(--wf-surface);
+  background: var(--wf-glass-surface-strong);
   color: var(--wf-muted);
   font-size: 11px;
   font-weight: 800;
@@ -552,9 +603,9 @@ table {
 }
 
 .windfall-section__favorite-button[aria-pressed="true"] {
-  border-color: #b88700;
-  background: #fff7d1;
-  color: #6f4d00;
+  border-color: rgba(10, 99, 206, 0.38);
+  background: rgba(10, 99, 206, 0.1);
+  color: #064ea8;
 }
 
 .windfall-section__favorite-icon {
@@ -567,16 +618,18 @@ table {
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
-  margin: -4px 0 14px;
-  padding: 8px 10px;
+  margin: -3px 0 14px;
+  padding: 9px 10px;
   border: 1px solid var(--wf-rule);
-  border-left: 4px solid #b88700;
+  border-left: 4px solid var(--wf-primary);
   border-radius: var(--wf-radius);
-  background: #fffdf2;
+  background: var(--wf-glass-surface);
+  box-shadow: var(--wf-shadow-subtle);
+  backdrop-filter: var(--wf-backdrop-blur);
 }
 
 .windfall-favorites-strip__label {
-  color: #6f4d00;
+  color: var(--wf-primary);
   font-size: 11px;
   font-weight: 900;
   letter-spacing: 0.07em;
@@ -597,9 +650,9 @@ table {
   align-items: center;
   gap: 5px;
   padding: 4px 8px;
-  border: 1px solid rgba(184, 135, 0, 0.32);
+  border: 1px solid rgba(10, 99, 206, 0.18);
   border-radius: 999px;
-  background: #ffffff;
+  background: rgba(255, 255, 255, 0.78);
   color: var(--wf-ink);
   font-size: 12px;
   font-weight: 700;
@@ -613,16 +666,16 @@ table {
 }
 
 .windfall-favorites-strip__marker {
-  color: #b88700;
+  color: var(--wf-primary);
   line-height: 1;
 }
 
 .windfall-favorites-strip__clear {
   min-height: 30px;
-  border: 1px solid rgba(184, 135, 0, 0.36);
-  border-radius: var(--wf-radius-tight);
-  background: transparent;
-  color: #6f4d00;
+  border: 1px solid rgba(10, 99, 206, 0.2);
+  border-radius: var(--wf-control-radius);
+  background: rgba(255, 255, 255, 0.52);
+  color: var(--wf-primary);
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.04em;
@@ -635,8 +688,9 @@ table {
 .windfall-evidence-panel {
   border: 1px solid var(--wf-rule);
   border-radius: var(--wf-radius);
-  background: var(--wf-surface);
-  box-shadow: var(--wf-shadow-subtle);
+  background: var(--wf-glass-surface-strong);
+  box-shadow: var(--wf-panel-shadow);
+  backdrop-filter: var(--wf-backdrop-blur);
 }
 
 .windfall-inline-card {
@@ -652,7 +706,7 @@ table {
   padding: 10px 12px;
   border: 0;
   border-bottom: 1px solid var(--wf-soft-rule);
-  background: var(--wf-surface);
+  background: rgba(255, 255, 255, 0.7);
   color: var(--wf-ink);
   text-align: left;
   cursor: pointer;
@@ -694,22 +748,20 @@ table {
 .windfall-ledger-panel {
   display: grid;
   gap: 12px;
-  padding: 12px;
+  padding: 13px;
 }
 
 .windfall-generator-panel {
-  border-color: var(--wf-generator-rule);
-  border-left: 5px solid var(--wf-generator-rule);
+  border-color: rgba(209, 154, 36, 0.38);
+  border-left: 4px solid var(--wf-generator-rule);
   background: var(--wf-generator-bg);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.7),
-    0 1px 0 rgba(92, 59, 0, 0.06);
+  box-shadow: 0 14px 32px rgba(92, 59, 0, 0.08);
 }
 
 .windfall-generator-panel .windfall-status-chip,
 .windfall-generator-panel .windfall-action-band {
-  border-color: rgba(212, 155, 42, 0.46);
-  background: rgba(255, 255, 255, 0.72);
+  border-color: rgba(209, 154, 36, 0.32);
+  background: rgba(255, 255, 255, 0.78);
 }
 
 .windfall-generator-panel textarea,
@@ -736,8 +788,9 @@ table {
   padding: 12px;
   border: 1px solid var(--wf-rule);
   border-radius: var(--wf-radius);
-  background: rgba(255, 255, 255, 0.78);
-  box-shadow: var(--wf-shadow-subtle);
+  background: var(--wf-glass-surface-strong);
+  box-shadow: var(--wf-panel-shadow);
+  backdrop-filter: var(--wf-backdrop-blur);
 }
 
 .windfall-influence-card--wide {
@@ -808,10 +861,10 @@ table {
   display: grid;
   min-width: 0;
   gap: 10px;
-  padding: 10px;
+  padding: 11px;
   border: 1px solid var(--wf-soft-rule);
   border-radius: var(--wf-radius);
-  background: rgba(255, 255, 255, 0.56);
+  background: rgba(246, 249, 253, 0.7);
 }
 
 .windfall-constraint-section--timing {
@@ -875,8 +928,8 @@ table {
   min-width: 0;
   gap: 8px;
   padding: 8px 10px;
-  border-left: 2px solid var(--wf-soft-rule);
-  background: rgba(251, 252, 253, 0.72);
+  border-left: 2px solid rgba(10, 99, 206, 0.16);
+  background: rgba(255, 255, 255, 0.66);
 }
 
 .windfall-influence-control-grid,
@@ -896,7 +949,7 @@ table {
 
 .windfall-influence-number-summary {
   min-width: 0;
-  color: #555555;
+  color: var(--wf-muted);
   font-size: 11px;
   line-height: 1.4;
 }
@@ -929,8 +982,8 @@ table {
   padding: 8px 10px;
   border: 1px solid var(--wf-rule);
   border-radius: var(--wf-radius);
-  background: #fbfcfd;
-  color: #4b5563;
+  background: rgba(246, 249, 253, 0.82);
+  color: var(--wf-muted);
   font-size: 12px;
   line-height: 1.5;
   overflow-wrap: anywhere;
@@ -941,8 +994,8 @@ table {
   padding: 8px;
   border: 1px solid var(--wf-rule);
   border-radius: var(--wf-radius);
-  background: #fbfcfd;
-  color: #333333;
+  background: rgba(246, 249, 253, 0.82);
+  color: var(--wf-text);
   font-size: 12px;
 }
 
@@ -969,7 +1022,7 @@ table {
   padding: 10px;
   border: 1px solid var(--wf-rule);
   border-radius: var(--wf-radius);
-  background: var(--wf-surface);
+  background: rgba(255, 255, 255, 0.82);
 }
 
 .windfall-status-strip {
@@ -980,8 +1033,8 @@ table {
 
 .windfall-status-chip {
   border: 1px solid var(--wf-rule);
-  border-radius: var(--wf-radius-tight);
-  background: #fbfcfd;
+  border-radius: var(--wf-control-radius);
+  background: rgba(255, 255, 255, 0.76);
   padding: 7px 8px;
   color: var(--wf-text);
   font-size: 12px;
@@ -992,6 +1045,200 @@ table {
   color: var(--wf-ink);
   font-size: 15px;
   line-height: 1.1;
+}
+
+.windfall-number-trends {
+  display: grid;
+  gap: 14px;
+  margin: 12px 0;
+}
+
+.windfall-number-trends__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.windfall-number-trend-block {
+  overflow: hidden;
+  border: 1px solid var(--wf-rule);
+  border-radius: var(--wf-radius);
+  background: var(--wf-glass-surface-strong);
+  box-shadow: var(--wf-panel-shadow);
+  backdrop-filter: var(--wf-backdrop-blur);
+}
+
+.windfall-number-trend-block__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--wf-soft-rule);
+  background: rgba(246, 249, 253, 0.72);
+}
+
+.windfall-number-trend-block__eyebrow {
+  color: var(--wf-muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.windfall-number-trend-block__title {
+  margin: 1px 0 0;
+  color: var(--wf-section-title);
+  font-size: 17px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.windfall-number-trend-block__count {
+  flex: 0 0 auto;
+  color: var(--wf-muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.windfall-number-trend-block__rows {
+  display: grid;
+}
+
+.windfall-number-trend-row {
+  display: grid;
+  width: 100%;
+  min-height: 76px;
+  grid-template-columns: minmax(58px, max-content) minmax(0, 1fr);
+  gap: 8px 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--wf-soft-rule);
+  border-radius: 0;
+  background: transparent;
+  color: var(--wf-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.windfall-number-trend-row:last-child {
+  border-bottom: 0;
+}
+
+.windfall-number-trend-row:hover {
+  background: rgba(10, 99, 206, 0.045);
+}
+
+.windfall-number-trend-row[aria-pressed="true"] {
+  background: rgba(10, 99, 206, 0.085);
+  box-shadow: inset 3px 0 0 var(--wf-primary);
+}
+
+.windfall-number-trend-row__identity {
+  display: grid;
+  gap: 3px;
+}
+
+.windfall-number-trend-row__number {
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--number-trend-color) 74%, #ffffff);
+  border-radius: 999px;
+  background: var(--number-trend-color);
+  color: #ffffff;
+  font-size: 16px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.22);
+}
+
+.windfall-number-trend-row[aria-pressed="true"] .windfall-number-trend-row__number {
+  border-color: color-mix(in srgb, var(--number-trend-color) 56%, var(--wf-primary));
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.86), 0 0 0 5px var(--number-trend-color);
+  color: #ffffff;
+}
+
+.windfall-number-trend-row__status {
+  color: var(--wf-muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.windfall-number-trend-row[aria-pressed="true"] .windfall-number-trend-row__status {
+  color: var(--wf-primary);
+}
+
+.windfall-number-trend-row__metrics {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(4, minmax(42px, 1fr));
+  gap: 4px;
+}
+
+.windfall-number-trend-metric {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 3px 5px;
+  border: 1px solid var(--wf-soft-rule);
+  border-radius: var(--wf-control-radius);
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.windfall-number-trend-metric__label {
+  color: var(--wf-muted);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.windfall-number-trend-metric__value {
+  color: var(--wf-ink);
+  font-size: 12px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.windfall-number-trend-row__delta {
+  display: inline-flex;
+  width: fit-content;
+  grid-column: 2;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 7px;
+  border: 1px solid var(--wf-soft-rule);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--number-trend-color);
+  font-size: 11px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.windfall-number-trend-row[data-direction="flat"] .windfall-number-trend-row__delta {
+  color: var(--number-trend-color);
+}
+
+.windfall-number-trends__chartScroller {
+  max-width: 100%;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.windfall-number-trends__note {
+  color: var(--wf-muted);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .windfall-state-valid {
@@ -1098,5 +1345,10 @@ table {
 
   .windfall-influence-boost-grid {
     grid-template-columns: 1fr;
+  }
+
+  .windfall-number-trend-row {
+    grid-template-columns: minmax(50px, max-content) minmax(0, 1fr);
+    padding: 10px;
   }
 }

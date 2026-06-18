@@ -25,7 +25,10 @@ import {
   type MonthlyIdealDrawState,
   type StageIdealDrawState,
 } from "../../lib/monthlyDrawSummary";
+import { computeVirtualRowWindow, type VirtualRowWindow } from "../../lib/virtualRows";
 import { HigButton, InfoHelp } from "../shared/HigControls";
+
+const GENERATED_CANDIDATE_VISIBLE_COLUMN_COUNT = 23;
 
 /** Settings snapshot captured at export time — written as ## comment rows in CSV */
 export interface ExportSettings {
@@ -55,6 +58,7 @@ export interface ExportSettings {
   };
   minRecentMatches: number;
   recentMatchBias: number;
+  previousNeighbourConstraintNumbers?: number[];
   entropyEnabled: boolean;
   entropyThreshold: number;
   hammingEnabled: boolean;
@@ -243,7 +247,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
     }, []);
 
     // --- Column sorting ---
-    type SortKey = "nrr" | "ns" | "win" | "rdy" | "idm" | "stageIdm" | "conv" | "comp" | "ogaRaw" | "ogaPct" | "selHits" | "recentHits" | "oddEven" | "prize" | "b0x" | "b1x" | "b2x" | "b3x" | "b4x" | "b5x" | "b6x" | "b7x" | "b8x" | "recommended" | null;
+    type SortKey = "nrr" | "ns" | "win" | "rdy" | "idm" | "stageIdm" | "conv" | "comp" | "ogaRaw" | "ogaPct" | "selHits" | "recentHits" | "previousNeighbourHits" | "previousNeighbourDuplicateHits" | "previousNeighbourSingletonHits" | "oddEven" | "prize" | "b0x" | "b1x" | "b2x" | "b3x" | "b4x" | "b5x" | "b6x" | "b7x" | "b8x" | "recommended" | null;
     const [sortKey, setSortKey] = useState<SortKey>("prize");
     const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
     const toggleSort = (key: SortKey) => {
@@ -251,7 +255,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
         setSortDir((d) => (d === "asc" ? "desc" : "asc"));
       } else {
         setSortKey(key);
-        setSortDir(key === "nrr" || key === "ns" || key === "win" || key === "rdy" || key === "idm" || key === "stageIdm" || key === "conv" || key === "comp" || key === "ogaPct" || key === "selHits" || key === "recentHits" || key === "prize" || key?.startsWith("b") ? "desc" : "asc");
+        setSortDir(key === "nrr" || key === "ns" || key === "win" || key === "rdy" || key === "idm" || key === "stageIdm" || key === "conv" || key === "comp" || key === "ogaPct" || key === "selHits" || key === "recentHits" || key === "previousNeighbourHits" || key === "previousNeighbourDuplicateHits" || key === "previousNeighbourSingletonHits" || key === "prize" || key?.startsWith("b") ? "desc" : "asc");
       }
     };
     const sortIndicator = (key: SortKey): string => (sortKey === key ? (sortDir === "asc" ? " ▲" : " ▼") : "");
@@ -1081,6 +1085,18 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
           va = a.c.recentHits ?? numsA.filter((n: number) => recentSet.has(n)).length;
           vb = b.c.recentHits ?? numsB.filter((n: number) => recentSet.has(n)).length;
           break;
+        case "previousNeighbourHits":
+          va = a.c.previousNeighbourHits ?? -Infinity;
+          vb = b.c.previousNeighbourHits ?? -Infinity;
+          break;
+        case "previousNeighbourDuplicateHits":
+          va = a.c.previousNeighbourDuplicateHits ?? -Infinity;
+          vb = b.c.previousNeighbourDuplicateHits ?? -Infinity;
+          break;
+        case "previousNeighbourSingletonHits":
+          va = a.c.previousNeighbourSingletonHits ?? -Infinity;
+          vb = b.c.previousNeighbourSingletonHits ?? -Infinity;
+          break;
         case "oddEven":
           va = numsA.filter((n: number) => n % 2 === 1).length;
           vb = numsB.filter((n: number) => n % 2 === 1).length;
@@ -1347,22 +1363,59 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
   const OVERSCAN = 5;              // extra rows above/below viewport
   const VIRTUAL_THRESHOLD = 80;    // only virtualise when row count exceeds this
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(600);
+  const [virtualWindow, setVirtualWindow] = useState<VirtualRowWindow>(() => computeVirtualRowWindow({
+    totalRows: 0,
+    scrollTop: 0,
+    rowHeight: ROW_HEIGHT,
+    viewportHeight: 600,
+    overscan: OVERSCAN,
+    enabled: false,
+  }));
+  const virtualWindowRef = useRef(virtualWindow);
+  const scrollRafRef = useRef<number | null>(null);
+  const pendingScrollTopRef = useRef(0);
 
   const shouldVirtualise = filteredCandidates.length > VIRTUAL_THRESHOLD;
+  const totalRows = filteredCandidates.length;
+
+  const updateVirtualWindow = useCallback((scrollTopValue: number, nextViewportHeight = viewportHeight) => {
+    const nextWindow = computeVirtualRowWindow({
+      totalRows,
+      scrollTop: scrollTopValue,
+      rowHeight: ROW_HEIGHT,
+      viewportHeight: nextViewportHeight,
+      overscan: OVERSCAN,
+      enabled: shouldVirtualise,
+    });
+    const current = virtualWindowRef.current;
+    if (
+      nextWindow.startIdx !== current.startIdx ||
+      nextWindow.endIdx !== current.endIdx ||
+      nextWindow.topPad !== current.topPad ||
+      nextWindow.bottomPad !== current.bottomPad
+    ) {
+      virtualWindowRef.current = nextWindow;
+      setVirtualWindow(nextWindow);
+    }
+  }, [shouldVirtualise, totalRows, viewportHeight]);
 
   // Reset scroll when candidates or sort or filter change
   useEffect(() => {
     if (scrollContainerRef.current) {
       scrollContainerRef.current.scrollTop = 0;
-      setScrollTop(0);
     }
-  }, [candidates, sortKey, sortDir, filterEnabled, committedFilter]);
+    updateVirtualWindow(0);
+  }, [candidates, sortKey, sortDir, filterEnabled, committedFilter, updateVirtualWindow]);
 
   const handleTableScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
-    setScrollTop(e.currentTarget.scrollTop);
-  }, []);
+    pendingScrollTopRef.current = e.currentTarget.scrollTop;
+    if (scrollRafRef.current != null) return;
+    scrollRafRef.current = window.requestAnimationFrame(() => {
+      scrollRafRef.current = null;
+      updateVirtualWindow(pendingScrollTopRef.current);
+    });
+  }, [updateVirtualWindow]);
 
   // Observe container resize for accurate viewport height
   useEffect(() => {
@@ -1370,23 +1423,24 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
     if (!el || typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        setViewportHeight(entry.contentRect.height);
+        const nextHeight = entry.contentRect.height;
+        setViewportHeight(nextHeight);
+        updateVirtualWindow(el.scrollTop, nextHeight);
       }
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, [candidates.length]);
+  }, [candidates.length, updateVirtualWindow]);
 
-  const totalRows = filteredCandidates.length;
-  const startIdx = shouldVirtualise
-    ? Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN)
-    : 0;
-  const visibleCount = shouldVirtualise
-    ? Math.min(totalRows - startIdx, Math.ceil(viewportHeight / ROW_HEIGHT) + 2 * OVERSCAN)
-    : totalRows;
-  const endIdx = startIdx + visibleCount;
-  const topPad = startIdx * ROW_HEIGHT;
-  const bottomPad = Math.max(0, (totalRows - endIdx) * ROW_HEIGHT);
+  useEffect(() => {
+    return () => {
+      if (scrollRafRef.current != null) {
+        window.cancelAnimationFrame(scrollRafRef.current);
+      }
+    };
+  }, []);
+
+  const { startIdx, endIdx, topPad, bottomPad } = virtualWindow;
   const visibleCandidates = shouldVirtualise
     ? filteredCandidates.slice(startIdx, endIdx)
     : filteredCandidates;
@@ -1674,7 +1728,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
        if (!exportData.length) return;
        const headers = [
          "#", "Main (6)", "Supp (2)", "Prize", "Odd/Even",
-         "Comp%", "OGA Raw", "OGA%", "SelHits", "RecentHits",
+         "Comp%", "OGA Raw", "OGA%", "SelHits", "RecentHits", "Prev±1", "Dup±1", "Sing±1",
          "0x", "1x", "2x", "3x", "4x", "5x", "6x", "7x", "8x+",
           "Conv", "IDM", "StageIDM", "Rdy", "Win", "WinTier", "Nrr", "NS",
         ];
@@ -1704,6 +1758,9 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
            ogaPct !== undefined ? ogaPct.toFixed(1) : "",
            selHits,
            recentHits,
+           c.previousNeighbourHits ?? "",
+           c.previousNeighbourDuplicateHits ?? "",
+           c.previousNeighbourSingletonHits ?? "",
            bc ? bc.undrawn : "",
            bc ? bc.times1 : "",
            bc ? bc.times2 : "",
@@ -1781,6 +1838,12 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
              : "none (all trend ratios allowed)"
          );
          tag("Recent matches", `min=${es.minRecentMatches} | bias=${es.recentMatchBias}`);
+         tag(
+           "Latest ±1/±2 required targets",
+           es.previousNeighbourConstraintNumbers?.length
+             ? `[${es.previousNeighbourConstraintNumbers.join(", ")}]`
+             : "none",
+         );
          tag("Monthly boostPenalize", es.monthlyBoostPenalize ? "ON" : "OFF");
 
          // Constructive fill — critical for understanding bucket overrepresentation
@@ -2466,6 +2529,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
           )}
           <div
             ref={scrollContainerRef}
+            data-testid="generated-candidates-scroll"
             onScroll={handleTableScroll}
             style={{
               maxHeight: shouldVirtualise ? 600 : undefined,
@@ -2483,11 +2547,29 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                  <th style={th}>Manual (M/S)</th>
                  <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("prize")}>Prize{sortIndicator("prize")}</th>
                  <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("oddEven")}>Odd/Even{sortIndicator("oddEven")}</th>
-                 <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("comp")}>Comp%{sortIndicator("comp")}</th>
-                 <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("ogaRaw")}>OGA Raw{sortIndicator("ogaRaw")}</th>
-                 <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("ogaPct")}>OGA%{sortIndicator("ogaPct")}</th>
                  <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("selHits")}>{selHeader}{sortIndicator("selHits")}</th>
                  <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("recentHits")}>RecentHits{sortIndicator("recentHits")}</th>
+                 <th
+                   style={{ ...th, ...sortableStyle }}
+                   onClick={() => toggleSort("previousNeighbourHits")}
+                   title="Total candidate numbers that are ±1 from the latest draw. Observe-only diagnostic; generation can separately require user-selected ±1/±2 targets."
+                 >
+                   Prev±1{sortIndicator("previousNeighbourHits")}
+                 </th>
+                 <th
+                   style={{ ...th, ...sortableStyle }}
+                   onClick={() => toggleSort("previousNeighbourDuplicateHits")}
+                   title="Candidate numbers that are ±1 neighbours of two previous-draw numbers, such as 34 between 33 and 35."
+                 >
+                   Dup±1{sortIndicator("previousNeighbourDuplicateHits")}
+                 </th>
+                 <th
+                   style={{ ...th, ...sortableStyle }}
+                   onClick={() => toggleSort("previousNeighbourSingletonHits")}
+                   title="Candidate numbers that are ±1 neighbours of exactly one previous-draw number."
+                 >
+                   Sing±1{sortIndicator("previousNeighbourSingletonHits")}
+                 </th>
                  <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("b0x")}>0x{sortIndicator("b0x")}</th>
                  <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("b1x")}>1x{sortIndicator("b1x")}</th>
                  <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("b2x")}>2x{sortIndicator("b2x")}</th>
@@ -2498,18 +2580,13 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                  <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("b7x")}>7x{sortIndicator("b7x")}</th>
                  <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("b8x")}>8x+{sortIndicator("b8x")}</th>
                  {renderMetricHeader("conv", "Conv", "Convergence measures how much this candidate moves the month's distribution toward (+) or away from (-) the Monthly Draws Summary target. Direction is informational only and is not a prize-winning prediction.")}
-                 {renderMetricHeader("idm", "IDM", "Ideal Draw Match measures how closely this candidate's bucket composition matches the empirical target composition. 100% is a perfect descriptive match, not a win probability.")}
                  {renderMetricHeader("stageIdm", "Stage IDM", "Stage IDM measures how closely this candidate's bucket composition matches the next draw-stage target from comparable same-size months. It is descriptive alignment, not a probability.")}
-                 {renderMetricHeader("rdy", "Rdy", "Readiness is a configurable diagnostic blend of Ideal Draw Match, Convergence, and OGA%. Higher means stronger alignment under those weights, not calibrated prediction.")}
-                 {renderMetricHeader("win", "Win", "WinScore is a candidate-pool diagnostic tiered by 2x bucket count and then absolute Convergence magnitude. It is not a calibrated next-draw probability.")}
-                 {renderMetricHeader("nrr", "Nrr", "Number Rarity Rank scores how rare the candidate's numbers are within the current generated pool. It is useful for batch compression, not a guaranteed lift.")}
-                 {renderMetricHeader("ns", "NS", "NumSum Score is the percentile rank of the candidate's number sum against historical draw sums. A score near 50 is historically median; this is descriptive support only.")}
                  <th style={th}>Actions</th>
               </tr>
            </thead>
             <tbody>
               {shouldVirtualise && topPad > 0 && (
-                <tr style={{ height: topPad }} aria-hidden="true"><td colSpan={27} /></tr>
+                <tr style={{ height: topPad }} aria-hidden="true"><td colSpan={GENERATED_CANDIDATE_VISIBLE_COLUMN_COUNT} /></tr>
               )}
               {visibleCandidates.map(({ c, origIdx, matched: isMatched }, sliceIdx) => {
                 const displayIdx = startIdx + sliceIdx;
@@ -2519,6 +2596,9 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                 const nums: number[] = [...c.main, ...c.supp];
                 const selHits = c.selHits ?? nums.filter((n: number) => hitSet.has(n)).length;
                 const recentHits = c.recentHits ?? nums.filter((n: number) => recentSet.has(n)).length;
+                const previousNeighbourHits = c.previousNeighbourHits;
+                const previousNeighbourDuplicateHits = c.previousNeighbourDuplicateHits;
+                const previousNeighbourSingletonHits = c.previousNeighbourSingletonHits;
                 const odd = nums.filter((n: number) => n % 2 === 1).length;
                 const even = nums.length - odd;
                 const manualMainHits = c.main.filter((n: number) => manualMainSet.has(n)).length;
@@ -2529,30 +2609,19 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                   : isSelRow
                   ? "#FFF9C4"
                   : undefined;
-                const ogaRaw = c.ogaScore;
-                const ogaPct = c.ogaPercentile;
-                const ogaTip = formatOGATooltip(ogaRaw, ogaPct);
                  const isActiveSim = simSourceKind === "candidate" && activeSimCandidateIdx === i;
                  const bucketCounts = getMonthlyBucketCounts(nums);
                  const convScore = convergenceScores[i];
                  const isBestConv = convScore !== null && bestConvergence !== null && convScore === bestConvergence && convScore > 0;
-                 const rdyScore = readinessScores[i];
-                 const isBestRdy = rdyScore !== null && bestReadiness !== null && rdyScore === bestReadiness && rdyScore > 0;
-                 const idmScore = idmScores[i];
-                 const isBestIdm = idmScore !== null && bestIdm !== null && idmScore === bestIdm && idmScore > 0;
                  const stageIdmScore = stageIdmScores[i];
                  const isBestStageIdm = stageIdmScore !== null && bestStageIdm !== null && stageIdmScore === bestStageIdm && stageIdmScore > 0;
-                 // Gold tint for best-Rdy candidate(s), green for best-Conv, gold takes priority
-                 const rdyShade = isBestRdy ? "rgba(255,193,7,0.18)" : undefined;
                  const convShade = isBestConv ? "rgba(46,125,50,0.15)" : undefined;
                  const effectiveShade = isDimmed
                    ? "#f0eded"
-                   : rdyShade
-                     ? shade ? shade : rdyShade
-                     : convShade
-                       ? shade ? shade : convShade
-                       : shade;
-                 const outlineColor = isBestRdy && shade ? "#f9a825" : isBestConv && shade ? "#2e7d32" : undefined;
+                   : convShade
+                     ? shade ? shade : convShade
+                     : shade;
+                 const outlineColor = isBestConv && shade ? "#2e7d32" : undefined;
                  // Insert a visual separator row at the boundary between matched and unmatched
                  const prevSliceIdx = sliceIdx - 1;
                  const prevItem = prevSliceIdx >= 0 ? visibleCandidates[prevSliceIdx] : null;
@@ -2562,7 +2631,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                    <React.Fragment key={i}>
                    {showSeparator && (
                      <tr aria-hidden="true">
-                       <td colSpan={27} style={{ padding: 0, border: "none" }}>
+                       <td colSpan={GENERATED_CANDIDATE_VISIBLE_COLUMN_COUNT} style={{ padding: 0, border: "none" }}>
                          <div style={{
                            height: 4,
                            background: "linear-gradient(90deg, #e65100 0%, #ff9800 50%, #e65100 100%)",
@@ -2591,7 +2660,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                        borderLeft: isDimmed ? "3px solid #ccc" : undefined,
                      }}
                      onClick={() => onSelectCandidate(i)}
-                     title={`#${i + 1} SelHits=${selHits} RecentHits=${recentHits}${convScore !== null ? ` Conv=${convScore.toFixed(1)}` : ""}${idmScore !== null ? ` IDM=${(idmScore * 100).toFixed(1)}%` : ""}${stageIdmScore !== null ? ` StageIDM=${(stageIdmScore * 100).toFixed(1)}%` : ""}${rdyScore !== null ? ` Rdy=${(rdyScore * 100).toFixed(1)}%` : ""}${winScores[origIdx] !== null ? ` Win=${getWinTier(winScores[origIdx])} ${(winScores[origIdx] as number).toFixed(0)}` : ""}${nrrScores[origIdx] !== null ? ` Nrr=${(nrrScores[origIdx] as number).toFixed(1)}` : ""} NS=${nsScores[origIdx].toFixed(1)}`}
+                     title={`#${i + 1} SelHits=${selHits} RecentHits=${recentHits}${previousNeighbourHits !== undefined ? ` Prev±1=${previousNeighbourHits}` : ""}${previousNeighbourDuplicateHits !== undefined ? ` Dup±1=${previousNeighbourDuplicateHits}` : ""}${previousNeighbourSingletonHits !== undefined ? ` Sing±1=${previousNeighbourSingletonHits}` : ""}${convScore !== null ? ` Conv=${convScore.toFixed(1)}` : ""}${stageIdmScore !== null ? ` StageIDM=${(stageIdmScore * 100).toFixed(1)}%` : ""}`}
                   >
                     <td style={tdCenter}>{displayIdx + 1}</td>
                     <td style={mainTd}>{c.main.map((n: number) => renderNumber(
@@ -2603,7 +2672,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                         || (n >= 10 && committedTwoDigitSearchSet.has(n))
                       ),
                     ))}</td>
-                    <td style={td}>{c.supp.map((n: number) => renderNumber(
+                    <td style={suppTd}>{c.supp.map((n: number) => renderNumber(
                       n,
                       isActiveSim ? "supp" : undefined,
                       hasCommittedNumberSearch && (
@@ -2617,21 +2686,13 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                      <span style={{ color: "#bbb", padding: "0 3px" }}>/</span>
                      {renderDots(manualSuppHits, "#2e7d32", "#999", "Manual supp hits")}
                    </td>
-                   <td style={tdCenter}>{prizeLabel}</td>
-                   <td style={tdCenter}>{`${odd}:${even}`}</td>
-                    <td style={tdCenter}>
-                      {c.finalCompositeAdj !== undefined
-                        ? (c.finalCompositeAdj * 100).toFixed(2)
-                        : ""}
-                    </td>
-                   <td style={tdCenter} title={ogaTip}>
-                     {ogaRaw !== undefined ? ogaRaw.toFixed(2) : ""}
-                   </td>
-                   <td style={tdCenter} title={ogaTip}>
-                     {ogaPct !== undefined ? ogaPct.toFixed(1) : ""}
-                   </td>
+                    <td style={tdCenter}>{prizeLabel}</td>
+                    <td style={tdCenter}>{`${odd}:${even}`}</td>
                    <td style={tdCenter}>{selHits}</td>
                    <td style={tdCenter}>{recentHits}</td>
+                   <td style={tdCenter} title="Total candidate numbers that are ±1 from the latest draw">{previousNeighbourHits ?? "—"}</td>
+                   <td style={tdCenter} title="Candidate numbers that are duplicated ±1 neighbour targets">{previousNeighbourDuplicateHits ?? "—"}</td>
+                   <td style={tdCenter} title="Candidate numbers that are singleton ±1 neighbour targets">{previousNeighbourSingletonHits ?? "—"}</td>
                    <td style={tdCenter}>{bucketCounts ? bucketCounts.undrawn : "—"}</td>
                    <td style={tdCenter}>{bucketCounts ? bucketCounts.times1 : "—"}</td>
                    <td style={tdCenter}>{bucketCounts ? bucketCounts.times2 : "—"}</td>
@@ -2650,13 +2711,6 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                     </td>
                     <td style={{
                       ...tdCenter,
-                      fontWeight: isBestIdm ? 700 : undefined,
-                      color: idmScore !== null ? (idmScore >= 0.875 ? "#1565c0" : idmScore >= 0.5 ? "#2e7d32" : "#888") : undefined,
-                    }}>
-                      {idmScore !== null ? (isBestIdm ? `Top ${(idmScore * 100).toFixed(1)}%` : `${(idmScore * 100).toFixed(1)}%`) : "—"}
-                    </td>
-                    <td style={{
-                      ...tdCenter,
                       fontWeight: isBestStageIdm ? 700 : undefined,
                       color: stageIdmScore !== null ? (stageIdmScore >= 0.875 ? "#0f5f8f" : stageIdmScore >= 0.5 ? "#2e7d32" : "#888") : undefined,
                       background: isBestStageIdm ? "rgba(14,165,233,0.12)" : undefined,
@@ -2665,65 +2719,6 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                     >
                       {stageIdmScore !== null ? (isBestStageIdm ? `Top ${(stageIdmScore * 100).toFixed(1)}%` : `${(stageIdmScore * 100).toFixed(1)}%`) : "—"}
                     </td>
-                    <td style={{
-                      ...tdCenter,
-                      fontWeight: isBestRdy ? 700 : undefined,
-                      color: rdyScore !== null ? (rdyScore >= 0.7 ? "#b8860b" : rdyScore >= 0.4 ? "#2e7d32" : "#888") : undefined,
-                    }}>
-                      {rdyScore !== null ? (isBestRdy ? `Top ${(rdyScore * 100).toFixed(1)}%` : `${(rdyScore * 100).toFixed(1)}%`) : "—"}
-                    </td>
-                    {(() => {
-                      const ws = winScores[origIdx];
-                      const tier = getWinTier(ws);
-                      const isBestWin = ws !== null && bestWinScore !== null && ws === bestWinScore && ws > 0;
-                      const tierColors: Record<string, string> = { A: "#b8860b", B: "#6a6a6a", C: "#8b5e3c", D: "#999", "—": "#ccc" };
-                      const tierBg: Record<string, string> = { A: "rgba(255,193,7,0.15)", B: "rgba(192,192,192,0.15)", C: "rgba(205,133,63,0.12)", D: "transparent", "—": "transparent" };
-                      return (
-                        <td style={{
-                          ...tdCenter,
-                          fontWeight: isBestWin || tier === "A" ? 700 : tier === "B" ? 600 : undefined,
-                          color: tierColors[tier] || "#ccc",
-                          background: tierBg[tier] || "transparent",
-                        }}
-                        title={ws !== null ? `WinScore: ${ws.toFixed(1)} (Tier ${tier}) — 2x=${getMonthlyBucketCounts([...c.main, ...c.supp])?.times2 ?? "?"}, |Conv|=${Math.abs(convergenceScores[origIdx] ?? 0).toFixed(1)}, Nrr=${nrrScores[origIdx]?.toFixed(1) ?? "?"}` : "No data"}
-                        >
-                          {ws !== null ? (isBestWin ? `Top ${tier} ${ws.toFixed(0)}` : `${tier} ${ws.toFixed(0)}`) : "—"}
-                        </td>
-                     )})()}
-                     {(() => {
-                       const nrr = nrrScores[origIdx];
-                       const isBestNrr = nrr !== null && bestNrr !== null && nrr === bestNrr && nrr > 0;
-                       return (
-                         <td style={{
-                           ...tdCenter,
-                           fontWeight: isBestNrr ? 700 : nrr !== null && nrr >= 70 ? 600 : undefined,
-                           color: nrr !== null ? (nrr >= 80 ? "#6a1b9a" : nrr >= 60 ? "#1565c0" : nrr >= 40 ? "#2e7d32" : "#888") : "#ccc",
-                           background: isBestNrr ? "rgba(106,27,154,0.12)" : nrr !== null && nrr >= 70 ? "rgba(106,27,154,0.06)" : undefined,
-                         }}
-                         title={nrr !== null ? `Nrr: ${nrr.toFixed(1)} — candidate contains numbers that are rare in the generated pool. Higher = more contrarian picks.` : "No data"}
-                         >
-                           {nrr !== null ? (isBestNrr ? `Top ${nrr.toFixed(1)}` : nrr.toFixed(1)) : "—"}
-                         </td>
-                       );
-                     })()}
-                     {(() => {
-                       const ns = nsScores[origIdx];
-                       const isBestNs = bestNs !== null && ns === bestNs;
-                       // Colour scale: ≥72 (high) teal, ≥60 blue, ≥48 green, else grey
-                       const nsColor = ns >= 72 ? "#00695c" : ns >= 60 ? "#1565c0" : ns >= 48 ? "#2e7d32" : "#888";
-                       return (
-                         <td style={{
-                           ...tdCenter,
-                           fontWeight: isBestNs ? 700 : ns >= 65 ? 600 : undefined,
-                           color: nsColor,
-                           background: isBestNs ? "rgba(0,105,92,0.12)" : ns >= 65 ? "rgba(0,105,92,0.05)" : undefined,
-                         }}
-                          title={`NS: ${ns.toFixed(1)} — NumSum Score: percentile rank vs historical draws (${historyForOGA?.length ?? 0} draws from windfall_history_lottolyzer.csv). 50 = median. Higher = more high-value numbers relative to history.`}
-                         >
-                           {isBestNs ? `Top ${ns.toFixed(1)}` : ns.toFixed(1)}
-                         </td>
-                       );
-                     })()}
                      <td style={tdCenter}>
                      <button
                        type="button"
@@ -2746,7 +2741,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                );
              })}
               {shouldVirtualise && bottomPad > 0 && (
-                <tr style={{ height: bottomPad }} aria-hidden="true"><td colSpan={27} /></tr>
+                <tr style={{ height: bottomPad }} aria-hidden="true"><td colSpan={GENERATED_CANDIDATE_VISIBLE_COLUMN_COUNT} /></tr>
               )}
            </tbody>
           </table>
@@ -3118,7 +3113,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                        <tr key={`ex-${exPage}-${idx}`}>
                          <td style={tdCenter}>{exPage * exPageSize + idx + 1}</td>
                          <td style={mainTd}>{combo.main.map((n) => renderNumber(n))}</td>
-                         <td style={td}>{combo.supp.map((n) => renderNumber(n))}</td>
+                         <td style={suppTd}>{combo.supp.map((n) => renderNumber(n))}</td>
                          <td style={tdCenter}>{`${odd}:${even}`}</td>
                          <td style={tdCenter} title={ogaTip}>{ogaRaw !== undefined ? ogaRaw.toFixed(2) : ""}</td>
                          <td style={tdCenter} title={ogaTip}>{ogaPct !== undefined ? ogaPct.toFixed(1) : ""}</td>
@@ -3684,8 +3679,9 @@ const th: React.CSSProperties = {
   fontWeight: 600,
   whiteSpace: "nowrap",
 };
-const mainTh: React.CSSProperties = { ...th, width: 170 };
-const mainTd: React.CSSProperties = { ...td, width: 170, minWidth: 0 };
+const mainTh: React.CSSProperties = { ...th, width: 170, whiteSpace: "nowrap" };
+const mainTd: React.CSSProperties = { ...td, width: 170, minWidth: 170, whiteSpace: "nowrap" };
+const suppTd: React.CSSProperties = { ...td, whiteSpace: "nowrap" };
 const manualTd: React.CSSProperties = { ...tdCenter, fontWeight: 600 };
 const simBtn: React.CSSProperties = {
    padding: "4px 8px",

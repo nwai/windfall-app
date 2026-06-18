@@ -162,7 +162,7 @@ export function rowsFromDraws(draws: Draw[]): DrawRow[] {
 }
 
 export function drawsFromRows(rows: DrawRow[]): Draw[] {
-  return rows.map((row) => ({
+  return sortHistoryRows(rows, "asc").map((row) => ({
     date: row.date,
     main: row.mains.slice(),
     supp: row.supps.slice(),

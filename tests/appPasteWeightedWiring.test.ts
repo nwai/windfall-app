@@ -10,6 +10,9 @@ describe("App paste-weighted panel wiring", () => {
     expect(appSource).toContain("handleSimulatePasteWeightedCandidate");
     expect(appSource).toContain("<PasteWeightedCandidatesPanel");
     expect(appSource).toContain("title={<b>Paste-Weighted Candidate Generator</b>}");
+
+    const pastePanelCall = appSource.match(/<PasteWeightedCandidatesPanel[\s\S]*?\/>/)?.[0] ?? "";
+    expect(pastePanelCall).toContain("stageIdealDrawState={stageIdealDrawState}");
   });
 
   it("keeps the portfolio compression panel imported and rendered in App", () => {
@@ -29,9 +32,9 @@ describe("App paste-weighted panel wiring", () => {
     expect(portfolioPanelCall).toContain("monthEndCarryOverWeights={monthEndCarryOverWeightsForGeneration}");
     expect(portfolioPanelCall).toContain("hotColdRows={portfolioHotColdRows}");
     expect(portfolioPanelCall).toContain("windowShapeRows={portfolioWindowShapeRows}");
-    expect(portfolioPanelCall).toContain("adjacentComboHistory={filteredHistory}");
+    expect(portfolioPanelCall).toContain("adjacentComboHistory={realFilteredHistory}");
     expect(portfolioPanelCall).toContain("monthlyBuckets={dgaEffectiveMonthlyBuckets}");
-    expect(portfolioPanelCall).toContain("backtestHistory={history}");
+    expect(portfolioPanelCall).toContain("backtestHistory={realHistory}");
     expect(portfolioPanelCall).toContain("onSimulateCore={handleSimulatePortfolioCore}");
     expect(portfolioPanelCall).toContain("activeSimulatedKey={activeSimulatedMainKey}");
   });

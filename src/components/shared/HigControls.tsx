@@ -1,4 +1,5 @@
-import React, { useId, useState } from "react";
+import React, { useCallback, useEffect, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 type HigButtonVariant = "primary" | "secondary" | "quiet" | "danger";
 type HigButtonSize = "normal" | "compact";
@@ -74,29 +75,119 @@ interface InfoHelpProps {
   className?: string;
 }
 
+interface InfoHelpPanelPosition {
+  left: number;
+  top: number;
+  width: number;
+}
+
+const INFO_HELP_VIEWPORT_MARGIN = 12;
+const INFO_HELP_BUTTON_GAP = 8;
+const INFO_HELP_MAX_WIDTH = 280;
+const INFO_HELP_MIN_WIDTH = 180;
+const INFO_HELP_FALLBACK_HEIGHT = 132;
+
+const clampNumber = (value: number, min: number, max: number): number => (
+  Math.min(Math.max(value, min), max)
+);
+
 export const InfoHelp: React.FC<InfoHelpProps> = ({ label, children, className }) => {
   const [open, setOpen] = useState(false);
+  const [panelPosition, setPanelPosition] = useState<InfoHelpPanelPosition | null>(null);
   const panelId = useId();
+  const fallbackId = `${panelId}-closed-description`;
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const panelRef = useRef<HTMLSpanElement | null>(null);
+
   const toggleOpen = (event: React.MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
+    setPanelPosition(null);
     setOpen((value) => !value);
   };
+
+  const updatePanelPosition = useCallback(() => {
+    const button = buttonRef.current;
+    if (!button || typeof window === "undefined") return;
+
+    const buttonRect = button.getBoundingClientRect();
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || INFO_HELP_MAX_WIDTH;
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 600;
+    const availableWidth = Math.max(
+      INFO_HELP_MIN_WIDTH,
+      viewportWidth - (INFO_HELP_VIEWPORT_MARGIN * 2),
+    );
+    const width = Math.min(INFO_HELP_MAX_WIDTH, availableWidth);
+    const panelHeight = panelRef.current?.getBoundingClientRect().height || INFO_HELP_FALLBACK_HEIGHT;
+    const minLeft = INFO_HELP_VIEWPORT_MARGIN;
+    const maxLeft = Math.max(minLeft, viewportWidth - width - INFO_HELP_VIEWPORT_MARGIN);
+    const preferredLeft = buttonRect.left + (buttonRect.width / 2) - (width / 2);
+    const left = clampNumber(preferredLeft, minLeft, maxLeft);
+    const belowTop = buttonRect.bottom + INFO_HELP_BUTTON_GAP;
+    const aboveTop = buttonRect.top - panelHeight - INFO_HELP_BUTTON_GAP;
+    const top = belowTop + panelHeight + INFO_HELP_VIEWPORT_MARGIN <= viewportHeight
+      ? belowTop
+      : Math.max(INFO_HELP_VIEWPORT_MARGIN, aboveTop);
+    const nextPosition = { left: Math.round(left), top: Math.round(top), width: Math.round(width) };
+
+    setPanelPosition((current) => (
+      current
+      && current.left === nextPosition.left
+      && current.top === nextPosition.top
+      && current.width === nextPosition.width
+        ? current
+        : nextPosition
+    ));
+  }, []);
+
+  useEffect(() => {
+    if (!open) return undefined;
+
+    updatePanelPosition();
+    window.addEventListener("resize", updatePanelPosition);
+    window.addEventListener("scroll", updatePanelPosition, true);
+
+    return () => {
+      window.removeEventListener("resize", updatePanelPosition);
+      window.removeEventListener("scroll", updatePanelPosition, true);
+    };
+  }, [open, updatePanelPosition]);
+
+  const panel = open && typeof document !== "undefined" ? createPortal(
+    <span
+      ref={panelRef}
+      id={panelId}
+      className="windfall-info-help__panel"
+      role="tooltip"
+      style={{
+        left: panelPosition ? `${panelPosition.left}px` : `${INFO_HELP_VIEWPORT_MARGIN}px`,
+        top: panelPosition ? `${panelPosition.top}px` : `${INFO_HELP_VIEWPORT_MARGIN}px`,
+        width: panelPosition ? `${panelPosition.width}px` : `min(${INFO_HELP_MAX_WIDTH}px, calc(100vw - ${INFO_HELP_VIEWPORT_MARGIN * 2}px))`,
+        visibility: panelPosition ? "visible" : "hidden",
+      }}
+    >
+      {children}
+    </span>,
+    document.body,
+  ) : null;
 
   return (
     <span className={["windfall-info-help", className ?? ""].filter(Boolean).join(" ")}>
       <button
+        ref={buttonRef}
         type="button"
         className="windfall-info-help__button"
         aria-label={label}
         aria-expanded={open}
         aria-controls={panelId}
+        aria-describedby={open ? panelId : fallbackId}
         onClick={toggleOpen}
       >
         ?
       </button>
-      <span id={panelId} className="windfall-info-help__panel" hidden={!open}>
+      <span id={fallbackId} className="windfall-visually-hidden">
         {children}
       </span>
+      {panel}
     </span>
   );
 };

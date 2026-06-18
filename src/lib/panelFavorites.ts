@@ -9,10 +9,11 @@ export const PANEL_FAVORITES_STORAGE_KEY = "windfall:panel-favorites:v1";
 export const FAVORITE_PANEL_REGISTRY: FavoritePanelMeta[] = [
   { id: "number-trends", title: "Number Trends Table", workflow: "History" },
   { id: "draw-history-manager", title: "Draw History Manager", workflow: "History" },
-  { id: "next-draw-probabilities", title: "Next Draw Probabilities", workflow: "History" },
+  { id: "next-draw-probabilities", title: "Next Draw Empirical Diagnostics", workflow: "History" },
   { id: "windowed-draw-filtering", title: "Windowed Draw Filtering (WFMQYH)", workflow: "History" },
   { id: "odd-even-ratio-filters", title: "Odd/Even Ratio Filters", workflow: "Signals" },
   { id: "odd-even-ratio-cadence", title: "Odd/Even Ratio Cadence", workflow: "Signals" },
+  { id: "scoring-system-diagnostics", title: "Scoring System Diagnostics", workflow: "Signals" },
   { id: "survival-analyzer", title: "Survival Analyzer", workflow: "Signals" },
   { id: "temperature-transition", title: "Temperature Transition", workflow: "Signals" },
   { id: "monte-carlo-analyzer", title: "Monte Carlo Analyzer", workflow: "Signals" },

@@ -1,7 +1,7 @@
 import React, { useMemo } from "react";
 import { Draw } from "../types";
-import { computeOGA } from "../utils/oga";
 import { forecastOGA } from "../lib/ogaForecast";
+import { filterRealDrawHistory } from "../lib/realDrawHistory";
 
 interface NextDrawProbabilitiesPanelProps {
   history: Draw[];
@@ -10,12 +10,22 @@ interface NextDrawProbabilitiesPanelProps {
   allHistory?: Draw[]; // pass full history for baseline toggle
 }
 
-export const NextDrawProbabilitiesPanel: React.FC<NextDrawProbabilitiesPanelProps> = ({ history, mode = "window", title = "Next Draw Probabilities", allHistory }) => {
-  // Compute Odd/Even ratio frequencies from observed history
+export const NextDrawProbabilitiesPanel: React.FC<NextDrawProbabilitiesPanelProps> = ({ history, title = "Next Draw Empirical Diagnostics", allHistory }) => {
+  const realWindow = useMemo(
+    () => filterRealDrawHistory(history, "next-draw empirical diagnostics"),
+    [history],
+  );
+  const realAllHistory = useMemo(
+    () => filterRealDrawHistory(allHistory ?? history, "next-draw empirical diagnostics baseline"),
+    [allHistory, history],
+  );
+  const analysisHistory = realWindow.history;
+
+  // Compute Odd/Even ratio empirical shares from observed real history.
   const ratioProbs = useMemo(() => {
     const map = new Map<string, number>();
     let total = 0;
-    for (const d of history) {
+    for (const d of analysisHistory) {
       const nums = [...d.main, ...d.supp];
       const odd = nums.filter(n => n % 2 === 1).length;
       const even = nums.length - odd;
@@ -26,13 +36,13 @@ export const NextDrawProbabilitiesPanel: React.FC<NextDrawProbabilitiesPanelProp
     const ratios = Array.from(map.entries()).map(([ratio, count]) => ({ ratio, count, p: total ? count / total : 0 }));
     ratios.sort((a, b) => b.p - a.p || a.ratio.localeCompare(b.ratio));
     return { total, ratios };
-  }, [history]);
+  }, [analysisHistory]);
 
   const [baselineMode, setBaselineMode] = React.useState<"window" | "all">("window");
-  const baseline = baselineMode === "window" ? history : (allHistory ?? history);
+  const baseline = baselineMode === "window" ? analysisHistory : realAllHistory.history;
 
-  // Compute OGA distribution for each observed draw using baseline = current history
-  const ogaStats = useMemo(() => forecastOGA(history, baseline), [history, baseline]);
+  // Compute OGA distribution from observed real draws only.
+  const ogaStats = useMemo(() => forecastOGA(analysisHistory, baseline), [analysisHistory, baseline]);
 
   const decileMembers = useMemo(() => {
     if (!ogaStats.deciles || !ogaStats.deciles.thresholds) return [] as number[][];
@@ -68,27 +78,29 @@ export const NextDrawProbabilitiesPanel: React.FC<NextDrawProbabilitiesPanelProp
     return shown;
   };
 
-  // Naive next-draw OGA band probabilities:
-  // Use empirical distribution; report probability of falling below p10, between p10-p90, above p90
-  const ogaBandProbs = useMemo(() => {
-    const n = ogaStats.n;
-    if (!n) return { low: 0, mid: 0, high: 0 };
-    // For a new sample drawn from the same process, empirical CDF suggests ~10% below p10, ~80% mid, ~10% above p90.
-    // Report these bands for a simple expectation.
-    return { low: 0.10, mid: 0.80, high: 0.10 };
-  }, [ogaStats]);
-
   const panelStyle: React.CSSProperties = { border: "1px solid #eee", borderRadius: 8, padding: 12, background: "#fff" };
-  const h4: React.CSSProperties = { margin: "4px 0 8px" };
   const list: React.CSSProperties = { fontSize: 12, lineHeight: 1.6 };
   const table: React.CSSProperties = { borderCollapse: "collapse", fontSize: 12, width: "100%" };
   const th: React.CSSProperties = { textAlign: "left", borderBottom: "1px solid #ddd", padding: "4px 6px", fontWeight: 600 };
   const td: React.CSSProperties = { borderBottom: "1px solid #eee", padding: "4px 6px" };
+  const warningStyle: React.CSSProperties = {
+    marginBottom: 8,
+    padding: "6px 8px",
+    borderRadius: 6,
+    background: "#fff7ed",
+    border: "1px solid #fed7aa",
+    color: "#9a3412",
+    fontSize: 12,
+  };
+  const warnings = [...realWindow.warnings, ...realAllHistory.warnings];
 
   return (
-    <div style={panelStyle}>
-      {history.length === 0 ? (
-        <div style={{ fontSize: 12, color: "#666" }}>No history available.</div>
+    <div style={panelStyle} aria-label={title}>
+      {warnings.map((warning) => (
+        <div key={warning} style={warningStyle}>{warning}</div>
+      ))}
+      {analysisHistory.length === 0 ? (
+        <div style={{ fontSize: 12, color: "#666" }}>No real draw history available.</div>
       ) : (
         <>
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6 }}>
@@ -101,20 +113,19 @@ export const NextDrawProbabilitiesPanel: React.FC<NextDrawProbabilitiesPanelProp
             </label>
           </div>
           <div style={list}>
-            <div><b>Window</b>: {history.length} draws</div>
+            <div><b>Window</b>: {analysisHistory.length} real draws</div>
             <div>
               <b>OGA bands</b> (empirical/KDE): mean={ogaStats.mean.toFixed(2)}; p10={ogaStats.p10.toFixed(2)}; p50={ogaStats.p50.toFixed(2)}; p90={ogaStats.p90.toFixed(2)}
             </div>
             <div>
-              <b>Next OGA probabilities</b> (KDE):
+              <b>OGA band support</b> (KDE diagnostic):
               low (≤p10) ≈ {(ogaStats.bands.low * 100).toFixed(0)}%, mid (p10–p90) ≈ {(ogaStats.bands.mid * 100).toFixed(0)}%, high (≥p90) ≈ {(ogaStats.bands.high * 100).toFixed(0)}%
             </div>
           </div>
 
-          {/* NEW: Decile probabilities */}
           {ogaStats.deciles && (
             <div style={{ marginTop: 8 }}>
-              <b style={{ fontSize: 12 }}>OGA decile thresholds and probabilities (KDE)</b>
+              <b style={{ fontSize: 12 }}>OGA decile thresholds and KDE support</b>
               <table style={table}>
                 <thead>
                   <tr>
@@ -122,7 +133,7 @@ export const NextDrawProbabilitiesPanel: React.FC<NextDrawProbabilitiesPanelProp
                     <th style={th}>Range</th>
                     <th style={th}>Count</th>
                     <th style={th}>Scores</th>
-                    <th style={th}>KDE Prob%</th>
+                    <th style={th}>KDE support %</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -145,13 +156,13 @@ export const NextDrawProbabilitiesPanel: React.FC<NextDrawProbabilitiesPanelProp
           )}
 
           <div style={{ marginTop: 8 }}>
-            <b style={{ fontSize: 12 }}>Odd/Even ratio probabilities (empirical)</b>
+            <b style={{ fontSize: 12 }}>Odd/Even ratio empirical shares</b>
             <table style={table}>
               <thead>
                 <tr>
                   <th style={th}>Ratio</th>
                   <th style={th}>Count</th>
-                  <th style={th}>Prob%</th>
+                  <th style={th}>Empirical share %</th>
                 </tr>
               </thead>
               <tbody>

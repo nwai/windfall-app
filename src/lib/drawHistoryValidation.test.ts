@@ -75,4 +75,25 @@ describe("drawHistoryValidation", () => {
     expect(summary.latestDate).toBe("2026-05-26");
     expect(summary.earliestDate).toBe("2026-05-25");
   });
+
+  it("normalizes newest-first manager rows into chronological app draw history", () => {
+    const rows: DrawRow[] = [
+      { date: "6/15/26", mains: [37, 38, 39, 40, 41, 42], supps: [43, 44] },
+      { date: "6/12/26", mains: [29, 30, 31, 32, 33, 34], supps: [35, 36] },
+      { date: "6/10/26", mains: [21, 22, 23, 24, 25, 26], supps: [27, 28] },
+      { date: "6/8/26", mains: [13, 14, 15, 16, 17, 18], supps: [19, 20] },
+      { date: "6/5/26", mains: [5, 6, 7, 8, 9, 10], supps: [11, 12] },
+    ];
+
+    const appHistory = drawsFromRows(rows);
+
+    expect(appHistory.map((draw) => draw.date)).toEqual([
+      "6/5/26",
+      "6/8/26",
+      "6/10/26",
+      "6/12/26",
+      "6/15/26",
+    ]);
+    expect(appHistory.slice(-3).map((draw) => draw.date)).toEqual(["6/10/26", "6/12/26", "6/15/26"]);
+  });
 });

@@ -7,8 +7,13 @@ describe("App truthfulness provenance wiring", () => {
     const appSource = readFileSync(resolve(process.cwd(), "src/App.tsx"), "utf8");
 
     expect(appSource).toContain('import { summarizeDrawHistoryProvenance } from "./lib/drawHistoryProvenance";');
+    expect(appSource).toContain('import { filterRealDrawHistory } from "./lib/realDrawHistory";');
     expect(appSource).toContain("summarizeDrawHistoryProvenance(history)");
     expect(appSource).toContain("summarizeDrawHistoryProvenance(filteredHistory)");
+    expect(appSource).toContain("const realHistory = realHistoryResult.history;");
+    expect(appSource).toContain("const realFilteredHistory = realFilteredHistoryResult.history;");
+    expect(appSource).not.toContain("function rowsToDraws");
+    expect(appSource).not.toContain("rowsToDraws(");
     expect(appSource).toContain('data-testid="draw-history-provenance"');
     expect(appSource).toContain("Data provenance:");
     expect(appSource).toContain("Active window:");

@@ -11,6 +11,7 @@
 
 import { generateCandidates } from "../generateCandidates";
 import type { GenerateCandidateRatioOption, GenerateCandidatesResult } from "../generateCandidates";
+import type { ScoringGenerationProfile } from "../lib/scoringGenerationInfluence";
 
 /** Monthly bucket options with arrays instead of Sets (for structured clone) */
 interface SerializedMonthlyBucketOptions {
@@ -95,6 +96,8 @@ export interface GenerateWorkerArgs {
   monthlyRepeatBiasWeights?: Record<number, number>;
   /** Per-number month-end carry-over weights for active early-month numbers. */
   monthEndCarryOverWeights?: Record<number, number>;
+  /** Serializable Scoring Diagnostics evidence profile for generation weighting. */
+  scoringGenerationProfile?: ScoringGenerationProfile;
 }
 
 function deserializeMonthlyBuckets(
@@ -203,7 +206,8 @@ ctx.addEventListener("message", (e: MessageEvent) => {
       args.maxLastDrawMatches,
       args.monthlyRepeatBiasWeights,
       args.mainDecadeBiases,
-      args.monthEndCarryOverWeights
+      args.monthEndCarryOverWeights,
+      args.scoringGenerationProfile
     );
 
     ctx.postMessage({ type: "result", id, result });

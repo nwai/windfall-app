@@ -88,6 +88,35 @@ describe("truthfulness wording guards", () => {
     expect(appSource).toContain("Advanced Survival Analysis & Churn/Return Diagnostic Models");
   });
 
+  it("renames next-draw probabilities to empirical diagnostics and avoids calibrated probability wording", () => {
+    const appSource = readProjectFile("src/App.tsx");
+    const panelSource = readProjectFile("src/components/NextDrawProbabilitiesPanel.tsx");
+    const favoritesSource = readProjectFile("src/lib/panelFavorites.ts");
+    const combined = `${appSource}\n${panelSource}\n${favoritesSource}`;
+
+    expect(combined).toContain("Next Draw Empirical Diagnostics");
+    expect(combined).not.toContain("Next Draw Probabilities");
+    expect(panelSource).not.toContain("Next OGA probabilities");
+    expect(panelSource).not.toContain("KDE Prob%");
+    expect(panelSource).not.toContain("Prob%</th>");
+    expect(panelSource).toContain("KDE support %");
+    expect(panelSource).toContain("Empirical share %");
+    expect(panelSource).toContain("filterRealDrawHistory");
+  });
+
+  it("keeps scoring system diagnostics observe-only and terminal-digit framed", () => {
+    const componentSource = readProjectFile("src/components/ScoringSystemDiagnosticsPanel.tsx");
+    const libSource = readProjectFile("src/lib/scoringSystemDiagnostics.ts");
+
+    expect(componentSource).toContain("Observe-only");
+    expect(componentSource).toContain("not calibrated next-draw probabilities");
+    expect(componentSource).toContain("terminal digit");
+    expect(componentSource).not.toMatch(/probability of next draw/i);
+    expect(componentSource).not.toMatch(/guaranteed|guarantee/i);
+    expect(componentSource).not.toMatch(/ending-family|ending family/i);
+    expect(libSource).not.toMatch(/prediction/i);
+  });
+
   it("keeps survival/churn documentation framed as diagnostics rather than prediction certainty", () => {
     const docs = readProjectFile("src/docs/SURVIVAL_CHURN_MODELS.md");
 

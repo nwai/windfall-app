@@ -57,6 +57,12 @@ export type CandidateSet = {
   recentHits?: number;
   carryOverHits?: number;
   carryOverScore?: number;
+  previousNeighbourHits?: number;
+  previousNeighbourDuplicateHits?: number;
+  previousNeighbourSingletonHits?: number;
+  previousNeighbourTargetCount?: number;
+  scoreEvidence?: number;
+  scoreEvidenceTrace?: string[];
 };
 
 

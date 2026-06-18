@@ -17,6 +17,11 @@ import {
   type OddEvenRatioOption,
   type OddEvenRatioSummary,
 } from "./lib/oddEvenRatios";
+import {
+  scoreCandidateWithScoringProfile,
+  scoringInfluenceMultiplier,
+  type ScoringGenerationProfile,
+} from "./lib/scoringGenerationInfluence";
 export {
   applyOddEvenRatioQuotas,
   buildOddEvenRatioQuotas,
@@ -194,6 +199,8 @@ export function generateCandidates(
   mainDecadeBiases?: MainDecadeBiases,
   /** Per-number month-end carry-over weighting for active early-month candidates. */
   monthEndCarryOverWeights?: Record<number, number>,
+  /** Optional diagnostic scoring profile used as evidence weighting during construction. */
+  scoringGenerationProfile?: ScoringGenerationProfile,
 ): GenerateCandidatesResult {
 
   if (DEBUG) {
@@ -534,6 +541,9 @@ export function generateCandidates(
         .join(", ")}`
     );
   }
+  if (scoringGenerationProfile?.enabled) {
+    traceSetter(`[TRACE] ${scoringGenerationProfile.traceLabel}`);
+  }
 
   const activeMainDigitBoosts = Object.entries(mainDigitBoosts)
     .flatMap(([digit, boosts]) => {
@@ -624,6 +634,7 @@ export function generateCandidates(
       if (carryOverBias !== 1) {
         factor *= carryOverBias;
       }
+      factor *= scoringInfluenceMultiplier(n, scoringGenerationProfile);
       if (factor < 1) {
         // Probabilistic inclusion: e.g. factor=0.3 → 30 % chance of 1 rep
         if (Math.random() < factor) out.push(n);
@@ -701,7 +712,8 @@ export function generateCandidates(
     for (const n of pool) {
       const selectedBias = preferredSet.has(n) ? MONTHLY_SELECTED_NUMBER_BIAS_REPEATS : 1;
       const carryOverBias = Math.max(0.1, monthEndCarryOverWeights?.[n] ?? 1);
-      const reps = Math.max(1, Math.round(selectedBias * carryOverBias));
+      const scoringBias = scoringInfluenceMultiplier(n, scoringGenerationProfile);
+      const reps = Math.max(1, Math.round(selectedBias * carryOverBias * scoringBias));
       for (let i = 0; i < reps; i++) weighted.push(n);
     }
     const picked: number[] = [];
@@ -1075,7 +1087,16 @@ if (patternOptions?.constraints?.length && patternOptions?.mode === 'restrict') 
       const sumTol = Math.max(0, patternOptions?.sumTolerance ?? 0);
       patternMatches = matchesAnyPattern(pat, patternOptions.constraints, sumTol);
     }
-    candidates.push({ main, supp, patternMatches });
+    const candidate: CandidateSet = { main, supp, patternMatches };
+    if (scoringGenerationProfile?.enabled) {
+      const scoringEvidence = scoreCandidateWithScoringProfile(candidate, scoringGenerationProfile);
+      candidate.scoreEvidence = scoringEvidence.normalizedScore;
+      candidate.scoreEvidenceTrace = scoringEvidence.trace;
+      if (scoringEvidence.trace.length > 0) {
+        candidate.trace = [...(candidate.trace ?? []), ...scoringEvidence.trace];
+      }
+    }
+    candidates.push(candidate);
     if (oddEvenRatio) {
       oddEvenQuotaCounts[oddEvenRatio] = (oddEvenQuotaCounts[oddEvenRatio] ?? 0) + 1;
     }

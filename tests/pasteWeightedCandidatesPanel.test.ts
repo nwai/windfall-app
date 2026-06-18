@@ -6,10 +6,35 @@ import { describe, expect, it } from "vitest";
 
 import { PasteWeightedCandidatesPanel } from "../src/components/candidates/PasteWeightedCandidatesPanel";
 import type { Draw } from "../src/types";
+import type { StageIdealDrawState } from "../src/lib/monthlyDrawSummary";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const draw = (main: number[]): Draw => ({ date: "", main, supp: [] });
+
+const stageState = (): StageIdealDrawState => ({
+  bucketSets: {
+    undrawn: new Set([1, 2, 3, 4, 5, 6, 7, 8]),
+    times1: new Set([9, 10, 11, 12, 13, 14, 15, 16]),
+    times2: new Set([17, 18, 19, 20, 21, 22, 23, 24]),
+    times3: new Set([25, 26, 27, 28, 29, 30, 31, 32]),
+    times4: new Set([33, 34, 35, 36, 37, 38]),
+    times5: new Set([39, 40, 41]),
+    times6: new Set([42]),
+    times7: new Set([43]),
+    times8: new Set([44, 45]),
+  },
+  currentDistribution: [8, 8, 8, 8, 6, 3, 1, 1, 2],
+  targetDistribution: [7, 9, 8, 8, 6, 3, 1, 1, 2],
+  idealDrawBucketCounts: [0, 2, 3, 2, 1, 0, 0, 0, 0],
+  workingMonthLabel: "2026-06",
+  expectedDrawCount: 13,
+  targetStageDrawCount: 6,
+  completedDrawCount: 5,
+  comparableMonthCount: 4,
+  expectedDrawCountSource: "auto",
+  warnings: [],
+});
 
 describe("PasteWeightedCandidatesPanel", () => {
   it("renders the paste-weighted candidate controls without seeded fake input", () => {
@@ -71,6 +96,18 @@ describe("PasteWeightedCandidatesPanel", () => {
     expect(html).toContain("shrunk toward latest 50");
     expect(html).toContain("S1:0 D0:5");
     expect(html).toContain("56%");
+  });
+
+  it("renders Stage IDM bucket-mix controls with six-main defaults", () => {
+    const html = renderToStaticMarkup(React.createElement(PasteWeightedCandidatesPanel, {
+      stageIdealDrawState: stageState(),
+    }));
+
+    expect(html).toContain("Stage IDM bucket mix");
+    expect(html).toContain("Descriptive next-stage monthly bucket composition");
+    expect(html).toContain("2026-06 · draw 6 of 13");
+    expect(html).toContain("Mains-only default: 0x 0 · 1x 2 · 2x 2 · 3x 1 · 4x 1");
+    expect(html).toContain("Reset to Stage IDM");
   });
 
   it("sends a generated paste-weighted row to simulation", async () => {
@@ -142,6 +179,52 @@ describe("PasteWeightedCandidatesPanel", () => {
     });
 
     expect(generatedCounts.at(-1)).toBe(0);
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it("filters generated paste candidates through enabled Stage IDM controls", async () => {
+    const generatedRows: number[][] = [];
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(React.createElement(PasteWeightedCandidatesPanel, {
+        initialPasteText: Array.from({ length: 45 }, (_, index) => index + 1).join(","),
+        initialCandidateCount: 4,
+        stageIdealDrawState: stageState(),
+        onGeneratedCandidatesChange: (candidates) => {
+          generatedRows.splice(0, generatedRows.length, ...candidates.map((candidate) => candidate.main));
+        },
+      }));
+    });
+
+    const stageCheckbox = Array.from(container.querySelectorAll("input[type='checkbox']"))
+      .find((input) => input.parentElement?.textContent?.includes("Stage IDM bucket mix")) as HTMLInputElement | undefined;
+    expect(stageCheckbox).toBeDefined();
+    await act(async () => {
+      stageCheckbox!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    const generateButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent === "Generate paste-weighted candidates");
+    expect(generateButton).toBeDefined();
+    await act(async () => {
+      generateButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(container.textContent).toContain("Stage IDM accepted:");
+    expect(generatedRows).toHaveLength(4);
+    for (const row of generatedRows) {
+      expect(row.filter((number) => number >= 9 && number <= 16)).toHaveLength(2);
+      expect(row.filter((number) => number >= 17 && number <= 24)).toHaveLength(2);
+      expect(row.filter((number) => number >= 25 && number <= 32)).toHaveLength(1);
+      expect(row.filter((number) => number >= 33 && number <= 38)).toHaveLength(1);
+    }
 
     await act(async () => {
       root.unmount();
