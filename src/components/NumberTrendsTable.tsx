@@ -22,6 +22,8 @@ export function NumberTrendsTable({
   trends,
   onToggle,
   selected,
+  externalSelectedNumbers,
+  externalSelectedLabel = "external forced selection",
   // New optional props to support usage in App.tsx
   history,
   excludedNumbers,
@@ -33,6 +35,8 @@ export function NumberTrendsTable({
   trends?: NumberTrend[];
   onToggle?: (n: number) => void;
   selected?: number[];
+  externalSelectedNumbers?: number[];
+  externalSelectedLabel?: string;
   // New optional props
   history?: Draw[];
   excludedNumbers?: number[];
@@ -78,7 +82,14 @@ export function NumberTrendsTable({
     return res;
   }, [history, trends]);
 
-  const activeSelected = trendSelectedNumbers || selected || [];
+  const ownSelected = trendSelectedNumbers || selected || [];
+  const externalSelected = externalSelectedNumbers || [];
+  const activeSelected = useMemo(
+    () => Array.from(new Set([...ownSelected, ...externalSelected])),
+    [externalSelected, ownSelected],
+  );
+  const ownSelectedSet = useMemo(() => new Set(ownSelected), [ownSelected]);
+  const externalSelectedSet = useMemo(() => new Set(externalSelected), [externalSelected]);
 
   const trendByNumber = useMemo(() => {
     const map = new Map<number, NumberTrend>();
@@ -185,11 +196,15 @@ export function NumberTrendsTable({
             <div className="windfall-number-trend-block__rows">
               {block.trends.map((trend) => {
                 const isSelected = activeSelected.includes(trend.number);
+                const isExternalOnly = externalSelectedSet.has(trend.number) && !ownSelectedSet.has(trend.number);
                 const { r3, r13, deltaPP, dir } = shortTermDeltaPP(trend);
                 const clr = colorForNumber(trend.number);
                 const arrowColor = dir === "flat" ? "#666666" : clr;
                 const directionLabel = dir === "up" ? "Up" : dir === "down" ? "Down" : "Flat";
                 const signedDelta = `${deltaPP >= 0 ? "+" : ""}${deltaPP.toFixed(1)}`;
+                const ariaLabel = isExternalOnly
+                  ? `Number ${trend.number} is forced by ${externalSelectedLabel}`
+                  : `Toggle forced inclusion for number ${trend.number}`;
 
                 return (
                   <button
@@ -198,15 +213,18 @@ export function NumberTrendsTable({
                     className="windfall-number-trend-row"
                     data-testid="number-trend-row"
                     data-direction={dir}
+                    data-external-selected={isExternalOnly ? "true" : undefined}
                     aria-pressed={isSelected}
-                    aria-label={`Toggle forced inclusion for number ${trend.number}`}
+                    aria-label={ariaLabel}
+                    disabled={isExternalOnly}
+                    title={isExternalOnly ? `Selected in ${externalSelectedLabel}; deselect it there to release it.` : undefined}
                     style={{ "--number-trend-color": arrowColor } as React.CSSProperties}
                     onClick={() => handleToggle(trend.number)}
                   >
                     <span className="windfall-number-trend-row__identity">
                       <span className="windfall-number-trend-row__number">{trend.number}</span>
                       <span className="windfall-number-trend-row__status">
-                        {isSelected ? "Forced" : "Available"}
+                        {isExternalOnly ? externalSelectedLabel : isSelected ? "Forced" : "Available"}
                       </span>
                     </span>
 

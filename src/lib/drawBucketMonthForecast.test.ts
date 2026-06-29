@@ -36,9 +36,12 @@ describe("forecastDrawBucketMonth", () => {
 
     const slot3 = forecast.slotForecasts[0];
     expect(slot3.slotIndex).toBe(3);
-    expect(slot3.bucketForecasts.div5.predictedHits).toBe(4);
-    expect(slot3.bucketForecasts.div5.support).toBe(2);
-    expect(slot3.bucketForecasts.div5.topMatches.map((match) => match.monthKey)).toEqual(["2026-01", "2026-02"]);
+    expect(slot3.bucketForecasts.div5).toBeUndefined();
+    expect(slot3.bucketForecasts.end0.predictedHits).toBe(2);
+    expect(slot3.bucketForecasts.end0.support).toBe(2);
+    expect(slot3.bucketForecasts.end5.predictedHits).toBe(2);
+    expect(slot3.bucketForecasts.end5.support).toBe(2);
+    expect(slot3.bucketForecasts.end5.topMatches.map((match) => match.monthKey)).toEqual(["2026-01", "2026-02"]);
     expect(slot3.bucketForecasts.end1.predictedHits).toBe(2);
     expect(slot3.bucketForecasts.end1.confidence).toBeGreaterThan(0.99);
   });
@@ -124,6 +127,8 @@ describe("forecastDrawBucketMonth", () => {
 
     expect(forecast.warnings).toContain("Ignored 1 simulated fallback draw row; draw-bucket month forecasts use real historical draws only.");
     expect(forecast.observedDrawCount).toBe(2);
-    expect(forecast.slotForecasts[0]?.bucketForecasts.div5.support).toBe(0);
+    expect(forecast.slotForecasts[0]?.bucketForecasts.div5).toBeUndefined();
+    expect(forecast.slotForecasts[0]?.bucketForecasts.end0.support).toBe(0);
+    expect(forecast.slotForecasts[0]?.bucketForecasts.end5.support).toBe(0);
   });
 });

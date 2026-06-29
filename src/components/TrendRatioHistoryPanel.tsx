@@ -194,7 +194,7 @@ export const TrendRatioHistoryPanel: React.FC<TrendRatioHistoryPanelProps> = ({
   if (!stats.length) {
     return (
       <section style={panelStyle}>
-        <h3 style={h3Style}>Historical Trend Ratio Distribution</h3>
+        <h3 style={h3Style}>Trend Ratio Diagnostics (Up / Down / Flat, mains + supps)</h3>
         <div style={{ fontSize: 12, color: "#666" }}>
           Not enough data (need at least lookback+1 eligible draws).
         </div>
@@ -204,7 +204,7 @@ export const TrendRatioHistoryPanel: React.FC<TrendRatioHistoryPanelProps> = ({
 
   return (
     <section style={panelStyle}>
-      <h3 style={h3Style}>Historical Trend Ratio Distribution (with z)</h3>
+      <h3 style={h3Style}>Trend Ratio Diagnostics (Up / Down / Flat, mains + supps, with z)</h3>
 
       <div style={infoRowStyle}>
         Window draws: {windowDraws} | Eligible: {drawsConsidered} | Selected coverage: {coverage.count}/{drawsConsidered} ({coverage.percent}%)
@@ -213,7 +213,7 @@ export const TrendRatioHistoryPanel: React.FC<TrendRatioHistoryPanelProps> = ({
         )}
       </div>
       <div style={infoSubStyle}>
-        L={lookback} compares hybrid value now vs draw L back; θ={threshold}. pU={pU.toFixed(2)}, pD={pD.toFixed(2)}, pF={pF.toFixed(2)}.
+        L={lookback} compares the pre-draw hybrid value with draw L back; θ={threshold}. Ratio totals use 6 mains + 2 supplementary numbers. pU={pU.toFixed(2)}, pD={pD.toFixed(2)}, pF={pF.toFixed(2)}.
         z uses multinomial null; suppressed when expected &lt; {minExpectedForZ}.
       </div>
 
@@ -340,7 +340,7 @@ export const TrendRatioHistoryPanel: React.FC<TrendRatioHistoryPanelProps> = ({
       </div>
 
       <div style={footStyle}>
-        Click a bar or Add/On button to toggle ratio filtering. z shows deviation from a neutral multinomial model.
+        Click a bar or Add/On button to toggle generation filtering. Default is off. z shows deviation from a neutral multinomial model and is diagnostic, not a calibrated probability.
         |z| ≥ 2 ≈ notable. Expected suppressed if &lt; {minExpectedForZ}. Adjust L or θ to change classification dynamics.
       </div>
     </section>

@@ -257,6 +257,7 @@ export const MonthlyOverlapPanel: React.FC<{ history: Draw[] }> = ({ history }) 
   }, [mostRecentLabel, rows]);
 
   const hasData = rows.length > 0;
+  const displayRows = useMemo(() => [...rows].reverse(), [rows]);
 
   const [expandedMonths, setExpandedMonths] = useState<Set<string>>(new Set());
   const toggleMonth = useCallback((label: string) => {
@@ -324,7 +325,7 @@ export const MonthlyOverlapPanel: React.FC<{ history: Draw[] }> = ({ history }) 
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => {
+              {displayRows.map((r) => {
                 const isExcluded = r.monthLabel === mostRecentLabel;
                 const isExpanded = expandedMonths.has(r.monthLabel);
                 if (r.isPending) {

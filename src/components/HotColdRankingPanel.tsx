@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 
 import type { Draw } from "../types";
 import {
@@ -13,16 +13,25 @@ import {
   type HotColdStatus,
   resolveHotColdWindowChoice,
 } from "../lib/hotColdRanking";
+import { normalizeHotColdGenerationNumbers } from "../lib/hotColdGenerationSelection";
 
 interface HotColdRankingPanelProps {
   history: Draw[];
   wfmqyhWindowSize?: number;
+  forcedNumbers?: number[];
+  excludedNumbers?: number[];
+  onToggleForcedNumber?: (number: number) => void;
+  onToggleExcludedNumber?: (number: number) => void;
 }
 
 type BreakdownSortKey = "hotRank" | "historicalCount" | "historicalRank" | "recentCount" | "recentRank" | "priorRate" | "weightedRate" | "weightedRank";
+type BreakdownSelectionMode = "off" | "include" | "exclude";
 
 const formatPercent = (value: number): string => `${(value * 100).toFixed(1)}%`;
 const formatSignedPoints = (value: number): string => `${value >= 0 ? "+" : ""}${(value * 100).toFixed(1)} pts`;
+const formatHalfLifeOptionLabel = (option: number): string => (
+  option === 0 ? "0 · latest draw only" : `${option} draws`
+);
 
 const statusStyles: Record<HotColdStatus, { label: string; background: string; color: string; border: string }> = {
   hot: { label: "Hot", background: "#ffebee", color: "#b71c1c", border: "1px solid #ef9a9a" },
@@ -64,7 +73,14 @@ const TopListCard: React.FC<{ title: string; hint: string; rows: HotColdRankingR
   </div>
 );
 
-export const HotColdRankingPanel: React.FC<HotColdRankingPanelProps> = ({ history, wfmqyhWindowSize }) => {
+export const HotColdRankingPanel: React.FC<HotColdRankingPanelProps> = ({
+  history,
+  wfmqyhWindowSize,
+  forcedNumbers = [],
+  excludedNumbers = [],
+  onToggleForcedNumber,
+  onToggleExcludedNumber,
+}) => {
   const [includeSupp, setIncludeSupp] = useState<boolean>(true);
   const [recentWindowChoice, setRecentWindowChoice] = useState<string>("20");
   const [halfLifeChoice, setHalfLifeChoice] = useState<string>("10");
@@ -72,6 +88,7 @@ export const HotColdRankingPanel: React.FC<HotColdRankingPanelProps> = ({ histor
   const [breakdownOpen, setBreakdownOpen] = useState<boolean>(true);
   const [breakdownSortKey, setBreakdownSortKey] = useState<BreakdownSortKey>("hotRank");
   const [breakdownSortDir, setBreakdownSortDir] = useState<"asc" | "desc">("asc");
+  const [breakdownSelectionMode, setBreakdownSelectionMode] = useState<BreakdownSelectionMode>("off");
 
   const resolvedRecentWindow = useMemo(() => {
     const choice = parseHotColdWindowChoice(recentWindowChoice, 20);
@@ -87,6 +104,9 @@ export const HotColdRankingPanel: React.FC<HotColdRankingPanelProps> = ({ histor
     () => formatHotColdWindowChoiceLabel(parseHotColdWindowChoice(halfLifeChoice, 10), history.length, 10, "halfLife", wfmqyhWindowSize),
     [halfLifeChoice, history.length, wfmqyhWindowSize],
   );
+  const weightedLeadersHint = resolvedHalfLife === 0
+    ? "Latest-draw-only weighted rank; older draws receive zero weight."
+    : `Whole-history rank with a ${halfLifeLabel} half-life.`;
 
   const summary = useMemo(
     () => analyzeHotColdRanking(history, { includeSupp, recentWindow: resolvedRecentWindow, halfLife: resolvedHalfLife }),
@@ -100,6 +120,14 @@ export const HotColdRankingPanel: React.FC<HotColdRankingPanelProps> = ({ histor
 
   const hotCount = filteredRows.filter((row) => row.status === "hot").length;
   const coldCount = filteredRows.filter((row) => row.status === "cold").length;
+  const forcedNumberSet = useMemo(
+    () => new Set(normalizeHotColdGenerationNumbers(forcedNumbers)),
+    [forcedNumbers],
+  );
+  const excludedNumberSet = useMemo(
+    () => new Set(normalizeHotColdGenerationNumbers(excludedNumbers)),
+    [excludedNumbers],
+  );
 
   const sortedBreakdownRows = useMemo(() => {
     const selector: Record<BreakdownSortKey, (row: HotColdRankingRow) => number> = {
@@ -136,6 +164,30 @@ export const HotColdRankingPanel: React.FC<HotColdRankingPanelProps> = ({ histor
     breakdownSortKey === key ? (breakdownSortDir === "asc" ? " ▲" : " ▼") : ""
   );
 
+  const includeRowsMode = breakdownSelectionMode === "include";
+  const excludeRowsMode = breakdownSelectionMode === "exclude";
+  const breakdownRowsInteractive = (
+    (includeRowsMode && !!onToggleForcedNumber) ||
+    (excludeRowsMode && !!onToggleExcludedNumber)
+  );
+
+  const handleBreakdownRowActivation = useCallback((number: number): void => {
+    if (breakdownSelectionMode === "include") {
+      onToggleForcedNumber?.(number);
+      return;
+    }
+    if (breakdownSelectionMode === "exclude") {
+      onToggleExcludedNumber?.(number);
+    }
+  }, [breakdownSelectionMode, onToggleExcludedNumber, onToggleForcedNumber]);
+
+  const handleBreakdownRowKeyDown = useCallback((event: React.KeyboardEvent<HTMLTableRowElement>, number: number): void => {
+    if (!breakdownRowsInteractive) return;
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    handleBreakdownRowActivation(number);
+  }, [breakdownRowsInteractive, handleBreakdownRowActivation]);
+
   return (
     <section style={{ border: "1px solid #e5e7eb", borderRadius: 8, background: "#fff", padding: 12, display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
@@ -171,7 +223,7 @@ export const HotColdRankingPanel: React.FC<HotColdRankingPanelProps> = ({ histor
             <select value={halfLifeChoice} onChange={(event) => setHalfLifeChoice(event.target.value)} style={{ fontSize: 12 }}>
               <optgroup label="Draw-count choices">
                 {HOT_COLD_HALF_LIFE_OPTIONS.map((option) => (
-                  <option key={option} value={String(option)}>{option} draws</option>
+                  <option key={option} value={String(option)}>{formatHalfLifeOptionLabel(option)}</option>
                 ))}
               </optgroup>
               <optgroup label="WFMQYH shortcuts">
@@ -195,7 +247,7 @@ export const HotColdRankingPanel: React.FC<HotColdRankingPanelProps> = ({ histor
       </div>
 
       <div style={{ fontSize: 12, color: "#475569", lineHeight: 1.45, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 10px" }}>
-        <b>How to read this:</b> <b>Historical</b> ranks use full loaded history. <b>Recent</b> ranks use only the last <b>{summary.recentWindow}</b> draws. <b>Weighted</b> ranks use the whole history but give more weight to recent draws. This makes it easier to compare the app’s long-run counts against the kind of <em>current hotness</em> that lottery websites often emphasize.
+        <b>How to read this:</b> <b>Historical</b> ranks use full loaded history. <b>Recent</b> ranks use only the last <b>{summary.recentWindow}</b> draws. <b>Weighted</b> ranks use the selected half-life; <b>0</b> means only the latest draw receives weight. This makes it easier to compare the app’s long-run counts against the kind of <em>current hotness</em> that lottery websites often emphasize.
       </div>
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
@@ -219,7 +271,7 @@ export const HotColdRankingPanel: React.FC<HotColdRankingPanelProps> = ({ histor
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10 }}>
         <TopListCard title="Historical leaders" hint="Most appearances across the full loaded history." rows={summary.topHistorical.slice(0, 6)} accent="#1565c0" />
         <TopListCard title="Recent leaders" hint={`Most appearances in the last ${summary.recentWindow} draws.`} rows={summary.topRecent.slice(0, 6)} accent="#b26a00" />
-        <TopListCard title="Recency-weighted leaders" hint={`Whole-history rank with a ${halfLifeLabel} half-life.`} rows={summary.topWeighted.slice(0, 6)} accent="#7c3aed" />
+        <TopListCard title="Recency-weighted leaders" hint={weightedLeadersHint} rows={summary.topWeighted.slice(0, 6)} accent="#7c3aed" />
         <TopListCard title="Hottest movers" hint="Best combined recent-vs-prior and weighted trend." rows={summary.topHot.slice(0, 6)} accent="#b71c1c" />
       </div>
 
@@ -246,6 +298,31 @@ export const HotColdRankingPanel: React.FC<HotColdRankingPanelProps> = ({ histor
         </button>
         {breakdownOpen ? (
           <div style={{ overflowX: "auto", background: "#fff" }}>
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "10px 12px", borderBottom: "1px solid #e2e8f0", background: "#ffffff" }}>
+              <div style={{ fontSize: 12, color: "#475569", lineHeight: 1.45 }}>
+                Row selection is off by default. Turn on one mode, then click a number row to add or remove it from candidate generation.
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", fontSize: 12 }}>
+                <label style={{ minHeight: 32, display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 9px", borderRadius: 8, border: includeRowsMode ? "1px solid #f97316" : "1px solid #e2e8f0", background: includeRowsMode ? "#fff7ed" : "#f8fafc", color: includeRowsMode ? "#9a3412" : "#334155", fontWeight: includeRowsMode ? 800 : 600 }}>
+                  <input
+                    type="checkbox"
+                    checked={includeRowsMode}
+                    onChange={(event) => setBreakdownSelectionMode(event.target.checked ? "include" : "off")}
+                    aria-label="Include selected rows in candidate generation"
+                  />
+                  Include selected rows
+                </label>
+                <label style={{ minHeight: 32, display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 9px", borderRadius: 8, border: excludeRowsMode ? "1px solid #64748b" : "1px solid #e2e8f0", background: excludeRowsMode ? "#f1f5f9" : "#f8fafc", color: excludeRowsMode ? "#0f172a" : "#334155", fontWeight: excludeRowsMode ? 800 : 600 }}>
+                  <input
+                    type="checkbox"
+                    checked={excludeRowsMode}
+                    onChange={(event) => setBreakdownSelectionMode(event.target.checked ? "exclude" : "off")}
+                    aria-label="Exclude selected rows from candidate generation"
+                  />
+                  Exclude selected rows
+                </label>
+              </div>
+            </div>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
               <thead>
                 <tr style={{ background: "#f8fafc" }}>
@@ -262,13 +339,35 @@ export const HotColdRankingPanel: React.FC<HotColdRankingPanelProps> = ({ histor
                   <th style={{ padding: "8px 10px", borderBottom: "1px solid #e2e8f0", textAlign: "center", color: "#475569", whiteSpace: "nowrap", cursor: "pointer", userSelect: "none" }} onClick={() => toggleBreakdownSort("weightedRate")} title="Sort by recency-weighted hit rate">Weighted rate{getSortIndicator("weightedRate")}</th>
                   <th style={{ padding: "8px 10px", borderBottom: "1px solid #e2e8f0", textAlign: "center", color: "#475569", whiteSpace: "nowrap", cursor: "pointer", userSelect: "none" }} onClick={() => toggleBreakdownSort("weightedRank")} title="Sort by recency-weighted rank">Weighted rank{getSortIndicator("weightedRank")}</th>
                   <th style={{ padding: "8px 10px", borderBottom: "1px solid #e2e8f0", textAlign: "center", color: "#475569", whiteSpace: "nowrap" }}>Hot score</th>
+                  <th style={{ padding: "8px 10px", borderBottom: "1px solid #e2e8f0", textAlign: "center", color: "#475569", whiteSpace: "nowrap" }}>Generation</th>
                 </tr>
               </thead>
               <tbody>
                 {sortedBreakdownRows.map((row) => {
                     const statusStyle = statusStyles[row.status];
+                    const isForced = forcedNumberSet.has(row.number);
+                    const isExcluded = excludedNumberSet.has(row.number);
+                    const generationLabel = isForced ? "Forced in" : isExcluded ? "Excluded" : "—";
+                    const generationStyle = isForced
+                      ? { background: "#fff7ed", color: "#9a3412", border: "1px solid #fdba74" }
+                      : isExcluded
+                        ? { background: "#f1f5f9", color: "#0f172a", border: "1px solid #94a3b8" }
+                        : { background: "#ffffff", color: "#64748b", border: "1px solid #e2e8f0" };
+                    const rowBackground = isForced ? "#fffaf5" : isExcluded ? "#f8fafc" : "#ffffff";
+                    const rowTitle = breakdownRowsInteractive
+                      ? `${includeRowsMode ? "Toggle forced inclusion" : "Toggle forced exclusion"} for ${row.number}`
+                      : undefined;
                     return (
-                      <tr key={row.number} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                      <tr
+                        key={row.number}
+                        onClick={breakdownRowsInteractive ? () => handleBreakdownRowActivation(row.number) : undefined}
+                        onKeyDown={breakdownRowsInteractive ? (event) => handleBreakdownRowKeyDown(event, row.number) : undefined}
+                        role={breakdownRowsInteractive ? "button" : undefined}
+                        tabIndex={breakdownRowsInteractive ? 0 : undefined}
+                        aria-pressed={breakdownRowsInteractive ? (includeRowsMode ? isForced : isExcluded) : undefined}
+                        title={rowTitle}
+                        style={{ borderBottom: "1px solid #f1f5f9", background: rowBackground, cursor: breakdownRowsInteractive ? "pointer" : "default", outlineOffset: -2 }}
+                      >
                         <td style={{ padding: "7px 10px", textAlign: "center", fontVariantNumeric: "tabular-nums", color: "#64748b" }}>{row.hotRank}</td>
                         <td style={{ padding: "7px 10px", textAlign: "center", fontWeight: 800, color: "#1e293b", fontVariantNumeric: "tabular-nums" }}>{row.number}</td>
                         <td style={{ padding: "7px 10px", textAlign: "center", color: "#64748b" }}>{row.digitWidth === "oneDigit" ? "1-digit" : "2-digit"}</td>
@@ -287,6 +386,11 @@ export const HotColdRankingPanel: React.FC<HotColdRankingPanelProps> = ({ histor
                         <td style={{ padding: "7px 10px", textAlign: "center", fontVariantNumeric: "tabular-nums" }}>{row.weightedRank}</td>
                         <td style={{ padding: "7px 10px", textAlign: "center", fontVariantNumeric: "tabular-nums", fontWeight: 700, color: row.hotScore > 0 ? "#b71c1c" : row.hotScore < 0 ? "#0369a1" : "#475569" }} title={`Δ z-score ${row.deltaZScore.toFixed(2)} • weighted delta ${formatSignedPoints(row.weightedDelta)}`}>
                           {row.hotScore.toFixed(2)}
+                        </td>
+                        <td style={{ padding: "7px 10px", textAlign: "center", whiteSpace: "nowrap" }}>
+                          <span style={{ display: "inline-flex", minWidth: 72, alignItems: "center", justifyContent: "center", padding: "2px 8px", borderRadius: 999, fontSize: 11, fontWeight: 800, ...generationStyle }}>
+                            {generationLabel}
+                          </span>
                         </td>
                       </tr>
                     );

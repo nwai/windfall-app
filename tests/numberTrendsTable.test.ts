@@ -88,6 +88,24 @@ describe("NumberTrendsTable", () => {
     expect(numberOneRow?.querySelector(".windfall-number-trend-row__delta")?.getAttribute("aria-label")).toContain("13D 100.0 percent");
   });
 
+  it("shows externally forced drought-break numbers as locked selected rows", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(NumberTrendsTable, {
+        trends: buildTrends(),
+        selected: [],
+        externalSelectedNumbers: [11],
+        externalSelectedLabel: "Drought-break shortlist",
+      }),
+    );
+    const document = new DOMParser().parseFromString(html, "text/html");
+    const droughtRow = document.querySelector("[aria-label='Number 11 is forced by Drought-break shortlist']");
+
+    expect(droughtRow?.getAttribute("aria-pressed")).toBe("true");
+    expect(droughtRow?.getAttribute("data-external-selected")).toBe("true");
+    expect(droughtRow?.getAttribute("disabled")).not.toBeNull();
+    expect(droughtRow?.textContent).toContain("Drought-break shortlist");
+  });
+
   it("documents the trend arrow delta in the user manual", () => {
     const manual = readProjectFile("public/user-manual.html");
 

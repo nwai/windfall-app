@@ -24,6 +24,20 @@ describe("DGA heatmap simulation strip wiring", () => {
     expect(gridBlock).toContain("onChange={handleDgaStripChange}");
   });
 
+  it("can mirror DGA strip selections into the latest draw ±1/±2 constraint builder", () => {
+    const appSource = readAppSource();
+    const gridStart = appSource.indexOf('title="DGA grid"');
+    const monthlyGridStart = appSource.indexOf("<DGAMonthlyBucketStateGrid", gridStart);
+    const gridBlock = appSource.slice(gridStart, monthlyGridStart);
+
+    expect(appSource).toContain("mirrorDgaStripToPreviousNeighbour");
+    expect(appSource).toContain("applyDgaStripMirrorToPreviousNeighbour");
+    expect(appSource).toContain("setPreviousNeighbourConstraintNumbers(");
+    expect(gridBlock).toContain("Mirror strip to ±1/±2 builder");
+    expect(gridBlock).toContain("aria-pressed={mirrorDgaStripToPreviousNeighbour}");
+    expect(gridBlock).toContain("only valid latest-draw ±1/±2 targets");
+  });
+
   it("aligns heatmap strip rows to the heatmap canvas row gutter", () => {
     const appSource = readAppSource();
     const heatmapStart = appSource.indexOf('title="DGA heatmap"');

@@ -30,4 +30,26 @@ describe("odd/even ratio helpers", () => {
       "2:6": 40,
     });
   });
+
+  it("allocates selected eight-number ratios from active WFMQYH counts", () => {
+    expect(buildOddEvenRatioQuotas(
+      500,
+      ["5:3", "4:4", "3:5", "6:2", "2:6", "7:1"],
+      [
+        { ratio: "5:3", count: 7, percent: 30 },
+        { ratio: "4:4", count: 6, percent: 26 },
+        { ratio: "3:5", count: 4, percent: 17 },
+        { ratio: "6:2", count: 3, percent: 13 },
+        { ratio: "2:6", count: 2, percent: 9 },
+        { ratio: "7:1", count: 1, percent: 4 },
+      ],
+    )).toEqual({
+      "5:3": 152,
+      "4:4": 130,
+      "3:5": 87,
+      "6:2": 65,
+      "2:6": 44,
+      "7:1": 22,
+    });
+  });
 });

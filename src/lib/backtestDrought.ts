@@ -1,17 +1,18 @@
-// Backtest support for "Most likely to break a drought next draw"
-// Uses computeTemperatureSignal (same signal used by your heatmap / DGA panels)
-// For each eligible timepoint it computes the ordered top-K predictions and checks
-// whether the next draw contains any of the predicted numbers and at what rank.
+// Backtest support for DGA drought-break empirical shortlist.
+// Uses the same computeDroughtHazard model displayed in the DGA panel. For each
+// eligible timepoint, it ranks numbers from history available up to that point
+// and checks whether the next draw contains any ranked numbers.
 
 import { Draw } from "../types";
-import { computeTemperatureSignal } from "./temperatureSignal";
+import { computeDroughtHazard, DROUGHT_HAZARD_ANY_DRAWN_BASELINE } from "./droughtHazard";
 
 export type BacktestOptions = {
   minHistory?: number;      // minimum number of draws before we start predicting (default 20)
   useRollingWindow?: boolean; // whether to use only the last windowSize draws when computing signal
   windowSize?: number;      // relevant if useRollingWindow true (default 180)
   topK?: number;            // how many top predictions to consider (default 12)
-  // options forwarded to computeTemperatureSignal
+  // Deprecated temperature options are accepted for old saved state, but this
+  // backtest now intentionally ranks from empirical drought hazard only.
   alpha?: number;
   hybridWeight?: number;
   emaNormalize?: "per-number" | "global";
@@ -39,6 +40,12 @@ export type BacktestSummary = {
   hitAtTop10: number;
   averageFirstHitRank?: number; // only among predictions with a hit
   rankDistribution: Record<string, number>; // map "1","2",...,"miss" -> counts
+  baseline: {
+    scope: "mains+supps";
+    perNumberAnyDrawnProbability: number;
+    topKAnyHitProbability: number;
+    expectedHitsInTopK: number;
+  };
   records: SingleBacktestRecord[];
 };
 
@@ -54,14 +61,31 @@ const defaultOpts: BacktestOptions = {
   metric: "hybrid",
 };
 
+function combinations(n: number, k: number): number {
+  if (k < 0 || n < 0 || k > n) return 0;
+  let result = 1;
+  for (let i = 1; i <= k; i++) {
+    result = result * (n - k + i) / i;
+  }
+  return result;
+}
+
+function topKAnyHitBaseline(topK: number): number {
+  const safeTopK = Math.max(0, Math.min(45, Math.round(topK)));
+  if (safeTopK <= 0) return 0;
+  if (safeTopK > 37) return 1;
+  return 1 - combinations(45 - safeTopK, 8) / combinations(45, 8);
+}
+
 /**
- * Run drought-prediction backtest on `history`.
+ * Run empirical drought-hazard backtest on `history`.
  * Returns summary and per-prediction records.
  */
 export function backtestDroughtPredictions(history: Draw[], opts: BacktestOptions = {}): BacktestSummary {
   const o = { ...defaultOpts, ...opts };
   const n = history.length;
   const records: SingleBacktestRecord[] = [];
+  const topK = Math.max(1, Math.min(45, Math.round(o.topK ?? 12)));
 
   // We can predict the 'next' draw only when we have at least minHistory draws before prediction.
   // We'll iterate predictionIndex = t where we build signal from draws[0..t] and compare to draws[t+1].
@@ -73,22 +97,12 @@ export function backtestDroughtPredictions(history: Draw[], opts: BacktestOption
     const windowDraws = history.slice(windowStart, t + 1); // inclusive up to t
     if (windowDraws.length === 0) continue;
 
-    const tempSignal = computeTemperatureSignal(windowDraws, {
-      alpha: o.alpha!,
-      hybridWeight: o.hybridWeight!,
-      emaNormalize: o.emaNormalize!,
-      enforcePeaks: o.enforcePeaks!,
-      metric: o.metric!,
-      heightNumbers: 45,
-    });
-
-    // tempSignal is expected array length 45 for numbers 1..45
-    const arr: { n: number; s: number }[] = [];
-    for (let i = 0; i < 45; i++) arr.push({ n: i + 1, s: tempSignal[i] ?? 0 });
-    arr.sort((a, b) => b.s - a.s || a.n - b.n);
-
-    const topK = (o.topK ?? 12);
-    const topList = arr.slice(0, topK).map((x) => x.n);
+    const droughtHazard = computeDroughtHazard(windowDraws);
+    const topList = droughtHazard.byNumber
+      .slice()
+      .sort((a, b) => b.p - a.p || b.k - a.k || a.number - b.number)
+      .slice(0, topK)
+      .map((x) => x.number);
 
     const nextDraw = history[t + 1];
     const nextNums = new Set<number>([...nextDraw.main, ...nextDraw.supp]);
@@ -162,6 +176,12 @@ export function backtestDroughtPredictions(history: Draw[], opts: BacktestOption
     hitAtTop10,
     averageFirstHitRank,
     rankDistribution: rankCounts,
+    baseline: {
+      scope: "mains+supps",
+      perNumberAnyDrawnProbability: DROUGHT_HAZARD_ANY_DRAWN_BASELINE,
+      topKAnyHitProbability: topKAnyHitBaseline(topK),
+      expectedHitsInTopK: topK * DROUGHT_HAZARD_ANY_DRAWN_BASELINE,
+    },
     records,
   };
 

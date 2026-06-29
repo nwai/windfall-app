@@ -27,6 +27,17 @@ interface Options {
   historyDraws: { main: number[]; supp: number[] }[]; // chronological oldest->newest
 }
 
+function allRatioTags(): string[] {
+  const tags: string[] = [];
+  for (let up = 0; up <= 8; up += 1) {
+    for (let down = 0; down <= 8 - up; down += 1) {
+      const flat = 8 - up - down;
+      tags.push(`${up}-${down}-${flat}`);
+    }
+  }
+  return tags;
+}
+
 export function computeHistoricalTrendRatios(opts: Options): TrendRatioStat[] {
   const { lookback, threshold, valueSeries, historyDraws } = opts;
   if (!historyDraws.length || valueSeries.length !== 45) return [];
@@ -37,7 +48,7 @@ export function computeHistoricalTrendRatios(opts: Options): TrendRatioStat[] {
   // We need at least lookback+1 value points to classify before draw t
   // For draw t we classify using values at indices (t-1) and (t-1 - lookback).
   for (let t = 0; t < historyDraws.length; t++) {
-    const valueIndex = t; // assuming each draw appended a value row after it was processed previously
+    const valueIndex = t - 1;
     const prevIndex = valueIndex - lookback;
     if (prevIndex < 0) continue; // insufficient history for lookback window
     // Ensure all series have enough length
@@ -68,16 +79,17 @@ export function computeHistoricalTrendRatios(opts: Options): TrendRatioStat[] {
 
   if (eligibleDraws === 0) return [];
 
-  const stats: TrendRatioStat[] = Array.from(ratioCount.entries()).map(
-    ([tag, obj]) => ({
+  const stats: TrendRatioStat[] = allRatioTags().map((tag) => {
+    const obj = ratioCount.get(tag) || { c: 0, up: 0, down: 0, flat: 0 };
+    return {
       tag,
       count: obj.c,
       percent: +(100 * obj.c / eligibleDraws).toFixed(2),
       up: obj.up,
       down: obj.down,
       flat: obj.flat
-    })
-  );
+    };
+  });
 
   // Sort by frequency descending then tag
   stats.sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));

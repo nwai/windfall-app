@@ -61,10 +61,10 @@ export interface DrawMonthOption {
 
 export const DEFAULT_DRAW_BUCKETS: DrawBucketDefinition[] = [
   {
-    key: "div5",
-    label: "Divisible by 5",
-    numbers: [5, 10, 15, 20, 25, 30, 35, 40, 45],
-    description: "Tracks how many numbers divisible by 5 appear in each draw.",
+    key: "end0",
+    label: "Ending in 0",
+    numbers: [10, 20, 30, 40],
+    description: "Tracks 10/20/30/40 appearances per draw.",
   },
   {
     key: "end1",
@@ -89,6 +89,12 @@ export const DEFAULT_DRAW_BUCKETS: DrawBucketDefinition[] = [
     label: "Ending in 4",
     numbers: [4, 14, 24, 34, 44],
     description: "Tracks 4/14/24/34/44 appearances per draw.",
+  },
+  {
+    key: "end5",
+    label: "Ending in 5",
+    numbers: [5, 15, 25, 35, 45],
+    description: "Tracks 5/15/25/35/45 appearances per draw.",
   },
   {
     key: "end6",
@@ -324,7 +330,7 @@ export const buildDrawBucketPatternLeaderboard = (
  * Analyses how often each configured bucket appears per draw within the current history window.
  *
  * This is designed to reveal draw-level composition patterns, e.g. whether draws typically
- * contain 0, 1, 2, or more numbers from a bucket such as numbers divisible by 5.
+ * contain 0, 1, 2, or more numbers from a terminal-digit bucket such as ending in 0 or 5.
  */
 export const analyzeDrawBucketPatterns = (
   draws: Draw[],

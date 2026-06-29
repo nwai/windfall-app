@@ -383,10 +383,10 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
   // heatmap itself is rendering full-history context.
   const hazard = useMemo(() => computeDroughtHazard(hazardChrono), [hazardChrono]);
 
-  function labelForP(p: number) {
-    if (p >= 0.28) return { label: "High", color: "#d32f2f" };
-    if (p >= 0.22) return { label: "Elevated", color: "#f57c00" };
-    if (p >= 0.15) return { label: "Baseline", color: "#1976d2" };
+  function labelForP(p: number, baseline: number) {
+    if (p >= baseline + 0.08) return { label: "High evidence", color: "#d32f2f" };
+    if (p >= baseline + 0.03) return { label: "Elevated evidence", color: "#f57c00" };
+    if (p >= baseline - 0.03) return { label: "Near baseline", color: "#1976d2" };
     return { label: "Low", color: "#455a64" };
   }
 
@@ -427,9 +427,9 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
       {showHoverProbability && hoverN && hoverPt && (
         <div style={hoverBoxStyle}>
           {(() => {
-            const rec = hazard.byNumber[hoverN - 1] || { k: 0, p: 0 };
-            const baseline = 8 / 45;
-            const { label, color } = labelForP(rec.p);
+            const rec = hazard.byNumber[hoverN - 1] || { k: 0, p: 0, hitsNext: 0, trials: 0 };
+            const baseline = hazard.baselineProbability;
+            const { label, color } = labelForP(rec.p, baseline);
             const hoveredDraw = hoverDrawIndex !== null ? displayChrono[hoverDrawIndex] : null;
             const hoveredBucketLabel = hoverDrawIndex !== null
               ? labels[effectiveBucketIndexSeries[hoverN - 1]?.[hoverDrawIndex] ?? 0] ?? null
@@ -443,7 +443,7 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
               <div>
                 <div style={{ marginBottom: 4 }}>
                   <b style={{ marginRight: 6 }}>#{hoverN}</b>
-                  <span style={{ color: "#666" }}>Break-drought chance next draw</span>
+                  <span style={{ color: "#666" }}>Smoothed drought-break appearance rate</span>
                 </div>
                 {hoveredBucketLabel && hoveredDrawLabel ? (
                   <div style={{ color: "#555", marginBottom: 4 }}>
@@ -455,7 +455,7 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
                   <span style={{ color: "#444", fontWeight: 600 }}>{label}</span>
                 </div>
                 <div style={{ color: "#777", marginTop: 2, marginBottom: 6 }}>
-                  Drought length k={rec.k} • Baseline ≈ {(baseline * 100).toFixed(1)}%
+                  Drought length k={rec.k} • Observed {rec.hitsNext}/{rec.trials} • Baseline {(baseline * 100).toFixed(1)}%
                 </div>
                 {spark && (
                   <div>

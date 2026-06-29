@@ -626,6 +626,10 @@ const RankDriftTable: React.FC<{ realHistory: Draw[]; scope: ScoringDiagnosticsS
     }),
     [entity, filteredWindow, itemKey, realHistory, scope, startAfter, step],
   );
+  const displaySnapshots = useMemo(
+    () => [...result.snapshots].reverse(),
+    [result.snapshots],
+  );
 
   return (
     <div style={{ display: "grid", gap: 10 }}>
@@ -729,7 +733,7 @@ const RankDriftTable: React.FC<{ realHistory: Draw[]; scope: ScoringDiagnosticsS
             </tr>
           </thead>
           <tbody>
-            {result.snapshots.map((snapshot) => (
+            {displaySnapshots.map((snapshot) => (
               <tr key={`${snapshot.date}-${snapshot.drawCount}`}>
                 <td style={tdStrongStyle}>{snapshot.date}</td>
                 <td style={tdStyle}>{snapshot.drawCount}</td>

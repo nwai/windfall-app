@@ -22,6 +22,7 @@ Windfall is a dense analytical app, so the design goal is not decoration. The de
 - Do not use color alone to communicate status.
 - Keep generator panels visually findable with `windfall-generator-panel`.
 - Use `WorkflowAnchor` and `AppWorkflowNav` when adding major workflow sections.
+- Use the shared disclosure affordance on collapsible panels; do not reintroduce browser-default markers or panel-specific collapse icons.
 
 ## Review Questions
 

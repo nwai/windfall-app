@@ -119,6 +119,9 @@ export interface AppPresetSnapshot {
 
   // User and system exclusions
   excludedNumbers: number[];
+  hotColdForcedNumbers?: number[];
+  hotColdExcludedNumbers?: number[];
+  droughtBreakSelectedNumbers?: number[];
 
   // Trend settings
   trendLookback: number;
@@ -370,6 +373,9 @@ export function normalizeAppPresetSnapshot(snapshot: AppPresetSnapshot): AppPres
     acceptanceNeedsEnabled: !!snapshot.acceptanceNeedsEnabled,
     acceptanceNeedsCounts: normalizeMonthlyCounts(snapshot.acceptanceNeedsCounts),
     acceptanceNeedsHardExclude: !!snapshot.acceptanceNeedsHardExclude,
+    hotColdForcedNumbers: normalizeWeightedTargetNumbers(snapshot.hotColdForcedNumbers),
+    hotColdExcludedNumbers: normalizeWeightedTargetNumbers(snapshot.hotColdExcludedNumbers),
+    droughtBreakSelectedNumbers: normalizeWeightedTargetNumbers(snapshot.droughtBreakSelectedNumbers).slice(0, 3),
     previousNeighbourConstraintNumbers: normalizeWeightedTargetNumbers(snapshot.previousNeighbourConstraintNumbers).slice(0, 8),
     maxLastDrawMatchesEnabled: !!snapshot.maxLastDrawMatchesEnabled,
     maxLastDrawMatchesValue: clampInteger(snapshot.maxLastDrawMatchesValue, 0, 6, DEFAULT_LAST_DRAW_MATCH_CAP),

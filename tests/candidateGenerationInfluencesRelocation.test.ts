@@ -23,19 +23,37 @@ describe("Candidate Generation Influences control relocation", () => {
     expect(registrySource()).not.toContain('id: "operators-panel"');
   });
 
-  it("moves OGA reference, spokes, ranking weights, GPWF, lambda, and OGA top into Candidate Generation Influences", () => {
+  it("places generation setup before candidate generators and keeps generator panels output-focused", () => {
     const app = appSource();
+    const setupIndex = app.indexOf('panelId="candidate-generation-influences"');
+    const pasteIndex = app.indexOf('panelId="paste-weighted-candidate-generator"');
+    const portfolioIndex = app.indexOf('panelId="portfolio-compression"');
+    const generatedIndex = app.indexOf('panelId="generated-candidates"');
+
+    expect(setupIndex).toBeGreaterThanOrEqual(0);
+    expect(setupIndex).toBeLessThan(pasteIndex);
+    expect(setupIndex).toBeLessThan(portfolioIndex);
+    expect(setupIndex).toBeLessThan(generatedIndex);
+    expect(app).toContain('title={<b>Candidate Generation Setup</b>}');
+    expect(app).toContain('summaryHint="Configure filters, weighting, evidence, and forced/excluded numbers before generation"');
+
     const influencesBlock = blockBetween(
       app,
       'panelId="candidate-generation-influences"',
-      '<TracePanel',
+      '{/* [ORDER-ANCHOR] 23.5 Paste-Weighted Candidate Generator */}',
     );
     const generatedBlock = blockBetween(
       app,
       'panelId="generated-candidates"',
-      'panelId="candidate-generation-influences"',
+      '{/* [ORDER-ANCHOR] 24.5 Pick Six */}',
     );
 
+    expect(influencesBlock).toContain('title="Engine & Ranking"');
+    expect(influencesBlock).toContain('title="Hard Filters"');
+    expect(influencesBlock).toContain('title="Shape & Bucket Quotas"');
+    expect(influencesBlock).toContain('title="Number Biases"');
+    expect(influencesBlock).toContain('title="Recency & Latest Draw Rules"');
+    expect(influencesBlock).toContain('title="Active Setup Summary"');
     expect(influencesBlock).toContain("OGA Reference And Ranking");
     expect(influencesBlock).toContain("value={ogaRefMode}");
     expect(influencesBlock).toContain("setOgaRefMode");
@@ -55,7 +73,30 @@ describe("Candidate Generation Influences control relocation", () => {
     expect(influencesBlock).toContain("previewStats.hamming");
     expect(influencesBlock).toContain("previewStats.jaccard");
 
-    expect(generatedBlock).not.toContain("OGA reference:");
+    expect(generatedBlock).not.toContain('panelId="candidate-generation-influences"');
+    expect(generatedBlock).not.toContain("OGA Reference And Ranking");
     expect(generatedBlock).not.toContain("<RankingWeightsPanel");
+  });
+
+  it("renders Active Setup Summary provenance and generation trace as grouped readable sections", () => {
+    const app = appSource();
+    const influencesBlock = blockBetween(
+      app,
+      'panelId="candidate-generation-influences"',
+      '{/* [ORDER-ANCHOR] 23.5 Paste-Weighted Candidate Generator */}',
+    );
+
+    expect(influencesBlock).toContain("windfall-influence-provenance__grid");
+    expect(influencesBlock).toContain("activeSetupProvenanceGroups.map");
+    expect(app).toContain('title: "History & Source"');
+    expect(app).toContain('title: "Filters & Distance"');
+    expect(app).toContain('title: "Recency & Latest Draw"');
+    expect(app).toContain('title: "Ending Digits & Buckets"');
+    expect(app).toContain('title: "Monthly & Carry-over"');
+    expect(app).toContain("formatGenerationTraceLines");
+    expect(app).toContain("Rejects · hard filters");
+    expect(app).toContain("Rejects · digit buckets");
+    expect(app).toContain("Rejects · shape/recency");
+    expect(app).not.toContain("rejects — excl:${st.exclusions} sum:${st.sumRange} div5:${st.div5} main0:${st.mainZeroSet}");
   });
 });

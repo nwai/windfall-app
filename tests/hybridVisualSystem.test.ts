@@ -19,10 +19,14 @@ describe("hybrid visual system shell", () => {
     const summary = document.querySelector("summary");
     const title = document.querySelector(".windfall-section__title");
     const hint = document.querySelector(".windfall-section__hint");
+    const disclosure = document.querySelector(".windfall-section__disclosure-button");
+    const disclosureIcon = document.querySelector(".windfall-section__disclosure-icon");
 
     expect(details?.classList.contains("windfall-section")).toBe(true);
     expect(details?.hasAttribute("open")).toBe(true);
     expect(summary?.classList.contains("windfall-section__summary")).toBe(true);
+    expect(disclosure).not.toBeNull();
+    expect(disclosureIcon?.textContent).toBe("▾");
     expect(title).not.toBeNull();
     expect(hint).not.toBeNull();
     expect(html).toContain("Generated Candidates");

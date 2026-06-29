@@ -12,6 +12,7 @@ export interface MonthlyDigitNumberCount {
 export interface MonthlyDigitOccurrenceRow {
   monthLabel: string;
   drawCount: number;
+  availableDrawCount: number;
   totalOccurrences: number;
   oneDigitOccurrences: number;
   twoDigitOccurrences: number;
@@ -28,6 +29,7 @@ export interface MonthlyDigitOccurrenceRow {
 
 export interface MonthlyDigitOccurrenceSummary {
   rows: MonthlyDigitOccurrenceRow[];
+  equalizedDrawCount: number | null;
   totalMonths: number;
   averageMonthCount: number;
   averageExcludedMonthLabels: string[];
@@ -64,6 +66,7 @@ export interface MonthlyDigitOccurrenceBias {
 
 export interface AnalyzeMonthlyDigitOccurrencesOptions {
   includeSupp?: boolean;
+  equalizeDrawCounts?: boolean;
 }
 
 const ONE_DIGIT_MIN = 1;
@@ -136,7 +139,7 @@ export const analyzeMonthlyDigitOccurrences = (
   history: Draw[],
   options: AnalyzeMonthlyDigitOccurrencesOptions = {},
 ): MonthlyDigitOccurrenceSummary => {
-  const { includeSupp = false } = options;
+  const { includeSupp = false, equalizeDrawCounts = false } = options;
 
   const normalized = history
     .map((draw) => {
@@ -168,13 +171,22 @@ export const analyzeMonthlyDigitOccurrences = (
   const overallOneDigitCounts = new Map<number, number>();
   const overallTwoDigitCounts = new Map<number, number>();
 
-  const rows = Array.from(byMonth.entries())
-    .sort((left, right) => left[0].localeCompare(right[0]))
+  const monthEntries = Array.from(byMonth.entries())
+    .sort((left, right) => left[0].localeCompare(right[0]));
+  const equalizedDrawCount = equalizeDrawCounts && monthEntries.length > 0
+    ? Math.min(...monthEntries.map(([, entries]) => entries.length))
+    : null;
+
+  const rows = monthEntries
     .map<MonthlyDigitOccurrenceRow>(([monthLabel, entries]) => {
       const oneDigitCounts = new Map<number, number>();
       const twoDigitCounts = new Map<number, number>();
+      const availableDrawCount = entries.length;
+      const countedEntries = equalizedDrawCount == null
+        ? entries
+        : entries.slice(0, equalizedDrawCount);
 
-      entries.forEach((entry) => {
+      countedEntries.forEach((entry) => {
         entry.numbers.forEach((value) => {
           if (isOneDigitNumber(value)) {
             oneDigitCounts.set(value, (oneDigitCounts.get(value) ?? 0) + 1);
@@ -192,11 +204,12 @@ export const analyzeMonthlyDigitOccurrences = (
       const oneDigitOccurrences = Array.from(oneDigitCounts.values()).reduce((sum, count) => sum + count, 0);
       const twoDigitOccurrences = Array.from(twoDigitCounts.values()).reduce((sum, count) => sum + count, 0);
       const totalOccurrences = oneDigitOccurrences + twoDigitOccurrences;
-      const drawCount = entries.length;
+      const drawCount = countedEntries.length;
 
       return {
         monthLabel,
         drawCount,
+        availableDrawCount,
         totalOccurrences,
         oneDigitOccurrences,
         twoDigitOccurrences,
@@ -297,6 +310,7 @@ export const analyzeMonthlyDigitOccurrences = (
 
   return {
     rows,
+    equalizedDrawCount,
     totalMonths: rows.length,
     averageMonthCount: averageRows.length,
     averageExcludedMonthLabels,

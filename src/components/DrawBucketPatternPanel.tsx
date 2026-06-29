@@ -890,8 +890,8 @@ export const DrawBucketPatternPanel: React.FC<DrawBucketPatternPanelProps> = ({ 
       ) : null}
 
       <div style={{ fontSize: 12, color: "#556", marginBottom: 12, lineHeight: 1.45 }}>
-        Look for buckets whose distributions bunch up around a particular hit count. For example, if the
-        <b> Divisible by 5</b> card peaks at <b>1x</b>, those draws most often contain exactly one number divisible by 5.
+        Look for terminal-digit buckets whose distributions bunch up around a particular hit count. For example, if the
+        <b> Ending in 5</b> card peaks at <b>1x</b>, those draws most often contain exactly one number ending in 5.
         A high <b>≥1 hit</b> rate means the bucket appears in most draws; a low <b>0 hit</b> rate means it is rarely absent.
       </div>
 

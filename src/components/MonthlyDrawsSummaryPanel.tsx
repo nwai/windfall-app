@@ -358,6 +358,10 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
       averageDrawCountFilter,
     })
   ), [averageDrawCountFilter, drawLimit, history]);
+  const monthlyBucketDisplayRows = useMemo(
+    () => [...summary.rows].reverse(),
+    [summary.rows],
+  );
 
   const stageIdealDrawState = useMemo(() => analyzeStageIdealDrawModel(history, {
     drawLimitPerMonth: "all",
@@ -568,7 +572,7 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
                   </tr>
                 </thead>
                 <tbody>
-                  {summary.rows.map((row) => (
+                  {monthlyBucketDisplayRows.map((row) => (
                     <tr key={row.monthLabel} style={{ background: row.monthLabel === summary.latestRow?.monthLabel ? "#f8fafc" : "#fff" }}>
                       <td style={{ ...tdStyle, fontWeight: 800, whiteSpace: "nowrap" }}>{row.monthLabel}</td>
                       <td style={{ ...tdStyle, textAlign: "center", fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>

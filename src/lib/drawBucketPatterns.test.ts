@@ -38,26 +38,40 @@ const leaderboardFixture = (overrides: Partial<DrawBucketPatternStats> & Pick<Dr
 });
 
 describe("analyzeDrawBucketPatterns", () => {
-  it("computes per-draw distributions for divisible-by-5 buckets with main+supp", () => {
+  it("splits formerly combined divisible-by-5 numbers into ending-0 and ending-5 buckets", () => {
     const stats = analyzeDrawBucketPatterns(history, { includeSupp: true });
-    const div5 = stats.find((bucket) => bucket.key === "div5");
+    const end0 = stats.find((bucket) => bucket.key === "end0");
+    const end5 = stats.find((bucket) => bucket.key === "end5");
 
-    expect(div5).toBeDefined();
-    expect(div5?.totalDraws).toBe(3);
-    expect(div5?.averageHits).toBeCloseTo(7 / 3, 5);
-    expect(div5?.atLeastOneRate).toBe(100);
-    expect(div5?.modeHits).toBe(2);
-    expect(div5?.maxObservedHits).toBe(3);
-    expect(div5?.distribution.map((bin) => [bin.hits, bin.count])).toEqual([
-      [0, 0],
-      [1, 0],
-      [2, 2],
+    expect(stats.find((bucket) => bucket.key === "div5")).toBeUndefined();
+    expect(end0?.numbers).toEqual([10, 20, 30, 40]);
+    expect(end5?.numbers).toEqual([5, 15, 25, 35, 45]);
+
+    expect(end0?.totalDraws).toBe(3);
+    expect(end0?.averageHits).toBeCloseTo(1, 5);
+    expect(end0?.atLeastOneRate).toBeCloseTo((2 / 3) * 100, 5);
+    expect(end0?.modeHits).toBe(0);
+    expect(end0?.maxObservedHits).toBe(2);
+    expect(end0?.distribution.map((bin) => [bin.hits, bin.count])).toEqual([
+      [0, 1],
+      [1, 1],
+      [2, 1],
+      [3, 0],
+      [4, 0],
+    ]);
+
+    expect(end5?.totalDraws).toBe(3);
+    expect(end5?.averageHits).toBeCloseTo(4 / 3, 5);
+    expect(end5?.atLeastOneRate).toBeCloseTo((2 / 3) * 100, 5);
+    expect(end5?.modeHits).toBe(0);
+    expect(end5?.maxObservedHits).toBe(3);
+    expect(end5?.distribution.map((bin) => [bin.hits, bin.count])).toEqual([
+      [0, 1],
+      [1, 1],
+      [2, 0],
       [3, 1],
       [4, 0],
       [5, 0],
-      [6, 0],
-      [7, 0],
-      [8, 0],
     ]);
   });
 
@@ -80,16 +94,29 @@ describe("analyzeDrawBucketPatterns", () => {
 
   it("caps recent hits to the requested recent window size", () => {
     const stats = analyzeDrawBucketPatterns(history, { includeSupp: true, recentWindowSize: 2 });
-    const div5 = stats.find((bucket) => bucket.key === "div5");
+    const end0 = stats.find((bucket) => bucket.key === "end0");
+    const end5 = stats.find((bucket) => bucket.key === "end5");
 
-    expect(div5).toBeDefined();
-    expect(div5?.recentHits).toEqual([3, 2]);
+    expect(end0?.recentHits).toEqual([0, 2]);
+    expect(end5?.recentHits).toEqual([3, 0]);
   });
 
   it("uses the configured default buckets", () => {
     const stats = analyzeDrawBucketPatterns([], { includeSupp: true });
 
     expect(stats.map((bucket) => bucket.key)).toEqual(DEFAULT_DRAW_BUCKETS.map((bucket) => bucket.key));
+    expect(stats.map((bucket) => bucket.key)).toEqual([
+      "end0",
+      "end1",
+      "end2",
+      "end3",
+      "end4",
+      "end5",
+      "end6",
+      "end7",
+      "end8",
+      "end9",
+    ]);
     expect(stats.every((bucket) => bucket.totalDraws === 0)).toBe(true);
     expect(stats.every((bucket) => bucket.distribution.length >= 1)).toBe(true);
   });

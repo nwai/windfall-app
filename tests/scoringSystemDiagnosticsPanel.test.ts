@@ -199,6 +199,7 @@ describe("ScoringSystemDiagnosticsPanel", () => {
     const table = container.querySelector('table[aria-label="Rank drift walk-forward snapshots"]');
     const scrollRegion = container.querySelector<HTMLElement>('[aria-label="Rank drift snapshots scroll area"]');
     expect(table?.textContent).toContain("Draws");
+    expect(table?.querySelector("tbody tr")?.textContent).toContain("6/15/26");
     expect(scrollRegion?.style.maxHeight).toBe("46vh");
     expect(scrollRegion?.style.overflowY).toBe("auto");
   });

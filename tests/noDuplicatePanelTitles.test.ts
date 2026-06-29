@@ -33,6 +33,7 @@ describe("panel title hierarchy", () => {
       ["src/components/AdjacentCombosPanel.tsx", />\{title\}</],
       ["src/components/NextDrawProbabilitiesPanel.tsx", /<h4[^>]*>\{title\}<\/h4>/],
       ["src/components/DrawBucketPatternPanel.tsx", />Draw Bucket Pattern Explorer</],
+      ["src/components/NextHotBlocksPanel.tsx", />\s*Next Hot Blocks\s*</],
     ];
 
     for (const [path, pattern] of visualDuplicatePatterns) {

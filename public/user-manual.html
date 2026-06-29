@@ -183,6 +183,7 @@
     <a href="#getting-started">Getting Started</a>
     <a href="#loading-history">Loading Draw History</a>
     <a href="#number-trends-table">Number Trends Table</a>
+    <a href="#trend-ratio-diagnostics">Trend Ratio Diagnostics</a>
     <a href="#smart-history-review">Smart History Review</a>
     <a href="#official-source-compare">Official / Reference Source Comparison</a>
 
@@ -228,6 +229,7 @@
 
     <a class="section" href="#dga">DGA Grid</a>
     <a href="#dga-overview">Overview</a>
+    <a href="#dga-drought-break">Drought-break Shortlist</a>
     <a href="#dga-columns">Column Structure</a>
     <a href="#dga-next">The Next Column</a>
     <a href="#dga-simulate-strip">Simulate Next Strip</a>
@@ -318,6 +320,28 @@
   </div>
 
   <p>Clicking a number row marks or unmarks that number for forced inclusion in candidate generation.</p>
+
+  <h3 id="trend-ratio-diagnostics">Trend Ratio Diagnostics</h3>
+  <p><strong>Trend Ratio Diagnostics</strong> records the observed <strong>Up / Down / Flat</strong> trend composition of historical draws. Each ratio is written as <code>U-D-F</code>, where the three numbers count how many of the eight drawn values were classified as Up, Down, or Flat at that point in history.</p>
+
+  <h4>Scope and timing</h4>
+  <ul>
+    <li>The ratio uses <strong>mains + supplementary numbers</strong>, so every valid ratio totals 8.</li>
+    <li>For each historical draw, the app classifies trend state using only values available before that draw. This protects the diagnostic from lookahead leakage.</li>
+    <li>The table includes all 45 possible U/D/F ratios, even when a ratio has zero observed historical occurrences in the active WFMQYH window.</li>
+  </ul>
+
+  <h4>What z means</h4>
+  <p>The <strong>z</strong> column compares the observed count for each ratio with a neutral multinomial reference built from the observed Up, Down, and Flat rates. A larger absolute z value means that ratio appeared more or less often than the neutral reference would expect.</p>
+
+  <div class="note">
+    <strong>Truthfulness note:</strong> z is a diagnostic, not a calibrated probability. It is useful for spotting unusual historical structure, but it does not guarantee that a ratio is due or likely in the next draw.
+  </div>
+
+  <h4>What the Add button does</h4>
+  <p>The <strong>Add button</strong> toggles a ratio into the active generation filter. The default state is off: when no ratios are selected, all trend ratios are allowed. Click <strong>Add</strong> once to turn a ratio on; click the same button again when it shows <strong>On</strong> to remove that ratio and return it to the off/default state.</p>
+
+  <p>When one or more ratios are selected, candidate generation rejects candidates whose current Up / Down / Flat composition does not match one of the selected ratios. Trace output reports the active selected ratios, lookback, threshold, historical coverage, and trend-ratio rejection count.</p>
 
   <h3 id="smart-history-review">Smart History Review</h3>
   <p>Under the Draw History Manager, the app includes a <strong>Smart History Review</strong> panel. This is designed to help you correct human-made history problems without editing CSV files by hand.</p>
@@ -1380,6 +1404,68 @@
   <p>The <strong>DGA (Draw-Grid Analysis)</strong> grid provides a visual heat-map of number frequencies across the draw history. Each row represents one number (1–45) and each column represents one draw. The WFMQYH (Windfall Monthly Quarterly Yearly History) window is shown at full opacity; draws outside this window are shown at 35% opacity to provide context without visual dominance.</p>
 
   <p>Clicking any column header focuses that column (all other columns dim to 30% opacity). Click the same header again, or click any other column, to change or clear the focus.</p>
+
+  <h3 id="dga-drought-break">Drought-break Empirical Shortlist</h3>
+
+  <p><strong>Drought-break empirical shortlist (mains + supps)</strong> sits under <strong>Signals</strong> and ranks numbers by their current drought length and the historical rate at which numbers with that same drought length appeared in the following draw. It treats a number as "appeared" if it was drawn as either a main or supplementary number.</p>
+
+  <p>Click a number in the <strong>#</strong> column to mark it as a drought-break forced inclusion for candidate generation. Click it again to release it. The shortlist allows a maximum of three selected drought-break forced numbers, reflecting the current empirical working rule that winning candidates should not be overloaded with drought-break assumptions. These selections are separate from <strong>User Selected Numbers</strong>, so they do not silently trigger selected-number boosting.</p>
+
+  <h4>Column definitions</h4>
+  <table>
+    <thead>
+      <tr>
+        <th>Column</th>
+        <th>Meaning</th>
+        <th>How to read it</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>#</strong></td>
+        <td>The number being ranked, from 1 to 45.</td>
+        <td>Rows are sorted by strongest empirical drought-break support first.</td>
+      </tr>
+      <tr>
+        <td><strong>Month bucket</strong></td>
+        <td>The number's current monthly frequency bucket, such as <code>Undrawn</code>, <code>1x</code>, <code>2x</code>, and so on.</td>
+        <td>This is context only. It helps you see whether the shortlisted number is currently undrawn or already active this month, but it does not drive the drought-break rate.</td>
+      </tr>
+      <tr>
+        <td><strong>Current drought (k)</strong></td>
+        <td>The number of consecutive draws since this number last appeared in either mains or supplementary numbers.</td>
+        <td><code>k = 0</code> means the number appeared in the latest draw. Larger <code>k</code> values mean the number has been absent for longer.</td>
+      </tr>
+      <tr>
+        <td><strong>Smoothed appearance rate</strong></td>
+        <td>The estimated next-draw appearance rate for numbers currently at the same drought length <code>k</code>.</td>
+        <td>This starts from observed history, then shrinks sparse evidence toward the neutral <code>8 / 45 = 17.8%</code> baseline so small samples do not appear falsely precise.</td>
+      </tr>
+      <tr>
+        <td><strong>Observed hits / trials</strong></td>
+        <td>The raw evidence count behind the rate. A trial is a past situation where a number had this same drought length after a draw; a hit is when it appeared in the very next draw.</td>
+        <td>For example, <code>9/40</code> means 9 next-draw appearances from 40 matching drought situations. Higher trial counts are generally more trustworthy than tiny samples.</td>
+      </tr>
+      <tr>
+        <td><strong>Vs baseline</strong></td>
+        <td>The smoothed appearance rate minus the neutral 17.8% baseline, shown in percentage points.</td>
+        <td>Positive values mean the drought length has historically appeared above baseline; negative values mean below baseline. This is a lift diagnostic, not a guarantee.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h4>How the shortlist is calculated</h4>
+  <ul>
+    <li><strong>Scope:</strong> mains + supplementary numbers. This is appearance evidence from the full 45-number draw pool, not main-number-only probability.</li>
+    <li><strong>Baseline:</strong> before a draw, a number has an <code>8 / 45 = 17.8%</code> chance of appearing somewhere in the eight drawn numbers.</li>
+    <li><strong>Drought state:</strong> after each historical draw, the app records each number's drought length <code>k</code>, then checks whether that number appeared in the next draw.</li>
+    <li><strong>Smoothing:</strong> the panel adds two baseline-prior trials to stabilize sparse drought lengths. This avoids overstating rare <code>k</code> values that have only a few observations.</li>
+    <li><strong>Ranking:</strong> numbers are ranked by the smoothed rate for their current drought length; ties favour longer current droughts.</li>
+  </ul>
+
+  <div class="note">
+    <strong>Truthfulness note:</strong> this shortlist is an empirical diagnostic, not a guarantee and not a calibrated main-number prediction. It is useful as supporting evidence, especially when combined with backtests and other panels.
+  </div>
 
   <h3 id="dga-columns">Column Structure</h3>
 

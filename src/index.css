@@ -328,10 +328,78 @@ tbody tr:hover {
 }
 
 .windfall-workflow-anchor {
+  position: relative;
   scroll-margin-top: 72px;
   margin: 20px 0 8px;
   padding: 13px 0 8px;
   border-top: 1px solid rgba(10, 99, 206, 0.24);
+}
+
+.windfall-workflow-anchor__nav-target {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+.windfall-workflow-anchor__topline {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.windfall-workflow-anchor__copy {
+  min-width: 0;
+}
+
+.windfall-workflow-anchor__title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 5px;
+  min-width: 0;
+}
+
+.windfall-workflow-anchor__disclosure-button {
+  display: inline-flex;
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(148, 163, 184, 0.5);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.82);
+  color: var(--wf-section-title);
+  cursor: pointer;
+  font: inherit;
+}
+
+.windfall-workflow-anchor__disclosure-button:hover {
+  border-color: rgba(10, 99, 206, 0.42);
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.windfall-workflow-anchor__disclosure-button:focus-visible {
+  outline: 2px solid var(--wf-primary);
+  outline-offset: 2px;
+}
+
+.windfall-workflow-anchor__disclosure-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.windfall-workflow-anchor__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .windfall-workflow-anchor:focus {
@@ -350,7 +418,7 @@ tbody tr:hover {
 }
 
 .windfall-workflow-anchor__title {
-  margin: 2px 0 0;
+  margin: 0;
   color: var(--wf-section-title);
   font-size: 21px;
   font-weight: 800;
@@ -362,6 +430,10 @@ tbody tr:hover {
   margin: 5px 0 0;
   color: var(--wf-muted);
   font-size: 13px;
+}
+
+.windfall-workflow-anchor__favorite {
+  margin-top: 0;
 }
 
 .windfall-hig-button {
@@ -439,6 +511,19 @@ tbody tr:hover {
   color: var(--wf-danger);
   font-size: 12px;
   font-weight: 700;
+}
+
+.windfall-hig-slider {
+  width: 100%;
+  min-width: 0;
+  min-height: 32px;
+  accent-color: var(--wf-primary);
+  cursor: pointer;
+}
+
+.windfall-hig-slider:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
 }
 
 .windfall-info-help {
@@ -520,13 +605,56 @@ tbody tr:hover {
 .windfall-section__summary {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
+  list-style: none;
   padding: 11px 0;
   cursor: pointer;
 }
 
+.windfall-section__summary::-webkit-details-marker {
+  display: none;
+}
+
 .windfall-section__heading {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.windfall-section__disclosure-button {
+  display: inline-flex;
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(148, 163, 184, 0.46);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.8);
+  color: var(--wf-section-title);
+}
+
+.windfall-section__summary:hover .windfall-section__disclosure-button {
+  border-color: rgba(10, 99, 206, 0.42);
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.windfall-section__summary:focus-visible .windfall-section__disclosure-button {
+  outline: 2px solid var(--wf-primary);
+  outline-offset: 2px;
+}
+
+.windfall-section__disclosure-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.windfall-section__heading-copy {
   display: inline-flex;
   min-width: 0;
   flex-wrap: wrap;
@@ -554,7 +682,12 @@ tbody tr:hover {
   padding: 2px 0 8px;
 }
 
-.windfall-section:not([open]) > .windfall-section__body {
+.windfall-section--body-only {
+  margin-top: 0;
+  border-top: 0;
+}
+
+.windfall-section:not([open]):not(.windfall-section--body-only) > .windfall-section__body {
   display: none;
 }
 
@@ -781,6 +914,41 @@ tbody tr:hover {
   align-items: start;
 }
 
+.windfall-generation-setup-stack {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.windfall-generation-setup-stack .windfall-inline-card__body {
+  padding: 12px;
+}
+
+.windfall-generation-setup-summary-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--wf-rule);
+  border-radius: var(--wf-radius);
+  background: rgba(246, 249, 253, 0.82);
+}
+
+.windfall-generation-setup-summary-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 2px 8px;
+  border: 1px solid rgba(10, 99, 206, 0.16);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--wf-text);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
 .windfall-influence-card {
   display: grid;
   min-width: 0;
@@ -810,6 +978,36 @@ tbody tr:hover {
   color: var(--wf-muted);
   font-size: 12px;
   line-height: 1.4;
+}
+
+.windfall-core-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.windfall-core-filter-control {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+  align-content: start;
+  padding: 2px 0;
+  color: var(--wf-text);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.windfall-core-filter-control__label {
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+  gap: 6px;
+}
+
+.windfall-core-filter-control__range {
+  width: 100%;
+  min-width: 0;
 }
 
 .windfall-influence-legend {
@@ -979,13 +1177,69 @@ tbody tr:hover {
 
 .windfall-influence-provenance {
   margin-top: 10px;
-  padding: 8px 10px;
+  padding: 10px;
   border: 1px solid var(--wf-rule);
   border-radius: var(--wf-radius);
   background: rgba(246, 249, 253, 0.82);
-  color: var(--wf-muted);
+  color: var(--wf-text);
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.35;
+}
+
+.windfall-influence-provenance__header {
+  margin-bottom: 8px;
+  color: var(--wf-ink);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.windfall-influence-provenance__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 8px;
+}
+
+.windfall-influence-provenance__group {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.74);
+}
+
+.windfall-influence-provenance__title {
+  margin-bottom: 6px;
+  color: var(--wf-ink);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.windfall-influence-provenance__items {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+
+.windfall-influence-provenance__item {
+  display: grid;
+  grid-template-columns: minmax(78px, max-content) minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  min-width: 0;
+}
+
+.windfall-influence-provenance__label {
+  color: var(--wf-muted);
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.windfall-influence-provenance__value {
+  margin: 0;
+  min-width: 0;
+  color: var(--wf-text);
   overflow-wrap: anywhere;
 }
 
@@ -1253,6 +1507,51 @@ tbody tr:hover {
   color: var(--wf-danger);
 }
 
+.windfall-dga-mirror-control {
+  align-items: center;
+  background: rgba(248, 250, 252, 0.92);
+  border: 1px solid var(--wf-border);
+  border-radius: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  margin-top: 10px;
+  padding: 8px 10px;
+}
+
+.windfall-dga-mirror-control__button {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #cfd6e2;
+  border-radius: 8px;
+  color: #1f2937;
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  justify-content: center;
+  min-height: 32px;
+  padding: 5px 10px;
+}
+
+.windfall-dga-mirror-control__button:hover {
+  border-color: #94a3b8;
+}
+
+.windfall-dga-mirror-control__button.is-active {
+  background: #111827;
+  border-color: #111827;
+  color: #ffffff;
+}
+
+.windfall-dga-mirror-control__status {
+  color: #475569;
+  flex: 1 1 260px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 @media (max-width: 1180px) {
   .windfall-influence-card--wide {
     grid-column: 1 / -1;
@@ -1329,6 +1628,7 @@ tbody tr:hover {
   }
 
   .windfall-influence-control-grid,
+  .windfall-core-filter-grid,
   .windfall-influence-bias-grid {
     grid-template-columns: 1fr;
   }

@@ -11,6 +11,9 @@ interface CollapsibleSectionProps {
   panelId?: string;
   panelTitle?: string;
   favoriteable?: boolean;
+  chrome?: "default" | "bodyOnly";
+  open?: boolean;
+  bodyId?: string;
 }
 
 export const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
@@ -22,6 +25,9 @@ export const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
   panelId,
   panelTitle,
   favoriteable = true,
+  chrome = "default",
+  open: controlledOpen,
+  bodyId,
 }) => {
   const derivedKey = storageKey ?? (typeof title === "string" ? `cs-${title.replace(/\s+/g, "-").toLowerCase()}` : undefined);
   const [open, setOpen] = useState<boolean>(defaultOpen);
@@ -60,6 +66,24 @@ export const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
     panelFavorites?.toggleFavoritePanel(panelId);
   };
 
+  if (chrome === "bodyOnly") {
+    const bodyOnlyOpen = controlledOpen ?? open;
+
+    return (
+      <section
+        id={panelId ? getFavoritePanelDomId(panelId) : undefined}
+        className={`windfall-section windfall-section--body-only ${isFavorite ? "windfall-section--favorite" : ""}`}
+        data-panel-id={panelId}
+        data-collapsed={bodyOnlyOpen ? "false" : "true"}
+        tabIndex={panelId ? -1 : undefined}
+      >
+        <div id={bodyId} className="windfall-section__body" hidden={!bodyOnlyOpen}>
+          {children}
+        </div>
+      </section>
+    );
+  }
+
   return (
     <details
       id={panelId ? getFavoritePanelDomId(panelId) : undefined}
@@ -71,10 +95,15 @@ export const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
     >
       <summary className="windfall-section__summary">
         <span className="windfall-section__heading">
-          <span className="windfall-section__title">{title}</span>
-          {summaryHint ? (
-            <span className="windfall-section__hint">({summaryHint})</span>
-          ) : null}
+          <span className="windfall-section__disclosure-button" aria-hidden="true">
+            <span className="windfall-section__disclosure-icon">{open ? "▾" : "▸"}</span>
+          </span>
+          <span className="windfall-section__heading-copy">
+            <span className="windfall-section__title">{title}</span>
+            {summaryHint ? (
+              <span className="windfall-section__hint">({summaryHint})</span>
+            ) : null}
+          </span>
         </span>
         {canFavorite ? (
           <button

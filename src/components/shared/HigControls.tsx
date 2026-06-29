@@ -69,6 +69,67 @@ export const HigField: React.FC<HigFieldProps> = ({ id, label, help, error, chil
   );
 };
 
+export interface HigSliderProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, "type" | "value" | "defaultValue" | "onChange"> {
+  value: number;
+  onCommit: (value: number) => void;
+  onPreview?: (value: number) => void;
+}
+
+const numberFromSliderEvent = (
+  event: React.ChangeEvent<HTMLInputElement> | React.SyntheticEvent<HTMLInputElement>,
+): number => {
+  const value = Number(event.currentTarget.value);
+  return Number.isFinite(value) ? value : 0;
+};
+
+export const HigSlider = React.forwardRef<HTMLInputElement, HigSliderProps>(
+  ({ value, onCommit, onPreview, className, disabled, ...props }, ref) => {
+    const [draftValue, setDraftValue] = useState<number>(value);
+    const lastCommittedValueRef = useRef<number>(value);
+
+    useEffect(() => {
+      lastCommittedValueRef.current = value;
+      setDraftValue(value);
+    }, [value]);
+
+    const commitValue = useCallback((nextValue: number) => {
+      if (disabled || !Number.isFinite(nextValue)) return;
+      if (Object.is(nextValue, lastCommittedValueRef.current)) return;
+      lastCommittedValueRef.current = nextValue;
+      onCommit(nextValue);
+    }, [disabled, onCommit]);
+
+    const handleChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+      const nextValue = numberFromSliderEvent(event);
+      setDraftValue(nextValue);
+      onPreview?.(nextValue);
+    }, [onPreview]);
+
+    const handleCommit = useCallback((event: React.SyntheticEvent<HTMLInputElement>) => {
+      commitValue(numberFromSliderEvent(event));
+    }, [commitValue]);
+
+    return (
+      <input
+        {...props}
+        ref={ref}
+        type="range"
+        className={["windfall-hig-slider", className ?? ""].filter(Boolean).join(" ")}
+        value={draftValue}
+        disabled={disabled}
+        onChange={handleChange}
+        onPointerUp={handleCommit}
+        onMouseUp={handleCommit}
+        onTouchEnd={handleCommit}
+        onKeyUp={handleCommit}
+        onBlur={handleCommit}
+      />
+    );
+  },
+);
+
+HigSlider.displayName = "HigSlider";
+
 interface InfoHelpProps {
   label: string;
   children: React.ReactNode;

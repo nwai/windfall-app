@@ -29,6 +29,7 @@ import { GeneratedCandidatesPanel, ExportSettings } from "./components/candidate
 import { PasteWeightedCandidatesPanel } from "./components/candidates/PasteWeightedCandidatesPanel";
 import { PortfolioCompressionPanel, type PortfolioHotColdEvidenceRow } from "./components/candidates/PortfolioCompressionPanel";
 import { buildTrendWeights } from "./lib/trendBias";
+import { computeTrendMap } from "./lib/trend";
 import { buildMonthlyRepeatBiasWeights, MRB_BUCKET_KEYS, MRB_BUCKET_LABELS, MRB_BUDGET } from "./lib/numberBiases";
 import { OGAHistogram } from "./components/OGAHistogram";
 import { DGA_CELL_SIZE } from "./constants/ui";
@@ -87,7 +88,7 @@ import {
   type AppPreset,
 } from "./lib/presets";
 import type { WindowPattern } from "./components/WindowStatsPanel";
-import { applyOddEvenRatioQuotas, generateCandidates, summarizeOddEvenRatios } from "./generateCandidates";
+import { applyOddEvenRatioQuotas, generateCandidates, summarizeOddEvenRatios, type GenerateCandidatesResult } from "./generateCandidates";
 import { useGenerateWorker, serializeMonthlyBuckets, serializeTrendMap } from "./hooks/useGenerateWorker";
 import type { GenerateWorkerArgs } from "./workers/generateWorker";
 import { ModulationDiagnosticsPanel } from "./components/ModulationDiagnosticsPanel";
@@ -101,7 +102,7 @@ import {
 import { PreviousNeighbourBacktestPanel } from "./components/PreviousNeighbourBacktestPanel";
 import { CollapsibleSection } from "./components/shared/CollapsibleSection";
 import { InlineCollapsibleCard } from "./components/shared/InlineCollapsibleCard";
-import { HigField, InfoHelp } from "./components/shared/HigControls";
+import { HigField, HigSlider, InfoHelp } from "./components/shared/HigControls";
 import { AppWorkflowNav, WorkflowAnchor } from "./components/layout/AppWorkflowNav";
 import { PanelFavoritesStrip } from "./components/layout/PanelFavoritesStrip";
 import { PanelFavoritesProvider } from "./context/PanelFavoritesContext";
@@ -141,6 +142,11 @@ import {
   type DigitWidthConstraintScope,
 } from "./lib/digitWidthConstraint";
 import {
+  normalizeHotColdGenerationNumbers,
+  toggleHotColdExcludeSelection,
+  toggleHotColdIncludeSelection,
+} from "./lib/hotColdGenerationSelection";
+import {
   DEFAULT_GENERATED_CANDIDATE_COUNT,
   getGeneratedCandidateCountWindowDefault,
   normalizeGeneratedCandidateCount,
@@ -166,6 +172,7 @@ import { summarizeDrawHistoryProvenance } from "./lib/drawHistoryProvenance";
 import { filterRealDrawHistory } from "./lib/realDrawHistory";
 import { strictValidateDraws } from "./lib/strictDrawValidation";
 import { formatWfmqyhDateRange } from "./lib/wfmqyhWindowDateRange";
+import { drawResultTemperatureStyle } from "./lib/drawResultTemperature";
 import {
   loadFavoritePanelIds,
   normalizeFavoritePanelIds,
@@ -210,6 +217,87 @@ const formatScoringInfluenceLabel = (value: ScoringGenerationInfluence): string 
   value === "off" ? "Off" : `${value.slice(0, 1).toUpperCase()}${value.slice(1)}`
 );
 
+type GenerationRejectionStats = GenerateCandidatesResult["rejectionStats"];
+
+const formatTracePairs = (pairs: Array<[string, number | string]>): string => (
+  pairs.map(([label, value]) => `${label}:${value}`).join(" · ")
+);
+
+const formatGenerationTraceLines = (options: {
+  label: string;
+  requested: number;
+  kept: number;
+  elapsedMs: number;
+  stats: GenerationRejectionStats;
+  monthlyRejects: number;
+  prizeRejects: number;
+  capRejects: number;
+  poolSize?: number;
+  overgenFactor?: number;
+  filteredCount?: number;
+  budget?: number;
+}): string[] => {
+  const {
+    label,
+    requested,
+    kept,
+    elapsedMs,
+    stats,
+    monthlyRejects,
+    prizeRejects,
+    capRejects,
+    poolSize,
+    overgenFactor,
+    filteredCount,
+    budget,
+  } = options;
+  const poolSummary = poolSize !== undefined
+    ? `, pool ${poolSize}${overgenFactor !== undefined ? ` (overgen ${overgenFactor}x)` : ""}${filteredCount !== undefined ? ` -> filtered ${filteredCount}` : ""}`
+    : "";
+  const budgetSummary = budget !== undefined ? `, budget ${budget}` : "";
+
+  return [
+    `[TRACE] ${label}: requested ${requested}${poolSummary} -> kept ${kept} (accepted ${stats.accepted}/${stats.totalAttempts} attempts${budgetSummary}) in ${elapsedMs}ms`,
+    `[TRACE] ${label} Rejects · hard filters: ${formatTracePairs([
+      ["exclusions", stats.exclusions],
+      ["sum", stats.sumRange],
+      ["div5", stats.div5],
+      ["entropy", stats.entropy],
+      ["hamming", stats.hamming],
+      ["jaccard", stats.jaccard],
+    ])}`,
+    `[TRACE] ${label} Rejects · digit buckets: ${formatTracePairs([
+      ["end0", stats.mainZeroSet],
+      ["end1", stats.mainOneSet],
+      ["end2", stats.mainTwoSet],
+      ["end3", stats.mainThreeSet],
+      ["end4", stats.mainFourSet],
+      ["end5", stats.mainFiveSet],
+      ["end6", stats.mainSixSet],
+      ["end7", stats.mainSevenSet],
+      ["end8", stats.mainEightSet],
+      ["end9", stats.mainNineSet],
+      ["digitWidth", stats.digitWidth],
+    ])}`,
+    `[TRACE] ${label} Rejects · shape/recency: ${formatTracePairs([
+      ["oddEven", stats.oddEven],
+      ["tricky", stats.tricky],
+      ["repeat", stats.repeatUnion],
+      ["recMin", stats.minRecent],
+      ["recMax", stats.maxLastDraw],
+      ["recBias", stats.recentBias],
+      ["trend", stats.trendRatio],
+      ["pattern", stats.patternConstraint],
+      ["ogaBias", stats.ogaBias],
+    ])}`,
+    `[TRACE] ${label} Rejects · post filters: ${formatTracePairs([
+      ["monthly", monthlyRejects],
+      ["prize", prizeRejects],
+      ["ogaCap", capRejects],
+    ])}`,
+  ];
+};
+
 
 const custom: ZoneGroups = [
   [1, 2, 3, 4, 5],
@@ -240,6 +328,19 @@ const MIN_VALID_DRAWS = 45;
 const API_URL =
   "https://api.thelott.com/sales/vmax/web/data/lotto/results?companyId=Tatts&productId=WeekdayWindfall&maxDrawCount=50";
 const DEFAULT_ATTEMPT_MULTIPLIER = 400;
+const MAX_DROUGHT_BREAK_FORCED_NUMBERS = 3;
+
+const zeroMonthlyFrequencyConstraints = (): MonthlyFrequencyConstraints => ({
+  undrawn: 0,
+  times1: 0,
+  times2: 0,
+  times3: 0,
+  times4: 0,
+  times5: 0,
+  times6: 0,
+  times7: 0,
+  times8: 0,
+});
 
 const generationConstraintNumberBuckets = {
   main0: [10, 20, 30, 40],
@@ -442,9 +543,7 @@ function AppInner(): JSX.Element {
   const [digitWidthSingleDigitPercent, setDigitWidthSingleDigitPercent] = useState<number>(0);
   const [digitWidthConstraintScope, setDigitWidthConstraintScope] = useState<DigitWidthConstraintScope>("main");
   const [acceptanceNeedsEnabled, setAcceptanceNeedsEnabled] = useState<boolean>(false);
-  const [acceptanceNeedsCounts, setAcceptanceNeedsCounts] = useState<MonthlyFrequencyConstraints>({
-    undrawn: 0, times1: 0, times2: 0, times3: 0, times4: 0, times5: 0, times6: 0, times7: 0, times8: 0,
-  });
+  const [acceptanceNeedsCounts, setAcceptanceNeedsCounts] = useState<MonthlyFrequencyConstraints>(() => zeroMonthlyFrequencyConstraints());
   const [acceptanceNeedsHardExclude, setAcceptanceNeedsHardExclude] = useState<boolean>(false);
   const [attemptMultiplier, setAttemptMultiplier] = useState<number>(DEFAULT_ATTEMPT_MULTIPLIER);
   const [overgenFactor, setOvergenFactor] = useState<number>(50);
@@ -782,22 +881,17 @@ function AppInner(): JSX.Element {
   const monthEndCarryOverBiasTouchedRef = useRef(false);
   const scoringGenerationInfluenceTraceReadyRef = useRef(false);
 
-  // Sync acceptance-needs defaults from the bucket sizes in the payload
+  // Keep MiAN tied to the user's selected Acceptance needs only. When MiAN is
+  // off, its hidden counts stay zero so stale bucket demands cannot reject all candidates later.
   useEffect(() => {
-    if (!monthlyConstraintPayload) return;
-    const b = monthlyConstraintPayload.buckets;
-    setAcceptanceNeedsCounts({
-      undrawn: b.undrawn.size,
-      times1: b.times1.size,
-      times2: b.times2.size,
-      times3: b.times3.size,
-      times4: b.times4.size,
-      times5: b.times5.size,
-      times6: b.times6.size,
-      times7: b.times7.size,
-      times8: b.times8.size,
-    });
-  }, [monthlyConstraintPayload]);
+    if (!acceptanceNeedsEnabled) {
+      setAcceptanceNeedsCounts(zeroMonthlyFrequencyConstraints());
+      return;
+    }
+    if (monthlyConstructiveEnabled && monthlyConstraintPayload) {
+      setAcceptanceNeedsCounts(monthlyConstraintPayload.constraints);
+    }
+  }, [acceptanceNeedsEnabled, monthlyConstructiveEnabled, monthlyConstraintPayload]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -893,9 +987,14 @@ function AppInner(): JSX.Element {
   const [highlightMsg, setHighlightMsg] = useState<string>("");
   const [highlights, setHighlights] = useState<any[]>([]);
   const [dgaHeatmapExpanded, setDgaHeatmapExpanded] = useState<boolean>(true);
+  const [dgaSectionOpen, setDgaSectionOpen] = useState<boolean>(true);
+  const dgaWorkflowBodyId = "workflow-dga-body";
   const [dgaGridExpanded, setDgaGridExpanded] = useState<boolean>(true);
 
   const [excludedNumbers, setExcludedNumbers] = useState<number[]>([]);
+  const [hotColdForcedNumbers, setHotColdForcedNumbers] = useState<number[]>([]);
+  const [hotColdExcludedNumbers, setHotColdExcludedNumbers] = useState<number[]>([]);
+  const [droughtBreakSelectedNumbers, setDroughtBreakSelectedNumbers] = useState<number[]>([]);
   const [userSelectedNumbers, setUserSelectedNumbers] = useState<number[]>([]);
   const [autoExcludeUnselected, setAutoExcludeUnselected] = useState<boolean>(false);
   const autoExcludedFromSelection = useMemo(() => {
@@ -904,12 +1003,15 @@ function AppInner(): JSX.Element {
     return Array.from({ length: 45 }, (_, i) => i + 1).filter((n) => !picked.has(n));
   }, [autoExcludeUnselected, userSelectedNumbers]);
   const effectiveExcludedNumbers = useMemo(
-    () => Array.from(new Set([...excludedNumbers, ...autoExcludedFromSelection])),
-    [excludedNumbers, autoExcludedFromSelection]
+    () => normalizeHotColdGenerationNumbers([...excludedNumbers, ...hotColdExcludedNumbers, ...autoExcludedFromSelection]),
+    [excludedNumbers, hotColdExcludedNumbers, autoExcludedFromSelection]
   );
   const [ratioOptions, setRatioOptions] = useState<{ ratio: string; count: number; percent: number }[]>([]);
   const [selectedRatios, setSelectedRatios] = useState<string[]>([]);
   const [useTrickyRule, setUseTrickyRule] = useState<boolean>(false);
+  const [trendLookback, setTrendLookback] = useState<number>(4);
+  const [trendThreshold, setTrendThreshold] = useState<number>(0.02);
+  const [allowedTrendRatios, setAllowedTrendRatios] = useState<string[]>([]);
   const [trendSelectedNumbers, setTrendSelectedNumbers] = useState<number[]>([]);
   const [focusNumber, setFocusNumber] = useState<number | null>(null);
   const [showHeatmapLetters, setShowHeatmapLetters] = useState(false);
@@ -927,6 +1029,13 @@ function AppInner(): JSX.Element {
   const [patternConstraintMode, setPatternConstraintModeode] = useState<'boost' | 'restrict'>('boost');
   const [patternBoostFactor, setPatternBoostFactor] = useState<number>(0.15);
   const [patternSumTolerance, setPatternSumTolerance] = useState<number>(0);
+  const toggleTrendRatio = useCallback((tag: string) => {
+    setAllowedTrendRatios((current) => (
+      current.includes(tag)
+        ? current.filter((value) => value !== tag)
+        : [...current, tag]
+    ));
+  }, []);
 
   // NEW: OGA bias UI state
   const [enableOGAForecastBias, setEnableOGAForecastBias] = useState<boolean>(false);
@@ -1123,14 +1232,15 @@ function AppInner(): JSX.Element {
 
   const generationForcedNumbers = useMemo(() => {
     const seen = new Set<number>();
+    const excluded = new Set(effectiveExcludedNumbers);
     const output: number[] = [];
-    for (const number of [...trendSelectedNumbers, ...previousNeighbourConstraintNumbers]) {
-      if (!Number.isInteger(number) || number < 1 || number > 45 || seen.has(number)) continue;
+    for (const number of [...trendSelectedNumbers, ...previousNeighbourConstraintNumbers, ...hotColdForcedNumbers, ...droughtBreakSelectedNumbers]) {
+      if (!Number.isInteger(number) || number < 1 || number > 45 || seen.has(number) || excluded.has(number)) continue;
       seen.add(number);
       output.push(number);
     }
     return output;
-  }, [trendSelectedNumbers, previousNeighbourConstraintNumbers]);
+  }, [droughtBreakSelectedNumbers, effectiveExcludedNumbers, hotColdForcedNumbers, trendSelectedNumbers, previousNeighbourConstraintNumbers]);
 
   const sortedGenerationForcedNumbers = useMemo(
     () => generationForcedNumbers.slice().sort((left, right) => left - right),
@@ -1147,6 +1257,40 @@ function AppInner(): JSX.Element {
   const togglePreviousNeighbourTarget = useCallback((target: number) => {
     setPreviousNeighbourConstraintNumbers((current) => togglePreviousNeighbourConstraintTarget(current, target));
   }, []);
+
+  const toggleHotColdForcedNumber = useCallback((number: number) => {
+    const next = toggleHotColdIncludeSelection({
+      forcedNumbers: hotColdForcedNumbers,
+      excludedNumbers: hotColdExcludedNumbers,
+    }, number);
+    setHotColdForcedNumbers(next.forcedNumbers);
+    setHotColdExcludedNumbers(next.excludedNumbers);
+    if (next.forcedNumbers.includes(number)) {
+      setExcludedNumbers((current) => current.filter((value) => value !== number));
+    }
+  }, [hotColdExcludedNumbers, hotColdForcedNumbers]);
+
+  const toggleHotColdExcludedNumber = useCallback((number: number) => {
+    const next = toggleHotColdExcludeSelection({
+      forcedNumbers: hotColdForcedNumbers,
+      excludedNumbers: hotColdExcludedNumbers,
+    }, number);
+    setHotColdForcedNumbers(next.forcedNumbers);
+    setHotColdExcludedNumbers(next.excludedNumbers);
+  }, [hotColdExcludedNumbers, hotColdForcedNumbers]);
+
+  const toggleDroughtBreakSelectedNumber = useCallback((number: number) => {
+    if (!Number.isInteger(number) || number < 1 || number > 45) return;
+    const normalizedCurrent = normalizeHotColdGenerationNumbers(droughtBreakSelectedNumbers);
+    const alreadySelected = normalizedCurrent.includes(number);
+    if (alreadySelected) {
+      setDroughtBreakSelectedNumbers(normalizedCurrent.filter((value) => value !== number));
+      return;
+    }
+    if (normalizedCurrent.length >= MAX_DROUGHT_BREAK_FORCED_NUMBERS) return;
+    setDroughtBreakSelectedNumbers(normalizeHotColdGenerationNumbers([...normalizedCurrent, number]));
+    setExcludedNumbers((current) => current.filter((value) => value !== number));
+  }, [droughtBreakSelectedNumbers]);
 
   const wfmqyhMainNumberCounts = useMemo(
     () => buildWfmqyhNumberCounts(realFilteredHistory),
@@ -1394,6 +1538,33 @@ function AppInner(): JSX.Element {
 
   // DGA grid simulate strip selections
   const [dgaStripSelected, setDgaStripSelected] = useState<number[]>([]);
+  const [mirrorDgaStripToPreviousNeighbour, setMirrorDgaStripToPreviousNeighbour] = useState<boolean>(false);
+
+  const dgaStripPreviousNeighbourMatches = useMemo(() => {
+    const targetSet = new Set(previousNeighbourConstraintTargetNumbers);
+    return normalizePreviousNeighbourConstraintNumbers(
+      dgaStripSelected.filter((number) => targetSet.has(number))
+    );
+  }, [dgaStripSelected, previousNeighbourConstraintTargetNumbers]);
+
+  const applyDgaStripMirrorToPreviousNeighbour = useCallback((numbers: readonly number[]) => {
+    const targetSet = new Set(previousNeighbourConstraintTargetNumbers);
+    setPreviousNeighbourConstraintNumbers(
+      normalizePreviousNeighbourConstraintNumbers(numbers.filter((number) => targetSet.has(number)))
+    );
+  }, [previousNeighbourConstraintTargetNumbers]);
+
+  const clearDgaStripSelection = useCallback(() => {
+    setDgaStripSelected([]);
+    if (mirrorDgaStripToPreviousNeighbour) {
+      setPreviousNeighbourConstraintNumbers([]);
+    }
+  }, [mirrorDgaStripToPreviousNeighbour]);
+
+  useEffect(() => {
+    if (!mirrorDgaStripToPreviousNeighbour) return;
+    applyDgaStripMirrorToPreviousNeighbour(dgaStripSelected);
+  }, [applyDgaStripMirrorToPreviousNeighbour, dgaStripSelected, mirrorDgaStripToPreviousNeighbour]);
 
   // Ref for scrolling to DGA grid after simulate, and back-navigation
   const dgaGridRef = useRef<HTMLDivElement>(null);
@@ -1415,6 +1586,9 @@ function AppInner(): JSX.Element {
   const handleDgaStripChange = useCallback((nums: number[]) => {
     const sorted = normalizeDgaSelectedNumbers(nums).slice(0, 8);
     setDgaStripSelected(sorted);
+    if (mirrorDgaStripToPreviousNeighbour) {
+      applyDgaStripMirrorToPreviousNeighbour(sorted);
+    }
 
     if (sorted.length === 0) {
       setSimulatedDraw(null);
@@ -1431,7 +1605,7 @@ function AppInner(): JSX.Element {
     } as any);
     setSimSource("dga-strip");
     setSimCandidateIdx(null);
-  }, []);
+  }, [applyDgaStripMirrorToPreviousNeighbour, mirrorDgaStripToPreviousNeighbour]);
 
   // Manual simulation (heatmap/NextHotBlocks overlay only)
   const [manualSimSelected, setManualSimSelected] = useState<number[]>([]);
@@ -1455,7 +1629,7 @@ function AppInner(): JSX.Element {
     } as any);
     setSimSource('candidate');
     setSimCandidateIdx(idx);
-    setDgaStripSelected([]); // clear strip selections when external simulate fires
+    clearDgaStripSelection(); // clear strip selections when external simulate fires
     scrollToDGA();
   };
 
@@ -1466,7 +1640,7 @@ function AppInner(): JSX.Element {
     setSimulatedDraw({ main, supp, date: "PickSixManual", isSimulated: true } as any);
     setSimSource('user');
     setSimCandidateIdx(null);
-    setDgaStripSelected([]); // clear strip selections when external simulate fires
+    clearDgaStripSelection(); // clear strip selections when external simulate fires
     scrollToDGA();
   };
 
@@ -1512,9 +1686,9 @@ function AppInner(): JSX.Element {
     setSimulatedDraw({ main, supp: [], date: "PasteWeighted", isSimulated: true } as any);
     setSimSource('candidate');
     setSimCandidateIdx(null);
-    setDgaStripSelected([]);
+    clearDgaStripSelection();
     scrollToDGA();
-  }, [scrollToDGA]);
+  }, [clearDgaStripSelection, scrollToDGA]);
 
   const handleSimulatePortfolioCore = useCallback((numbers: number[]) => {
     const main = numbers
@@ -1528,9 +1702,9 @@ function AppInner(): JSX.Element {
     setSimulatedDraw({ main, supp: [], date: "PortfolioCore", isSimulated: true } as any);
     setSimSource('candidate');
     setSimCandidateIdx(null);
-    setDgaStripSelected([]);
+    clearDgaStripSelection();
     scrollToDGA();
-  }, [scrollToDGA]);
+  }, [clearDgaStripSelection, scrollToDGA]);
   
 
   // Trend series for panels
@@ -1556,6 +1730,35 @@ function AppInner(): JSX.Element {
     }
     return series;
   }, [realFilteredHistory]);
+
+  const activeTrendMap = useMemo(
+    () => computeTrendMap(trendValueSeries, { lookback: trendLookback, threshold: trendThreshold }),
+    [trendValueSeries, trendLookback, trendThreshold],
+  );
+
+  const historicalTrendRatioStats = useMemo(
+    () => computeHistoricalTrendRatios({
+      lookback: trendLookback,
+      threshold: trendThreshold,
+      valueSeries: trendValueSeries,
+      historyDraws: realFilteredHistory.map((d) => ({ main: d.main, supp: d.supp })),
+    }),
+    [realFilteredHistory, trendLookback, trendThreshold, trendValueSeries],
+  );
+
+  const trendRatioEligibleDraws = useMemo(
+    () => historicalTrendRatioStats.reduce((sum, row) => sum + row.count, 0),
+    [historicalTrendRatioStats],
+  );
+
+  const trendRatioCoveragePercent = useMemo(() => {
+    if (!allowedTrendRatios.length || trendRatioEligibleDraws <= 0) return 100;
+    const allowed = new Set(allowedTrendRatios);
+    const selectedDraws = historicalTrendRatioStats
+      .filter((row) => allowed.has(row.tag))
+      .reduce((sum, row) => sum + row.count, 0);
+    return +(100 * selectedDraws / trendRatioEligibleDraws).toFixed(2);
+  }, [allowedTrendRatios, historicalTrendRatioStats, trendRatioEligibleDraws]);
 
   useEffect(() => {
     setKnobs((prev) => ({
@@ -1613,9 +1816,9 @@ function AppInner(): JSX.Element {
   }, [realHistory, realFilteredHistory, simulatedDraw]);
 
   useEffect(() => {
-    setRatioOptions(computeOddEvenRatios(realFilteredHistory));
-    setSelectedRatios((ratios) => ratios.filter((r) => ratioOptions.some((opt) => opt.ratio === r)));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const nextRatioOptions = computeOddEvenRatios(realFilteredHistory);
+    setRatioOptions(nextRatioOptions);
+    setSelectedRatios((ratios) => ratios.filter((r) => nextRatioOptions.some((opt) => opt.ratio === r)));
   }, [realFilteredHistory]);
 
   const numberTrends = useMemo(() => computeNumberTrends(realFilteredHistory), [realFilteredHistory]);
@@ -1969,12 +2172,14 @@ function AppInner(): JSX.Element {
     );
   }
 
-  /** Effective MiAN counts — when "Use these counts when constructing candidates" is ON and
-   *  Monthly Draws Summary has constraints, mirror those selections automatically so the
-   *  "Must include from Acceptance needs" always tracks the Acceptance needs values. */
-  const effectiveMianCounts: MonthlyFrequencyConstraints = (monthlyConstructiveEnabled && monthlyConstraintPayload)
-    ? monthlyConstraintPayload.constraints
-    : acceptanceNeedsCounts;
+  /** Effective MiAN counts — disabled MiAN is always zero. When Monthly Draws Summary
+   *  constructive counts are active, MiAN mirrors the selected Acceptance needs, not
+   *  the full bucket sizes. */
+  const effectiveMianCounts: MonthlyFrequencyConstraints = !acceptanceNeedsEnabled
+    ? zeroMonthlyFrequencyConstraints()
+    : (monthlyConstructiveEnabled && monthlyConstraintPayload)
+      ? monthlyConstraintPayload.constraints
+      : acceptanceNeedsCounts;
 
   function meetsAcceptanceNeeds(candidate: CandidateSet): boolean {
     if (!acceptanceNeedsEnabled) return true;
@@ -2109,6 +2314,11 @@ function AppInner(): JSX.Element {
         `[TRACE] Digit-width share active: ${digitWidthConstraintTargets.singleDigitPercent}% single-digit / ${digitWidthConstraintTargets.twoDigitPercent}% two-digit | ${formatDigitWidthScopeLabel(digitWidthConstraintTargets.scope)} | strict target ${digitWidthConstraintTargets.singleDigitCount} single-digit + ${digitWidthConstraintTargets.twoDigitCount} two-digit`
       ]);
     }
+    if (allowedTrendRatios.length > 0) {
+      setTraceMaybe((t) => [...t,
+        `[TRACE] Trend ratio filter active: ${allowedTrendRatios.join(", ")} (trend-ratio filter active; U/D/F over mains + supps; lookback=${trendLookback}; threshold=${trendThreshold}; historical coverage=${trendRatioCoveragePercent.toFixed(2)}%)`
+      ]);
+    }
     if (monthEndCarryOverBiasEnabled) {
       setTraceMaybe((t) => [...t,
         `[TRACE] Month-end carry-over bias active: ${monthEndCarryOverStrengthSettings.label} strength; ${monthEndCarryOverWeighting.targetMonthLabel} (${monthEndCarryOverWeighting.drawsSoFarThisMonth} draw${monthEndCarryOverWeighting.drawsSoFarThisMonth === 1 ? "" : "s"} so far) ← ${monthEndCarryOverWeighting.sourceMonthLabel ?? "no previous month"}; sources undrawn=${monthEndCarryOverIncludeMonthEndUndrawn ? "on" : "off"} boundary=${monthEndCarryOverIncludeBoundaryRepeats ? "on" : "off"}; active pool ${monthEndCarryOverWeighting.activeNumbers.length}${monthEndCarryOverPoolBreakdown ? ` (${monthEndCarryOverPoolBreakdown})` : ""}${selectedCarryOverBoostSummary ? ` | selected boost ${selectedCarryOverBoostSummary} ×${selectedCarryOverBoostFactor}` : ""}${monthEndCarryOverTopWeightSummary ? ` | active weights ${monthEndCarryOverTopWeightSummary}` : ""}`
@@ -2116,7 +2326,7 @@ function AppInner(): JSX.Element {
     }
     if (generationForcedNumbers.length > 0) {
       setTraceMaybe((t) => [...t,
-        `[TRACE] Forced generation numbers active: ${generationForcedNumbers.join(", ")} (trend selections ${trendSelectedNumbers.length}; latest ±1/±2 targets ${previousNeighbourConstraintNumbers.length})`
+        `[TRACE] Forced generation numbers active: ${generationForcedNumbers.join(", ")} (trend selections ${trendSelectedNumbers.length}; latest ±1/±2 targets ${previousNeighbourConstraintNumbers.length}; hot/cold row selections ${hotColdForcedNumbers.length}; drought-break selections ${droughtBreakSelectedNumbers.length})`
       ]);
     }
 
@@ -2144,8 +2354,8 @@ function AppInner(): JSX.Element {
       recentMatchBias,
       repeatWindowSizeW,
       minFromRecentUnionM,
-      trendMapEntries: undefined,
-      allowedTrendRatios: undefined,
+      trendMapEntries: allowedTrendRatios.length ? serializeTrendMap(activeTrendMap) : undefined,
+      allowedTrendRatios: allowedTrendRatios.length ? allowedTrendRatios : undefined,
       sumFilter: { enabled: false, min: 0, max: 0, includeSupp: true },
       patternOptions: {
         constraints: selectedWindowPatterns,
@@ -2308,7 +2518,20 @@ function AppInner(): JSX.Element {
       const st = result.rejectionStats;
       setTraceMaybe((t) => [
         ...t,
-        `[TRACE] Generation: requested ${numCandidates}, pool ${poolSize} (overgen ${overgenFactor}×) → filtered ${poolBeforeSlice} → kept ${processedCandidates.length} (accepted ${st.accepted}/${st.totalAttempts} attempts, budget ${poolSize * attemptMultiplier}) in ${dt}ms; rejects — excl:${st.exclusions} sum:${st.sumRange} div5:${st.div5} main0:${st.mainZeroSet} main1:${st.mainOneSet} main2:${st.mainTwoSet} main3:${st.mainThreeSet} main4:${st.mainFourSet} main5:${st.mainFiveSet} main6:${st.mainSixSet} main7:${st.mainSevenSet} main8:${st.mainEightSet} main9:${st.mainNineSet} digitWidth:${st.digitWidth} oddEven:${st.oddEven} tricky:${st.tricky} repeat:${st.repeatUnion} recMin:${st.minRecent} recMax:${st.maxLastDraw} recBias:${st.recentBias} trend:${st.trendRatio} pattern:${st.patternConstraint} ent:${st.entropy} ham:${st.hamming} jac:${st.jaccard} ogaBias:${st.ogaBias} monthly:${monthlyRejects} prize:${prizeRejects} cap:${capRejects}`,
+        ...formatGenerationTraceLines({
+          label: "Generation",
+          requested: numCandidates,
+          poolSize,
+          overgenFactor,
+          filteredCount: poolBeforeSlice,
+          kept: processedCandidates.length,
+          budget: poolSize * attemptMultiplier,
+          elapsedMs: dt,
+          stats: st,
+          monthlyRejects,
+          prizeRejects,
+          capRejects,
+        }),
       ]);
 
       setIsGenerating(false);
@@ -2371,6 +2594,11 @@ function AppInner(): JSX.Element {
         `[TRACE] Digit-width share active: ${digitWidthConstraintTargets.singleDigitPercent}% single-digit / ${digitWidthConstraintTargets.twoDigitPercent}% two-digit | ${formatDigitWidthScopeLabel(digitWidthConstraintTargets.scope)} | strict target ${digitWidthConstraintTargets.singleDigitCount} single-digit + ${digitWidthConstraintTargets.twoDigitCount} two-digit`
       ]);
     }
+    if (allowedTrendRatios.length > 0) {
+      setTraceMaybe((t) => [...t,
+        `[TRACE] ${traceLabel}: Trend ratio filter active: ${allowedTrendRatios.join(", ")} (trend-ratio filter active; U/D/F over mains + supps; lookback=${trendLookback}; threshold=${trendThreshold}; historical coverage=${trendRatioCoveragePercent.toFixed(2)}%)`
+      ]);
+    }
     if (monthEndCarryOverBiasEnabled) {
       setTraceMaybe((t) => [...t,
         `[TRACE] Month-end carry-over bias active: ${monthEndCarryOverStrengthSettings.label} strength; ${monthEndCarryOverWeighting.targetMonthLabel} (${monthEndCarryOverWeighting.drawsSoFarThisMonth} draw${monthEndCarryOverWeighting.drawsSoFarThisMonth === 1 ? "" : "s"} so far) ← ${monthEndCarryOverWeighting.sourceMonthLabel ?? "no previous month"}; sources undrawn=${monthEndCarryOverIncludeMonthEndUndrawn ? "on" : "off"} boundary=${monthEndCarryOverIncludeBoundaryRepeats ? "on" : "off"}; active pool ${monthEndCarryOverWeighting.activeNumbers.length}${monthEndCarryOverPoolBreakdown ? ` (${monthEndCarryOverPoolBreakdown})` : ""}${selectedCarryOverBoostSummary ? ` | selected boost ${selectedCarryOverBoostSummary} ×${selectedCarryOverBoostFactor}` : ""}${monthEndCarryOverTopWeightSummary ? ` | active weights ${monthEndCarryOverTopWeightSummary}` : ""}`
@@ -2378,7 +2606,7 @@ function AppInner(): JSX.Element {
     }
     if (generationForcedNumbers.length > 0) {
       setTraceMaybe((t) => [...t,
-        `[TRACE] ${traceLabel}: forced generation numbers active ${generationForcedNumbers.join(", ")} (trend selections ${trendSelectedNumbers.length}; latest ±1/±2 targets ${previousNeighbourConstraintNumbers.length})`
+        `[TRACE] ${traceLabel}: forced generation numbers active ${generationForcedNumbers.join(", ")} (trend selections ${trendSelectedNumbers.length}; latest ±1/±2 targets ${previousNeighbourConstraintNumbers.length}; hot/cold row selections ${hotColdForcedNumbers.length}; drought-break selections ${droughtBreakSelectedNumbers.length})`
       ]);
     }
 
@@ -2405,8 +2633,8 @@ function AppInner(): JSX.Element {
       recentMatchBias,
       repeatWindowSizeW,
       minFromRecentUnionM,
-      undefined,
-      undefined,
+      allowedTrendRatios.length ? activeTrendMap : undefined,
+      allowedTrendRatios.length ? allowedTrendRatios : undefined,
       { enabled: false, min: 0, max: 0, includeSupp: true },
       {
         constraints: selectedWindowPatterns,
@@ -2535,8 +2763,19 @@ function AppInner(): JSX.Element {
 
     const dt = Math.round(performance.now() - t0);
     const st = result.rejectionStats;
-    const msg = `[TRACE] ${traceLabel}: requested ${target}, kept ${processed.length} (accepted ${st.accepted}/${st.totalAttempts}) in ${dt}ms; rejects — excl:${st.exclusions} sum:${st.sumRange} div5:${st.div5} main0:${st.mainZeroSet} main1:${st.mainOneSet} main2:${st.mainTwoSet} main3:${st.mainThreeSet} main4:${st.mainFourSet} main5:${st.mainFiveSet} main6:${st.mainSixSet} main7:${st.mainSevenSet} main8:${st.mainEightSet} main9:${st.mainNineSet} digitWidth:${st.digitWidth} oddEven:${st.oddEven} tricky:${st.tricky} repeat:${st.repeatUnion} recMin:${st.minRecent} recBias:${st.recentBias} trend:${st.trendRatio} pattern:${st.patternConstraint} ent:${st.entropy} ham:${st.hamming} jac:${st.jaccard} ogaBias:${st.ogaBias} monthly:${monthlyRejects} prize:${prizeRejects} cap:${capRejects}`;
-    setTraceMaybe((t) => [...t, msg]);
+    setTraceMaybe((t) => [
+      ...t,
+      ...formatGenerationTraceLines({
+        label: traceLabel,
+        requested: target,
+        kept: processed.length,
+        elapsedMs: dt,
+        stats: st,
+        monthlyRejects,
+        prizeRejects,
+        capRejects,
+      }),
+    ]);
 
     return { processed, prizeRejects, capRejects, freqArr, dt, st };
   };
@@ -2726,6 +2965,81 @@ function AppInner(): JSX.Element {
     setLegendTotal(values.length);
   }, [trendValueSeries]);
 
+  const endDigitSetSummary = [
+    `0=${mainZeroSetEnabled ? `max ${maxMainZeroSetCount}` : "off"}`,
+    `1=${mainOneSetEnabled ? `max ${maxMainOneSetCount}` : "off"}`,
+    `2=${mainTwoSetEnabled ? `max ${maxMainTwoSetCount}` : "off"}`,
+    `3=${mainThreeSetEnabled ? `max ${maxMainThreeSetCount}` : "off"}`,
+    `4=${mainFourSetEnabled ? `max ${maxMainFourSetCount}` : "off"}`,
+    `5=${mainFiveSetEnabled ? `max ${maxMainFiveSetCount}` : "off"}`,
+    `6=${mainSixSetEnabled ? `max ${maxMainSixSetCount}` : "off"}`,
+    `7=${mainSevenSetEnabled ? `max ${maxMainSevenSetCount}` : "off"}`,
+    `8=${mainEightSetEnabled ? `max ${maxMainEightSetCount}` : "off"}`,
+    `9=${mainNineSetEnabled ? `max ${maxMainNineSetCount}` : "off"}`,
+  ].join(" · ");
+  const activeSetupProvenanceGroups: Array<{
+    title: string;
+    items: Array<{ label: string; value: React.ReactNode }>;
+  }> = [
+    {
+      title: "History & Source",
+      items: [
+        { label: "Real window", value: `${realFilteredHistory.length}/${filteredHistory.length} loaded` },
+        { label: "Ratios", value: selectedRatios.length ? selectedRatios.join(" ") : "none" },
+        { label: "Tricky", value: useTrickyRule ? "on" : "off" },
+      ],
+    },
+    {
+      title: "Filters & Distance",
+      items: [
+        { label: "Entropy", value: entropyEnabled ? entropyThreshold : "off" },
+        { label: "Hamming", value: hammingEnabled ? hammingThreshold : "off" },
+        { label: "Jaccard", value: jaccardEnabled ? jaccardThreshold : "off" },
+        { label: "Sum", value: sumFilter.enabled ? `${sumFilter.min}-${sumFilter.max}${sumFilter.includeSupp ? "+supp" : ""}` : "off" },
+      ],
+    },
+    {
+      title: "Recency & Latest Draw",
+      items: [
+        { label: "RecMin", value: minRecentMatches },
+        { label: "RecBias", value: recentMatchBias },
+        { label: "Prev ±1/±2", value: previousNeighbourConstraintNumbers.length ? previousNeighbourConstraintNumbers.join(", ") : "off" },
+        { label: "Drought-break", value: droughtBreakSelectedNumbers.length ? droughtBreakSelectedNumbers.join(", ") : "off" },
+        { label: "Repeat", value: `W ${repeatWindowSizeW} · M ${minFromRecentUnionM}` },
+        { label: "GPWF", value: gpwfEnabled ? "on" : "off" },
+        { label: "Lambda", value: lambdaEnabled ? lambda.toFixed(2) : "off" },
+      ],
+    },
+    {
+      title: "Geometry & Pattern",
+      items: [
+        { label: "Pattern", value: `${patternConstraintMode} · tol ${patternSumTolerance} · boost ${patternBoostFactor}` },
+        { label: "OGA bias", value: enableOGAForecastBias ? `${ogaPreferredBand} @ ${ogaBaselineMode}` : "off" },
+      ],
+    },
+    {
+      title: "Ending Digits & Buckets",
+      items: [
+        { label: "End limits", value: endDigitSetSummary },
+        { label: "Digit width", value: digitWidthConstraintTargets.enabled ? `${digitWidthConstraintTargets.singleDigitPercent}/${digitWidthConstraintTargets.twoDigitPercent} ${formatDigitWidthScopeLabel(digitWidthConstraintTargets.scope)} => ${digitWidthConstraintTargets.singleDigitCount}/${digitWidthConstraintTargets.twoDigitCount}` : "off" },
+        { label: "End boosts", value: activeMainDigitBoostSummary || "none" },
+        { label: "Decade bias", value: activeMainDecadeBiasSummary || "none" },
+      ],
+    },
+    {
+      title: "Monthly & Carry-over",
+      items: [
+        { label: "MRB", value: mrbEnabled ? `on · budget ${MRB_BUCKET_KEYS.reduce((s, k) => s + Math.max(0, (mrbBucketBoosts[k] ?? 1) - 1), 0).toFixed(1)}/${MRB_BUDGET}` : "off" },
+        {
+          label: "Carry-over",
+          value: monthEndCarryOverBiasEnabled
+            ? `${monthEndCarryOverStrengthSettings.label} · ${monthEndCarryOverWeighting.targetMonthLabel} · active ${monthEndCarryOverWeighting.activeNumbers.length}${monthEndCarryOverPoolBreakdown ? ` (${monthEndCarryOverPoolBreakdown})` : ""} · undrawn ${monthEndCarryOverIncludeMonthEndUndrawn ? "on" : "off"} · boundary ${monthEndCarryOverIncludeBoundaryRepeats ? "on" : "off"}${selectedCarryOverBoostSummary ? ` · selected ${selectedCarryOverBoostSummary} x${selectedCarryOverBoostFactor}` : ""}`
+            : `off · default ${monthEndCarryOverWeighting.defaultEnabled ? "on" : "off"}`,
+        },
+      ],
+    },
+  ];
+
   return (
     <PanelFavoritesProvider favoritePanelIds={favoritePanelIds} onToggleFavorite={toggleFavoritePanel}>
     <div className="windfall-app-shell">
@@ -2776,7 +3090,13 @@ function AppInner(): JSX.Element {
 
       {/* [ORDER-ANCHOR] 01 Number Trends Table */}
       <CollapsibleSection panelId="number-trends" title={<b>Number Trends Table</b>} summaryHint="Click a number to mark for forced inclusion" defaultOpen={false}>
-        <NumberTrendsTable trends={numberTrends} onToggle={(n) => setTrendSelectedNumbers(prev => prev.includes(n) ? prev.filter(x => x !== n) : [...prev, n])} selected={trendSelectedNumbers} />
+        <NumberTrendsTable
+          trends={numberTrends}
+          onToggle={(n) => setTrendSelectedNumbers(prev => prev.includes(n) ? prev.filter(x => x !== n) : [...prev, n])}
+          selected={trendSelectedNumbers}
+          externalSelectedNumbers={droughtBreakSelectedNumbers}
+          externalSelectedLabel="Drought-break shortlist"
+        />
         <div style={{ fontSize: 12, color: "#888", marginBottom: 8 }}>
           Colored rows indicate numbers you have selected for forced inclusion.
         </div>
@@ -3338,6 +3658,24 @@ function AppInner(): JSX.Element {
         />
       </CollapsibleSection>
 
+      {/* [ORDER-ANCHOR] 07.05 Drought-break empirical shortlist */}
+      <CollapsibleSection
+        panelId="drought-break-shortlist"
+        title={<b>Drought-break empirical shortlist (mains + supps)</b>}
+        summaryHint={`Empirical drought-break support · forced selections ${droughtBreakSelectedNumbers.length}/${MAX_DROUGHT_BREAK_FORCED_NUMBERS}`}
+        defaultOpen={false}
+      >
+        <DroughtHazardPanel
+          history={realFilteredHistory}
+          top={8}
+          title="Drought-break empirical shortlist (mains + supps)"
+          bucketLabels={monthlyBucketLabels}
+          forcedNumbers={droughtBreakSelectedNumbers}
+          maxForcedSelections={MAX_DROUGHT_BREAK_FORCED_NUMBERS}
+          onToggleNumber={toggleDroughtBreakSelectedNumber}
+        />
+      </CollapsibleSection>
+
       {/* [ORDER-ANCHOR] 07.1 Most Likely NOT Drawn */}
       <CollapsibleSection panelId="most-likely-not-drawn" title={<b>Most Likely NOT Drawn</b>} defaultOpen={false}>
         <MostLikelyNotDrawnPanel history={realFilteredHistory} title="Most Likely NOT Drawn" />
@@ -3359,21 +3697,16 @@ function AppInner(): JSX.Element {
         <PreviousNeighbourBacktestPanel draws={realFilteredHistory} />
       </CollapsibleSection>
 
-      {/* [ORDER-ANCHOR] 08 Trend Ratio History */}
-      <CollapsibleSection panelId="trend-ratio-history" title={<b>Trend Ratio History</b>} defaultOpen={false}>
+      {/* [ORDER-ANCHOR] 08 Trend Ratio Diagnostics */}
+      <CollapsibleSection panelId="trend-ratio-history" title={<b>Trend Ratio Diagnostics (Up / Down / Flat, mains + supps)</b>} defaultOpen={false}>
         <TrendRatioHistoryPanel
-          stats={computeHistoricalTrendRatios({
-            lookback: 4,
-            threshold: 0.02,
-            valueSeries: trendValueSeries,
-            historyDraws: realFilteredHistory.map(d => ({ main: d.main, supp: d.supp }))
-          })}
-          allowedTrendRatios={[]}
-          toggleTrendRatio={() => {}}
-          lookback={4}
-          threshold={0.02}
-          drawsConsidered={Math.max(0, activeWindowSize - 4)}
-          windowDraws={activeWindowSize}
+          stats={historicalTrendRatioStats}
+          allowedTrendRatios={allowedTrendRatios}
+          toggleTrendRatio={toggleTrendRatio}
+          lookback={trendLookback}
+          threshold={trendThreshold}
+          drawsConsidered={trendRatioEligibleDraws}
+          windowDraws={realFilteredHistory.length}
         />
       </CollapsibleSection>
 
@@ -3398,7 +3731,7 @@ function AppInner(): JSX.Element {
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 11.25 Draw Bucket Patterns */}
-      <CollapsibleSection panelId="draw-bucket-patterns" title={<b>Draw Bucket Patterns</b>} summaryHint="div5, ending digits, main+supp" defaultOpen={false}>
+      <CollapsibleSection panelId="draw-bucket-patterns" title={<b>Draw Bucket Patterns</b>} summaryHint="terminal digits, main+supp" defaultOpen={false}>
         <div style={{ marginTop: 8 }}>
           <DrawBucketPatternPanel draws={realFilteredHistory} allDraws={realHistory} />
         </div>
@@ -3530,7 +3863,7 @@ function AppInner(): JSX.Element {
       {/* [ORDER-ANCHOR] 17 Trend Ratio Filter (UP / DOWN / FLAT) */}
       <CollapsibleSection panelId="trend-ratio-filter" title={<b>Trend Ratio Filter (UP / DOWN / FLAT)</b>} defaultOpen={false}>
         <div style={{ marginTop: 6, fontSize: 11, color: "#555" }}>
-          Configure trend ratio filters in dedicated panel (omitted for brevity).
+          Use the Add/On controls in Trend Ratio Diagnostics to toggle active U/D/F ratio filtering. Default state is off; selected ratios are passed into generation and shown in Trace.
         </div>
       </CollapsibleSection>
 
@@ -3609,7 +3942,14 @@ function AppInner(): JSX.Element {
       </CollapsibleSection>
 
       <CollapsibleSection panelId="hot-cold-ranking" title={<b>Hot vs Cold Ranking</b>} defaultOpen={false} summaryHint="Historical vs recent vs weighted number heat">
-        <HotColdRankingPanel history={realHistory} wfmqyhWindowSize={activeWindowSize} />
+        <HotColdRankingPanel
+          history={realHistory}
+          wfmqyhWindowSize={activeWindowSize}
+          forcedNumbers={hotColdForcedNumbers}
+          excludedNumbers={hotColdExcludedNumbers}
+          onToggleForcedNumber={toggleHotColdForcedNumber}
+          onToggleExcludedNumber={toggleHotColdExcludedNumber}
+        />
       </CollapsibleSection>
 
       <WorkflowAnchor
@@ -3623,6 +3963,8 @@ function AppInner(): JSX.Element {
         <UserSelectedNumbersPanel
           userSelectedNumbers={userSelectedNumbers}
           setUserSelectedNumbers={setUserSelectedNumbers}
+          externalSelectedNumbers={droughtBreakSelectedNumbers}
+          externalSelectedLabel="Drought-break shortlist"
           autoExcludeUnselected={autoExcludeUnselected}
           onToggleAutoExclude={setAutoExcludeUnselected}
           onSimulate={(nums) => {
@@ -3630,7 +3972,7 @@ function AppInner(): JSX.Element {
               setSimulatedDraw(null);
               setSimSource('none');
               setSimCandidateIdx(null);
-              setDgaStripSelected([]);
+              clearDgaStripSelection();
               return;
             }
             const main = nums.slice(0, 6).sort((a, b) => a - b);
@@ -3638,14 +3980,14 @@ function AppInner(): JSX.Element {
             setSimulatedDraw({ main, supp, date: "UserSim", isSimulated: true } as any);
             setSimSource('user');
             setSimCandidateIdx(null);
-            setDgaStripSelected([]);
+            clearDgaStripSelection();
             scrollToDGA();
           }}
           onClear={() => {
             setSimulatedDraw(null);
             setSimSource('none');
             setSimCandidateIdx(null);
-            setDgaStripSelected([]);
+            clearDgaStripSelection();
           }}
           isSimulatingUser={simSource === 'user'}
         />
@@ -3706,174 +4048,29 @@ function AppInner(): JSX.Element {
         )}
       </CollapsibleSection>
 
-      {/* [ORDER-ANCHOR] 23.5 Paste-Weighted Candidate Generator */}
-      <CollapsibleSection
-        panelId="paste-weighted-candidate-generator"
-        title={<b>Paste-Weighted Candidate Generator</b>}
-        summaryHint="Paste rows, weight numbers, generate six-number candidates"
-        defaultOpen={true}
-      >
-        <div style={{ marginTop: 8 }}>
-          <PasteWeightedCandidatesPanel
-            onSimulateCandidate={handleSimulatePasteWeightedCandidate}
-            onGeneratedCandidatesChange={setPasteWeightedPortfolioCandidates}
-            activeSimulatedKey={activeSimulatedMainKey}
-            initialCandidateCount={Math.max(4, Math.min(30, numCandidates || 12))}
-            fullHistory={realHistory}
-            activeHistory={realFilteredHistory}
-            activeWindowLabel={historyWindowName}
-            stageIdealDrawState={stageIdealDrawState}
-            monthlyAcceptanceNeeds={monthlyConstraintPayload?.constraints ?? null}
-          />
-        </div>
-      </CollapsibleSection>
+          <CollapsibleSection
+            panelId="candidate-generation-influences"
+            title={<b>Candidate Generation Setup</b>}
+            summaryHint="Configure filters, weighting, evidence, and forced/excluded numbers before generation"
+            defaultOpen={true}
+          >
+            <div className="windfall-generation-setup-summary-strip" aria-label="Active generation setup summary">
+              <span className="windfall-generation-setup-summary-chip">Forced {generationForcedNumbers.length}</span>
+              <span className="windfall-generation-setup-summary-chip">Excluded {allExclusions.length}</span>
+              <span className="windfall-generation-setup-summary-chip">Ratios {selectedRatios.length ? selectedRatios.join(" ") : "off"}</span>
+              <span className="windfall-generation-setup-summary-chip">Scoring {formatScoringInfluenceLabel(scoringGenerationInfluence)}</span>
+              <span className="windfall-generation-setup-summary-chip">Carry-over {monthEndCarryOverBiasEnabled ? monthEndCarryOverStrengthSettings.label : "off"}</span>
+              <span className="windfall-generation-setup-summary-chip">Stage IDM {stageIdealDrawState ? `${stageIdealDrawState.comparableMonthCount} comps` : "unavailable"}</span>
+            </div>
 
-      {/* [ORDER-ANCHOR] 23.75 Portfolio Compression / 12-Game Distiller */}
-      <CollapsibleSection
-        panelId="portfolio-compression"
-        title={<b>Portfolio Compression / 12-Game Distiller</b>}
-        summaryHint="Paste portfolio rows, count unique numbers, distil a top-six core"
-        defaultOpen={true}
-      >
-        <div style={{ marginTop: 8 }}>
-          <PortfolioCompressionPanel
-            userSelectedNumbers={userSelectedNumbers}
-            monthEndCarryOverBiasEnabled={monthEndCarryOverBiasEnabled}
-            monthEndCarryOverWeights={monthEndCarryOverWeightsForGeneration}
-            hotColdRows={portfolioHotColdRows}
-            windowShapeRows={portfolioWindowShapeRows}
-            adjacentComboHistory={realFilteredHistory}
-            monthlyBuckets={dgaEffectiveMonthlyBuckets}
-            backtestHistory={realHistory}
-            onSimulateCore={handleSimulatePortfolioCore}
-            activeSimulatedKey={activeSimulatedMainKey}
-            candidateSources={[
-              {
-                id: "generated-candidates",
-                label: "Generated Candidates",
-                candidates: candidates.map((candidate) => candidate.main),
-              },
-              {
-                id: "paste-weighted-candidates",
-                label: "Paste-Weighted Candidates",
-                candidates: pasteWeightedPortfolioCandidates.map((candidate) => candidate.main),
-              },
-            ]}
-          />
-        </div>
-      </CollapsibleSection>
-
-      {/* [ORDER-ANCHOR] 24 Generated Candidates */}
-      <CollapsibleSection panelId="generated-candidates" title={<b>Generated Candidates</b>} defaultOpen={true}>
-        <div style={{ padding: 32, fontFamily: "sans-serif" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "12px 0 18px", flexWrap: "wrap" }}>
-            <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
-              <input
-                type="checkbox"
-                checked={selectedBoostEnabled}
-                onChange={(e) => setSelectedBoostEnabled(e.target.checked)}
-              />
-              Boost User Selected numbers during generation
-              <InfoHelp label="Selected-number boost help">
-                Biases generation toward your User Selected numbers before constraints are applied.
-              </InfoHelp>
-            </label>
-            <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
-              Factor
-              <input
-                type="number"
-                min={1}
-                max={5}
-                step={0.25}
-                value={selectedBoostFactor}
-                disabled={!selectedBoostEnabled}
-                onChange={(e) => setSelectedBoostFactor(Math.max(1, Number(e.target.value) || 1))}
-                style={{ width: 70 }}
-              />
-              <InfoHelp label="Selected boost factor help">
-                Higher values increase selected-number pick weight during generation, while exclusions and forced numbers still apply.
-              </InfoHelp>
-            </label>
-            <span style={{ fontSize: 12, color: "#555" }}>
-              Applies only to generation (not ranking); still respects exclusions/forced numbers.
-            </span>
-          </div>
-
-          <GeneratedCandidatesPanel
-            onGenerate={handleGenerate}
-            candidates={candidates}
-            quotaWarning={quotaWarning}
-            isGenerating={isGenerating}
-            numCandidates={numCandidates}
-            setNumCandidates={setNumCandidates}
-            userSelectedNumbers={userSelectedNumbers}
-            setUserSelectedNumbers={setUserSelectedNumbers}
-            onSelectCandidate={setSelectedCandidateIdx}
-            onSimulateCandidate={handleSimulateCandidate}
-            selectedCandidateIdx={selectedCandidateIdx}
-            mostRecentDraw={realFilteredHistory[realFilteredHistory.length - 1] || null}
-            manualSimSelected={manualSimSelected}
-            setManualSimSelected={setManualSimSelected}
-            activeOGABand={activeOGABand}
-            forcedNumbers={generationForcedNumbers}
-            activeSimCandidateIdx={simCandidateIdx ?? -1}
-            simSourceKind={simSource}
-            batchSize={batchSize}
-            setBatchSize={setBatchSize}
-            onRunBatch={handleRunBatchFrequencies}
-            batchFreq={batchFreq}
-            isBatching={isBatching}
-            batchSummary={batchSummary}
-            batchSessionRuns={batchSessionRuns}
-            setBatchSessionRuns={setBatchSessionRuns}
-            onRunBatchSession={handleRunBatchSession}
-            isBatchSessionRunning={isBatchSessionRunning}
-            batchSessionProgress={batchSessionProgress}
-            batchSessionTopSeries={batchSessionTopSeries}
-            batchSessionAggregate={batchSessionAggregate}
-            onSimulateNumbers={handleSimulatePickSixManual}
-            monthlyAvgBuckets={monthlyAvgBuckets}
-            monthlyBuckets={monthlyBucketSetsAlways ?? monthlyConstraintPayload?.buckets}
-            monthlyIdealDrawState={monthlyIdealDrawState}
-            stageIdealDrawState={stageIdealDrawState}
-            historyForOGA={realFilteredHistory}
-            fullHistory={realHistory}
-            ogaRefScores={pastOGAScoresRef}
-            ogaSpokeCount={ogaSpokeCount}
-            attemptMultiplier={attemptMultiplier}
-            onAttemptMultiplierChange={setAttemptMultiplier}
-            overgenFactor={overgenFactor}
-            onOvergenFactorChange={setOvergenFactor}
-            rdyWeights={rdyWeights}
-            enableOGA={knobs.enableOGA}
-            ratioOptions={ratioOptions}
-            exportSettings={({
-              excludedNumbers: effectiveExcludedNumbers,
-              hc3Exclusions,
-              sde1Exclusions,
-              enableHC3: knobs.enableHC3,
-              enableSDE1: knobs.enableSDE1,
-              selectedOddEvenRatios: selectedRatios,
-              lambdaEnabled,
-              lambda,
-              selectedBoostEnabled,
-              selectedBoostFactor,
-              monthlyBoostPenalize: monthlyConstraintPayload?.boostPenalize ?? false,
-              monthlyConstructiveEnabled,
-              monthlyConstructiveConstraints: monthlyConstraintPayload?.constraints,
-              minRecentMatches,
-              recentMatchBias,
-              previousNeighbourConstraintNumbers: [...previousNeighbourConstraintNumbers],
-              entropyEnabled,
-              entropyThreshold,
-              hammingEnabled,
-              hammingThreshold,
-              jaccardEnabled,
-              jaccardThreshold,
-            } as ExportSettings)}
-          />
-          <CollapsibleSection panelId="candidate-generation-influences" title={<b>Candidate Generation Influences</b>} summaryHint="Toggle filters and boosts that affect generation" defaultOpen={true}>
-            <div className="windfall-influences-grid">
+            <div className="windfall-generation-setup-stack">
+              <InlineCollapsibleCard
+                title="Engine & Ranking"
+                subtitle="Ranking references, diagnostic influence, recency weighting, and GPWF controls."
+                collapsedSummary={`Scoring ${formatScoringInfluenceLabel(scoringGenerationInfluence)} · OGA ${ogaRefMode} · λ ${lambdaEnabled ? lambda.toFixed(2) : "off"} · GPWF ${gpwfEnabled ? "on" : "off"}`}
+                defaultExpanded={true}
+              >
+                <div className="windfall-influences-grid">
               <div className="windfall-influence-card windfall-influence-card--wide">
                 <h3 className="windfall-influence-card__title">OGA Reference And Ranking</h3>
                 <p className="windfall-influence-card__subtitle">
@@ -3953,15 +4150,13 @@ function AppInner(): JSX.Element {
                     Lambda recency weighting
                   </label>
                   <HigField label={`Lambda ${lambda.toFixed(2)}`} help="Higher values shift more influence toward recent draws. Disabled means the generator receives no Lambda adjustment.">
-                    <input
-                      type="range"
+                    <HigSlider
                       min={0.2}
                       max={0.99}
                       step={0.01}
                       value={lambda}
                       disabled={!lambdaEnabled}
-                      onChange={(e) => setLambda(Number(e.target.value))}
-                      style={{ width: "100%" }}
+                      onCommit={setLambda}
                     />
                   </HigField>
                   <div style={{ height: 1, background: "#e5e7eb", margin: "2px 0" }} aria-hidden="true" />
@@ -4031,6 +4226,64 @@ function AppInner(): JSX.Element {
                 </div>
               </div>
 
+                </div>
+              </InlineCollapsibleCard>
+
+              <InlineCollapsibleCard
+                title="Number Biases"
+                subtitle="User-selected number boost controls."
+                collapsedSummary={`Selected boost ${selectedBoostEnabled ? `x${selectedBoostFactor}` : "off"} · user selected ${userSelectedNumbers.length}`}
+                defaultExpanded={false}
+              >
+                <div className="windfall-influences-grid">
+                  <div className="windfall-influence-card">
+                    <h3 className="windfall-influence-card__title">Selected Number Boost</h3>
+                    <p className="windfall-influence-card__subtitle">
+                      Biases candidate construction toward User Selected numbers without overriding exclusions or forced-number limits.
+                    </p>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                      <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
+                        <input
+                          type="checkbox"
+                          checked={selectedBoostEnabled}
+                          onChange={(e) => setSelectedBoostEnabled(e.target.checked)}
+                        />
+                        Boost User Selected numbers during generation
+                        <InfoHelp label="Selected-number boost help">
+                          Biases generation toward your User Selected numbers before constraints are applied.
+                        </InfoHelp>
+                      </label>
+                      <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
+                        Factor
+                        <input
+                          type="number"
+                          min={1}
+                          max={5}
+                          step={0.25}
+                          value={selectedBoostFactor}
+                          disabled={!selectedBoostEnabled}
+                          onChange={(e) => setSelectedBoostFactor(Math.max(1, Number(e.target.value) || 1))}
+                          style={{ width: 70 }}
+                        />
+                        <InfoHelp label="Selected boost factor help">
+                          Higher values increase selected-number pick weight during generation, while exclusions and forced numbers still apply.
+                        </InfoHelp>
+                      </label>
+                    </div>
+                    <p style={{ margin: 0, fontSize: 12, color: "#64748b", lineHeight: 1.4 }}>
+                      Applies only to generation weighting, not candidate ranking; still respects exclusions and forced numbers.
+                    </p>
+                  </div>
+                </div>
+              </InlineCollapsibleCard>
+
+              <InlineCollapsibleCard
+                title="Shape & Bucket Quotas"
+                subtitle="Ending-digit, decade, monthly bucket, and carry-over composition controls."
+                collapsedSummary={`Digit width ${digitWidthConstraintTargets.enabled ? `${digitWidthConstraintTargets.singleDigitCount}/${digitWidthConstraintTargets.twoDigitCount}` : "off"} · MiAN ${acceptanceNeedsEnabled ? "on" : "off"} · ending boosts ${activeMainDigitBoostSummary || "off"} · decade ${activeMainDecadeBiasSummary || "off"} · MRB ${mrbEnabled ? "on" : "off"}`}
+                defaultExpanded={false}
+              >
+                <div className="windfall-influences-grid">
               {/* Column 1: Generation Constraints */}
               <div className="windfall-influence-card windfall-influence-card--wide">
                 <h3 className="windfall-influence-card__title">Generation Constraints</h3>
@@ -4059,6 +4312,7 @@ function AppInner(): JSX.Element {
                     <div className="windfall-constraint-section__grid windfall-constraint-section__grid--ending">
                   {exactConstraintRows.map(({ key, label, helper, badge, max, enabled, setEnabled, count, setCount, singleDigitBoost, twoDigitBoost, setSingleDigitBoost, setTwoDigitBoost, title, bucketKey }) => {
                     const bucketSummary = generationConstraintBucketSummaries[bucketKey];
+                    const maxDrawResultCount = Math.max(...bucketSummary.drawResultCounts.map(({ count }) => count), 0);
                     const bucketNumbers = generationConstraintNumberBuckets[bucketKey];
                     const hasSingleDigitNumbers = bucketNumbers.some((n) => n >= 1 && n <= 9);
                     const hasTwoDigitNumbers = bucketNumbers.some((n) => n >= 10);
@@ -4192,7 +4446,21 @@ function AppInner(): JSX.Element {
                             <div style={{ marginTop: 4, color: "#777", fontVariantNumeric: "tabular-nums" }}>
                               Draw results:&nbsp;
                               {bucketSummary.drawResultCounts.map(({ hits, count: drawCount }) => (
-                                <span key={`${key}-hits-${hits}`} style={{ marginRight: 8 }}>
+                                <span
+                                  key={`${key}-hits-${hits}`}
+                                  style={{
+                                    ...drawResultTemperatureStyle(drawCount, maxDrawResultCount),
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    minHeight: 20,
+                                    marginRight: 6,
+                                    marginTop: 3,
+                                    padding: "1px 6px",
+                                    borderRadius: 999,
+                                    fontSize: 11,
+                                  }}
+                                  title={`Observed WFMQYH draw-result count: ${hits} matching main number${hits === 1 ? "" : "s"} occurred ${drawCount} time${drawCount === 1 ? "" : "s"}.`}
+                                >
                                   {hits}x={drawCount}
                                 </span>
                               ))}
@@ -4215,6 +4483,7 @@ function AppInner(): JSX.Element {
                     <div className="windfall-constraint-section__grid windfall-constraint-section__grid--decade">
                     {mainDecadeConstraintRows.map(({ key, label, helper, badge, bias, setBias, title, bucketKey }) => {
                       const bucketSummary = generationConstraintDecadeSummaries[bucketKey];
+                      const maxDrawResultCount = Math.max(...bucketSummary.drawResultCounts.map(({ count }) => count), 0);
                       const isBoosted = bias > 0;
                       const isPunished = bias < 0;
                       return (
@@ -4298,7 +4567,21 @@ function AppInner(): JSX.Element {
                               <div style={{ marginTop: 4, color: "#777", fontVariantNumeric: "tabular-nums" }}>
                                 Draw results:&nbsp;
                                 {bucketSummary.drawResultCounts.map(({ hits, count: drawCount }) => (
-                                  <span key={`${key}-hits-${hits}`} style={{ marginRight: 8 }}>
+                                  <span
+                                    key={`${key}-hits-${hits}`}
+                                    style={{
+                                      ...drawResultTemperatureStyle(drawCount, maxDrawResultCount),
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      minHeight: 20,
+                                      marginRight: 6,
+                                      marginTop: 3,
+                                      padding: "1px 6px",
+                                      borderRadius: 999,
+                                      fontSize: 11,
+                                    }}
+                                    title={`Observed WFMQYH draw-result count: ${hits} matching main number${hits === 1 ? "" : "s"} occurred ${drawCount} time${drawCount === 1 ? "" : "s"}.`}
+                                  >
                                     {hits}x={drawCount}
                                   </span>
                                 ))}
@@ -4732,6 +5015,16 @@ function AppInner(): JSX.Element {
                   </section>
                 </div>
               </div>
+                </div>
+              </InlineCollapsibleCard>
+
+              <InlineCollapsibleCard
+                title="Recency & Latest Draw Rules"
+                subtitle="Odd/even, last-draw overlap, latest ±1/±2 targets, repeat-window rules, and OGA forecast bias."
+                collapsedSummary={`Recent min ${minRecentMatches} · latest ±1/±2 ${previousNeighbourConstraintNumbers.length || "off"} · repeat W ${repeatWindowSizeW}/M ${minFromRecentUnionM}`}
+                defaultExpanded={false}
+              >
+                <div className="windfall-influences-grid">
 
               {/* Column 2: Composition & Recency + OGA Bias */}
               <div className="windfall-influence-card">
@@ -5094,6 +5387,16 @@ function AppInner(): JSX.Element {
                   })()}
                 </div>
               </div>
+                </div>
+              </InlineCollapsibleCard>
+
+              <InlineCollapsibleCard
+                title="Hard Filters"
+                subtitle="Entropy, distance filters, and readiness scoring controls."
+                collapsedSummary={`Entropy ${entropyEnabled ? entropyThreshold : "off"} · Hamming ${hammingEnabled ? hammingThreshold : "off"} · Jaccard ${jaccardEnabled ? `${Math.round(jaccardThreshold * 100)}%` : "off"}`}
+                defaultExpanded={false}
+              >
+                <div className="windfall-influences-grid">
 
               {/* Column 3: Core Filters + Readiness Scoring */}
               <div className="windfall-influence-card">
@@ -5108,26 +5411,28 @@ function AppInner(): JSX.Element {
                     <span>Hamming preview: {previewStats.hamming}/100 candidates pass</span>
                     <span>Jaccard preview: {previewStats.jaccard}/100 candidates pass</span>
                   </div>
-                  <label>
-                    <input type="checkbox" checked={entropyEnabled} onChange={(e) => setEntropyEnabled(e.target.checked)} style={{ marginRight: 6 }} />
-                    Entropy (threshold {entropyThreshold})
-                  </label>
-                  <div style={{ marginLeft: 18, marginTop: 4 }}>
-                    <input type="range" min={0} max={6} step={0.1} value={entropyThreshold} onChange={(e) => setEntropyThreshold(Number(e.target.value))} style={{ width: 200 }} />
-                  </div>
-                  <label>
-                    <input type="checkbox" checked={hammingEnabled} onChange={(e) => setHammingEnabled(e.target.checked)} style={{ marginRight: 6 }} />
-                    Hamming (min {hammingThreshold})
-                  </label>
-                  <div style={{ marginLeft: 18, marginTop: 4 }}>
-                    <input type="range" min={0} max={8} step={1} value={hammingThreshold} onChange={(e) => setHammingThreshold(Number(e.target.value))} style={{ width: 200 }} />
-                  </div>
-                  <label>
-                    <input type="checkbox" checked={jaccardEnabled} onChange={(e) => setJaccardEnabled(e.target.checked)} style={{ marginRight: 6 }} />
-                    Jaccard (max {Math.round(jaccardThreshold * 100)}%)
-                  </label>
-                  <div style={{ marginLeft: 18, marginTop: 4 }}>
-                    <input type="range" min={0} max={1} step={0.01} value={jaccardThreshold} onChange={(e) => setJaccardThreshold(Number(e.target.value))} style={{ width: 200 }} />
+                  <div className="windfall-core-filter-grid">
+                    <label className="windfall-core-filter-control">
+                      <span className="windfall-core-filter-control__label">
+                        <input type="checkbox" checked={entropyEnabled} onChange={(e) => setEntropyEnabled(e.target.checked)} />
+                        Entropy (threshold {entropyThreshold})
+                      </span>
+                      <HigSlider className="windfall-core-filter-control__range" min={0} max={6} step={0.1} value={entropyThreshold} onCommit={setEntropyThreshold} />
+                    </label>
+                    <label className="windfall-core-filter-control">
+                      <span className="windfall-core-filter-control__label">
+                        <input type="checkbox" checked={hammingEnabled} onChange={(e) => setHammingEnabled(e.target.checked)} />
+                        Hamming (min {hammingThreshold})
+                      </span>
+                      <HigSlider className="windfall-core-filter-control__range" min={0} max={8} step={1} value={hammingThreshold} onCommit={setHammingThreshold} />
+                    </label>
+                    <label className="windfall-core-filter-control">
+                      <span className="windfall-core-filter-control__label">
+                        <input type="checkbox" checked={jaccardEnabled} onChange={(e) => setJaccardEnabled(e.target.checked)} />
+                        Jaccard (max {Math.round(jaccardThreshold * 100)}%)
+                      </span>
+                      <HigSlider className="windfall-core-filter-control__range" min={0} max={1} step={0.01} value={jaccardThreshold} onCommit={setJaccardThreshold} />
+                    </label>
                   </div>
                 </div>
 
@@ -5143,9 +5448,9 @@ function AppInner(): JSX.Element {
                   <label style={{ display: "block", marginBottom: 2, fontSize: 12 }} title="Ideal Draw Match: How closely the candidate's bucket composition (0x, 1x, 2x…) matches the exhaustive ideal draw row in Monthly Draws Summary. High IDM = stronger descriptive bucket alignment, not a probability.">
                     <b>IDM</b> — Ideal Draw Match: <b>{Math.round(rdyWeights.idm / ( rdyWeights.idm + rdyWeights.conv + rdyWeights.oga || 1) * 100)}%</b>
                   </label>
-                  <input type="range" min={0} max={1} step={0.05} value={rdyWeights.idm}
-                    onChange={(e) => setRdyWeights(prev => ({ ...prev, idm: Number(e.target.value) }))}
-                    style={{ width: "100%" }} />
+                  <HigSlider min={0} max={1} step={0.05} value={rdyWeights.idm}
+                    onCommit={(value) => setRdyWeights(prev => ({ ...prev, idm: value }))}
+                  />
                   <div style={{ fontSize: 11, color: "#888" }}>
                     Measures bucket composition similarity to the exhaustive Monthly Draws Summary ideal draw. Higher = closer descriptive alignment to the robust monthly target, not a win forecast.
                   </div>
@@ -5155,9 +5460,9 @@ function AppInner(): JSX.Element {
                   <label style={{ display: "block", marginBottom: 2, fontSize: 12 }} title="Convergence: How much this candidate moves the current month's frequency distribution toward the Monthly Draws Summary target (SSD reduction). High Conv = more convergent toward that diagnostic target.">
                     <b>Conv</b> — Convergence: <b>{Math.round(rdyWeights.conv / (rdyWeights.idm + rdyWeights.conv + rdyWeights.oga || 1) * 100)}%</b>
                   </label>
-                  <input type="range" min={0} max={1} step={0.05} value={rdyWeights.conv}
-                    onChange={(e) => setRdyWeights(prev => ({ ...prev, conv: Number(e.target.value) }))}
-                    style={{ width: "100%" }} />
+                  <HigSlider min={0} max={1} step={0.05} value={rdyWeights.conv}
+                    onCommit={(value) => setRdyWeights(prev => ({ ...prev, conv: value }))}
+                  />
                   <div style={{ fontSize: 11, color: "#888" }}>
                     Measures the SSD (sum of squared differences) reduction between the current and target distributions. Related to IDM but accounts for the magnitude of each bucket's over/under-representation.
                   </div>
@@ -5167,9 +5472,9 @@ function AppInner(): JSX.Element {
                   <label style={{ display: "block", marginBottom: 2, fontSize: 12 }} title="OGA (Octagonal Geometry Alignment): The candidate's OGA percentile relative to all historical draws. High OGA% = numbers that form geometrically balanced patterns on the DGA grid.">
                     <b>OGA</b> — Geometry Alignment: <b>{Math.round(rdyWeights.oga / (rdyWeights.idm + rdyWeights.conv + rdyWeights.oga || 1) * 100)}%</b>
                   </label>
-                  <input type="range" min={0} max={1} step={0.05} value={rdyWeights.oga}
-                    onChange={(e) => setRdyWeights(prev => ({ ...prev, oga: Number(e.target.value) }))}
-                    style={{ width: "100%" }} />
+                  <HigSlider min={0} max={1} step={0.05} value={rdyWeights.oga}
+                    onCommit={(value) => setRdyWeights(prev => ({ ...prev, oga: value }))}
+                  />
                   <div style={{ fontSize: 11, color: "#888" }}>
                     Uses the OGA percentile to favour candidates whose numbers form geometrically aligned patterns. Independent of monthly frequency analysis.
                   </div>
@@ -5180,15 +5485,38 @@ function AppInner(): JSX.Element {
                 </div>
                 </div>{/* end readiness wrapper */}
               </div>{/* end column 3 */}
-            </div>
-            <div className="windfall-influence-provenance">
-              <b>Provenance:</b> Real window={realFilteredHistory.length}/{filteredHistory.length} loaded; Entropy={entropyEnabled ? entropyThreshold : "off"}; Hamming={hammingEnabled ? hammingThreshold : "off"}; Jaccard={jaccardEnabled ? jaccardThreshold : "off"}; Tricky={useTrickyRule ? "on" : "off"}; Ratios={selectedRatios.length ? selectedRatios.join(" ") : "none"}; RecMin={minRecentMatches}; RecBias={recentMatchBias}; Prev±1/±2Targets={previousNeighbourConstraintNumbers.length ? previousNeighbourConstraintNumbers.join(",") : "off"}; Repeat W={repeatWindowSizeW} M={minFromRecentUnionM}; GPWF={gpwfEnabled ? "on" : "off"}; λ={lambdaEnabled ? lambda.toFixed(2) : "off"}; Sum={sumFilter.enabled ? `${sumFilter.min}–${sumFilter.max}${sumFilter.includeSupp ? "+supp" : ""}` : "off"}; PatternMode={patternConstraintMode} Tol={patternSumTolerance} Boost={patternBoostFactor}; OGABias={enableOGAForecastBias ? `${ogaPreferredBand} @ ${ogaBaselineMode}` : "off"}; End0Set=${mainZeroSetEnabled ? `max ${maxMainZeroSetCount}` : "off"}; End1Set=${mainOneSetEnabled ? `max ${maxMainOneSetCount}` : "off"}; End2Set=${mainTwoSetEnabled ? `max ${maxMainTwoSetCount}` : "off"}; End3Set=${mainThreeSetEnabled ? `max ${maxMainThreeSetCount}` : "off"}; End4Set=${mainFourSetEnabled ? `max ${maxMainFourSetCount}` : "off"}; End5Set=${mainFiveSetEnabled ? `max ${maxMainFiveSetCount}` : "off"}; End6Set=${mainSixSetEnabled ? `max ${maxMainSixSetCount}` : "off"}; End7Set=${mainSevenSetEnabled ? `max ${maxMainSevenSetCount}` : "off"}; End8Set=${mainEightSetEnabled ? `max ${maxMainEightSetCount}` : "off"}; End9Set=${mainNineSetEnabled ? `max ${maxMainNineSetCount}` : "off"}; DigitWidth=${digitWidthConstraintTargets.enabled ? `${digitWidthConstraintTargets.singleDigitPercent}/${digitWidthConstraintTargets.twoDigitPercent} ${formatDigitWidthScopeLabel(digitWidthConstraintTargets.scope)} => ${digitWidthConstraintTargets.singleDigitCount}/${digitWidthConstraintTargets.twoDigitCount}` : "off"}; EndDigitBoosts={activeMainDigitBoostSummary || "none"}; DecadeBias={activeMainDecadeBiasSummary || "none"}; MRB={mrbEnabled ? `ON budget:${MRB_BUCKET_KEYS.reduce((s,k)=>s+Math.max(0,(mrbBucketBoosts[k]??1)-1),0).toFixed(1)}/${MRB_BUDGET}` : "off"}; CarryOver={monthEndCarryOverBiasEnabled ? `ON ${monthEndCarryOverStrengthSettings.label} ${monthEndCarryOverWeighting.targetMonthLabel} active:${monthEndCarryOverWeighting.activeNumbers.length}${monthEndCarryOverPoolBreakdown ? ` [${monthEndCarryOverPoolBreakdown}]` : ""} sources:undrawn=${monthEndCarryOverIncludeMonthEndUndrawn ? "on" : "off"},boundary=${monthEndCarryOverIncludeBoundaryRepeats ? "on" : "off"}${selectedCarryOverBoostSummary ? ` selected:${selectedCarryOverBoostSummary}×${selectedCarryOverBoostFactor}` : ""}` : `off default:${monthEndCarryOverWeighting.defaultEnabled ? "on" : "off"}`}
+                </div>
+              </InlineCollapsibleCard>
+
+              <InlineCollapsibleCard
+                title="Active Setup Summary"
+                subtitle="A plain-language audit trail of active forced numbers, exclusions, and generation inputs."
+                collapsedSummary={`Forced ${generationForcedNumbers.length} · exclusions ${allExclusions.length} · SDE1 ${knobs.enableSDE1 ? "on" : "off"} · HC3 ${knobs.enableHC3 ? "on" : "off"}`}
+                defaultExpanded={false}
+              >
+            <div className="windfall-influence-provenance" aria-label="Generation provenance summary">
+              <div className="windfall-influence-provenance__header">Provenance</div>
+              <div className="windfall-influence-provenance__grid">
+                {activeSetupProvenanceGroups.map((group) => (
+                  <section key={group.title} className="windfall-influence-provenance__group" aria-label={group.title}>
+                    <div className="windfall-influence-provenance__title">{group.title}</div>
+                    <dl className="windfall-influence-provenance__items">
+                      {group.items.map((item) => (
+                        <div key={item.label} className="windfall-influence-provenance__item">
+                          <dt className="windfall-influence-provenance__label">{item.label}</dt>
+                          <dd className="windfall-influence-provenance__value">{item.value}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </section>
+                ))}
+              </div>
             </div>
             {/* Forced and Excluded reporting */}
             <div className="windfall-influence-report">
               <div style={{ marginBottom: 6 }}>
                 <b>Forced numbers</b> ({generationForcedNumbers.length}): {generationForcedNumbers.length ? sortedGenerationForcedNumbers.join(", ") : "— none —"}
-                <span style={{ color: "#64748b" }}> Trend {trendSelectedNumbers.length}; latest ±1/±2 {previousNeighbourConstraintNumbers.length}.</span>
+                <span style={{ color: "#64748b" }}> Trend {trendSelectedNumbers.length}; latest ±1/±2 {previousNeighbourConstraintNumbers.length}; drought-break {droughtBreakSelectedNumbers.length}.</span>
               </div>
               <div className="windfall-influence-report__grid">
                 <div>
@@ -5214,7 +5542,150 @@ function AppInner(): JSX.Element {
                 </div>
               </div>
             </div>
+              </InlineCollapsibleCard>
+            </div>
           </CollapsibleSection>
+
+      {/* [ORDER-ANCHOR] 23.5 Paste-Weighted Candidate Generator */}
+      <CollapsibleSection
+        panelId="paste-weighted-candidate-generator"
+        title={<b>Paste-Weighted Candidate Generator</b>}
+        summaryHint="Paste rows, weight numbers, generate six-number candidates"
+        defaultOpen={true}
+      >
+        <div style={{ marginTop: 8 }}>
+          <PasteWeightedCandidatesPanel
+            onSimulateCandidate={handleSimulatePasteWeightedCandidate}
+            onGeneratedCandidatesChange={setPasteWeightedPortfolioCandidates}
+            activeSimulatedKey={activeSimulatedMainKey}
+            initialCandidateCount={Math.max(4, Math.min(30, numCandidates || 12))}
+            fullHistory={realHistory}
+            activeHistory={realFilteredHistory}
+            activeWindowLabel={historyWindowName}
+            stageIdealDrawState={stageIdealDrawState}
+            monthlyAcceptanceNeeds={monthlyConstraintPayload?.constraints ?? null}
+          />
+        </div>
+      </CollapsibleSection>
+
+      {/* [ORDER-ANCHOR] 23.75 Portfolio Compression / 12-Game Distiller */}
+      <CollapsibleSection
+        panelId="portfolio-compression"
+        title={<b>Portfolio Compression / 12-Game Distiller</b>}
+        summaryHint="Paste portfolio rows, count unique numbers, distil a top-six core"
+        defaultOpen={true}
+      >
+        <div style={{ marginTop: 8 }}>
+          <PortfolioCompressionPanel
+            userSelectedNumbers={userSelectedNumbers}
+            monthEndCarryOverBiasEnabled={monthEndCarryOverBiasEnabled}
+            monthEndCarryOverWeights={monthEndCarryOverWeightsForGeneration}
+            hotColdRows={portfolioHotColdRows}
+            windowShapeRows={portfolioWindowShapeRows}
+            adjacentComboHistory={realFilteredHistory}
+            monthlyBuckets={dgaEffectiveMonthlyBuckets}
+            backtestHistory={realHistory}
+            onSimulateCore={handleSimulatePortfolioCore}
+            activeSimulatedKey={activeSimulatedMainKey}
+            candidateSources={[
+              {
+                id: "generated-candidates",
+                label: "Generated Candidates",
+                candidates: candidates.map((candidate) => candidate.main),
+              },
+              {
+                id: "paste-weighted-candidates",
+                label: "Paste-Weighted Candidates",
+                candidates: pasteWeightedPortfolioCandidates.map((candidate) => candidate.main),
+              },
+            ]}
+          />
+        </div>
+      </CollapsibleSection>
+
+      {/* [ORDER-ANCHOR] 24 Generated Candidates */}
+      <CollapsibleSection panelId="generated-candidates" title={<b>Generated Candidates</b>} defaultOpen={true}>
+        <div style={{ padding: 32, fontFamily: "sans-serif" }}>
+          <GeneratedCandidatesPanel
+            onGenerate={handleGenerate}
+            candidates={candidates}
+            quotaWarning={quotaWarning}
+            isGenerating={isGenerating}
+            numCandidates={numCandidates}
+            setNumCandidates={setNumCandidates}
+            userSelectedNumbers={userSelectedNumbers}
+            setUserSelectedNumbers={setUserSelectedNumbers}
+            onSelectCandidate={setSelectedCandidateIdx}
+            onSimulateCandidate={handleSimulateCandidate}
+            selectedCandidateIdx={selectedCandidateIdx}
+            mostRecentDraw={realFilteredHistory[realFilteredHistory.length - 1] || null}
+            manualSimSelected={manualSimSelected}
+            setManualSimSelected={setManualSimSelected}
+            activeOGABand={activeOGABand}
+            forcedNumbers={generationForcedNumbers}
+            activeSimCandidateIdx={simCandidateIdx ?? -1}
+            simSourceKind={simSource}
+            batchSize={batchSize}
+            setBatchSize={setBatchSize}
+            onRunBatch={handleRunBatchFrequencies}
+            batchFreq={batchFreq}
+            isBatching={isBatching}
+            batchSummary={batchSummary}
+            batchSessionRuns={batchSessionRuns}
+            setBatchSessionRuns={setBatchSessionRuns}
+            onRunBatchSession={handleRunBatchSession}
+            isBatchSessionRunning={isBatchSessionRunning}
+            batchSessionProgress={batchSessionProgress}
+            batchSessionTopSeries={batchSessionTopSeries}
+            batchSessionAggregate={batchSessionAggregate}
+            onSimulateNumbers={handleSimulatePickSixManual}
+            monthlyAvgBuckets={monthlyAvgBuckets}
+            monthlyBuckets={monthlyBucketSetsAlways ?? monthlyConstraintPayload?.buckets}
+            monthlyIdealDrawState={monthlyIdealDrawState}
+            stageIdealDrawState={stageIdealDrawState}
+            historyForOGA={realFilteredHistory}
+            fullHistory={realHistory}
+            ogaRefScores={pastOGAScoresRef}
+            ogaSpokeCount={ogaSpokeCount}
+            attemptMultiplier={attemptMultiplier}
+            onAttemptMultiplierChange={setAttemptMultiplier}
+            overgenFactor={overgenFactor}
+            onOvergenFactorChange={setOvergenFactor}
+            rdyWeights={rdyWeights}
+            enableOGA={knobs.enableOGA}
+            ratioOptions={ratioOptions}
+            exportSettings={({
+              excludedNumbers: effectiveExcludedNumbers,
+              hc3Exclusions,
+              sde1Exclusions,
+              enableHC3: knobs.enableHC3,
+              enableSDE1: knobs.enableSDE1,
+              selectedOddEvenRatios: selectedRatios,
+              trendRatioFilter: {
+                lookback: trendLookback,
+                threshold: trendThreshold,
+                allowedRatios: [...allowedTrendRatios],
+                coveragePercent: trendRatioCoveragePercent,
+              },
+              lambdaEnabled,
+              lambda,
+              selectedBoostEnabled,
+              selectedBoostFactor,
+              monthlyBoostPenalize: monthlyConstraintPayload?.boostPenalize ?? false,
+              monthlyConstructiveEnabled,
+              monthlyConstructiveConstraints: monthlyConstraintPayload?.constraints,
+              minRecentMatches,
+              recentMatchBias,
+              previousNeighbourConstraintNumbers: [...previousNeighbourConstraintNumbers],
+              entropyEnabled,
+              entropyThreshold,
+              hammingEnabled,
+              hammingThreshold,
+              jaccardEnabled,
+              jaccardThreshold,
+            } as ExportSettings)}
+          />
+
 
           <div style={{ width: "100%", marginBottom: 68 }}>
             <OGAHistogram
@@ -5247,24 +5718,43 @@ function AppInner(): JSX.Element {
         id="workflow-dga"
         title="Diamond Grid Analysis"
         summary="Inspect spatial, simulated, and monthly-bucket views without changing the source draw history."
+        favoritePanelId="diamond-grid-analysis"
+        collapsible={true}
+        expanded={dgaSectionOpen}
+        controlsId={dgaWorkflowBodyId}
+        onExpandedChange={setDgaSectionOpen}
       />
 
+      <CollapsibleSection
+        panelId="next-hot-blocks"
+        title={<b>Next Hot Blocks</b>}
+        summaryHint="Observed block heat/drift and block exclusions"
+        defaultOpen={true}
+      >
+        <div style={{ width: "100%", marginTop: 8, marginBottom: 10 }}>
+          <NextHotBlocksPanel
+            history={realFilteredHistory}
+            excludedNumbers={effectiveExcludedNumbers}
+            setExcludedNumbers={setExcludedNumbers}
+            onClearAutoExclusions={() => setAutoExcludeUnselected(false)}
+          />
+        </div>
+      </CollapsibleSection>
+
       {/* [ORDER-ANCHOR] 25 Diamond Grid Analysis (DGA) */}
-      <CollapsibleSection panelId="diamond-grid-analysis" title={<b>Diamond Grid Analysis (DGA)</b>} defaultOpen={true}>
+      <CollapsibleSection
+        title="Diamond Grid Analysis"
+        defaultOpen={true}
+        chrome="bodyOnly"
+        favoriteable={false}
+        open={dgaSectionOpen}
+        bodyId={dgaWorkflowBodyId}
+      >
         <div style={{ width: "100%", marginTop: 18, marginBottom: 10 }}>
-          {/* Next Hot Blocks above Temperature Heatmap */}
-          <div style={{ marginBottom: 12 }}>
-            <NextHotBlocksPanel
-              history={realFilteredHistory}
-              excludedNumbers={effectiveExcludedNumbers}
-              setExcludedNumbers={setExcludedNumbers}
-              onClearAutoExclusions={() => setAutoExcludeUnselected(false)}
-            />
-          </div>
           <InlineCollapsibleCard
             title="DGA heatmap"
-            subtitle={`${realFilteredHistory.length} real draw${realFilteredHistory.length === 1 ? "" : "s"} in the active window · heatmap view, drought hazard and simulation strip`}
-            collapsedSummary="Shows the DGA heatmap with a view selector for temperature or monthly bucket-state mode, plus legend controls, the drought-break shortlist, and the aligned simulation strip."
+            subtitle={`${realFilteredHistory.length} real draw${realFilteredHistory.length === 1 ? "" : "s"} in the active window · heatmap view and simulation strip`}
+            collapsedSummary="Shows the DGA heatmap with a view selector for temperature or monthly bucket-state mode, plus legend controls and the aligned simulation strip."
             defaultExpanded={true}
             expanded={dgaHeatmapExpanded}
             onExpandedChange={setDgaHeatmapExpanded}
@@ -5305,15 +5795,6 @@ function AppInner(): JSX.Element {
                   <input type="checkbox" checked={showHeatmapLetters} onChange={e => setShowHeatmapLetters(e.target.checked)} style={{ marginLeft: 6 }} title="Overlay letter codes" />
                 </label>
                 <span style={{ fontSize: 12, color: "#64748b" }}>{dgaHeatmapSubtitle}</span>
-              </div>
-
-              <div style={{ width: "100%", marginBottom: 8 }}>
-                <DroughtHazardPanel
-                  history={realFilteredHistory}
-                  top={8}
-                  title="Most likely to break a drought next draw"
-                  bucketLabels={monthlyBucketLabels}
-                />
               </div>
 
               <div style={{ width: "100%", marginTop: 8, marginBottom: 6 }}>
@@ -5448,6 +5929,27 @@ function AppInner(): JSX.Element {
                 ) : (
                   <i>No grid data available.</i>
                 )}
+                <div className="windfall-dga-mirror-control" aria-label="DGA strip to Latest Draw ±1/±2 mirror">
+                  <button
+                    type="button"
+                    className={`windfall-dga-mirror-control__button${mirrorDgaStripToPreviousNeighbour ? " is-active" : ""}`}
+                    aria-pressed={mirrorDgaStripToPreviousNeighbour}
+                    onClick={() => setMirrorDgaStripToPreviousNeighbour((current) => !current)}
+                  >
+                    {mirrorDgaStripToPreviousNeighbour ? "Mirroring strip to ±1/±2 builder" : "Mirror strip to ±1/±2 builder"}
+                  </button>
+                  <div className="windfall-dga-mirror-control__status">
+                    <b>{mirrorDgaStripToPreviousNeighbour ? "On" : "Off"}</b>
+                    {" · "}
+                    {mirrorDgaStripToPreviousNeighbour
+                      ? dgaStripPreviousNeighbourMatches.length
+                        ? `Mirroring ${dgaStripPreviousNeighbourMatches.length} valid target${dgaStripPreviousNeighbourMatches.length === 1 ? "" : "s"}: ${dgaStripPreviousNeighbourMatches.join(", ")}.`
+                        : dgaStripSelected.length
+                          ? "No current strip selections are valid latest-draw ±1/±2 targets."
+                          : "Select numbers in the DGA simulation strip to mirror matching ±1/±2 targets."
+                      : "DGA strip simulates only. Turn on to copy only valid latest-draw ±1/±2 targets into the constraint builder."}
+                  </div>
+                </div>
               </div>
             </InlineCollapsibleCard>
           </div>
@@ -5513,9 +6015,12 @@ function AppInner(): JSX.Element {
       selectedRatios: [...selectedRatios],
       useTrickyRule,
       excludedNumbers: [...excludedNumbers],
-      trendLookback: 4,
-      trendThreshold: 0.02,
-      allowedTrendRatios: [],
+      hotColdForcedNumbers: [...hotColdForcedNumbers],
+      hotColdExcludedNumbers: [...hotColdExcludedNumbers],
+      droughtBreakSelectedNumbers: [...droughtBreakSelectedNumbers],
+      trendLookback,
+      trendThreshold,
+      allowedTrendRatios: [...allowedTrendRatios],
       trendSelectedNumbers: [...trendSelectedNumbers],
       rankingWeights: { ...rankingWeights },
       weightedTargets: { ...weightedTargets },
@@ -5623,6 +6128,9 @@ function AppInner(): JSX.Element {
     setSelectedRatios(s.selectedRatios);
     setUseTrickyRule(s.useTrickyRule);
     setExcludedNumbers(s.excludedNumbers);
+    setHotColdForcedNumbers(normalizeHotColdGenerationNumbers(s.hotColdForcedNumbers));
+    setHotColdExcludedNumbers(normalizeHotColdGenerationNumbers(s.hotColdExcludedNumbers));
+    setDroughtBreakSelectedNumbers(normalizeHotColdGenerationNumbers(s.droughtBreakSelectedNumbers).slice(0, MAX_DROUGHT_BREAK_FORCED_NUMBERS));
     setRankingWeights({
           oga: s.rankingWeights?.oga ?? 0.7,
           sel: s.rankingWeights?.sel ?? 0.2,
@@ -5725,6 +6233,9 @@ function AppInner(): JSX.Element {
     setManualSimSelected(s.manualSimSelected ?? []);
     setMinRecentMatches(s.minRecentMatches ?? 0);
     setRecentMatchBias(s.recentMatchBias ?? 0);
+    setTrendLookback(Math.max(1, Math.min(52, Math.round(s.trendLookback ?? 4))));
+    setTrendThreshold(Math.max(0, Math.min(1, Number.isFinite(s.trendThreshold) ? s.trendThreshold : 0.02)));
+    setAllowedTrendRatios(Array.from(new Set((s.allowedTrendRatios ?? []).filter((tag) => /^\d+-\d+-\d+$/.test(tag)))));
     setPreviousNeighbourConstraintNumbers(normalizePreviousNeighbourConstraintNumbers(s.previousNeighbourConstraintNumbers ?? []));
     setRepeatWindowSizeW(s.repeatWindowSizeW ?? 12);
     setMinFromRecentUnionM(s.minFromRecentUnionM ?? 0);

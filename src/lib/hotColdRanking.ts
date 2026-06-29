@@ -1,7 +1,7 @@
 import type { Draw } from "../types";
 
 export const HOT_COLD_RECENT_WINDOW_OPTIONS = [10, 20, 30, 50] as const;
-export const HOT_COLD_HALF_LIFE_OPTIONS = [6, 10, 14, 20] as const;
+export const HOT_COLD_HALF_LIFE_OPTIONS = [0, 6, 10, 14, 20] as const;
 
 export type HotColdWindowShortcut = "W" | "F" | "M" | "Q" | "Y" | "H" | "WFMQYH";
 export type HotColdWindowChoice = number | HotColdWindowShortcut;
@@ -126,6 +126,9 @@ export const formatHotColdWindowChoiceLabel = (
   wfmqyhWindowSize?: number,
 ): string => {
   if (typeof choice === "number" && Number.isFinite(choice)) {
+    if (mode === "halfLife" && choice === 0) {
+      return "0 · Latest draw only";
+    }
     return `${choice} draws`;
   }
 
@@ -202,13 +205,21 @@ const takeTop = (rows: HotColdRankingRow[], selector: (row: HotColdRankingRow) =
     .slice(0, count);
 };
 
+const getRecencyWeight = (age: number, halfLife: number): number => {
+  if (halfLife === 0) {
+    return age === 0 ? 1 : 0;
+  }
+  return Math.exp((-Math.log(2) * age) / halfLife);
+};
+
 export const analyzeHotColdRanking = (
   history: Draw[],
   options: HotColdRankingOptions = {},
 ): HotColdRankingSummary => {
   const includeSupp = options.includeSupp ?? false;
   const recentWindowInput = options.recentWindow ?? 20;
-  const halfLife = Math.max(1, options.halfLife ?? 10);
+  const halfLifeInput = options.halfLife ?? 10;
+  const halfLife = Number.isFinite(halfLifeInput) ? Math.max(0, halfLifeInput) : 10;
   const prepared = prepareHistory(history, includeSupp);
   const totalDraws = prepared.length;
   const recentWindow = Math.min(Math.max(1, recentWindowInput), Math.max(1, totalDraws));
@@ -218,7 +229,7 @@ export const analyzeHotColdRanking = (
   const priorDraws = prepared.slice(0, Math.max(0, totalDraws - recentWindow));
   const totalWeight = prepared.reduce((sum, _draw, index) => {
     const age = prepared.length - 1 - index;
-    return sum + Math.exp((-Math.log(2) * age) / halfLife);
+    return sum + getRecencyWeight(age, halfLife);
   }, 0);
 
   const rawRows = NUMBER_RANGE.map<HotColdRankingRow>((number) => {
@@ -230,7 +241,7 @@ export const analyzeHotColdRanking = (
     const priorRate = priorWindow > 0 ? priorCount / priorWindow : totalRate;
     const weightedHits = prepared.reduce((sum, draw, index) => {
       const age = prepared.length - 1 - index;
-      const weight = Math.exp((-Math.log(2) * age) / halfLife);
+      const weight = getRecencyWeight(age, halfLife);
       return sum + (draw.numbers.includes(number) ? weight : 0);
     }, 0);
     const weightedRate = totalWeight > 0 ? weightedHits / totalWeight : 0;

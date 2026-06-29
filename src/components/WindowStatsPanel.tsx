@@ -79,6 +79,7 @@ export const WindowStatsPanel: React.FC<WindowStatsPanelProps> = ({
 
   // Build rows oldest -> newest
   const rows = useMemo(() => draws.map(d => buildRow(d, withSupp)), [draws, withSupp]);
+  const displayRows = useMemo(() => [...rows].reverse(), [rows]);
 
   // Summary (simple)
   const summary = useMemo(() => {
@@ -195,7 +196,7 @@ export const WindowStatsPanel: React.FC<WindowStatsPanelProps> = ({
             </tr>
           </thead>
           <tbody>
-            {rows.map((r, i) => {
+            {displayRows.map((r, i) => {
               const pattern: WindowPattern = {
                 low: r.low,
                 high: r.high,

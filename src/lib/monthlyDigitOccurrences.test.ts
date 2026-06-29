@@ -89,6 +89,51 @@ describe("analyzeMonthlyDigitOccurrences", () => {
     expect(summary.overallTwoDigitTopNumbers[0]).toEqual({ number: 10, count: 2 });
   });
 
+  it("can equalize monthly rows to the first shared draw count per month", () => {
+    const unevenHistory: Draw[] = [
+      { date: "2024-01-03", main: [1, 2, 10, 11, 12, 13], supp: [] },
+      { date: "2024-01-10", main: [3, 4, 14, 15, 16, 17], supp: [] },
+      { date: "2024-01-17", main: [5, 6, 7, 8, 9, 10], supp: [] },
+      { date: "2024-02-02", main: [1, 10, 11, 12, 13, 14], supp: [] },
+      { date: "2024-02-09", main: [2, 3, 4, 5, 6, 7], supp: [] },
+    ];
+
+    const full = analyzeMonthlyDigitOccurrences(unevenHistory, { includeSupp: false });
+    const equalized = analyzeMonthlyDigitOccurrences(unevenHistory, {
+      includeSupp: false,
+      equalizeDrawCounts: true,
+    });
+
+    expect(full.equalizedDrawCount).toBeNull();
+    expect(full.rows[0]).toMatchObject({
+      monthLabel: "2024-01",
+      drawCount: 3,
+      availableDrawCount: 3,
+      oneDigitOccurrences: 9,
+      twoDigitOccurrences: 9,
+    });
+
+    expect(equalized.equalizedDrawCount).toBe(2);
+    expect(equalized.totalDraws).toBe(4);
+    expect(equalized.totalOneDigitOccurrences).toBe(11);
+    expect(equalized.totalTwoDigitOccurrences).toBe(13);
+    expect(equalized.rows[0]).toMatchObject({
+      monthLabel: "2024-01",
+      drawCount: 2,
+      availableDrawCount: 3,
+      oneDigitOccurrences: 4,
+      twoDigitOccurrences: 8,
+      oneDigitUniqueNumbers: [1, 2, 3, 4],
+    });
+    expect(equalized.rows[1]).toMatchObject({
+      monthLabel: "2024-02",
+      drawCount: 2,
+      availableDrawCount: 2,
+      oneDigitOccurrences: 7,
+      twoDigitOccurrences: 5,
+    });
+  });
+
   it("returns an empty summary when no valid dated rows exist", () => {
     const summary = analyzeMonthlyDigitOccurrences([
       { date: "", main: [1, 2, 3, 10, 11, 12], supp: [4, 5] },

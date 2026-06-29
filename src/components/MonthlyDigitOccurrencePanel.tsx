@@ -14,6 +14,9 @@ interface MonthlyDigitOccurrencePanelProps {
 
 const formatPercent = (value: number): string => `${(value * 100).toFixed(1)}%`;
 const formatBiasPoints = (value: number): string => `${value >= 0 ? "+" : ""}${(value * 100).toFixed(1)} pts`;
+const formatDrawCount = (row: MonthlyDigitOccurrenceRow): string => (
+  row.availableDrawCount > row.drawCount ? `${row.drawCount} / ${row.availableDrawCount}` : String(row.drawCount)
+);
 
 const leaderStyles: Record<MonthlyDigitOccurrenceRow["leadingBucket"], { label: string; background: string; color: string; border: string }> = {
   oneDigit: {
@@ -191,16 +194,25 @@ const BiasSummaryCard: React.FC<{ bias: MonthlyDigitOccurrenceBias }> = ({ bias 
 export const MonthlyDigitOccurrencePanel: React.FC<MonthlyDigitOccurrencePanelProps> = ({ history }) => {
   const [includeSupp, setIncludeSupp] = useState<boolean>(false);
   const [latestFirst, setLatestFirst] = useState<boolean>(true);
+  const [equalDrawCounts, setEqualDrawCounts] = useState<boolean>(false);
   const [breakdownOpen, setBreakdownOpen] = useState<boolean>(true);
 
   const summary = useMemo(
     () => analyzeMonthlyDigitOccurrences(history, { includeSupp }),
     [history, includeSupp],
   );
+  const breakdownSummary = useMemo(
+    () => (
+      equalDrawCounts
+        ? analyzeMonthlyDigitOccurrences(history, { includeSupp, equalizeDrawCounts: true })
+        : summary
+    ),
+    [equalDrawCounts, history, includeSupp, summary],
+  );
 
   const rows = useMemo(
-    () => (latestFirst ? [...summary.rows].reverse() : summary.rows),
-    [latestFirst, summary.rows],
+    () => (latestFirst ? [...breakdownSummary.rows].reverse() : breakdownSummary.rows),
+    [breakdownSummary.rows, latestFirst],
   );
   const averageMonthHint = summary.averageMonthCount > 0
     ? `${summary.avgOneDigitPerMonth.toFixed(1)} per month across ${summary.averageMonthCount} complete month${summary.averageMonthCount === 1 ? "" : "s"}${summary.averageExcludedMonthLabels.length ? ` (excl. ${summary.averageExcludedMonthLabels.join(", ")})` : ""}`
@@ -234,6 +246,15 @@ export const MonthlyDigitOccurrencePanel: React.FC<MonthlyDigitOccurrencePanelPr
               onChange={(event) => setLatestFirst(event.target.checked)}
             />
             Latest month first
+          </label>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, color: "#334155" }}>
+            <input
+              type="checkbox"
+              checked={equalDrawCounts}
+              onChange={(event) => setEqualDrawCounts(event.target.checked)}
+              aria-label="Compare equal monthly draw counts"
+            />
+            Compare equal draw counts
           </label>
         </div>
       </div>
@@ -315,12 +336,18 @@ export const MonthlyDigitOccurrencePanel: React.FC<MonthlyDigitOccurrencePanelPr
             Collapsed to keep the panel compact. Expand to inspect the full month-by-month breakdown.
           </div>
         ) : (
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1100, fontSize: 12 }}>
+          <>
+            {equalDrawCounts && breakdownSummary.equalizedDrawCount != null ? (
+              <div style={{ padding: "8px 12px", fontSize: 12, color: "#475569", background: "#f8fafc", borderBottom: "1px solid #e5e7eb" }}>
+                Showing first <b>{breakdownSummary.equalizedDrawCount}</b> draws per month. Draws shown as <b>counted / available</b> when a month has additional draws beyond the equal-count comparison.
+              </div>
+            ) : null}
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1100, fontSize: 12 }}>
               <thead>
                 <tr style={{ background: "#f8fbff" }}>
                   <th style={thLeft}>Month</th>
-                  <th style={thRight}>Draws</th>
+                  <th style={thRight}>Draws{equalDrawCounts ? " counted" : ""}</th>
                   <th style={thRight}>1-digit total</th>
                   <th style={thRight}>2-digit total</th>
                   <th style={thLeft}>Share split</th>
@@ -338,7 +365,7 @@ export const MonthlyDigitOccurrencePanel: React.FC<MonthlyDigitOccurrencePanelPr
                   return (
                     <tr key={row.monthLabel} style={{ borderTop: "1px solid #edf2f7" }}>
                       <td style={{ ...tdLeft, fontWeight: 700 }}>{row.monthLabel}</td>
-                      <td style={tdRight}>{row.drawCount}</td>
+                      <td style={tdRight}>{formatDrawCount(row)}</td>
                       <td style={{ ...tdRight, color: "#155e75", fontWeight: 700 }}>{row.oneDigitOccurrences}</td>
                       <td style={{ ...tdRight, color: "#1d4ed8", fontWeight: 700 }}>{row.twoDigitOccurrences}</td>
                       <td style={tdLeft}>
@@ -373,8 +400,9 @@ export const MonthlyDigitOccurrencePanel: React.FC<MonthlyDigitOccurrencePanelPr
                   </tr>
                 )}
               </tbody>
-            </table>
-          </div>
+              </table>
+            </div>
+          </>
         )}
       </div>
     </section>

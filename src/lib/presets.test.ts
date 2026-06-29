@@ -74,6 +74,7 @@ describe("normalizeAppPresetSnapshot", () => {
         trendLookback: -5,
         trendThreshold: Number.POSITIVE_INFINITY,
         allowedTrendRatios: ["4-2-2", "4-4-4", "bad"],
+        droughtBreakSelectedNumbers: [7, "8", 9, 10, 46, 7] as any,
         maxLastDrawMatchesValue: 99,
         numCandidates: 0,
         batchSize: Number.POSITIVE_INFINITY,
@@ -91,6 +92,7 @@ describe("normalizeAppPresetSnapshot", () => {
     expect(normalized.trendLookback).toBe(4);
     expect(normalized.trendThreshold).toBe(0.02);
     expect(normalized.allowedTrendRatios).toEqual(["4-2-2"]);
+    expect(normalized.droughtBreakSelectedNumbers).toEqual([7, 8, 9]);
     expect(normalized.maxLastDrawMatchesValue).toBe(6);
     expect(normalized.numCandidates).toBe(1);
     expect(normalized.batchSize).toBe(200);

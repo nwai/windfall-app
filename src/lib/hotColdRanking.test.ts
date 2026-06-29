@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
+import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
 import type { Draw } from "../types";
+import { HotColdRankingPanel } from "../components/HotColdRankingPanel";
 import {
   analyzeHotColdRanking,
   formatHotColdWindowChoiceLabel,
@@ -76,6 +79,39 @@ describe("analyzeHotColdRanking", () => {
     expect(summary.recentWindow).toBe(2);
     expect(summary.priorWindow).toBe(0);
     expect(summary.rows.find((row) => row.number === 1)?.recentCount).toBe(1);
+  });
+
+  it("supports zero half-life as latest-draw-only weighted evidence", () => {
+    const zeroHalfLife = analyzeHotColdRanking(history, { includeSupp: false, recentWindow: 4, halfLife: 0 });
+
+    const latestOnlyNumber = zeroHalfLife.rows.find((row) => row.number === 37);
+    const historicalOnlyNumber = zeroHalfLife.rows.find((row) => row.number === 1);
+
+    expect(latestOnlyNumber?.weightedRate).toBe(1);
+    expect(latestOnlyNumber?.weightedRank).toBeLessThanOrEqual(6);
+    expect(historicalOnlyNumber?.weightedRate).toBe(0);
+    expect(formatHotColdWindowChoiceLabel(0, 80, 10, "halfLife")).toBe("0 · Latest draw only");
+  });
+
+  it("renders zero as a weighted half-life selector choice", () => {
+    const html = renderToStaticMarkup(React.createElement(HotColdRankingPanel, { history }));
+
+    expect(html).toContain("0 · latest draw only");
+  });
+
+  it("renders include/exclude generation selectors for hot/cold breakdown rows", () => {
+    const html = renderToStaticMarkup(React.createElement(HotColdRankingPanel as any, {
+      history,
+      forcedNumbers: [4],
+      excludedNumbers: [1],
+      onToggleForcedNumber: () => undefined,
+      onToggleExcludedNumber: () => undefined,
+    }));
+
+    expect(html).toContain("Include selected rows");
+    expect(html).toContain("Exclude selected rows");
+    expect(html).toContain("Forced in");
+    expect(html).toContain("Excluded");
   });
 
   it("resolves WFMQYH shortcut choices to draw counts", () => {

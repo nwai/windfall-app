@@ -1,6 +1,15 @@
 import React, { useState } from "react";
 import type { Draw } from "../types";
-import { backtestDroughtPredictions, BacktestOptions, BacktestSummary } from "../lib/backtestDrought";
+import { backtestDroughtPredictions, BacktestOptions, BacktestSummary, type SingleBacktestRecord } from "../lib/backtestDrought";
+
+export type DroughtBacktestDisplayRecord = SingleBacktestRecord;
+
+export function selectDroughtBacktestDisplayRecords(
+  records: readonly DroughtBacktestDisplayRecord[],
+  limit: number,
+): DroughtBacktestDisplayRecord[] {
+  return [...records].reverse().slice(0, Math.max(0, limit));
+}
 
 export function DroughtBacktestPanel({ history }: { history: Draw[] }) {
   const [running, setRunning] = useState(false);
@@ -108,7 +117,7 @@ export function DroughtBacktestPanel({ history }: { history: Draw[] }) {
                 </tr>
               </thead>
               <tbody>
-                {summary.records.slice(0, 200).map((r, i) => (
+                {selectDroughtBacktestDisplayRecords(summary.records, 200).map((r, i) => (
                   <tr key={i} style={{ borderBottom: "1px solid #eee" }}>
                     <td style={tdL}>{r.indexAtPrediction}</td>
                     <td style={tdL}>{r.predictDate}</td>

@@ -68,12 +68,14 @@ describe("HIG contributor guardrails", () => {
     expect(presetsSource).toContain("favoritePanelIds?: string[]");
     expect(presetsSource).toContain("normalizeFavoritePanelIds");
     expect(registrySource).toContain("FAVORITE_PANEL_REGISTRY");
+    expect(registrySource).toContain('id: "next-hot-blocks"');
     expect(cssSource).toContain(".windfall-favorites-strip");
     expect(cssSource).toContain(".windfall-section__favorite-text");
   });
 
   it("keeps the iCloud-informed visual-system tokens on shared surfaces", () => {
     const cssSource = readRepoFile("src/index.css");
+    const higGuideSource = readRepoFile("docs/HIG_UI_GUIDE.md");
 
     expect(cssSource).toContain("--wf-glass-surface");
     expect(cssSource).toContain("--wf-panel-shadow");
@@ -83,5 +85,6 @@ describe("HIG contributor guardrails", () => {
     expect(cssSource).toContain(".windfall-workflow-nav");
     expect(cssSource).toContain(".windfall-section");
     expect(cssSource).toContain(".windfall-generator-panel");
+    expect(higGuideSource).toContain("disclosure affordance");
   });
 });

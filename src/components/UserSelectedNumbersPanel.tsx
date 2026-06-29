@@ -20,6 +20,8 @@ interface UserSelectedNumbersPanelProps {
   isSimulatingUser?: boolean;
   autoExcludeUnselected?: boolean;
   onToggleAutoExclude?: (enabled: boolean) => void;
+  externalSelectedNumbers?: number[];
+  externalSelectedLabel?: string;
 }
 
 export const UserSelectedNumbersPanel: React.FC<UserSelectedNumbersPanelProps> = ({
@@ -32,6 +34,8 @@ export const UserSelectedNumbersPanel: React.FC<UserSelectedNumbersPanelProps> =
   isSimulatingUser = false,
   autoExcludeUnselected = false,
   onToggleAutoExclude,
+  externalSelectedNumbers = [],
+  externalSelectedLabel = "external forced selections",
 }) => {
   const hasLoadedPersistedSelection = React.useRef(false);
   const pendingPersistedSelection = React.useRef<number[] | null>(null);
@@ -41,6 +45,11 @@ export const UserSelectedNumbersPanel: React.FC<UserSelectedNumbersPanelProps> =
     [userSelectedNumbers],
   );
   const selectedSet = React.useMemo(() => new Set(selectedNumbers), [selectedNumbers]);
+  const lockedExternalNumbers = React.useMemo(
+    () => normalizeUserSelectedNumbers(externalSelectedNumbers).filter((number) => !selectedSet.has(number)),
+    [externalSelectedNumbers, selectedSet],
+  );
+  const lockedExternalSet = React.useMemo(() => new Set(lockedExternalNumbers), [lockedExternalNumbers]);
   const simulation = React.useMemo(
     () => buildUserSelectionSimulation(selectedNumbers),
     [selectedNumbers],
@@ -124,6 +133,11 @@ export const UserSelectedNumbersPanel: React.FC<UserSelectedNumbersPanelProps> =
           <div style={subtleText}>
             {selectedCount > 0 ? `Selected set: ${selectedNumbers.join(", ")}` : "Selected set: none"}
           </div>
+          {lockedExternalNumbers.length > 0 && (
+            <div style={{ ...subtleText, color: "#166534", marginTop: 3 }}>
+              Locked by {externalSelectedLabel}: {lockedExternalNumbers.join(", ")}
+            </div>
+          )}
         </div>
         <div style={toolbar}>
           <button
@@ -159,14 +173,23 @@ export const UserSelectedNumbersPanel: React.FC<UserSelectedNumbersPanelProps> =
       <div style={numberGrid} aria-label="User selected number buttons">
         {NUMBER_OPTIONS.map((number) => {
           const active = selectedSet.has(number);
+          const locked = lockedExternalSet.has(number);
+          const pressed = active || locked;
+          const ariaLabel = locked
+            ? `Number ${number} is forced by ${externalSelectedLabel}`
+            : active
+              ? `Remove user selected number ${number}`
+              : `Add user selected number ${number}`;
           return (
             <button
               key={number}
               type="button"
+              aria-label={ariaLabel}
               onClick={() => handleToggle(number)}
-              style={numberButton(active)}
-              aria-pressed={active}
-              title={active ? `Remove ${number}` : `Add ${number}`}
+              disabled={locked}
+              style={numberButton(pressed, locked)}
+              aria-pressed={pressed}
+              title={locked ? `Selected in ${externalSelectedLabel}; deselect it there to release it.` : active ? `Remove ${number}` : `Add ${number}`}
             >
               {number}
             </button>
@@ -316,15 +339,15 @@ const secondaryButton = (disabled: boolean): React.CSSProperties => ({
   lineHeight: 1.2,
 });
 
-const numberButton = (active: boolean): React.CSSProperties => ({
+const numberButton = (active: boolean, locked = false): React.CSSProperties => ({
   width: 38,
   height: 32,
-  border: `1px solid ${active ? "#2563eb" : "#cbd5e1"}`,
+  border: `1px solid ${locked ? "#15803d" : active ? "#2563eb" : "#cbd5e1"}`,
   borderRadius: 6,
-  background: active ? "#2563eb" : "#fff",
-  boxShadow: active ? "inset 0 0 0 1px #2563eb" : "none",
-  color: active ? "#fff" : "#0f172a",
-  cursor: "pointer",
+  background: locked ? "#dcfce7" : active ? "#2563eb" : "#fff",
+  boxShadow: active && !locked ? "inset 0 0 0 1px #2563eb" : "none",
+  color: locked ? "#14532d" : active ? "#fff" : "#0f172a",
+  cursor: locked ? "not-allowed" : "pointer",
   fontSize: 12,
   fontWeight: active ? 700 : 500,
   lineHeight: 1,

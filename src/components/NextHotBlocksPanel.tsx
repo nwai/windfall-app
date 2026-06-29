@@ -199,7 +199,6 @@ export const NextHotBlocksPanel: React.FC<NextHotBlocksPanelProps> = ({
   return (
     <div style={{ background: '#fff', border: '1px solid #eee', borderRadius: 8, padding: 12, width: '100%', maxWidth: '100%' }}>
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-        <div><b>Next Hot Blocks</b></div>
         <label style={{ fontSize: 12 }}>
           View:
           <select value={viewMode} onChange={(e) => setViewMode(e.target.value as 'heatmap' | 'drift')} style={{ marginLeft: 6 }}>
