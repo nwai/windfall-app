@@ -1,6 +1,6 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import MonthlyDrawsSummaryPanel from "../src/components/MonthlyDrawsSummaryPanel";
 import MonthlyOverlapPanel from "../src/components/MonthlyOverlapPanel";
@@ -17,6 +17,15 @@ const firstBodyRowText = (html: string): string => {
 };
 
 describe("chronological tables display latest rows first", () => {
+  beforeAll(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-15T12:00:00"));
+  });
+
+  afterAll(() => {
+    vi.useRealTimers();
+  });
+
   it("shows the latest month first in Monthly Draws Summary", () => {
     const html = renderToStaticMarkup(React.createElement(MonthlyDrawsSummaryPanel, {
       history: [
