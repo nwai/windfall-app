@@ -548,6 +548,11 @@ tbody tr:hover {
   cursor: pointer;
 }
 
+.tattslotto-ticket-grid-replay-help .windfall-info-help__button {
+  width: 32px;
+  height: 32px;
+}
+
 .windfall-info-help__panel {
   position: fixed;
   z-index: 10000;

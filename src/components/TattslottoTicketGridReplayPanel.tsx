@@ -232,7 +232,7 @@ export const TattslottoTicketGridReplayPanel: React.FC<TattslottoTicketGridRepla
             Frame {activeFrame?.frameNumber ?? 0} / {frames.length} | {activeFrame?.date ?? "No draw"} | {scope === "mainsSupps" ? "mains + supps" : "mains only"}
           </div>
         </div>
-        <InfoHelp label="Tattslotto replay explanation">
+        <InfoHelp label="Tattslotto replay explanation" className="tattslotto-ticket-grid-replay-help">
           This panel replays observed historical draws on the 9x5 Tattslotto ticket grid. Overlays are diagnostics from the active WFMQYH window, not calibrated predictions.
         </InfoHelp>
       </div>
