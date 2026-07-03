@@ -111,6 +111,7 @@ import { forecastOGA } from "./lib/ogaForecast";
 import { MostLikelyNotDrawnPanel } from "./components/MostLikelyNotDrawnPanel";
 import { BacktestPanel } from "./components/BacktestPanel";
 import { NextHotBlocksPanel } from "./components/NextHotBlocksPanel";
+import { TattslottoTicketGridReplayPanel } from "./components/TattslottoTicketGridReplayPanel";
 import UndrawnPatternsPanel from "./components/UndrawnPatternsPanel";
 import MonthlyOverlapPanel from "./components/MonthlyOverlapPanel";
 import MonthlyDrawsSummaryPanel, { type MonthlyConstraintPayload, type MonthlyFrequencyConstraints, type MonthlyBucketSets, type MonthlyIdealDrawState, type StageIdealDrawState } from "./components/MonthlyDrawsSummaryPanel";
@@ -5740,6 +5741,17 @@ function AppInner(): JSX.Element {
           />
         </div>
       </CollapsibleSection>
+      <CollapsibleSection
+        panelId="tattslotto-ticket-grid-replay"
+        title={<b>Tattslotto Ticket Grid Replay</b>}
+        summaryHint="Observed 9x5 ticket-grid replay with pattern overlays"
+        defaultOpen={false}
+      >
+        <div style={{ width: "100%", marginTop: 8, marginBottom: 10 }}>
+          <TattslottoTicketGridReplayPanel history={realFilteredHistory} />
+        </div>
+      </CollapsibleSection>
+
 
       {/* [ORDER-ANCHOR] 25 Diamond Grid Analysis (DGA) */}
       <CollapsibleSection
