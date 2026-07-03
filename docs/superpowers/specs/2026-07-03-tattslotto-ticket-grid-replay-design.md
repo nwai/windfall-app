@@ -5,7 +5,7 @@ Status: Approved concept, awaiting implementation plan
 
 ## Purpose
 
-Add a discovery-focused panel that replays real Windfall draw history on the same 9-column by 5-row ticket grid used by Tattslotto customers. The goal is to make spatial behaviour easier to see: row/column clustering, repeated cells, carry-over numbers, and adjacent-neighbour traces.
+Add a discovery-focused panel that replays real Windfall draw history on the same 9-column by 5-row ticket grid used by Tattslotto customers. The goal is to make spatial behaviour easier to see: row/column clustering, repeated cells, carry-over numbers, adjacent-neighbour traces, and how hot/cold number status changes over time.
 
 The panel is an observe-only visual diagnostic. It must not alter candidate generation, scoring, forced inclusions, forced exclusions, draw history, or saved presets in V1.
 
@@ -67,6 +67,7 @@ For the active frame:
 - Supplementary numbers: filled violet cells.
 - Previous-frame repeats: optional carry-over marker.
 - Previous-frame adjacent-neighbour hits: optional ±1/±2 trace marker.
+- Running hot/cold status: optional count-based marker from history seen so far in the replay.
 - Overlay information must remain secondary to the drawn numbers.
 
 Color must never be the only cue. Use labels, symbols, tooltips, or a visible legend.
@@ -99,7 +100,7 @@ Animation must use cleanup-safe timers so unmounting, changing WFMQYH, or collap
 
 ## Overlay Toggles
 
-V1 includes three observe-only overlay toggles.
+V1 includes four observe-only overlay toggles.
 
 ### Spatial Density
 
@@ -146,6 +147,33 @@ The tooltip/help text should say:
 
 `Marks active-draw numbers that sit ±1 or ±2 from the previous draw. This is observed replay evidence, not a forecast.`
 
+### Running Hot/Cold Counts
+
+Shows which numbers are hot or cold at the current replay frame using only draws already seen up to that frame.
+
+This overlay must be calculated as a running count to avoid lookahead:
+
+- At replay frame `t`, count appearances from frame `0` through frame `t` only.
+- Do not use future frames in the selected WFMQYH window.
+- The hot count is the highest count among numbers 1-45 at frame `t`.
+- Hot numbers are all numbers tied at that highest count.
+- The cold count is the lowest count among numbers 1-45 at frame `t`.
+- Cold numbers are all numbers tied at that lowest count.
+- Early frames will often have many zero-count cold numbers; this is expected and must be labelled plainly.
+
+Suggested display:
+
+- A side summary: `Hot count 3: 7, 12, 31` and `Cold count 0: 28 numbers`.
+- Optional grid tint or small `H` / `C` badges when the overlay is enabled.
+- If the cold tie set is large, show the count first and allow expansion rather than filling the screen with numbers.
+- Support mains-only vs mains+supps counting, defaulting to mains+supps for consistency with the 45-number ball universe.
+
+Label this as:
+
+`Running observed hot/cold counts up to the current replay frame.`
+
+Do not compare the current frame against the full WFMQYH window, because that would leak future draws into earlier frames.
+
 ## Legends and Help
 
 The panel must include a compact legend:
@@ -155,6 +183,7 @@ The panel must include a compact legend:
 - Carry-over
 - Spatial density
 - Adjacent trace
+- Running hot/cold
 
 Help must be keyboard/touch accessible. Do not rely on hover-only title text for material explanations.
 
@@ -208,6 +237,7 @@ Recommended pure helpers:
 - `computeTicketGridDensity(frames, options)`
 - `computeCarryOverMarkers(currentFrame, previousFrame, options)`
 - `computeAdjacentTraceMarkers(currentFrame, previousFrame, options)`
+- `computeRunningHotColdCounts(frames, frameIndex, options)`
 
 Keep all draw calculations in pure helper functions so they can be tested without rendering React.
 
@@ -221,6 +251,8 @@ Required unit tests:
 - computes mains and supps separately.
 - computes carry-over markers from adjacent draw pairs.
 - computes ±1/±2 adjacent trace markers correctly, including boundary cases for 1 and 45.
+- computes running hot/cold counts without looking beyond the current frame.
+- handles hot/cold ties, including early-frame zero-count cold ties.
 - resets frame index when the history window changes.
 
 Required component tests:
@@ -277,8 +309,9 @@ Recommended panel note:
 4. Add spatial density overlay.
 5. Add carry-over overlay.
 6. Add adjacent trace overlay.
-7. Wire panel under DGA.
-8. Add manual/browser QA and user manual entry.
+7. Add running hot/cold counts overlay.
+8. Wire panel under DGA.
+9. Add manual/browser QA and user manual entry.
 
 ## Open Decisions
 
@@ -288,4 +321,5 @@ All V1 decisions are resolved:
 - Scope V1 to real-history replay only.
 - Defer candidate carousel to V2.
 - Use WFMQYH as the replay window.
+- Include running hot/cold counts as a V1 observe-only overlay.
 - Keep overlays observe-only and generation-neutral.
