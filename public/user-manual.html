@@ -229,6 +229,7 @@
 
     <a class="section" href="#dga">DGA Grid</a>
     <a href="#dga-overview">Overview</a>
+    <a href="#tattslotto-ticket-grid-replay">Tattslotto Ticket Grid Replay</a>
     <a href="#dga-drought-break">Drought-break Shortlist</a>
     <a href="#dga-columns">Column Structure</a>
     <a href="#dga-next">The Next Column</a>
@@ -1404,6 +1405,24 @@
   <p>The <strong>DGA (Draw-Grid Analysis)</strong> grid provides a visual heat-map of number frequencies across the draw history. Each row represents one number (1–45) and each column represents one draw. The WFMQYH (Windfall Monthly Quarterly Yearly History) window is shown at full opacity; draws outside this window are shown at 35% opacity to provide context without visual dominance.</p>
 
   <p>Clicking any column header focuses that column (all other columns dim to 30% opacity). Click the same header again, or click any other column, to change or clear the focus.</p>
+
+  <h3 id="tattslotto-ticket-grid-replay">Tattslotto Ticket Grid Replay</h3>
+
+  <p><strong>Tattslotto Ticket Grid Replay</strong> replays observed historical draws from the active WFMQYH window on the 9-column by 5-row ticket grid used by Tattslotto customers.</p>
+
+  <p>The panel is diagnostic only. It can help you inspect spatial density, carry-over numbers, adjacent +/-1/+/-2 traces, and running hot/cold status over time, but these overlays are not calibrated predictions.</p>
+
+  <table>
+    <thead>
+      <tr><th>Overlay</th><th>Meaning</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>Spatial density</strong></td><td>Observed row/column concentration inside the active WFMQYH replay window.</td></tr>
+      <tr><td><strong>Carry-over</strong></td><td>Numbers repeated from the previous replay frame.</td></tr>
+      <tr><td><strong>Adjacent +/-1/+/-2 trace</strong></td><td>Numbers in the active draw that sit one or two numbers away from the previous draw's numbers.</td></tr>
+      <tr><td><strong>Running hot/cold</strong></td><td>Hot and cold numbers calculated only from draws already seen up to the current replay frame. This avoids lookahead.</td></tr>
+    </tbody>
+  </table>
 
   <h3 id="dga-drought-break">Drought-break Empirical Shortlist</h3>
 
