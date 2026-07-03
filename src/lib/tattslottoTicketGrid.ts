@@ -95,3 +95,126 @@ export const stepTicketReplayFrame = ({
   if (frameCount <= 0) return 0;
   return Math.max(0, Math.min(frameCount - 1, currentIndex + direction));
 };
+
+export interface TicketGridDensity {
+  rowCounts: number[];
+  columnCounts: number[];
+  maxRowCount: number;
+  maxColumnCount: number;
+  normalizedRowIntensity: number[];
+  normalizedColumnIntensity: number[];
+}
+
+export interface RunningHotColdCounts {
+  countsByNumber: Record<number, number>;
+  hotCount: number;
+  hotNumbers: number[];
+  coldCount: number;
+  coldNumbers: number[];
+}
+
+const uniqueSortedNumbers = (numbers: readonly number[]): number[] => (
+  Array.from(new Set(numbers.filter(isTicketNumber))).sort((left, right) => left - right)
+);
+
+const numbersInScopeSet = (
+  frame: TicketGridReplayFrame | null | undefined,
+  scope: TicketGridDrawScope,
+): Set<number> => new Set(ticketNumbersForFrame(frame, scope));
+
+export const computeCarryOverMarkers = (
+  currentFrame: TicketGridReplayFrame | null | undefined,
+  previousFrame: TicketGridReplayFrame | null | undefined,
+  scope: TicketGridDrawScope,
+): number[] => {
+  if (!currentFrame || !previousFrame) return [];
+  const previous = numbersInScopeSet(previousFrame, scope);
+  return uniqueSortedNumbers(ticketNumbersForFrame(currentFrame, scope).filter((number) => previous.has(number)));
+};
+
+const buildAdjacentNeighbourSet = (numbers: readonly number[]): Set<number> => {
+  const neighbours = new Set<number>();
+  numbers.forEach((number) => {
+    [-2, -1, 1, 2].forEach((delta) => {
+      const candidate = number + delta;
+      if (isTicketNumber(candidate)) neighbours.add(candidate);
+    });
+  });
+  return neighbours;
+};
+
+export const computeAdjacentTraceMarkers = (
+  currentFrame: TicketGridReplayFrame | null | undefined,
+  previousFrame: TicketGridReplayFrame | null | undefined,
+  scope: TicketGridDrawScope,
+): number[] => {
+  if (!currentFrame || !previousFrame) return [];
+  const neighbours = buildAdjacentNeighbourSet(ticketNumbersForFrame(previousFrame, scope));
+  return uniqueSortedNumbers(ticketNumbersForFrame(currentFrame, scope).filter((number) => neighbours.has(number)));
+};
+
+export const computeTicketGridDensity = (
+  frames: readonly TicketGridReplayFrame[],
+  scope: TicketGridDrawScope,
+): TicketGridDensity => {
+  const rowCounts = Array.from({ length: TATTSLOTTO_GRID_ROWS }, () => 0);
+  const columnCounts = Array.from({ length: TATTSLOTTO_GRID_COLUMNS }, () => 0);
+
+  frames.forEach((frame) => {
+    ticketNumbersForFrame(frame, scope).forEach((number) => {
+      const position = getTicketGridPosition(number);
+      if (!position) return;
+      rowCounts[position.row] += 1;
+      columnCounts[position.column] += 1;
+    });
+  });
+
+  const maxRowCount = Math.max(0, ...rowCounts);
+  const maxColumnCount = Math.max(0, ...columnCounts);
+  const normalize = (value: number, max: number): number => (max > 0 ? value / max : 0);
+
+  return {
+    rowCounts,
+    columnCounts,
+    maxRowCount,
+    maxColumnCount,
+    normalizedRowIntensity: rowCounts.map((value) => normalize(value, maxRowCount)),
+    normalizedColumnIntensity: columnCounts.map((value) => normalize(value, maxColumnCount)),
+  };
+};
+
+export const computeRunningHotColdCounts = (
+  frames: readonly TicketGridReplayFrame[],
+  frameIndex: number,
+  scope: TicketGridDrawScope,
+): RunningHotColdCounts => {
+  const safeIndex = Math.max(0, Math.min(frames.length - 1, Math.floor(frameIndex)));
+  const countsByNumber: Record<number, number> = {};
+  for (let number = TATTSLOTTO_MIN_NUMBER; number <= TATTSLOTTO_MAX_NUMBER; number += 1) {
+    countsByNumber[number] = 0;
+  }
+
+  frames.slice(0, safeIndex + 1).forEach((frame) => {
+    ticketNumbersForFrame(frame, scope).forEach((number) => {
+      countsByNumber[number] += 1;
+    });
+  });
+
+  const counts = Object.values(countsByNumber);
+  const hotCount = counts.length ? Math.max(...counts) : 0;
+  const coldCount = counts.length ? Math.min(...counts) : 0;
+  const numbersForCount = (count: number): number[] => (
+    Object.entries(countsByNumber)
+      .filter(([, value]) => value === count)
+      .map(([number]) => Number(number))
+      .sort((left, right) => left - right)
+  );
+
+  return {
+    countsByNumber,
+    hotCount,
+    hotNumbers: numbersForCount(hotCount),
+    coldCount,
+    coldNumbers: numbersForCount(coldCount),
+  };
+};
