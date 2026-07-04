@@ -114,10 +114,23 @@ describe("analyzeHotColdRanking", () => {
     expect(html).toContain("Excluded");
   });
 
+  it("labels manual user exclusions as locked in hot/cold include mode", () => {
+    const html = renderToStaticMarkup(React.createElement(HotColdRankingPanel as any, {
+      history,
+      lockedExcludedNumbers: [1],
+      onToggleForcedNumber: () => undefined,
+      onToggleExcludedNumber: () => undefined,
+    }));
+
+    expect(html).toContain("User exclusions active: 1");
+    expect(html).toContain("User Excluded");
+    expect(html).toContain("Clear it in WFMQYH User Exclusions");
+  });
+
   it("resolves WFMQYH shortcut choices to draw counts", () => {
     expect(resolveHotColdWindowChoice("W", 80, 20)).toBe(3);
     expect(resolveHotColdWindowChoice("F", 80, 20)).toBe(6);
-    expect(resolveHotColdWindowChoice("M", 80, 20)).toBe(12);
+    expect(resolveHotColdWindowChoice("M", 80, 20)).toBe(13);
     expect(resolveHotColdWindowChoice("Q", 80, 20)).toBe(36);
     expect(resolveHotColdWindowChoice("Y", 200, 20)).toBe(156);
     expect(resolveHotColdWindowChoice("H", 80, 20)).toBe(80);
@@ -128,6 +141,7 @@ describe("analyzeHotColdRanking", () => {
 
   it("formats WFMQYH shortcut labels clearly for recent windows and half-life", () => {
     expect(formatHotColdWindowChoiceLabel("W", 80, 20, "recentWindow")).toBe("W · Weekly (3 draws)");
+    expect(formatHotColdWindowChoiceLabel("M", 80, 20, "recentWindow")).toBe("M · Month (13 draws)");
     expect(formatHotColdWindowChoiceLabel("H", 80, 20, "recentWindow")).toBe("H · Full history (all loaded draws · 80)");
     expect(formatHotColdWindowChoiceLabel("H", 80, 10, "halfLife")).toBe("H · Full history (80 draws)");
     expect(formatHotColdWindowChoiceLabel("WFMQYH", 80, 20, "recentWindow", 27)).toBe("WFMQYH · Current custom window (27 active draws)");

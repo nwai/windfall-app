@@ -1,6 +1,12 @@
 import React, { useMemo, useState } from 'react';
 import type { Draw } from '../types';
 import { getMostRecentDraw } from '../lib/recentDraws';
+import {
+  getConflictLedgerNumbers,
+  summarizeNumberRangeConflicts,
+  type NumberConflictLedger,
+  type NumberRangeConflictSummary,
+} from '../lib/numberConflictLedger';
 
 type Block = { start: number; end: number; label: string };
 type HeatCell = { blockIdx: number; drawIdx: number; value: number };
@@ -11,6 +17,7 @@ interface NextHotBlocksPanelProps {
   setExcludedNumbers: React.Dispatch<React.SetStateAction<number[]>>;
   maxDraws?: number;            // optional cap for rendering (default 160)
   simNumbers?: number[];        // optional simulated overlay (from App)
+  numberConflictLedger?: NumberConflictLedger;
   onClearAutoExclusions?: () => void; // notify parent to drop derived exclusions
 }
 
@@ -77,6 +84,7 @@ export const NextHotBlocksPanel: React.FC<NextHotBlocksPanelProps> = ({
   setExcludedNumbers,
   maxDraws = 160,
   simNumbers,
+  numberConflictLedger,
   onClearAutoExclusions,
 }) => {
   const [blockSize, setBlockSize] = useState<number>(5);
@@ -169,11 +177,39 @@ export const NextHotBlocksPanel: React.FC<NextHotBlocksPanelProps> = ({
       any: excludedCount > 0,
     };
   });
-  
+  const blockConflictSummaries = useMemo(
+    () => blocks.map((b) => summarizeNumberRangeConflicts(numberConflictLedger, b)),
+    [blocks, numberConflictLedger],
+  );
+  const activeHardIncludes = useMemo(
+    () => getConflictLedgerNumbers(numberConflictLedger, "hardIncludeSources"),
+    [numberConflictLedger],
+  );
+  const activeHardExcludes = useMemo(
+    () => getConflictLedgerNumbers(numberConflictLedger, "hardExcludeSources"),
+    [numberConflictLedger],
+  );
+  const activeSoftIncludes = useMemo(
+    () => getConflictLedgerNumbers(numberConflictLedger, "softIncludeSources"),
+    [numberConflictLedger],
+  );
+  const activeSoftExcludes = useMemo(
+    () => getConflictLedgerNumbers(numberConflictLedger, "softExcludeSources"),
+    [numberConflictLedger],
+  );
+  const hasLedgerSignals = (
+    activeHardIncludes.length > 0 ||
+    activeHardExcludes.length > 0 ||
+    activeSoftIncludes.length > 0 ||
+    activeSoftExcludes.length > 0
+  );
+	  
   const toggleBlock = (block: Block) => {
       const nums: number[] = [];
       for (let n = block.start; n <= block.end; n++) nums.push(n);
     const allExcluded = nums.every((n) => excludedNumbers.includes(n));
+    const conflictSummary = summarizeNumberRangeConflicts(numberConflictLedger, block);
+    if (!allExcluded && !conflictSummary.canApplyHardExclude) return;
     setExcludedNumbers((prev) => {
       const set = new Set(prev);
       if (allExcluded) {
@@ -325,20 +361,38 @@ export const NextHotBlocksPanel: React.FC<NextHotBlocksPanelProps> = ({
           Clear NHB block exclusions
         </button>
       </div>
+      {hasLedgerSignals && (
+        <div role="status" style={ledgerBannerStyle}>
+          <strong>Active elsewhere:</strong>{" "}
+          {activeHardIncludes.length ? <span>Included {activeHardIncludes.join(", ")}</span> : null}
+          {activeHardExcludes.length ? <span>Excluded {activeHardExcludes.join(", ")}</span> : null}
+          {activeSoftIncludes.length ? <span>Boosted {activeSoftIncludes.join(", ")}</span> : null}
+          {activeSoftExcludes.length ? <span>Soft-excluded {activeSoftExcludes.join(", ")}</span> : null}
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8, alignItems: 'center' }}>
         <span style={{ fontSize: 12, color: '#444' }}>Block exclusions:</span>
-        {blocks.map((b) => {
+        {blocks.map((b, bi) => {
           const nums = Array.from({ length: b.end - b.start + 1 }, (_, i) => b.start + i);
           const allExcluded = nums.every((n) => excludedNumbers.includes(n));
+          const conflictSummary = blockConflictSummaries[bi];
+          const blockExclusionBlocked = !allExcluded && !conflictSummary.canApplyHardExclude;
+          const title = blockExclusionBlocked
+            ? conflictSummary.blockingReason
+            : blockControlTitle(conflictSummary);
           return (
-            <label key={b.label} style={{ fontSize: 12, border: '1px solid #eee', padding: '4px 6px', borderRadius: 4 }}>
+            <label key={b.label} style={blockLabelStyle(blockExclusionBlocked, conflictSummary)}>
               <input
                 type="checkbox"
+                aria-label={`Exclude block ${b.label}`}
                 checked={allExcluded}
+                disabled={blockExclusionBlocked}
                 onChange={() => toggleBlock(b)}
+                title={title}
                 style={{ marginRight: 6 }}
               />
               Exclude {b.label}
+              <BlockConflictBadges summary={conflictSummary} />
             </label>
           );
         })}
@@ -443,3 +497,88 @@ export const NextHotBlocksPanel: React.FC<NextHotBlocksPanelProps> = ({
 };
 
 export default NextHotBlocksPanel;
+
+const formatNumberList = (numbers: number[]): string => numbers.length ? numbers.join(", ") : "";
+
+const blockControlTitle = (summary: NumberRangeConflictSummary): string => {
+  const parts = [
+    summary.hardIncludedNumbers.length ? `contains included ${formatNumberList(summary.hardIncludedNumbers)}` : "",
+    summary.hardExcludedNumbers.length ? `contains excluded ${formatNumberList(summary.hardExcludedNumbers)}` : "",
+    summary.softIncludedNumbers.length ? `contains boosted ${formatNumberList(summary.softIncludedNumbers)}` : "",
+    summary.softExcludedNumbers.length ? `contains soft-excluded ${formatNumberList(summary.softExcludedNumbers)}` : "",
+  ].filter(Boolean);
+  return parts.length ? `${summary.label}: ${parts.join("; ")}` : `Exclude block ${summary.label}`;
+};
+
+const BlockConflictBadges: React.FC<{ summary: NumberRangeConflictSummary }> = ({ summary }) => {
+  const badges = [
+    summary.hardIncludedNumbers.length ? { label: `Contains included: ${formatNumberList(summary.hardIncludedNumbers)}`, tone: "include" } : null,
+    summary.hardExcludedNumbers.length ? { label: `Contains excluded: ${formatNumberList(summary.hardExcludedNumbers)}`, tone: "exclude" } : null,
+    summary.softIncludedNumbers.length ? { label: `Boosted: ${formatNumberList(summary.softIncludedNumbers)}`, tone: "soft" } : null,
+    summary.softExcludedNumbers.length ? { label: `Soft-excluded: ${formatNumberList(summary.softExcludedNumbers)}`, tone: "soft" } : null,
+  ].filter(Boolean) as { label: string; tone: "include" | "exclude" | "soft" }[];
+
+  if (!badges.length && !summary.blockingReason) return null;
+
+  return (
+    <span style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 3 }}>
+      {summary.blockingReason && (
+        <span style={badgeStyle("blocked")}>
+          {summary.blockingReason}
+        </span>
+      )}
+      {badges.map((badge) => (
+        <span key={badge.label} style={badgeStyle(badge.tone)}>
+          {badge.label}
+        </span>
+      ))}
+    </span>
+  );
+};
+
+const ledgerBannerStyle: React.CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 8,
+  alignItems: "center",
+  marginTop: 8,
+  padding: "7px 9px",
+  border: "1px solid #e2e8f0",
+  borderRadius: 8,
+  background: "#f8fafc",
+  color: "#334155",
+  fontSize: 12,
+};
+
+const blockLabelStyle = (
+  blocked: boolean,
+  summary: NumberRangeConflictSummary,
+): React.CSSProperties => ({
+  fontSize: 12,
+  border: `1px solid ${blocked ? "#fca5a5" : summary.hardExcludedNumbers.length ? "#bfdbfe" : "#eee"}`,
+  padding: "4px 6px",
+  borderRadius: 6,
+  background: blocked ? "#fff1f2" : summary.hardExcludedNumbers.length ? "#eff6ff" : "#fff",
+  color: blocked ? "#991b1b" : "#111827",
+});
+
+const badgeStyle = (tone: "include" | "exclude" | "soft" | "blocked"): React.CSSProperties => {
+  const colors = {
+    include: { background: "#ecfdf5", color: "#166534", border: "#bbf7d0" },
+    exclude: { background: "#eff6ff", color: "#1d4ed8", border: "#bfdbfe" },
+    soft: { background: "#f8fafc", color: "#475569", border: "#e2e8f0" },
+    blocked: { background: "#fff1f2", color: "#991b1b", border: "#fecdd3" },
+  }[tone];
+
+  return {
+    display: "inline-flex",
+    width: "fit-content",
+    border: `1px solid ${colors.border}`,
+    borderRadius: 999,
+    background: colors.background,
+    color: colors.color,
+    padding: "1px 6px",
+    fontSize: 11,
+    fontWeight: 700,
+  };
+};

@@ -37,6 +37,8 @@ export type BuildChurnOptions = {
   zpaGroupOf?: (n: number) => number; // optional: number -> ZPA group index
 };
 
+const MONTH_DRAW_WINDOW = 13;
+
 function countInWindow(history: Draw[], endIdx: number, win: number, n: number) {
   let c = 0;
   for (let t = Math.max(0, endIdx - win + 1); t <= endIdx; t++) {
@@ -70,7 +72,7 @@ export function buildChurnDataset(history: Draw[], opts: BuildChurnOptions): Num
 
   for (let n = 1; n <= 45; n++) {
     const freqFortnight = countInWindow(history, end, 6, n);
-    const freqMonth = countInWindow(history, end, 12, n);
+    const freqMonth = countInWindow(history, end, MONTH_DRAW_WINDOW, n);
     const freqQuarter = countInWindow(history, end, 36, n);
 
     const first = seenFirst[n] ?? 0;
@@ -144,7 +146,7 @@ export function extractFeaturesForNumber(
   }
 
   const freqFortnight = countInWindow(history, end, 6, n);
-  const freqMonth = countInWindow(history, end, 12, n);
+  const freqMonth = countInWindow(history, end, MONTH_DRAW_WINDOW, n);
   const freqQuarter = countInWindow(history, end, 36, n);
 
   const tenure = firstSeen ? (end + 1) - firstSeen + 1 : 0;

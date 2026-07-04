@@ -14,7 +14,7 @@ describe("DGA drought hazard truthfulness wording", () => {
     const panelSource = source("src/components/DroughtHazardPanel.tsx");
     const heatmapSource = source("src/components/TemperatureHeatmap.tsx");
 
-    expect(appSource).toContain("Drought-break empirical shortlist (mains + supps)");
+    expect(appSource).toContain("Drought-break shortlist (mains + supps)");
     expect(appSource).not.toContain("Most likely to break a drought next draw");
     expect(panelSource).toContain("Smoothed appearance rate");
     expect(panelSource).toContain("Observed hits / trials");
@@ -27,13 +27,14 @@ describe("DGA drought hazard truthfulness wording", () => {
       React.createElement(DroughtHazardPanel, {
         history: [],
         top: 4,
+        defaultMode: "empirical",
         forcedNumbers: [1, 2, 3],
         maxForcedSelections: 3,
         onToggleNumber: () => undefined,
       }),
     );
     const document = new DOMParser().parseFromString(html, "text/html");
-    const buttons = Array.from(document.querySelectorAll("button"));
+    const buttons = Array.from(document.querySelectorAll("button[data-drought-number-button='true']"));
 
     expect(document.body.textContent).toContain("3/3 selected for forced inclusion");
     expect(buttons.map((button) => button.getAttribute("aria-pressed"))).toEqual([
@@ -45,6 +46,27 @@ describe("DGA drought hazard truthfulness wording", () => {
     expect(buttons[0]?.getAttribute("aria-label")).toContain("Remove drought-break forced inclusion 1");
     expect(buttons[3]?.getAttribute("disabled")).not.toBeNull();
     expect(buttons[3]?.getAttribute("aria-label")).toContain("Maximum drought-break forced inclusions reached");
+  });
+
+  it("disables drought-break forced inclusion for user-excluded numbers", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(DroughtHazardPanel, {
+        history: [],
+        top: 3,
+        defaultMode: "empirical",
+        forcedNumbers: [2],
+        excludedNumbers: [1],
+        maxForcedSelections: 3,
+        onToggleNumber: () => undefined,
+      }),
+    );
+    const document = new DOMParser().parseFromString(html, "text/html");
+    const excludedButton = document.querySelector("button[aria-label='Number 1 is excluded by User Exclusions']");
+
+    expect(document.body.textContent).toContain("User exclusions active: 1");
+    expect(excludedButton?.getAttribute("aria-pressed")).toBe("false");
+    expect(excludedButton?.getAttribute("disabled")).not.toBeNull();
+    expect(excludedButton?.getAttribute("title")).toContain("Clear it in WFMQYH User Exclusions");
   });
 
   it("places the drought-break shortlist under Signals before Most Likely NOT Drawn", () => {

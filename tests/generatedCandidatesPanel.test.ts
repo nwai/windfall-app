@@ -133,6 +133,22 @@ describe("GeneratedCandidatesPanel", () => {
     expect(html).not.toContain('title="Readiness score:');
   });
 
+  it("keeps generated-candidate column headers sticky inside the scrolling table", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(GeneratedCandidatesPanel, buildProps({
+        candidates: Array.from({ length: 120 }, (_, index) => buildCandidate(index)),
+      })),
+    );
+    const document = new DOMParser().parseFromString(html, "text/html");
+    const scroller = document.querySelector('[data-testid="generated-candidates-scroll"]');
+    const firstHeader = scroller?.querySelector("thead th");
+
+    expect(scroller?.getAttribute("style")).toContain("overflow-y:auto");
+    expect(firstHeader?.getAttribute("style")).toContain("position:sticky");
+    expect(firstHeader?.getAttribute("style")).toContain("top:0");
+    expect(firstHeader?.getAttribute("style")).toContain("z-index:2");
+  });
+
   it("renders the shared Monthly Draws Summary ideal state as the hidden IDM target", () => {
     const buckets = monthlyBucketSets({
       undrawn: [1, 2],

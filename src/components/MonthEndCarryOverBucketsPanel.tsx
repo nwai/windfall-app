@@ -2,10 +2,16 @@ import React, { useMemo, useState } from "react";
 
 import type { Draw } from "../types";
 import { analyzeMonthEndCarryOverBuckets, type MonthEndCarryOverBucketEvent } from "../lib/monthEndCarryOverBuckets";
+import {
+  formatUserExclusionReminder,
+  normalizeUserExclusionLocks,
+  removeUserExcludedNumbers,
+} from "../lib/userExclusionLocks";
 
 interface MonthEndCarryOverBucketsPanelProps {
   history: Draw[];
   selectedBoostNumbers?: number[];
+  excludedNumbers?: number[];
   onToggleBoostNumber?: (number: number) => void;
 }
 
@@ -99,14 +105,16 @@ const uniqueNumberLabel = (events: MonthEndCarryOverBucketEvent[]): string => {
 const EventChips: React.FC<{
   events: MonthEndCarryOverBucketEvent[];
   selectedNumbers: ReadonlySet<number>;
+  userExcludedNumbers: ReadonlySet<number>;
   onToggleBoostNumber?: (number: number) => void;
-}> = ({ events, selectedNumbers, onToggleBoostNumber }) => {
+}> = ({ events, selectedNumbers, userExcludedNumbers, onToggleBoostNumber }) => {
   if (events.length === 0) return <span style={{ color: "#94a3b8" }}>None</span>;
 
   return (
     <div style={{ minWidth: 220 }}>
       {events.map((event) => {
-        const selected = selectedNumbers.has(event.number);
+        const isUserExcluded = userExcludedNumbers.has(event.number);
+        const selected = !isUserExcluded && selectedNumbers.has(event.number);
         const title = `${event.number}: ${event.sourceLastDrawDate} -> ${event.targetFirstDrawDate}; source ${event.sourceMonthHits}x, target ${event.targetMonthHits}x`;
         if (!onToggleBoostNumber) {
           return (
@@ -124,13 +132,16 @@ const EventChips: React.FC<{
             key={`${event.boundaryLabel}-${event.number}-${event.sourceLastDrawDate}`}
             type="button"
             aria-pressed={selected}
-            aria-label={`${selected ? "Remove" : "Add"} carry-over boost for ${event.number}`}
+            aria-label={isUserExcluded ? `Number ${event.number} is excluded by User Exclusions` : `${selected ? "Remove" : "Add"} carry-over boost for ${event.number}`}
             onClick={() => onToggleBoostNumber(event.number)}
+            disabled={isUserExcluded}
             style={{
               ...(selected ? selectedNumberChipStyle : numberChipStyle),
-              cursor: "pointer",
+              cursor: isUserExcluded ? "not-allowed" : "pointer",
+              opacity: isUserExcluded ? 0.55 : 1,
             }}
-            title={`${title}; ${selected ? "click to remove the explicit boost" : "click to apply a massive explicit boost"}`}
+            title={isUserExcluded ? `${title}; clear it in WFMQYH User Exclusions before boosting it here` : `${title}; ${selected ? "click to remove the explicit boost" : "click to apply a massive explicit boost"}`}
+            data-user-excluded={isUserExcluded ? "true" : undefined}
           >
             {event.number}
           </button>
@@ -146,11 +157,24 @@ const EventChips: React.FC<{
 export const MonthEndCarryOverBucketsPanel: React.FC<MonthEndCarryOverBucketsPanelProps> = ({
   history,
   selectedBoostNumbers = [],
+  excludedNumbers = [],
   onToggleBoostNumber,
 }) => {
   const [mode, setMode] = useState<Mode>("all");
   const [excludePartialSourceMonths, setExcludePartialSourceMonths] = useState(true);
-  const selectedNumberSet = useMemo(() => new Set(selectedBoostNumbers), [selectedBoostNumbers]);
+  const userExcludedNumbers = useMemo(
+    () => normalizeUserExclusionLocks(excludedNumbers),
+    [excludedNumbers],
+  );
+  const userExcludedSet = useMemo(() => new Set(userExcludedNumbers), [userExcludedNumbers]);
+  const userExclusionReminder = useMemo(
+    () => formatUserExclusionReminder(userExcludedNumbers),
+    [userExcludedNumbers],
+  );
+  const selectedNumberSet = useMemo(
+    () => new Set(removeUserExcludedNumbers(selectedBoostNumbers, userExcludedNumbers)),
+    [selectedBoostNumbers, userExcludedNumbers],
+  );
 
   const analysis = useMemo(
     () => analyzeMonthEndCarryOverBuckets(history, {
@@ -191,9 +215,15 @@ export const MonthEndCarryOverBucketsPanel: React.FC<MonthEndCarryOverBucketsPan
         <Metric label="6x / 7x / 8x+" value={String(analysis.summary.highBucketCarryOverInstances)} />
       </div>
 
-      {onToggleBoostNumber && selectedBoostNumbers.length > 0 && (
+      {onToggleBoostNumber && selectedNumberSet.size > 0 && (
         <div style={{ margin: "0 0 10px", color: "#14532d", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 6, padding: "7px 9px", fontSize: 12, fontWeight: 700 }}>
-          Massive generation boost selected: {selectedBoostNumbers.slice().sort((left, right) => left - right).join(", ")}
+          Massive generation boost selected: {Array.from(selectedNumberSet).sort((left, right) => left - right).join(", ")}
+        </div>
+      )}
+
+      {userExclusionReminder && (
+        <div role="status" style={{ margin: "0 0 10px", color: "#475569", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 6, padding: "7px 9px", fontSize: 12 }}>
+          {userExclusionReminder}. Clear these in WFMQYH User Exclusions before boosting them here.
         </div>
       )}
 
@@ -221,6 +251,7 @@ export const MonthEndCarryOverBucketsPanel: React.FC<MonthEndCarryOverBucketsPan
                   <EventChips
                     events={row.carryOverNumbers}
                     selectedNumbers={selectedNumberSet}
+                    userExcludedNumbers={userExcludedSet}
                     onToggleBoostNumber={onToggleBoostNumber}
                   />
                 </td>

@@ -1,18 +1,65 @@
 import React from "react";
 import { Draw } from "../types";
-import { computeDroughtHazard } from "../lib/droughtHazard";
+import {
+  STRICT_DROUGHT_DEFAULT_THRESHOLD,
+  type DroughtHazardNumberRow,
+  type StrictDroughtNumberRow,
+  computeDroughtHazard,
+  computeStrictDroughtShortlist,
+} from "../lib/droughtHazard";
+import {
+  formatUserExclusionReminder,
+  normalizeUserExclusionLocks,
+  removeUserExcludedNumbers,
+} from "../lib/userExclusionLocks";
+
+type DroughtDisplayMode = "strict" | "empirical";
 
 export const DroughtHazardPanel: React.FC<{
   history: Draw[];
+  fullHistory?: Draw[];
   top?: number;
   title?: string;
+  strictThreshold?: number;
+  defaultMode?: DroughtDisplayMode;
   onToggleNumber?: (n: number) => void;
   forcedNumbers?: number[];
+  excludedNumbers?: number[];
   maxForcedSelections?: number;
   bucketLabels?: Record<number, string>;
-}> = ({ history, top = 12, title, onToggleNumber, forcedNumbers = [], maxForcedSelections, bucketLabels }) => {
-  const { baselineProbability, maxK, byNumber, priorTrials } = React.useMemo(() => computeDroughtHazard(history), [history]);
-  const forcedSet = React.useMemo(() => new Set(forcedNumbers), [forcedNumbers]);
+}> = ({
+  history,
+  fullHistory,
+  top = 12,
+  title,
+  strictThreshold = STRICT_DROUGHT_DEFAULT_THRESHOLD,
+  defaultMode = "strict",
+  onToggleNumber,
+  forcedNumbers = [],
+  excludedNumbers = [],
+  maxForcedSelections,
+  bucketLabels,
+}) => {
+  const [mode, setMode] = React.useState<DroughtDisplayMode>(defaultMode);
+  const empirical = React.useMemo(() => computeDroughtHazard(history), [history]);
+  const strict = React.useMemo(
+    () => computeStrictDroughtShortlist(history, fullHistory?.length ? fullHistory : history, { threshold: strictThreshold }),
+    [fullHistory, history, strictThreshold],
+  );
+  const { baselineProbability, maxK, byNumber, priorTrials } = empirical;
+  const userExcludedNumbers = React.useMemo(
+    () => normalizeUserExclusionLocks(excludedNumbers),
+    [excludedNumbers],
+  );
+  const userExcludedSet = React.useMemo(() => new Set(userExcludedNumbers), [userExcludedNumbers]);
+  const userExclusionReminder = React.useMemo(
+    () => formatUserExclusionReminder(userExcludedNumbers),
+    [userExcludedNumbers],
+  );
+  const forcedSet = React.useMemo(
+    () => new Set(removeUserExcludedNumbers(forcedNumbers, userExcludedNumbers)),
+    [forcedNumbers, userExcludedNumbers],
+  );
   const forcedCount = forcedSet.size;
   const maxReached = typeof maxForcedSelections === "number" && forcedCount >= maxForcedSelections;
   const fallbackLabels = React.useMemo(() => {
@@ -24,15 +71,54 @@ export const DroughtHazardPanel: React.FC<{
     });
     return counts.map((c) => (c === 0 ? "Undrawn" : `${c}x`));
   }, [history]);
-  const sorted = React.useMemo(
-    () => byNumber.slice().sort((a, b) => b.p - a.p || b.k - a.k).slice(0, top),
+  const empiricalRows = React.useMemo(
+    () => byNumber.slice().sort((a, b) => b.p - a.p || b.k - a.k || a.number - b.number).slice(0, top),
     [byNumber, top]
+  );
+  const strictRows = React.useMemo(() => strict.rows.slice(0, top), [strict.rows, top]);
+
+  const renderNumberButton = (number: number) => {
+    const isUserExcluded = userExcludedSet.has(number);
+    const isForced = !isUserExcluded && forcedSet.has(number);
+    const disabled = !!onToggleNumber && (isUserExcluded || (!isForced && maxReached));
+    const toggleLabel = isForced
+      ? `Remove drought-break forced inclusion ${number}`
+      : isUserExcluded
+        ? `Number ${number} is excluded by User Exclusions`
+        : disabled
+        ? `Maximum drought-break forced inclusions reached; remove another number before adding ${number}`
+        : `Add drought-break forced inclusion ${number}`;
+    const title = isUserExcluded
+      ? `Clear it in WFMQYH User Exclusions before selecting ${number}.`
+      : toggleLabel;
+
+    if (!onToggleNumber) return number;
+
+    return (
+      <button
+        type="button"
+        onClick={() => onToggleNumber(number)}
+        disabled={disabled}
+        aria-pressed={isForced}
+        aria-label={toggleLabel}
+        title={title}
+        style={numberButton(isForced, disabled)}
+        data-drought-number-button="true"
+        data-user-excluded={isUserExcluded ? "true" : undefined}
+      >
+        {number}
+      </button>
+    );
+  };
+
+  const rowBackground = (number: number): string | undefined => (
+    forcedSet.has(number) ? "#f0fdf4" : undefined
   );
 
   return (
     <section style={{ border: "1px solid #eee", borderRadius: 8, padding: 12, background: "#fff", marginTop: 10 }}>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 8 }}>
-        <div style={{ fontWeight: 700 }}>{title || "Drought-break empirical shortlist (mains + supps)"}</div>
+        <div style={{ fontWeight: 700 }}>{title || "Drought-break shortlist (mains + supps)"}</div>
         {onToggleNumber && typeof maxForcedSelections === "number" && (
           <div
             aria-live="polite"
@@ -50,72 +136,183 @@ export const DroughtHazardPanel: React.FC<{
           </div>
         )}
       </div>
-      <div style={{ fontSize: 12, color: "#666", marginBottom: 6 }}>
-        Mains+supps appearance evidence by current drought length. Rates are empirical, shrunk toward the {(baselineProbability * 100).toFixed(1)}% neutral 8-of-45 baseline.
+      <div style={{ fontSize: 12, color: "#666", marginBottom: 8 }}>
+        Strict mode ranks numbers with a full-history current drought of {strict.threshold}+ draws before using historical drought behavior as support. Empirical hazard mode shows pooled next-appearance evidence by drought length, shrunk toward the {(baselineProbability * 100).toFixed(1)}% neutral 8-of-45 baseline.
       </div>
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
-        <thead>
-          <tr style={{ background: "#f7f7f7" }}>
-            <th style={th}>#</th>
-            <th style={{ ...th, textAlign: "left" }}>Month bucket</th>
-            <th style={th}>Current drought (k)</th>
-            <th style={th}>Smoothed appearance rate</th>
-            <th style={th}>Observed hits / trials</th>
-            <th style={th}>Vs baseline</th>
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.map((r) => {
-            const isForced = forcedSet.has(r.number);
-            const disabled = !!onToggleNumber && !isForced && maxReached;
-            const toggleLabel = isForced
-              ? `Remove drought-break forced inclusion ${r.number}`
-              : disabled
-                ? `Maximum drought-break forced inclusions reached; remove another number before adding ${r.number}`
-                : `Add drought-break forced inclusion ${r.number}`;
-            return (
-              <tr
-                key={r.number}
-                style={{ background: isForced ? "#f0fdf4" : undefined }}
-              >
-                <td style={td}>
-                  {onToggleNumber ? (
-                    <button
-                      type="button"
-                      onClick={() => onToggleNumber(r.number)}
-                      disabled={disabled}
-                      aria-pressed={isForced}
-                      aria-label={toggleLabel}
-                      title={toggleLabel}
-                      style={numberButton(isForced, disabled)}
-                    >
-                      {r.number}
-                    </button>
-                  ) : (
-                    r.number
-                  )}
-                </td>
-                <td style={{ ...td, textAlign: "left" }}>{bucketLabels?.[r.number] ?? fallbackLabels[r.number] ?? "—"}</td>
-                <td style={td}>{r.k}</td>
-                <td style={td}>{(r.p * 100).toFixed(1)}%</td>
-                <td style={td}>{r.hitsNext}/{r.trials}</td>
-                <td style={{ ...td, color: r.liftVsBaseline >= 0 ? "#b91c1c" : "#1d4ed8", fontWeight: 700 }}>
-                  {r.liftVsBaseline >= 0 ? "+" : ""}{(r.liftVsBaseline * 100).toFixed(1)}pp
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+      <div role="group" aria-label="Drought shortlist mode" style={segmentedControl}>
+        <button
+          type="button"
+          aria-pressed={mode === "strict"}
+          onClick={() => setMode("strict")}
+          style={modeButton(mode === "strict")}
+        >
+          Strict drought {strict.threshold}+
+        </button>
+        <button
+          type="button"
+          aria-pressed={mode === "empirical"}
+          onClick={() => setMode("empirical")}
+          style={modeButton(mode === "empirical")}
+        >
+          Empirical hazard
+        </button>
+      </div>
+      {userExclusionReminder && (
+        <div role="status" style={{ fontSize: 12, color: "#475569", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "7px 9px", marginBottom: 8 }}>
+          {userExclusionReminder}. Clear these in WFMQYH User Exclusions before selecting them here.
+        </div>
+      )}
+      <div style={{ overflowX: "auto" }}>
+        {mode === "strict" ? (
+          <StrictDroughtTable
+            rows={strictRows}
+            threshold={strict.threshold}
+            bucketLabels={bucketLabels}
+            fallbackLabels={fallbackLabels}
+            renderNumberButton={renderNumberButton}
+            rowBackground={rowBackground}
+          />
+        ) : (
+          <EmpiricalHazardTable
+            rows={empiricalRows}
+            bucketLabels={bucketLabels}
+            fallbackLabels={fallbackLabels}
+            renderNumberButton={renderNumberButton}
+            rowBackground={rowBackground}
+          />
+        )}
+      </div>
       <div style={{ fontSize: 12, color: "#666", marginTop: 6 }}>
-        Max observed drought length k = {maxK}. Sparse drought lengths are stabilized with {priorTrials} baseline prior trials. Month bucket is context only; it does not drive the rate.
+        Strict rank uses full-history current drought first. Break maturity is the share of that number's completed {strict.threshold}+ drought episodes that were broken at or before its current drought length. Max observed empirical drought length k = {maxK}. Sparse empirical lengths are stabilized with {priorTrials} baseline prior trials. Month bucket is context only; it does not drive the rate.
       </div>
     </section>
   );
 };
 
-const th: React.CSSProperties = { textAlign: "right", padding: "6px 8px", borderBottom: "1px solid #ddd", fontWeight: 700 };
-const td: React.CSSProperties = { textAlign: "right", padding: "6px 8px", borderBottom: "1px solid #eee" };
+const StrictDroughtTable: React.FC<{
+  rows: StrictDroughtNumberRow[];
+  threshold: number;
+  bucketLabels?: Record<number, string>;
+  fallbackLabels: string[];
+  renderNumberButton: (number: number) => React.ReactNode;
+  rowBackground: (number: number) => string | undefined;
+}> = ({ rows, threshold, bucketLabels, fallbackLabels, renderNumberButton, rowBackground }) => (
+  <table style={tableStyle}>
+    <thead>
+      <tr style={{ background: "#f7f7f7" }}>
+        <th style={th}>#</th>
+        <th style={th}>Strict rank</th>
+        <th style={{ ...th, textAlign: "left" }}>Month bucket</th>
+        <th style={th}>Full drought</th>
+        <th style={th}>WFMQYH drought</th>
+        <th style={th}>Episodes {threshold}+</th>
+        <th style={th}>Typical break</th>
+        <th style={th}>Break maturity</th>
+        <th style={th}>Empirical rate</th>
+        <th style={th}>Hits / trials</th>
+        <th style={th}>Vs baseline</th>
+      </tr>
+    </thead>
+    <tbody>
+      {rows.length ? rows.map((r) => (
+        <tr key={r.number} style={{ background: rowBackground(r.number) }}>
+          <td style={td}>{renderNumberButton(r.number)}</td>
+          <td style={td}>{r.strictRank ?? "—"}</td>
+          <td style={{ ...td, textAlign: "left" }}>{bucketLabels?.[r.number] ?? fallbackLabels[r.number] ?? "—"}</td>
+          <td style={td}>{r.currentDrought}</td>
+          <td style={td}>{r.activeWindowDrought}</td>
+          <td style={td}>{r.historicalDroughtEpisodes}</td>
+          <td style={td}>{formatTypicalBreak(r)}</td>
+          <td style={td}>{r.breakTimingScore.toFixed(0)}%</td>
+          <td style={td}>{(r.p * 100).toFixed(1)}%</td>
+          <td style={td}>{r.hitsNext}/{r.trials}</td>
+          <td style={baselineCell(r.liftVsBaseline)}>
+            {r.liftVsBaseline >= 0 ? "+" : ""}{(r.liftVsBaseline * 100).toFixed(1)}pp
+          </td>
+        </tr>
+      )) : (
+        <tr>
+          <td style={{ ...td, textAlign: "left" }} colSpan={11}>
+            No numbers currently meet the strict {threshold}+ full-history drought threshold.
+          </td>
+        </tr>
+      )}
+    </tbody>
+  </table>
+);
+
+const EmpiricalHazardTable: React.FC<{
+  rows: DroughtHazardNumberRow[];
+  bucketLabels?: Record<number, string>;
+  fallbackLabels: string[];
+  renderNumberButton: (number: number) => React.ReactNode;
+  rowBackground: (number: number) => string | undefined;
+}> = ({ rows, bucketLabels, fallbackLabels, renderNumberButton, rowBackground }) => (
+  <table style={tableStyle}>
+    <thead>
+      <tr style={{ background: "#f7f7f7" }}>
+        <th style={th}>#</th>
+        <th style={{ ...th, textAlign: "left" }}>Month bucket</th>
+        <th style={th}>Current drought (k)</th>
+        <th style={th}>Smoothed appearance rate</th>
+        <th style={th}>Observed hits / trials</th>
+        <th style={th}>Vs baseline</th>
+      </tr>
+    </thead>
+    <tbody>
+      {rows.map((r) => (
+        <tr key={r.number} style={{ background: rowBackground(r.number) }}>
+          <td style={td}>{renderNumberButton(r.number)}</td>
+          <td style={{ ...td, textAlign: "left" }}>{bucketLabels?.[r.number] ?? fallbackLabels[r.number] ?? "—"}</td>
+          <td style={td}>{r.k}</td>
+          <td style={td}>{(r.p * 100).toFixed(1)}%</td>
+          <td style={td}>{r.hitsNext}/{r.trials}</td>
+          <td style={baselineCell(r.liftVsBaseline)}>
+            {r.liftVsBaseline >= 0 ? "+" : ""}{(r.liftVsBaseline * 100).toFixed(1)}pp
+          </td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+);
+
+const formatTypicalBreak = (row: StrictDroughtNumberRow): string => {
+  if (row.medianBreakLength == null || row.p75BreakLength == null) return "No completed episodes";
+  return `med ${formatLength(row.medianBreakLength)} / p75 ${formatLength(row.p75BreakLength)}`;
+};
+
+const formatLength = (value: number): string => (
+  Number.isInteger(value) ? String(value) : value.toFixed(1)
+);
+
+const tableStyle: React.CSSProperties = { width: "100%", minWidth: 920, borderCollapse: "collapse", fontSize: 14 };
+const th: React.CSSProperties = { textAlign: "right", padding: "6px 8px", borderBottom: "1px solid #ddd", fontWeight: 700, whiteSpace: "nowrap" };
+const td: React.CSSProperties = { textAlign: "right", padding: "6px 8px", borderBottom: "1px solid #eee", whiteSpace: "nowrap" };
+
+const baselineCell = (liftVsBaseline: number): React.CSSProperties => ({
+  ...td,
+  color: liftVsBaseline >= 0 ? "#b91c1c" : "#1d4ed8",
+  fontWeight: 700,
+});
+
+const segmentedControl: React.CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 6,
+  marginBottom: 8,
+};
+
+const modeButton = (active: boolean): React.CSSProperties => ({
+  minHeight: 32,
+  border: `1px solid ${active ? "#0f172a" : "#cbd5e1"}`,
+  borderRadius: 8,
+  background: active ? "#0f172a" : "#ffffff",
+  color: active ? "#ffffff" : "#0f172a",
+  cursor: "pointer",
+  fontSize: 12,
+  fontWeight: 800,
+  padding: "5px 10px",
+});
 
 const numberButton = (active: boolean, disabled: boolean): React.CSSProperties => ({
   minWidth: 34,

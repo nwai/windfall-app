@@ -106,6 +106,24 @@ describe("NumberTrendsTable", () => {
     expect(droughtRow?.textContent).toContain("Drought-break shortlist");
   });
 
+  it("flags user-excluded numbers as unavailable for forced inclusion", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(NumberTrendsTable, {
+        trends: buildTrends(),
+        selected: [7],
+        excludedNumbers: [11],
+      }),
+    );
+    const document = new DOMParser().parseFromString(html, "text/html");
+    const excludedRow = document.querySelector("[aria-label='Number 11 is excluded by User Exclusions']");
+
+    expect(document.body.textContent).toContain("User exclusions active: 11");
+    expect(excludedRow?.getAttribute("aria-pressed")).toBe("false");
+    expect(excludedRow?.getAttribute("data-user-excluded")).toBe("true");
+    expect(excludedRow?.getAttribute("disabled")).not.toBeNull();
+    expect(excludedRow?.textContent).toContain("Excluded");
+  });
+
   it("documents the trend arrow delta in the user manual", () => {
     const manual = readProjectFile("public/user-manual.html");
 

@@ -11,6 +11,19 @@ const draw = (date: string, main: number[], supp: number[] = [], isSimulated = f
 });
 
 describe("churn feature provenance", () => {
+  it("uses thirteen draws for month-frequency features", () => {
+    const history = Array.from({ length: 13 }, (_, index) => (
+      draw(`2026-01-${String(index + 1).padStart(2, "0")}`, index === 0 ? [45, 2, 3, 4, 5, 6] : [1, 2, 3, 4, 5, 6])
+    ));
+
+    const rows = buildChurnDataset(history, { churnWindowK: 13 });
+    const fortyFive = rows.find((row) => row.number === 45);
+    const features = extractFeaturesForNumber(history, 45, { churnThreshold: 13 });
+
+    expect(fortyFive?.freqMonth).toBe(1);
+    expect(features.freqMonth).toBe(1);
+  });
+
   it("ignores simulated fallback rows when building churn labels and recency features", () => {
     const history = [
       draw("2026-01-01", [1, 2, 3, 4, 5, 6]),

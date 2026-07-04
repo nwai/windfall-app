@@ -1,5 +1,6 @@
 import React, { useMemo } from "react";
 import type { Draw } from "../types";
+import { formatUserExclusionReminder, normalizeUserExclusionLocks } from "../lib/userExclusionLocks";
 
 export const NUMBER_TREND_WEEK_DRAW_WINDOW = 3;
 export const NUMBER_TREND_MONTH_DRAW_WINDOW = 13;
@@ -84,9 +85,18 @@ export function NumberTrendsTable({
 
   const ownSelected = trendSelectedNumbers || selected || [];
   const externalSelected = externalSelectedNumbers || [];
+  const userExcludedNumbers = useMemo(
+    () => normalizeUserExclusionLocks(excludedNumbers),
+    [excludedNumbers],
+  );
+  const userExcludedSet = useMemo(() => new Set(userExcludedNumbers), [userExcludedNumbers]);
+  const userExclusionReminder = useMemo(
+    () => formatUserExclusionReminder(userExcludedNumbers),
+    [userExcludedNumbers],
+  );
   const activeSelected = useMemo(
-    () => Array.from(new Set([...ownSelected, ...externalSelected])),
-    [externalSelected, ownSelected],
+    () => Array.from(new Set([...ownSelected, ...externalSelected])).filter((number) => !userExcludedSet.has(number)),
+    [externalSelected, ownSelected, userExcludedSet],
   );
   const ownSelectedSet = useMemo(() => new Set(ownSelected), [ownSelected]);
   const externalSelectedSet = useMemo(() => new Set(externalSelected), [externalSelected]);
@@ -177,6 +187,15 @@ export function NumberTrendsTable({
 
   return (
     <section className="windfall-number-trends" aria-label="Number trends by five-number range">
+      {userExclusionReminder && (
+        <div
+          role="status"
+          className="windfall-number-trends__note"
+          style={{ marginBottom: 8, borderColor: "#cbd5e1", background: "#f8fafc" }}
+        >
+          {userExclusionReminder}. Clear these in WFMQYH User Exclusions before selecting them here.
+        </div>
+      )}
       <div className="windfall-number-trends__grid">
         {trendBlocks.map((block) => (
           <section
@@ -195,16 +214,24 @@ export function NumberTrendsTable({
 
             <div className="windfall-number-trend-block__rows">
               {block.trends.map((trend) => {
-                const isSelected = activeSelected.includes(trend.number);
-                const isExternalOnly = externalSelectedSet.has(trend.number) && !ownSelectedSet.has(trend.number);
+                const isUserExcluded = userExcludedSet.has(trend.number);
+                const isSelected = !isUserExcluded && activeSelected.includes(trend.number);
+                const isExternalOnly = !isUserExcluded && externalSelectedSet.has(trend.number) && !ownSelectedSet.has(trend.number);
                 const { r3, r13, deltaPP, dir } = shortTermDeltaPP(trend);
                 const clr = colorForNumber(trend.number);
                 const arrowColor = dir === "flat" ? "#666666" : clr;
                 const directionLabel = dir === "up" ? "Up" : dir === "down" ? "Down" : "Flat";
                 const signedDelta = `${deltaPP >= 0 ? "+" : ""}${deltaPP.toFixed(1)}`;
-                const ariaLabel = isExternalOnly
+                const ariaLabel = isUserExcluded
+                  ? `Number ${trend.number} is excluded by User Exclusions`
+                  : isExternalOnly
                   ? `Number ${trend.number} is forced by ${externalSelectedLabel}`
                   : `Toggle forced inclusion for number ${trend.number}`;
+                const title = isUserExcluded
+                  ? `Clear it in WFMQYH User Exclusions before selecting ${trend.number}.`
+                  : isExternalOnly
+                    ? `Selected in ${externalSelectedLabel}; deselect it there to release it.`
+                    : undefined;
 
                 return (
                   <button
@@ -214,17 +241,18 @@ export function NumberTrendsTable({
                     data-testid="number-trend-row"
                     data-direction={dir}
                     data-external-selected={isExternalOnly ? "true" : undefined}
+                    data-user-excluded={isUserExcluded ? "true" : undefined}
                     aria-pressed={isSelected}
                     aria-label={ariaLabel}
-                    disabled={isExternalOnly}
-                    title={isExternalOnly ? `Selected in ${externalSelectedLabel}; deselect it there to release it.` : undefined}
+                    disabled={isExternalOnly || isUserExcluded}
+                    title={title}
                     style={{ "--number-trend-color": arrowColor } as React.CSSProperties}
                     onClick={() => handleToggle(trend.number)}
                   >
                     <span className="windfall-number-trend-row__identity">
                       <span className="windfall-number-trend-row__number">{trend.number}</span>
                       <span className="windfall-number-trend-row__status">
-                        {isExternalOnly ? externalSelectedLabel : isSelected ? "Forced" : "Available"}
+                        {isUserExcluded ? "Excluded" : isExternalOnly ? externalSelectedLabel : isSelected ? "Forced" : "Available"}
                       </span>
                     </span>
 

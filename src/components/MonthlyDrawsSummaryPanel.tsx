@@ -22,6 +22,10 @@ import {
   type MonthlyIdealDrawState,
   type StageIdealDrawState,
 } from "../lib/monthlyDrawSummary";
+import {
+  formatUserExclusionReminder,
+  normalizeUserExclusionLocks,
+} from "../lib/userExclusionLocks";
 
 export type {
   AvgBucketEntry,
@@ -44,6 +48,7 @@ interface MonthlyDrawsSummaryPanelProps {
   onAvgBucketsChange?: (avgBuckets: AvgBucketEntry[]) => void;
   onIdealDrawStateChange?: (state: MonthlyIdealDrawState | null) => void;
   onStageIdealDrawStateChange?: (state: StageIdealDrawState | null) => void;
+  excludedNumbers?: number[];
 }
 
 type DrawLimit = number | "all";
@@ -208,17 +213,25 @@ const BucketChip: React.FC<{ times: number; value: string | number; muted?: bool
   </span>
 );
 
-const NumberPills: React.FC<{ numbers: number[]; selected?: number[]; onToggle?: (n: number) => void }> = ({
+const NumberPills: React.FC<{
+  numbers: number[];
+  selected?: number[];
+  excludedNumbers?: readonly number[];
+  onToggle?: (n: number) => void;
+}> = ({
   numbers,
   selected = [],
+  excludedNumbers = [],
   onToggle,
 }) => {
   if (!numbers.length) return <span style={{ color: "#94a3b8" }}>none</span>;
   const selectedSet = new Set(selected);
+  const excludedSet = new Set(excludedNumbers);
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
       {numbers.map((n) => {
-        const active = selectedSet.has(n);
+        const isUserExcluded = excludedSet.has(n);
+        const active = !isUserExcluded && selectedSet.has(n);
         if (!onToggle) {
           return (
             <span
@@ -247,19 +260,22 @@ const NumberPills: React.FC<{ numbers: number[]; selected?: number[]; onToggle?:
             key={n}
             type="button"
             onClick={() => onToggle(n)}
+            disabled={isUserExcluded}
             style={{
               width: 34,
               height: 30,
               borderRadius: 6,
-              border: active ? "1px solid #2563eb" : "1px solid #cbd5e1",
-              background: active ? "#dbeafe" : "#fff",
-              color: active ? "#1d4ed8" : "#0f172a",
+              border: active ? "1px solid #2563eb" : isUserExcluded ? "1px solid #cbd5e1" : "1px solid #cbd5e1",
+              background: active ? "#dbeafe" : isUserExcluded ? "#f1f5f9" : "#fff",
+              color: active ? "#1d4ed8" : isUserExcluded ? "#94a3b8" : "#0f172a",
               fontWeight: 800,
-              cursor: "pointer",
+              cursor: isUserExcluded ? "not-allowed" : "pointer",
               fontVariantNumeric: "tabular-nums",
             }}
             aria-pressed={active}
-            title={`${active ? "Remove" : "Select"} ${n}`}
+            aria-label={isUserExcluded ? `Number ${n} is excluded by User Exclusions` : `${active ? "Remove" : "Select"} ${n}`}
+            title={isUserExcluded ? `Clear it in WFMQYH User Exclusions before selecting ${n}.` : `${active ? "Remove" : "Select"} ${n}`}
+            data-user-excluded={isUserExcluded ? "true" : undefined}
           >
             {n}
           </button>
@@ -344,6 +360,7 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
   onAvgBucketsChange,
   onIdealDrawStateChange,
   onStageIdealDrawStateChange,
+  excludedNumbers = [],
 }) => {
   const [drawLimit, setDrawLimit] = useState<DrawLimit>("all");
   const [averageDrawCountFilter, setAverageDrawCountFilter] = useState<DrawLimit>("all");
@@ -351,6 +368,15 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
   const [selectedByBucket, setSelectedByBucket] = useState<SelectedByBucket>(() => emptySelections());
   const [simulateResult, setSimulateResult] = useState<number[] | null>(null);
   const [selectedNumberBiasEnabled, setSelectedNumberBiasEnabled] = useState<boolean>(false);
+  const userExcludedNumbers = useMemo(
+    () => normalizeUserExclusionLocks(excludedNumbers),
+    [excludedNumbers],
+  );
+  const userExcludedSet = useMemo(() => new Set(userExcludedNumbers), [userExcludedNumbers]);
+  const userExclusionReminder = useMemo(
+    () => formatUserExclusionReminder(userExcludedNumbers),
+    [userExcludedNumbers],
+  );
 
   const summary = useMemo(() => (
     analyzeMonthlyDrawSummary(history, {
@@ -378,34 +404,40 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
     () => numbersFromMonthlySelections(selectedByBucket),
     [selectedByBucket],
   );
+  const activeBucketSets = summary.effectiveBucketSets;
+  const activeBucketLabels = summary.effectiveBucketLabels;
 
   const projectedBucketCounts = useMemo(
-    () => projectMonthlyBucketCounts(summary.latestBucketSets, selectedByBucket),
-    [selectedByBucket, summary.latestBucketSets],
+    () => projectMonthlyBucketCounts(activeBucketSets, selectedByBucket),
+    [activeBucketSets, selectedByBucket],
   );
 
   const bucketOptions = useMemo(() => {
     const options = {} as Record<MonthlyBucketKey, number[]>;
     for (const key of MONTHLY_BUCKET_KEYS) {
-      options[key] = [...summary.latestBucketSets[key]].sort((a, b) => a - b);
+      options[key] = [...activeBucketSets[key]].sort((a, b) => a - b);
     }
     return options;
-  }, [summary.latestBucketSets]);
+  }, [activeBucketSets]);
 
   useEffect(() => {
     setSelectedByBucket((previous) => {
-      const pruned = pruneMonthlySelections(previous, summary.latestBucketSets);
+      const prunedByBuckets = pruneMonthlySelections(previous, activeBucketSets);
+      const pruned = MONTHLY_BUCKET_KEYS.reduce<SelectedByBucket>((acc, key) => {
+        acc[key] = prunedByBuckets[key].filter((number) => !userExcludedSet.has(number));
+        return acc;
+      }, emptySelections());
       return sameSelections(previous, pruned) ? previous : pruned;
     });
-  }, [summary.latestBucketSets]);
+  }, [activeBucketSets, userExcludedSet]);
 
   useEffect(() => {
-    onBucketInfoChange?.({ labels: summary.latestBucketLabels });
-  }, [onBucketInfoChange, summary.latestBucketLabels]);
+    onBucketInfoChange?.({ labels: activeBucketLabels });
+  }, [activeBucketLabels, onBucketInfoChange]);
 
   useEffect(() => {
-    onBucketSetsChange?.(summary.latestBucketSets);
-  }, [onBucketSetsChange, summary.latestBucketSets]);
+    onBucketSetsChange?.(activeBucketSets);
+  }, [activeBucketSets, onBucketSetsChange]);
 
   useEffect(() => {
     onAvgBucketsChange?.(summary.eligibleRows.length ? summary.bucketAverages : []);
@@ -444,13 +476,14 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
     }
     onConstraintsChange?.({
       constraints,
-      buckets: summary.latestBucketSets,
+      buckets: activeBucketSets,
       selectedNumbersByBucket: selectedByBucket,
       selectedNumberBiasEnabled,
     });
-  }, [constraints, constructiveFillEnabled, onConstraintsChange, selectedByBucket, selectedNumberBiasEnabled, summary.latestBucketSets, summary.latestRow]);
+  }, [activeBucketSets, constraints, constructiveFillEnabled, onConstraintsChange, selectedByBucket, selectedNumberBiasEnabled, summary.latestRow]);
 
   const toggleBucketNumber = (bucketKey: MonthlyBucketKey, n: number) => {
+    if (userExcludedSet.has(n)) return;
     setSelectedByBucket((previous) => {
       const nextSet = new Set(previous[bucketKey]);
       if (nextSet.has(n)) nextSet.delete(n);
@@ -494,8 +527,12 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
             Historical baselines and averages are <b>date-smart</b>: the opening partial month <b>2024-05</b> stays visible in the table, but it is excluded from all-history baseline / ideal-mix calculations.
           </div>
         </div>
-        <div style={{ color: "#475569", fontSize: 12, fontWeight: 700 }}>
-          Latest real month: {summary.latestRow?.monthLabel ?? "none"}
+        <div style={{ color: "#475569", fontSize: 12, fontWeight: 700, textAlign: "right", lineHeight: 1.35 }}>
+          <div>Latest observed: {summary.latestRow?.monthLabel ?? "none"}</div>
+          <div>
+            Active buckets: {summary.effectiveMonthLabel || "none"}
+            {summary.effectiveMonthIsSynthetic ? " (planning reset)" : ""}
+          </div>
         </div>
       </div>
 
@@ -530,7 +567,8 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
 
       <div style={statGridStyle}>
         <StatCard label="Months" value={String(summary.rows.length)} detail={`${summary.quality.validDatedDrawCount} dated draw rows`} />
-        <StatCard label="Latest Draws" value={summary.latestRow ? String(summary.latestRow.totalDrawCount) : "0"} detail={summary.latestRow?.monthLabel ?? "No valid month"} />
+        <StatCard label="Latest Observed" value={summary.latestRow ? String(summary.latestRow.totalDrawCount) : "0"} detail={summary.latestRow?.monthLabel ?? "No valid month"} />
+        <StatCard label="Active Buckets" value={summary.effectiveMonthDrawCount === 0 && summary.effectiveMonthIsSynthetic ? "reset" : String(summary.effectiveMonthDrawCount)} detail={summary.effectiveMonthLabel || "No active month"} />
         <StatCard label="Baseline" value={String(summary.eligibleRows.length)} detail={summary.excludedMonthCount ? `${summary.excludedMonthCount} excluded from baseline` : "No baseline exclusions"} />
         <StatCard label="Integrity" value={summary.quality.warnings.length ? `${summary.quality.warnings.length} warning${summary.quality.warnings.length === 1 ? "" : "s"}` : "clear"} tone={qualityTone} />
       </div>
@@ -553,7 +591,9 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
           <div style={sectionStyle}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
               <strong style={{ color: "#0f172a" }}>Monthly Buckets</strong>
-              <span style={{ color: "#64748b", fontSize: 12 }}>Counts are unique numbers per month; repeated entries inside one draw are ignored.</span>
+              <span style={{ color: "#64748b", fontSize: 12 }}>
+                Counts are unique numbers per month; planning reset rows show 0/expected draws before the first draw lands.
+              </span>
             </div>
             <div style={{ overflowX: "auto", maxHeight: 430 }}>
               <table style={{ width: "100%", minWidth: 760, borderCollapse: "collapse" }}>
@@ -573,7 +613,7 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
                 </thead>
                 <tbody>
                   {monthlyBucketDisplayRows.map((row) => (
-                    <tr key={row.monthLabel} style={{ background: row.monthLabel === summary.latestRow?.monthLabel ? "#f8fafc" : "#fff" }}>
+                    <tr key={row.monthLabel} style={{ background: row.monthLabel === summary.effectiveMonthLabel ? "#f8fafc" : "#fff" }}>
                       <td style={{ ...tdStyle, fontWeight: 800, whiteSpace: "nowrap" }}>{row.monthLabel}</td>
                       <td style={{ ...tdStyle, textAlign: "center", fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>
                         {row.drawCount === row.totalDrawCount ? row.totalDrawCount : `${row.drawCount}/${row.totalDrawCount}`}
@@ -647,7 +687,15 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
             <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
               <div>
                 <strong style={{ color: "#0f172a" }}>Acceptance Needs</strong>
-                <div style={{ color: "#64748b", fontSize: 12 }}>Select numbers from the latest real month buckets; stale selections are removed automatically.</div>
+                <div style={{ color: "#64748b", fontSize: 12 }}>
+                  Select numbers from the active monthly buckets; stale selections are removed automatically.
+                  {summary.effectiveMonthIsSynthetic ? " The planning month starts with all numbers in Undrawn." : ""}
+                </div>
+                {userExclusionReminder && (
+                  <div role="status" style={{ color: "#475569", fontSize: 12, marginTop: 4 }}>
+                    {userExclusionReminder}. Clear these in WFMQYH User Exclusions before selecting them here.
+                  </div>
+                )}
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
                 <label style={{ display: "flex", alignItems: "center", gap: 6, color: "#334155", fontSize: 12, fontWeight: 700 }}>
@@ -704,6 +752,7 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
                   <NumberPills
                     numbers={bucketOptions[key]}
                     selected={selectedByBucket[key]}
+                    excludedNumbers={userExcludedNumbers}
                     onToggle={(n) => toggleBucketNumber(key, n)}
                   />
                 </div>

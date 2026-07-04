@@ -14,12 +14,18 @@ import {
   resolveHotColdWindowChoice,
 } from "../lib/hotColdRanking";
 import { normalizeHotColdGenerationNumbers } from "../lib/hotColdGenerationSelection";
+import {
+  formatUserExclusionReminder,
+  normalizeUserExclusionLocks,
+  removeUserExcludedNumbers,
+} from "../lib/userExclusionLocks";
 
 interface HotColdRankingPanelProps {
   history: Draw[];
   wfmqyhWindowSize?: number;
   forcedNumbers?: number[];
   excludedNumbers?: number[];
+  lockedExcludedNumbers?: number[];
   onToggleForcedNumber?: (number: number) => void;
   onToggleExcludedNumber?: (number: number) => void;
 }
@@ -78,6 +84,7 @@ export const HotColdRankingPanel: React.FC<HotColdRankingPanelProps> = ({
   wfmqyhWindowSize,
   forcedNumbers = [],
   excludedNumbers = [],
+  lockedExcludedNumbers = [],
   onToggleForcedNumber,
   onToggleExcludedNumber,
 }) => {
@@ -121,12 +128,21 @@ export const HotColdRankingPanel: React.FC<HotColdRankingPanelProps> = ({
   const hotCount = filteredRows.filter((row) => row.status === "hot").length;
   const coldCount = filteredRows.filter((row) => row.status === "cold").length;
   const forcedNumberSet = useMemo(
-    () => new Set(normalizeHotColdGenerationNumbers(forcedNumbers)),
-    [forcedNumbers],
+    () => new Set(removeUserExcludedNumbers(normalizeHotColdGenerationNumbers(forcedNumbers), lockedExcludedNumbers)),
+    [forcedNumbers, lockedExcludedNumbers],
   );
   const excludedNumberSet = useMemo(
     () => new Set(normalizeHotColdGenerationNumbers(excludedNumbers)),
     [excludedNumbers],
+  );
+  const userExcludedNumbers = useMemo(
+    () => normalizeUserExclusionLocks(lockedExcludedNumbers),
+    [lockedExcludedNumbers],
+  );
+  const userExcludedNumberSet = useMemo(() => new Set(userExcludedNumbers), [userExcludedNumbers]);
+  const userExclusionReminder = useMemo(
+    () => formatUserExclusionReminder(userExcludedNumbers),
+    [userExcludedNumbers],
   );
 
   const sortedBreakdownRows = useMemo(() => {
@@ -172,6 +188,7 @@ export const HotColdRankingPanel: React.FC<HotColdRankingPanelProps> = ({
   );
 
   const handleBreakdownRowActivation = useCallback((number: number): void => {
+    if (userExcludedNumberSet.has(number)) return;
     if (breakdownSelectionMode === "include") {
       onToggleForcedNumber?.(number);
       return;
@@ -179,7 +196,7 @@ export const HotColdRankingPanel: React.FC<HotColdRankingPanelProps> = ({
     if (breakdownSelectionMode === "exclude") {
       onToggleExcludedNumber?.(number);
     }
-  }, [breakdownSelectionMode, onToggleExcludedNumber, onToggleForcedNumber]);
+  }, [breakdownSelectionMode, onToggleExcludedNumber, onToggleForcedNumber, userExcludedNumberSet]);
 
   const handleBreakdownRowKeyDown = useCallback((event: React.KeyboardEvent<HTMLTableRowElement>, number: number): void => {
     if (!breakdownRowsInteractive) return;
@@ -249,6 +266,11 @@ export const HotColdRankingPanel: React.FC<HotColdRankingPanelProps> = ({
       <div style={{ fontSize: 12, color: "#475569", lineHeight: 1.45, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 10px" }}>
         <b>How to read this:</b> <b>Historical</b> ranks use full loaded history. <b>Recent</b> ranks use only the last <b>{summary.recentWindow}</b> draws. <b>Weighted</b> ranks use the selected half-life; <b>0</b> means only the latest draw receives weight. This makes it easier to compare the app’s long-run counts against the kind of <em>current hotness</em> that lottery websites often emphasize.
       </div>
+      {userExclusionReminder && (
+        <div role="status" style={{ fontSize: 12, color: "#475569", lineHeight: 1.45, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 10px" }}>
+          {userExclusionReminder}. Clear it in WFMQYH User Exclusions before selecting locked numbers here.
+        </div>
+      )}
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
         <div style={{ minWidth: 170, borderRadius: 8, border: "1px solid #e2e8f0", padding: "8px 12px", background: "#f8fafc" }}>
@@ -345,28 +367,36 @@ export const HotColdRankingPanel: React.FC<HotColdRankingPanelProps> = ({
               <tbody>
                 {sortedBreakdownRows.map((row) => {
                     const statusStyle = statusStyles[row.status];
-                    const isForced = forcedNumberSet.has(row.number);
+                    const isUserExcluded = userExcludedNumberSet.has(row.number);
+                    const isForced = !isUserExcluded && forcedNumberSet.has(row.number);
                     const isExcluded = excludedNumberSet.has(row.number);
-                    const generationLabel = isForced ? "Forced in" : isExcluded ? "Excluded" : "—";
+                    const generationLabel = isUserExcluded ? "User Excluded" : isForced ? "Forced in" : isExcluded ? "Excluded" : "—";
                     const generationStyle = isForced
                       ? { background: "#fff7ed", color: "#9a3412", border: "1px solid #fdba74" }
+                      : isUserExcluded
+                        ? { background: "#f1f5f9", color: "#334155", border: "1px solid #94a3b8" }
                       : isExcluded
                         ? { background: "#f1f5f9", color: "#0f172a", border: "1px solid #94a3b8" }
                         : { background: "#ffffff", color: "#64748b", border: "1px solid #e2e8f0" };
-                    const rowBackground = isForced ? "#fffaf5" : isExcluded ? "#f8fafc" : "#ffffff";
-                    const rowTitle = breakdownRowsInteractive
+                    const rowBackground = isForced ? "#fffaf5" : isUserExcluded || isExcluded ? "#f8fafc" : "#ffffff";
+                    const rowCanActivate = breakdownRowsInteractive && !isUserExcluded;
+                    const rowTitle = isUserExcluded
+                      ? `Number ${row.number} is excluded by User Exclusions. Clear it in WFMQYH User Exclusions before selecting it here.`
+                      : rowCanActivate
                       ? `${includeRowsMode ? "Toggle forced inclusion" : "Toggle forced exclusion"} for ${row.number}`
                       : undefined;
                     return (
                       <tr
                         key={row.number}
-                        onClick={breakdownRowsInteractive ? () => handleBreakdownRowActivation(row.number) : undefined}
-                        onKeyDown={breakdownRowsInteractive ? (event) => handleBreakdownRowKeyDown(event, row.number) : undefined}
-                        role={breakdownRowsInteractive ? "button" : undefined}
-                        tabIndex={breakdownRowsInteractive ? 0 : undefined}
-                        aria-pressed={breakdownRowsInteractive ? (includeRowsMode ? isForced : isExcluded) : undefined}
+                        onClick={rowCanActivate ? () => handleBreakdownRowActivation(row.number) : undefined}
+                        onKeyDown={rowCanActivate ? (event) => handleBreakdownRowKeyDown(event, row.number) : undefined}
+                        role={rowCanActivate ? "button" : undefined}
+                        tabIndex={rowCanActivate ? 0 : undefined}
+                        aria-disabled={isUserExcluded ? true : undefined}
+                        aria-pressed={rowCanActivate ? (includeRowsMode ? isForced : isExcluded) : undefined}
                         title={rowTitle}
-                        style={{ borderBottom: "1px solid #f1f5f9", background: rowBackground, cursor: breakdownRowsInteractive ? "pointer" : "default", outlineOffset: -2 }}
+                        style={{ borderBottom: "1px solid #f1f5f9", background: rowBackground, cursor: rowCanActivate ? "pointer" : "default", outlineOffset: -2 }}
+                        data-user-excluded={isUserExcluded ? "true" : undefined}
                       >
                         <td style={{ padding: "7px 10px", textAlign: "center", fontVariantNumeric: "tabular-nums", color: "#64748b" }}>{row.hotRank}</td>
                         <td style={{ padding: "7px 10px", textAlign: "center", fontWeight: 800, color: "#1e293b", fontVariantNumeric: "tabular-nums" }}>{row.number}</td>

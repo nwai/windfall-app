@@ -30,7 +30,9 @@ describe("chronological tables display latest rows first", () => {
     const html = renderToStaticMarkup(React.createElement(MonthlyDrawsSummaryPanel, {
       history: [
         draw("2026-04-01", [1, 2, 3, 4, 5, 6], [7, 8]),
+        draw("2026-04-08", [2, 3, 4, 5, 6, 7], [8, 9]),
         draw("2026-05-01", [9, 10, 11, 12, 13, 14], [15, 16]),
+        draw("2026-05-08", [10, 11, 12, 13, 14, 15], [16, 17]),
         draw("2026-06-01", [17, 18, 19, 20, 21, 22], [23, 24]),
       ],
     }));

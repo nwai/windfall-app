@@ -15,7 +15,7 @@ export interface HotColdShortcutOption {
 export const HOT_COLD_WFMQYH_OPTIONS: readonly HotColdShortcutOption[] = [
   { key: "W", label: "W · Weekly", draws: 3 },
   { key: "F", label: "F · Fortnight", draws: 6 },
-  { key: "M", label: "M · Month", draws: 12 },
+  { key: "M", label: "M · Month", draws: 13 },
   { key: "Q", label: "Q · Quarter", draws: 36 },
   { key: "Y", label: "Y · Year", draws: 156 },
   { key: "H", label: "H · Full history", draws: null },
@@ -75,7 +75,7 @@ const NUMBER_RANGE = Array.from({ length: 45 }, (_, index) => index + 1);
 const HOT_COLD_SHORTCUT_DRAWS: Record<Exclude<HotColdWindowShortcut, "H" | "WFMQYH">, number> = {
   W: 3,
   F: 6,
-  M: 12,
+  M: 13,
   Q: 36,
   Y: 156,
 };

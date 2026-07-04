@@ -7,6 +7,11 @@ import {
   normalizeUserSelectedNumbers,
   toggleUserSelectedNumber,
 } from "../lib/userSelectedNumbers";
+import {
+  formatUserExclusionReminder,
+  normalizeUserExclusionLocks,
+  removeUserExcludedNumbers,
+} from "../lib/userExclusionLocks";
 
 const NUMBER_OPTIONS = Array.from({ length: MAX_USER_SELECTED_NUMBER }, (_, index) => index + 1);
 
@@ -22,6 +27,7 @@ interface UserSelectedNumbersPanelProps {
   onToggleAutoExclude?: (enabled: boolean) => void;
   externalSelectedNumbers?: number[];
   externalSelectedLabel?: string;
+  excludedNumbers?: number[];
 }
 
 export const UserSelectedNumbersPanel: React.FC<UserSelectedNumbersPanelProps> = ({
@@ -36,18 +42,29 @@ export const UserSelectedNumbersPanel: React.FC<UserSelectedNumbersPanelProps> =
   onToggleAutoExclude,
   externalSelectedNumbers = [],
   externalSelectedLabel = "external forced selections",
+  excludedNumbers = [],
 }) => {
   const hasLoadedPersistedSelection = React.useRef(false);
   const pendingPersistedSelection = React.useRef<number[] | null>(null);
 
+  const userExcludedNumbers = React.useMemo(
+    () => normalizeUserExclusionLocks(excludedNumbers),
+    [excludedNumbers],
+  );
+  const userExcludedSet = React.useMemo(() => new Set(userExcludedNumbers), [userExcludedNumbers]);
+  const userExclusionReminder = React.useMemo(
+    () => formatUserExclusionReminder(userExcludedNumbers),
+    [userExcludedNumbers],
+  );
   const selectedNumbers = React.useMemo(
-    () => normalizeUserSelectedNumbers(userSelectedNumbers),
-    [userSelectedNumbers],
+    () => removeUserExcludedNumbers(normalizeUserSelectedNumbers(userSelectedNumbers), userExcludedNumbers),
+    [userExcludedNumbers, userSelectedNumbers],
   );
   const selectedSet = React.useMemo(() => new Set(selectedNumbers), [selectedNumbers]);
   const lockedExternalNumbers = React.useMemo(
-    () => normalizeUserSelectedNumbers(externalSelectedNumbers).filter((number) => !selectedSet.has(number)),
-    [externalSelectedNumbers, selectedSet],
+    () => removeUserExcludedNumbers(normalizeUserSelectedNumbers(externalSelectedNumbers), userExcludedNumbers)
+      .filter((number) => !selectedSet.has(number)),
+    [externalSelectedNumbers, selectedSet, userExcludedNumbers],
   );
   const lockedExternalSet = React.useMemo(() => new Set(lockedExternalNumbers), [lockedExternalNumbers]);
   const simulation = React.useMemo(
@@ -138,6 +155,11 @@ export const UserSelectedNumbersPanel: React.FC<UserSelectedNumbersPanelProps> =
               Locked by {externalSelectedLabel}: {lockedExternalNumbers.join(", ")}
             </div>
           )}
+          {userExclusionReminder && (
+            <div style={{ ...subtleText, color: "#475569", marginTop: 3 }}>
+              {userExclusionReminder}. Clear these in WFMQYH User Exclusions before selecting them here.
+            </div>
+          )}
         </div>
         <div style={toolbar}>
           <button
@@ -174,22 +196,34 @@ export const UserSelectedNumbersPanel: React.FC<UserSelectedNumbersPanelProps> =
         {NUMBER_OPTIONS.map((number) => {
           const active = selectedSet.has(number);
           const locked = lockedExternalSet.has(number);
-          const pressed = active || locked;
-          const ariaLabel = locked
+          const userExcluded = userExcludedSet.has(number);
+          const pressed = !userExcluded && (active || locked);
+          const disabled = locked || userExcluded;
+          const ariaLabel = userExcluded
+            ? `Number ${number} is excluded by User Exclusions`
+            : locked
             ? `Number ${number} is forced by ${externalSelectedLabel}`
             : active
               ? `Remove user selected number ${number}`
               : `Add user selected number ${number}`;
+          const title = userExcluded
+            ? `Clear it in WFMQYH User Exclusions before selecting ${number}.`
+            : locked
+              ? `Selected in ${externalSelectedLabel}; deselect it there to release it.`
+              : active
+                ? `Remove ${number}`
+                : `Add ${number}`;
           return (
             <button
               key={number}
               type="button"
               aria-label={ariaLabel}
               onClick={() => handleToggle(number)}
-              disabled={locked}
-              style={numberButton(pressed, locked)}
+              disabled={disabled}
+              style={userExcluded ? userExcludedNumberButton : numberButton(pressed, locked)}
               aria-pressed={pressed}
-              title={locked ? `Selected in ${externalSelectedLabel}; deselect it there to release it.` : active ? `Remove ${number}` : `Add ${number}`}
+              title={title}
+              data-user-excluded={userExcluded ? "true" : undefined}
             >
               {number}
             </button>
@@ -352,6 +386,20 @@ const numberButton = (active: boolean, locked = false): React.CSSProperties => (
   fontWeight: active ? 700 : 500,
   lineHeight: 1,
 });
+
+const userExcludedNumberButton: React.CSSProperties = {
+  width: 38,
+  height: 32,
+  border: "1px solid #cbd5e1",
+  borderRadius: 6,
+  background: "#f1f5f9",
+  boxShadow: "none",
+  color: "#94a3b8",
+  cursor: "not-allowed",
+  fontSize: 12,
+  fontWeight: 700,
+  lineHeight: 1,
+};
 
 const toggleLabel = (enabled: boolean): React.CSSProperties => ({
   display: "inline-flex",

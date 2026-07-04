@@ -34,4 +34,28 @@ describe("MonthEndCarryOverBucketsPanel", () => {
     expect(html).toContain("Remove carry-over boost for 6");
     expect(html).toContain("Add carry-over boost for 1");
   });
+
+  it("locks carry-over boost chips for user-excluded numbers", () => {
+    const history: Draw[] = [
+      draw("2026-01-01", [2, 6, 10, 11, 12, 13]),
+      draw("2026-01-08", [2, 6, 14, 15, 16, 17]),
+      draw("2026-01-15", [6, 18, 19, 20, 21, 22]),
+      draw("2026-01-22", [6, 23, 24, 25, 26, 27]),
+      draw("2026-01-29", [1, 2, 6, 28, 29, 30]),
+      draw("2026-02-02", [1, 2, 6, 31, 32, 33]),
+    ];
+
+    const html = renderToStaticMarkup(
+      React.createElement(MonthEndCarryOverBucketsPanel, {
+        history,
+        selectedBoostNumbers: [6],
+        excludedNumbers: [1],
+        onToggleBoostNumber: () => undefined,
+      }),
+    );
+
+    expect(html).toContain("User exclusions active: 1");
+    expect(html).toContain("Number 1 is excluded by User Exclusions");
+    expect(html).toContain("disabled");
+  });
 });

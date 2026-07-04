@@ -20,6 +20,10 @@ import {
   toggleUserSelectedNumber,
 } from "../../lib/userSelectedNumbers";
 import {
+  formatUserExclusionReminder,
+  normalizeUserExclusionLocks,
+} from "../../lib/userExclusionLocks";
+import {
   computeIdealMonthlyDraw,
   type MonthlyBucketSets,
   type MonthlyIdealDrawState,
@@ -81,6 +85,7 @@ export interface GeneratedCandidatesPanelProps {
   numCandidates: number;
   setNumCandidates: (n: number) => void;
   forcedNumbers?: number[];
+  excludedNumbers?: number[];
   userSelectedNumbers: number[];
   setUserSelectedNumbers: (nums: number[]) => void;
 
@@ -168,6 +173,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
   activeOGABand,
   ogaScoresRef,
   forcedNumbers = [],
+  excludedNumbers = [],
   exportSettings,
   activeSimCandidateIdx,
   simSourceKind,
@@ -210,6 +216,11 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
     const [exTotal, setExTotal] = useState<number>(0);
     const [exCapped, setExCapped] = useState<boolean>(false);
      const [pressedButton, setPressedButton] = useState<string | null>(null);
+    const userExcludedNumbers = useMemo(
+      () => normalizeUserExclusionLocks(excludedNumbers),
+      [excludedNumbers],
+    );
+    const userExcludedSet = useMemo(() => new Set(userExcludedNumbers), [userExcludedNumbers]);
 
     // --- Running clock for generation time ---
     const [elapsedMs, setElapsedMs] = useState<number>(0);
@@ -862,7 +873,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
 
   /**
    * WinScore (recalibrated) — candidate-pool diagnostic designed to rank
-   * generated rows without requiring Manual Simulation.
+   * generated rows without requiring Manual Prize Check.
    *
    * Internal candidate-sample recalibration from 71K generated candidates:
    *   - 2x bucket count (numbers drawn exactly 2× this month) was the strongest
@@ -1279,7 +1290,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
   const matchedCount = useMemo(() => filteredCandidates.filter((r) => r.matched).length, [filteredCandidates]);
   const hasActiveFilter = isFilteringActive && matchedCount < sortedCandidates.length;
 
-  /** Prize-qualifying counts — requires Manual Simulation to be fully populated (6M + 2S) */
+  /** Prize-qualifying counts — requires Manual Prize Check to be fully populated (6M + 2S) */
   const prizeQualifyingCount = useMemo((): number => {
     if (manualMainSet.size < 6 || manualSuppSet.size < 2) return 0;
     return candidates.filter(
@@ -1322,10 +1333,10 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
 
   /**
    * Historical Prize Backtest — for each past draw in historyForOGA, checks
-   * whether the manual simulation candidate would have qualified for any prize
+   * whether the manual prize-check candidate would have qualified for any prize
    * if played for that draw. Sorted most-recent draw first.
    *
-   * This answers: "If I had played this manual simulated candidate in past draws,
+   * This answers: "If I had played this manual prize-check candidate in past draws,
    * how often would I have won a prize, and in which division?"
    */
   const historicalBacktest = useMemo((): {
@@ -1666,6 +1677,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
     }
 
    function toggleManualPick(n: number) {
+     if (userExcludedSet.has(n)) return;
      setManualSimSelected((prev) => {
        const next = prev.includes(n)
          ? prev.filter((x) => x !== n)
@@ -2053,7 +2065,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
            { label: "Generated", value: String(candidates.length) },
            { label: "Visible", value: visibleRowsLabel },
            { label: "Prize-qualified", value: manualSimSelected.length >= 8 ? String(prizeQualifyingCount) : "manual off" },
-           { label: "Manual Sim", value: manualSimLabel },
+           { label: "Manual Check", value: manualSimLabel },
            { label: "Sort", value: activeSortLabel },
          ].map((item) => (
            <div key={item.label} style={summaryItem}>
@@ -2681,7 +2693,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                         || (n >= 10 && committedTwoDigitSearchSet.has(n))
                       ),
                     ))}</td>
-                   <td style={manualTd} title="Matches vs Manual Simulation (M/S)">
+                   <td style={manualTd} title="Matches vs Manual Prize Check (M/S)">
                      {renderDots(manualMainHits, "#c62828", "#999", "Manual main hits")}
                      <span style={{ color: "#bbb", padding: "0 3px" }}>/</span>
                      {renderDots(manualSuppHits, "#2e7d32", "#999", "Manual supp hits")}
@@ -2763,12 +2775,12 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                   color: showHistoricalBacktest ? "#7b5800" : "#555",
                   cursor: "pointer",
                 }}
-                title="For each historical draw, check if the manual simulation candidate would have qualified for a prize if played for that draw"
+                title="For each historical draw, check if the manual prize-check candidate would have qualified for a prize if played for that draw"
               >
                 Historical Prize Backtest {showHistoricalBacktest ? "▲" : "▼"}
               </button>
               {manualSimSelected.length < 8 ? (
-                <span style={{ fontSize: 11, color: "#999" }}>Select 8 numbers in Manual Simulation to run backtest</span>
+                <span style={{ fontSize: 11, color: "#999" }}>Select 8 numbers in Manual Prize Check to run backtest</span>
               ) : backtestOverallSummary.totalInstances > 0 ? (
                 <span style={{ fontSize: 11, color: "#7b5800", fontWeight: 600 }}>
                   {backtestOverallSummary.drawsWithAnyPrize}/{historicalBacktest.length} draws — manual candidate won a prize
@@ -2909,7 +2921,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                                     type="button"
                                     onClick={() => onSimulateNumbers([...draw.main, ...draw.supp])}
                                     style={{ ...simBtn, fontSize: 10, padding: "2px 6px" }}
-                                    title={`Load ${draw.date} winning numbers into manual simulation`}
+                                    title={`Load ${draw.date} winning numbers into Manual Prize Check`}
                                   >
                                     Load Draw
                                   </button>
@@ -2985,6 +2997,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
          <ManualSim
            manualSimSelected={manualSimSelected}
           toggleManualPick={toggleManualPick}
+          excludedNumbers={userExcludedNumbers}
           numberToBucket={numberToBucket}
           currentDist={currentDist}
           targetDist={targetDist}
@@ -2998,7 +3011,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
              <input type="radio" value="user" checked={exSource === "user"} onChange={() => setExSource("user")} /> User Selected
            </label>
            <label>
-             <input type="radio" value="manual" checked={exSource === "manual"} onChange={() => setExSource("manual")} /> Manual Sim (8)
+             <input type="radio" value="manual" checked={exSource === "manual"} onChange={() => setExSource("manual")} /> Manual Check (8)
            </label>
            <label>
              <input type="radio" value="custom" checked={exSource === "custom"} onChange={() => setExSource("custom")} /> Custom
@@ -3389,12 +3402,14 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
 const ManualSim: React.FC<{
   manualSimSelected: number[];
   toggleManualPick: (n: number) => void;
+  excludedNumbers?: readonly number[];
   numberToBucket: Map<number, number> | null;
   currentDist: number[] | null;
   targetDist: number[] | null;
 }> = ({
   manualSimSelected,
   toggleManualPick,
+  excludedNumbers = [],
   numberToBucket,
   currentDist,
   targetDist,
@@ -3402,6 +3417,11 @@ const ManualSim: React.FC<{
   // Compute before/after distribution when 8 numbers are selected
   const bucketLabels = ["0x", "1x", "2x", "3x", "4x", "5x", "6x", "7x", "8x+"];
   const showBeforeAfter = manualSimSelected.length === 8 && numberToBucket && currentDist && targetDist;
+  const userExcludedSet = React.useMemo(() => new Set(excludedNumbers), [excludedNumbers]);
+  const userExclusionReminder = React.useMemo(
+    () => formatUserExclusionReminder(excludedNumbers),
+    [excludedNumbers],
+  );
 
   const postDist = React.useMemo((): number[] | null => {
     if (!showBeforeAfter) return null;
@@ -3417,10 +3437,15 @@ const ManualSim: React.FC<{
   }, [showBeforeAfter, currentDist, numberToBucket, manualSimSelected]);
 
   return (
-    <div style={manual}>
-      <div style={{ marginBottom: 6, fontWeight: 600, fontSize: 13 }}>
-        Manual Simulation (select up to 8; first 6 main, next 2 supp)
+      <div style={manual}>
+        <div style={{ marginBottom: 6, fontWeight: 600, fontSize: 13 }}>
+        Manual Prize Check (select up to 8; first 6 main, next 2 supp)
       </div>
+      {userExclusionReminder && (
+        <div role="status" style={{ marginBottom: 8, color: "#475569", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "6px 8px", fontSize: 11 }}>
+          {userExclusionReminder}. Clear these in WFMQYH User Exclusions before selecting them here.
+        </div>
+      )}
 
       {showBeforeAfter && postDist && (
         <div style={{ marginBottom: 10, overflowX: "auto" }}>
@@ -3490,9 +3515,11 @@ const ManualSim: React.FC<{
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
         {Array.from({ length: 45 }, (_, i) => i + 1).map((n) => {
           const idx = manualSimSelected.indexOf(n);
-          const picked = idx !== -1;
+          const isUserExcluded = userExcludedSet.has(n);
+          const picked = !isUserExcluded && idx !== -1;
           const atCapacity = manualSimSelected.length >= 8 && !picked;
           const slotColor = picked ? (idx < 6 ? "#4a6fe3" : "#8e44ad") : "#fff";
+          const disabled = isUserExcluded || atCapacity;
           return (
             <label
               key={n}
@@ -3504,24 +3531,27 @@ const ManualSim: React.FC<{
                 padding: 4,
                 border: "1px solid #bbb",
                 borderRadius: 6,
-                background: slotColor,
-                color: picked ? "#fff" : "#333",
-                opacity: atCapacity ? 0.35 : 1,
-                cursor: atCapacity ? "not-allowed" : "pointer",
+                background: isUserExcluded ? "#f1f5f9" : slotColor,
+                color: picked ? "#fff" : isUserExcluded ? "#94a3b8" : "#333",
+                opacity: disabled ? 0.35 : 1,
+                cursor: disabled ? "not-allowed" : "pointer",
                 fontSize: 11,
               }}
               title={
-                picked
+                isUserExcluded
+                  ? `Clear it in WFMQYH User Exclusions before selecting ${n}.`
+                  : picked
                   ? `Slot ${idx + 1}`
                   : atCapacity
                   ? "Capacity full"
-                  : "Add to manual simulation"
+                  : "Add to Manual Prize Check"
               }
             >
               <input
                 type="checkbox"
                 checked={picked}
-                disabled={atCapacity}
+                disabled={disabled}
+                aria-label={isUserExcluded ? `Number ${n} is excluded by User Exclusions` : undefined}
                 onChange={() => toggleManualPick(n)}
                 style={{ marginBottom: 2 }}
               />
@@ -3531,8 +3561,8 @@ const ManualSim: React.FC<{
         })}
       </div>
       <div style={{ marginTop: 6, fontSize: 11, color: "#555" }}>
-        Manual simulation highlights the Temperature Heatmap only.
-        Use “Simulate” in the table to add a column to the DGA grid.
+        Manual selections are used only for candidate prize checks and the Historical Prize Backtest.
+        Use “Simulate” in the table to run a candidate through the DGA simulation flow.
       </div>
     </div>
   );
@@ -3673,9 +3703,14 @@ const td: React.CSSProperties = {
 };
 const tdCenter: React.CSSProperties = { ...td, textAlign: "center" };
 const th: React.CSSProperties = {
+  position: "sticky",
+  top: 0,
+  zIndex: 2,
   textAlign: "center",
   padding: "4px 6px",
   borderBottom: "1px solid #ddd",
+  background: "#fafafa",
+  boxShadow: "0 1px 0 rgba(15,23,42,0.08)",
   fontWeight: 600,
   whiteSpace: "nowrap",
 };

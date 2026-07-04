@@ -182,6 +182,7 @@
     <a class="section" href="#overview">Overview</a>
     <a href="#getting-started">Getting Started</a>
     <a href="#loading-history">Loading Draw History</a>
+    <a href="#wfmqyh-window">WFMQYH Window</a>
     <a href="#number-trends-table">Number Trends Table</a>
     <a href="#trend-ratio-diagnostics">Trend Ratio Diagnostics</a>
     <a href="#smart-history-review">Smart History Review</a>
@@ -204,7 +205,7 @@
     <a href="#rec-button">⭐ Rec — Recommended Ranking</a>
     <a href="#filter">Filter Panel</a>
     <a href="#filter-save">Saving &amp; Loading Filters</a>
-    <a href="#manual-sim">Manual Simulation</a>
+    <a href="#manual-sim">Manual Prize Check</a>
     <a href="#simulate-button">Simulate Button</a>
 
     <a class="section" href="#generation">Candidate Generation</a>
@@ -229,6 +230,7 @@
 
     <a class="section" href="#dga">DGA Grid</a>
     <a href="#dga-overview">Overview</a>
+    <a href="#next-hot-blocks">Next Hot Blocks</a>
     <a href="#tattslotto-ticket-grid-replay">Tattslotto Ticket Grid Replay</a>
     <a href="#dga-drought-break">Drought-break Shortlist</a>
     <a href="#dga-columns">Column Structure</a>
@@ -238,6 +240,7 @@
 
     <a class="section" href="#scoring-reference">Scoring Reference</a>
     <a href="#score-summary">Score Summary Table</a>
+    <a href="#prediction-journal">Prediction Journal</a>
     <a href="#previous-neighbour-backtest">Previous ±1 Neighbour Backtest</a>
     <a href="#analysis-findings">Analysis Findings</a>
 
@@ -294,6 +297,13 @@
 
   <div class="note">
     <strong>Safari users:</strong> If the File System Access API is not available, a standard file picker will appear automatically as a fallback.
+  </div>
+
+  <h3 id="wfmqyh-window">WFMQYH Window</h3>
+  <p><strong>WFMQYH</strong> is the active draw-history window used by many evidence panels and generation weights. The shortcuts are designed around draw counts rather than calendar labels: <strong>Weekly</strong> uses 3 draws, <strong>Fortnight</strong> uses 6 draws, <strong>Month</strong> uses 13 draws, <strong>Quarter</strong> uses 36 draws, and <strong>Year</strong> uses 156 draws.</p>
+
+  <div class="note">
+    <strong>Why Month is 13 draws:</strong> although some calendar months contain 12 or 14 draw dates, 13-draw months are the most common practical monthly shape in the loaded Windfall history. The Month shortcut therefore uses 13 draws as the standard month-like evidence window. Panels that perform calendar-month analysis, such as Monthly Draws Summary and Stage IDM, still calculate the actual expected draw count for the working month where that matters.
   </div>
 
   <h3 id="number-trends-table">Number Trends Table</h3>
@@ -599,8 +609,8 @@
       <tr><td><strong>#</strong></td><td>Row number in the current sort order.</td></tr>
       <tr><td><strong>Main (6)</strong></td><td>The six main numbers in the candidate set.</td></tr>
       <tr><td><strong>Supp (2)</strong></td><td>The two supplementary numbers.</td></tr>
-      <tr><td><strong>M/S</strong></td><td>Dots showing how many of the Manual Simulation numbers match this candidate's mains (red) and supps (green).</td></tr>
-      <tr><td><strong>Prize</strong></td><td>Prize division achieved if the Manual Simulation numbers are the winning draw. Only meaningful when 8 numbers are selected in Manual Simulation.</td></tr>
+      <tr><td><strong>M/S</strong></td><td>Dots showing how many of the Manual Prize Check numbers match this candidate's mains (red) and supps (green).</td></tr>
+      <tr><td><strong>Prize</strong></td><td>Prize division achieved if the Manual Prize Check numbers are treated as the winning draw. Only meaningful when 8 numbers are selected in Manual Prize Check.</td></tr>
       <tr><td><strong>Odd:Even</strong></td><td>Ratio of odd to even numbers across all 8 numbers.</td></tr>
       <tr><td><strong>Comp%</strong></td><td>Composite score from the OGA algorithm, expressed as a percentage. Higher = stronger composite alignment.</td></tr>
       <tr><td><strong>OGA Raw</strong></td><td>Raw OGA (Octagonal Grid Analysis) score.</td></tr>
@@ -615,7 +625,7 @@
       <tr><td><strong>Win</strong></td><td>WinScore — tier-gated candidate-pool diagnostic. See <a href="#winscore">Win Column</a>.</td></tr>
       <tr><td><strong>Nrr</strong></td><td>Number Rarity Rank. See <a href="#nrr-column">Nrr Column</a>.</td></tr>
       <tr><td><strong>NS</strong></td><td>NumSum Score — percentile rank of the candidate's number sum. See <a href="#ns-column">NS Column</a>.</td></tr>
-      <tr><td><strong>Simulate</strong></td><td>Loads this candidate's numbers into Manual Simulation and scrolls to the DGA grid.</td></tr>
+      <tr><td><strong>Simulate</strong></td><td>Runs this candidate through the app simulation flow, updates the shared simulation strips, and scrolls to the DGA grid. It does not overwrite Manual Prize Check.</td></tr>
     </tbody>
   </table>
 
@@ -681,7 +691,7 @@
   <!-- ───────────────────────────────────────── -->
   <h3 id="winscore">Win Column &amp; WinScore</h3>
 
-  <p>The <strong>Win</strong> column displays a tier letter (A / B / C / D) and a numeric score. It ranks generated rows by candidate-pool diagnostics <em>without</em> needing Manual Simulation.</p>
+  <p>The <strong>Win</strong> column displays a tier letter (A / B / C / D) and a numeric score. It ranks generated rows by candidate-pool diagnostics <em>without</em> needing Manual Prize Check.</p>
 
   <h4>Recalibrated model (April 2026)</h4>
   <p>Internal analysis of 71,000 generated candidates found that the <strong>2x bucket count</strong> (numbers drawn exactly twice in the current month) had the strongest observed association in that candidate sample. Treat the lift values below as sample diagnostics, not calibrated next-draw probabilities.</p>
@@ -808,7 +818,7 @@
   <p>Within the Filter panel, each field also has ▲▼ mini sort buttons.</p>
 
   <div class="tip">
-    <strong>Default sort:</strong> Prize (descending) when 8 Manual Simulation numbers are selected. When fewer than 8 are selected, the sort reverts to whatever was active before 8 numbers were chosen (stored in browser storage).
+    <strong>Default sort:</strong> Prize (descending) when 8 Manual Prize Check numbers are selected. When fewer than 8 are selected, the sort reverts to whatever was active before 8 numbers were chosen (stored in browser storage).
   </div>
 
   <!-- ───────────────────────────────────────── -->
@@ -866,9 +876,9 @@
   <p>Saved filters persist across page refreshes and app restarts.</p>
 
   <!-- ───────────────────────────────────────── -->
-  <h3 id="manual-sim">Manual Simulation</h3>
+  <h3 id="manual-sim">Manual Prize Check</h3>
 
-  <p>The <strong>Manual Simulation</strong> grid (below the candidates table) lets you select up to 8 numbers — the first 6 become mains, the last 2 become supplementaries. Once 8 numbers are selected:</p>
+  <p>The <strong>Manual Prize Check</strong> grid (below the candidates table) is a local prize-worthiness scratchpad. It lets you select up to 8 numbers — the first 6 become mains, the last 2 become supplementaries. It is not part of the DGA/app simulation flow and candidate-row Simulate buttons do not overwrite it. Once 8 numbers are selected:</p>
   <ul>
     <li>The <strong>Prize</strong> column populates for all candidates.</li>
     <li>A <strong>before/after bucket comparison table</strong> appears above the grid, showing the current month's bucket distribution, what it would become after this draw, the robust Monthly Draws Summary target, and the delta still needed.</li>
@@ -883,6 +893,8 @@
   <p>Each candidate row has a <strong>Simulate</strong> button. Clicking it:</p>
   <ol>
     <li>Loads the candidate's 8 numbers into the DGA grid as a simulated draw.</li>
+    <li>Replaces the shared simulation strip selection with the candidate's numbers.</li>
+    <li>Leaves Manual Prize Check unchanged, so your prize-worthiness scratchpad is not lost.</li>
     <li>Smooth-scrolls the page down to the DGA section.</li>
     <li>A <strong>↑ Back</strong> button appears above the DGA grid to return you to the originating scroll position.</li>
   </ol>
@@ -1406,6 +1418,23 @@
 
   <p>Clicking any column header focuses that column (all other columns dim to 30% opacity). Click the same header again, or click any other column, to change or clear the focus.</p>
 
+  <h3 id="next-hot-blocks">Next Hot Blocks</h3>
+
+  <p><strong>Next Hot Blocks</strong> groups the 45-number pool into contiguous blocks, then shows recent block heat and drift over the active WFMQYH history. It is descriptive evidence only. Excluding a block is a deliberate hard exclusion action, so the panel now checks the app-wide number conflict ledger before allowing that action.</p>
+
+  <h4>Conflict ledger behaviour</h4>
+  <ul>
+    <li><strong>Active elsewhere:</strong> a compact line lists numbers already included, excluded, boosted, or simulated by other panels.</li>
+    <li><strong>Included numbers:</strong> hard forced inclusions from panels such as Latest ±1/±2, Hot/Cold include rows, Number Trends selections, and Drought-break shortlist.</li>
+    <li><strong>Excluded numbers:</strong> hard exclusions from User Exclusions, Hot/Cold exclude rows, auto-exclude unselected numbers, SDE1, HC3, and bucket auto-exclusions.</li>
+    <li><strong>Boosted numbers:</strong> soft includes, such as user-selected boost or month-end carry-over boost. These are shown as warnings, not hard blockers.</li>
+    <li><strong>Block exclusion safety:</strong> if a block contains a hard forced inclusion, its <strong>Exclude</strong> checkbox is disabled and the panel explains which number and source caused the block. Remove the inclusion first if you really want to exclude that block.</li>
+  </ul>
+
+  <div class="note">
+    <strong>Truthfulness note:</strong> this guardrail prevents one panel from quietly contradicting another panel's forced inclusion state. A disabled block exclusion is not a statistical judgement about the block; it is a consistency safeguard.
+  </div>
+
   <h3 id="tattslotto-ticket-grid-replay">Tattslotto Ticket Grid Replay</h3>
 
   <p><strong>Tattslotto Ticket Grid Replay</strong> replays observed historical draws from the active WFMQYH window on the 9-column by 5-row ticket grid used by Tattslotto customers.</p>
@@ -1424,9 +1453,11 @@
     </tbody>
   </table>
 
-  <h3 id="dga-drought-break">Drought-break Empirical Shortlist</h3>
+  <h3 id="dga-drought-break">Drought-break Strict Shortlist</h3>
 
-  <p><strong>Drought-break empirical shortlist (mains + supps)</strong> sits under <strong>Signals</strong> and ranks numbers by their current drought length and the historical rate at which numbers with that same drought length appeared in the following draw. It treats a number as "appeared" if it was drawn as either a main or supplementary number.</p>
+  <p><strong>Drought-break shortlist (mains + supps)</strong> sits under <strong>Signals</strong>. Its default view is now <strong>Strict drought 6+</strong>, which ranks numbers with a full-history current drought of at least six draws. Six draws is used because it is roughly a fortnight at three draws per week. The older pooled empirical hazard view remains available as a toggle for comparison.</p>
+
+  <p>The strict view treats a number as "appeared" if it was drawn as either a main or supplementary number. It uses the active WFMQYH window for visible context, but uses full real history to break WFMQYH ties and measure the number's completed drought episodes.</p>
 
   <p>Click a number in the <strong>#</strong> column to mark it as a drought-break forced inclusion for candidate generation. Click it again to release it. The shortlist allows a maximum of three selected drought-break forced numbers, reflecting the current empirical working rule that winning candidates should not be overloaded with drought-break assumptions. These selections are separate from <strong>User Selected Numbers</strong>, so they do not silently trigger selected-number boosting.</p>
 
@@ -1443,7 +1474,12 @@
       <tr>
         <td><strong>#</strong></td>
         <td>The number being ranked, from 1 to 45.</td>
-        <td>Rows are sorted by strongest empirical drought-break support first.</td>
+        <td>Click the number to select or release it as a drought-break forced inclusion, up to the panel limit.</td>
+      </tr>
+      <tr>
+        <td><strong>Strict rank</strong></td>
+        <td>The row's rank in strict drought mode.</td>
+        <td>Rows are sorted by full-history current drought first, then by historical drought-break maturity and episode evidence.</td>
       </tr>
       <tr>
         <td><strong>Month bucket</strong></td>
@@ -1451,40 +1487,99 @@
         <td>This is context only. It helps you see whether the shortlisted number is currently undrawn or already active this month, but it does not drive the drought-break rate.</td>
       </tr>
       <tr>
-        <td><strong>Current drought (k)</strong></td>
-        <td>The number of consecutive draws since this number last appeared in either mains or supplementary numbers.</td>
-        <td><code>k = 0</code> means the number appeared in the latest draw. Larger <code>k</code> values mean the number has been absent for longer.</td>
+        <td><strong>Full drought</strong></td>
+        <td>The number of consecutive full-history draws since this number last appeared in either mains or supplementary numbers.</td>
+        <td>This is the primary strict-rank signal. It can break ties where several numbers are all undrawn across the active WFMQYH window.</td>
       </tr>
       <tr>
-        <td><strong>Smoothed appearance rate</strong></td>
-        <td>The estimated next-draw appearance rate for numbers currently at the same drought length <code>k</code>.</td>
-        <td>This starts from observed history, then shrinks sparse evidence toward the neutral <code>8 / 45 = 17.8%</code> baseline so small samples do not appear falsely precise.</td>
+        <td><strong>WFMQYH drought</strong></td>
+        <td>The number of consecutive active-window draws since the number last appeared.</td>
+        <td>This explains what you are seeing in the current WFMQYH/monthly view. It is context, not the final tie-breaker.</td>
       </tr>
       <tr>
-        <td><strong>Observed hits / trials</strong></td>
-        <td>The raw evidence count behind the rate. A trial is a past situation where a number had this same drought length after a draw; a hit is when it appeared in the very next draw.</td>
-        <td>For example, <code>9/40</code> means 9 next-draw appearances from 40 matching drought situations. Higher trial counts are generally more trustworthy than tiny samples.</td>
+        <td><strong>Episodes 6+</strong></td>
+        <td>How many completed historical drought episodes of at least six draws this number has had after a prior observed appearance.</td>
+        <td>Leading unknown history before a number first appears is not counted as a clean drought episode.</td>
       </tr>
+	      <tr>
+	        <td><strong>Typical break</strong></td>
+	        <td>The median and 75th percentile length of that number's completed 6+ drought episodes.</td>
+	        <td>For example, <code>med 8 / p75 11</code> means half of its completed droughts broke by 8 draws and 75% broke by 11 draws. This is a history profile for the number, not a promise that it will break now.</td>
+	      </tr>
+	      <tr>
+	        <td><strong>Break maturity</strong></td>
+	        <td>The share of that number's completed 6+ drought episodes that were broken at or before its current full-history drought length.</td>
+	        <td>A higher value means the current drought is mature compared with that number's own historical drought-break lengths. <code>100%</code> means every completed 6+ drought for that number had already broken by this length.</td>
+	      </tr>
+	      <tr>
+	        <td><strong>Empirical rate</strong></td>
+	        <td>The estimated next-draw appearance rate for numbers currently at the same drought length <code>k</code>.</td>
+	        <td>This is pooled by drought length across all 45 numbers. It starts from observed history, then shrinks sparse evidence toward the neutral <code>8 / 45 = 17.8%</code> baseline so small samples do not appear falsely precise.</td>
+	      </tr>
+	      <tr>
+	        <td><strong>Hits / trials</strong></td>
+	        <td>The raw evidence count behind the rate. A trial is a past situation where a number had this same drought length after a draw; a hit is when it appeared in the very next draw.</td>
+	        <td>For example, <code>9/40</code> means 9 next-draw appearances from 40 matching drought situations. Higher trial counts are generally more trustworthy than tiny samples.</td>
+	      </tr>
       <tr>
         <td><strong>Vs baseline</strong></td>
         <td>The smoothed appearance rate minus the neutral 17.8% baseline, shown in percentage points.</td>
         <td>Positive values mean the drought length has historically appeared above baseline; negative values mean below baseline. This is a lift diagnostic, not a guarantee.</td>
       </tr>
-    </tbody>
-  </table>
+	    </tbody>
+	  </table>
 
-  <h4>How the shortlist is calculated</h4>
+	  <h4>Reading the less obvious columns</h4>
+	  <table>
+	    <thead>
+	      <tr>
+	        <th>Column</th>
+	        <th>Plain-English reading</th>
+	        <th>Careful interpretation</th>
+	      </tr>
+	    </thead>
+	    <tbody>
+	      <tr>
+	        <td><strong>Typical break</strong></td>
+	        <td>How long this specific number has usually stayed absent once it entered a 6+ draw drought.</td>
+	        <td><code>med 8 / p75 11</code> means half of that number's completed droughts broke by 8 draws, and three quarters broke by 11 draws. If the current drought is already beyond those values, the drought is historically mature.</td>
+	      </tr>
+	      <tr>
+	        <td><strong>Break maturity</strong></td>
+	        <td>How far the current drought has travelled compared with that number's own past droughts.</td>
+	        <td><code>0%</code> means none of its completed 6+ droughts had broken this early. <code>50%</code> means the current drought has reached the middle of its past break pattern. <code>100%</code> means the current drought is at least as long as every completed 6+ drought seen for that number.</td>
+	      </tr>
+	      <tr>
+	        <td><strong>Empirical rate</strong></td>
+	        <td>How often numbers at this same drought length appeared in the next draw, after smoothing.</td>
+	        <td>This is not personal to the number. If number 7 has drought length 20, the empirical rate comes from all historical cases where any number had drought length 20. It is supporting evidence beside the strict rank.</td>
+	      </tr>
+	      <tr>
+	        <td><strong>Hits / trials</strong></td>
+	        <td>The raw count behind the empirical rate.</td>
+	        <td>In <code>8/34</code>, there were 34 historical situations where a number had the same drought length, and 8 of those appeared in the next draw. Small trial counts can move sharply when new draws arrive, so they should be treated as weaker evidence.</td>
+	      </tr>
+	      <tr>
+	        <td><strong>Vs baseline</strong></td>
+	        <td>How far the empirical rate sits above or below the neutral mains+supps baseline of <code>17.8%</code>.</td>
+	        <td><code>+5.4pp</code> means the smoothed empirical rate is 5.4 percentage points above baseline, not 5.4 times better. A positive value is a historical lift diagnostic, not a reliable forecast.</td>
+	      </tr>
+	    </tbody>
+	  </table>
+
+	  <h4>How the shortlist is calculated</h4>
   <ul>
-    <li><strong>Scope:</strong> mains + supplementary numbers. This is appearance evidence from the full 45-number draw pool, not main-number-only probability.</li>
-    <li><strong>Baseline:</strong> before a draw, a number has an <code>8 / 45 = 17.8%</code> chance of appearing somewhere in the eight drawn numbers.</li>
-    <li><strong>Drought state:</strong> after each historical draw, the app records each number's drought length <code>k</code>, then checks whether that number appeared in the next draw.</li>
-    <li><strong>Smoothing:</strong> the panel adds two baseline-prior trials to stabilize sparse drought lengths. This avoids overstating rare <code>k</code> values that have only a few observations.</li>
-    <li><strong>Ranking:</strong> numbers are ranked by the smoothed rate for their current drought length; ties favour longer current droughts.</li>
-  </ul>
+	    <li><strong>Scope:</strong> mains + supplementary numbers. This is appearance evidence from the full 45-number draw pool, not main-number-only probability.</li>
+	    <li><strong>Baseline:</strong> before a draw, a number has an <code>8 / 45 = 17.8%</code> chance of appearing somewhere in the eight drawn numbers.</li>
+	    <li><strong>Strict drought state:</strong> the default view includes only numbers whose full-history current drought is at least six draws.</li>
+	    <li><strong>Strict ranking:</strong> rows are ranked first by full-history current drought, then by how mature that drought is against the number's own completed 6+ drought episodes, then by episode frequency and empirical hazard support.</li>
+	    <li><strong>Empirical hazard mode:</strong> after each historical draw, the app records each number's drought length <code>k</code>, then checks whether that number appeared in the next draw.</li>
+	    <li><strong>Smoothing:</strong> the empirical rate adds two baseline-prior trials to stabilize sparse drought lengths. This avoids overstating rare <code>k</code> values that have only a few observations.</li>
+	  </ul>
 
-  <div class="note">
-    <strong>Truthfulness note:</strong> this shortlist is an empirical diagnostic, not a guarantee and not a calibrated main-number prediction. It is useful as supporting evidence, especially when combined with backtests and other panels.
-  </div>
+	  <div class="note">
+	    <strong>Truthfulness note:</strong> this shortlist is an empirical diagnostic, not a guarantee and not a calibrated main-number prediction. Strict rank is a disciplined drought-severity ranking; empirical rate is supporting evidence, not a promise that the number is "due."
+	  </div>
 
   <h3 id="dga-columns">Column Structure</h3>
 
@@ -1549,6 +1644,55 @@
       <tr><td><strong>OGA%</strong></td><td>0–100%</td><td>↓ High</td><td>Signal when window ≥ 10</td><td>Octagonal grid alignment</td></tr>
     </tbody>
   </table>
+
+  <h3 id="prediction-journal">Prediction Journal &amp; Scorecard</h3>
+
+  <p>The <strong>Prediction Journal &amp; Scorecard</strong> is an observe-only validation panel. It lets you write down your own hypotheses before the next draw, then scores them later against real draw history. It does not influence candidate generation, candidate ranking, filters, forced numbers, or any weighting system.</p>
+
+  <div class="note">
+    <strong>Purpose:</strong> the journal is for learning whether your own observations are improving over time. It is deliberately separate from generation so the saved record stays honest.
+  </div>
+
+  <h4>How entries are anchored and locked</h4>
+  <ul>
+    <li>When you save an entry, it is anchored to the latest real draw currently loaded in history.</li>
+    <li>The app also captures the current State Preset-style setup snapshot, including WFMQYH, generation controls, hard filters, selected ratios, selected/excluded numbers, and other preset-managed switches.</li>
+    <li>You can edit or delete the entry while no target draw has arrived yet.</li>
+    <li>If you edit an entry before it locks, the setup snapshot is refreshed to the app state at the time of the latest save.</li>
+    <li>Once the first target draw appears in history, the entry locks and can no longer be edited. This prevents after-the-fact changes.</li>
+    <li>The panel uses real draw history for scoring, not the active WFMQYH filter. WFMQYH can help you form a prediction, but validation must use the actual next draw stream.</li>
+  </ul>
+
+  <h4>Saved setup provenance</h4>
+  <p>Each entry displays a compact <strong>Saved setup</strong> summary, such as the WFMQYH mode, selected odd/even ratios, scoring influence, carry-over bias state, core hard-filter state, and selected/excluded number counts. The full setup snapshot is also stored inside the journal export so later analysis can compare prediction quality under different app configurations.</p>
+
+  <div class="warn-box">
+    <strong>Important:</strong> the saved setup snapshot is provenance. It does not change candidate generation, does not alter scoring, and does not make the prediction more or less true by itself.
+  </div>
+
+  <h4>Entry checker</h4>
+  <p>Before saving, the journal checks for impossible quantities. For example, a next-draw odd/even ratio must total 8, a next-draw number shortlist cannot contain more than 8 unique numbers, terminal digit selections cannot exceed what the target window can draw, and count fields such as bucket mix, repeat count, drought count, carry-over count, and confidence must stay inside their possible ranges. Invalid entries are blocked and shown as a visible error list.</p>
+
+  <h4>Fields you can record</h4>
+  <table>
+    <thead>
+      <tr><th>Field</th><th>What it records</th><th>Current scoring behaviour</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>Odd/even ratio</strong></td><td>A mains + supps ratio such as <code>2:6</code>.</td><td>Scored as exact hit or miss against the target draw window.</td></tr>
+      <tr><td><strong>Numbers</strong></td><td>Exact numbers or a shortlist. Punctuation in pasted text is accepted.</td><td>Scores how many listed numbers appeared in the target draw window.</td></tr>
+      <tr><td><strong>Monthly bucket mix</strong></td><td>Counts for Undrawn, 1x, 2x, through 8x+.</td><td>Scores against the bucket each target number belonged to before that draw happened.</td></tr>
+      <tr><td><strong>Single/double digit</strong></td><td>Counts of 1-9 versus 10-45.</td><td>Scored by absolute count match.</td></tr>
+      <tr><td><strong>Sum range</strong></td><td>A minimum and/or maximum total.</td><td>Scores whether the target draw total falls inside the saved range.</td></tr>
+      <tr><td><strong>Terminal digits</strong></td><td>Ending digits to watch. Entering <code>12</code> is treated as terminal digit <code>2</code>.</td><td>Scores how many listed terminal digits appeared.</td></tr>
+      <tr><td><strong>Recorded diagnostics</strong></td><td>Items such as U/D/F ratio, repeat count, ±1/±2 count, drought count, and carry-over count.</td><td>Stored for review; not all are scored in V1.</td></tr>
+      <tr><td><strong>Notes and confidence</strong></td><td>Your reasoning and a 0-100 self-rating.</td><td>Stored for future calibration and self-review.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="warn-box">
+    <strong>Honesty note:</strong> a scored journal entry is evidence about your prediction process, not proof that the same pattern will repeat. Treat the scorecard as a calibration record.
+  </div>
 
   <h3 id="previous-neighbour-backtest">Previous ±1 Neighbour Backtest</h3>
 

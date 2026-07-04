@@ -16,8 +16,51 @@ const draw = (date: string, main: number[], supp: number[] = []): Draw => ({
   supp,
 });
 
+const repeatDraws = (month: string, count: number, start = 1): Draw[] => (
+  Array.from({ length: count }, (_, index) => {
+    const day = String(index + 1).padStart(2, "0");
+    const base = ((start + index * 3 - 1) % 45) + 1;
+    return draw(`${month}-${day}`, [
+      base,
+      ((base + 1 - 1) % 45) + 1,
+      ((base + 2 - 1) % 45) + 1,
+      ((base + 3 - 1) % 45) + 1,
+      ((base + 4 - 1) % 45) + 1,
+      ((base + 5 - 1) % 45) + 1,
+    ], [
+      ((base + 6 - 1) % 45) + 1,
+      ((base + 7 - 1) % 45) + 1,
+    ]);
+  })
+);
+
+const weekdayDraws = (month: string, weekdays: number[], start = 1): Draw[] => {
+  const [yearRaw, monthRaw] = month.split("-");
+  const year = Number(yearRaw);
+  const monthIndex = Number(monthRaw) - 1;
+  const draws: Draw[] = [];
+  for (let day = 1; day <= 31; day++) {
+    const date = new Date(year, monthIndex, day);
+    if (date.getMonth() !== monthIndex) break;
+    if (!weekdays.includes(date.getDay())) continue;
+    const base = ((start + draws.length * 3 - 1) % 45) + 1;
+    draws.push(draw(`${month}-${String(day).padStart(2, "0")}`, [
+      base,
+      ((base + 1 - 1) % 45) + 1,
+      ((base + 2 - 1) % 45) + 1,
+      ((base + 3 - 1) % 45) + 1,
+      ((base + 4 - 1) % 45) + 1,
+      ((base + 5 - 1) % 45) + 1,
+    ], [
+      ((base + 6 - 1) % 45) + 1,
+      ((base + 7 - 1) % 45) + 1,
+    ]));
+  }
+  return draws;
+};
+
 describe("analyzeMonthlyDrawSummary", () => {
-  it("uses only observed draw months while letting ideal-draw logic switch to a synthetic planning month when the calendar has advanced", () => {
+  it("adds a synthetic planning row while keeping latestRow anchored to observed draw history", () => {
     const summary = analyzeMonthlyDrawSummary(
       [
         draw("2024-01-03", [1, 2, 3, 4, 5, 6], [7, 8]),
@@ -26,8 +69,13 @@ describe("analyzeMonthlyDrawSummary", () => {
       { today: new Date("2026-05-26T00:00:00Z") },
     );
 
-    expect(summary.rows.map((row) => row.monthLabel)).toEqual(["2024-01", "2024-02"]);
+    expect(summary.rows.map((row) => row.monthLabel)).toEqual(["2024-01", "2024-02", "2026-05"]);
     expect(summary.latestRow?.monthLabel).toBe("2024-02");
+    expect(summary.rows.at(-1)).toMatchObject({
+      monthLabel: "2026-05",
+      drawCount: 0,
+      totalDrawCount: 1,
+    });
     expect(summary.effectiveMonthLabel).toBe("2026-05");
     expect(summary.effectiveMonthIsSynthetic).toBe(true);
     expect(summary.currentDistribution[0]).toBe(45);
@@ -39,11 +87,87 @@ describe("analyzeMonthlyDrawSummary", () => {
     expect(summary.quality.syntheticMonthCount).toBe(1);
   });
 
+  it("rolls a completed latest month into a next-month planning row before the calendar month changes", () => {
+    const summary = analyzeMonthlyDrawSummary([
+      ...repeatDraws("2026-01", 13, 1),
+      ...repeatDraws("2026-03", 13, 4),
+      ...repeatDraws("2026-06", 13, 7),
+    ], {
+      today: new Date("2026-06-30T12:00:00"),
+      averageDrawCountFilter: 13,
+    });
+
+    const planningRow = summary.rows.find((row) => row.monthLabel === "2026-07");
+    expect(summary.latestRow?.monthLabel).toBe("2026-06");
+    expect(summary.effectiveMonthLabel).toBe("2026-07");
+    expect(summary.effectiveMonthDrawCount).toBe(0);
+    expect(summary.effectiveMonthIsSynthetic).toBe(true);
+    expect(planningRow).toMatchObject({
+      monthLabel: "2026-07",
+      drawCount: 0,
+      totalDrawCount: 13,
+      validNumberOccurrences: 0,
+      expectedNumberSlots: 0,
+    });
+    expect(planningRow?.undrawn).toHaveLength(45);
+    expect(planningRow?.distribution[0]).toBe(45);
+    expect(summary.effectiveBucketSets.undrawn.size).toBe(45);
+    expect(summary.effectiveBucketSets.times1.size).toBe(0);
+    expect(summary.eligibleRows.map((row) => row.monthLabel)).toEqual(["2026-01", "2026-03", "2026-06"]);
+    expect(summary.drawCountOptions).toEqual([13]);
+    expect(summary.idealDraw?.bucketCounts.reduce((sum, bucket) => sum + bucket.count, 0)).toBe(8);
+  });
+
+  it("uses the latest month's weekday rhythm instead of the historical max when deciding completion", () => {
+    const mondayWednesdayFriday = [1, 3, 5];
+    const summary = analyzeMonthlyDrawSummary([
+      ...weekdayDraws("2025-10", mondayWednesdayFriday, 1),
+      ...weekdayDraws("2026-01", mondayWednesdayFriday, 4),
+      ...weekdayDraws("2026-03", mondayWednesdayFriday, 7),
+      ...weekdayDraws("2026-06", mondayWednesdayFriday, 10),
+    ], {
+      today: new Date("2026-06-30T12:00:00"),
+      averageDrawCountFilter: 13,
+    });
+
+    const juneRow = summary.rows.find((row) => row.monthLabel === "2026-06");
+    const planningRow = summary.rows.find((row) => row.monthLabel === "2026-07");
+    expect(summary.maxObservedDrawsPerMonth).toBe(14);
+    expect(juneRow?.totalDrawCount).toBe(13);
+    expect(summary.effectiveMonthLabel).toBe("2026-07");
+    expect(summary.effectiveMonthIsSynthetic).toBe(true);
+    expect(planningRow).toMatchObject({
+      monthLabel: "2026-07",
+      drawCount: 0,
+      totalDrawCount: 14,
+    });
+    expect(summary.effectiveBucketSets.undrawn.size).toBe(45);
+  });
+
+  it("uses the latest observed month rhythm when older recent rows include extra weekdays", () => {
+    const mondayWednesdayFriday = [1, 3, 5];
+    const summary = analyzeMonthlyDrawSummary([
+      ...weekdayDraws("2025-10", mondayWednesdayFriday, 1),
+      ...weekdayDraws("2026-04", [0, 2], 4),
+      ...weekdayDraws("2026-05", mondayWednesdayFriday, 7),
+      ...weekdayDraws("2026-06", mondayWednesdayFriday, 10),
+    ], {
+      today: new Date("2026-06-30T12:00:00"),
+    });
+
+    expect(summary.maxObservedDrawsPerMonth).toBe(14);
+    expect(summary.rows.find((row) => row.monthLabel === "2026-06")?.totalDrawCount).toBe(13);
+    expect(summary.effectiveMonthLabel).toBe("2026-07");
+    expect(summary.rows.find((row) => row.monthLabel === "2026-07")?.totalDrawCount).toBe(14);
+  });
+
   it("deduplicates numbers within a draw and reports invalid input instead of overcounting", () => {
     const summary = analyzeMonthlyDrawSummary([
       draw("2024-03-01", [1, 1, 2, 46, 2, 3], [3, 4, Number.NaN]),
       draw("invalid-date", [5, 6, 7, 8, 9, 10], [11, 12]),
-    ]);
+    ], {
+      today: new Date("2024-03-02T12:00:00"),
+    });
 
     expect(summary.rows).toHaveLength(1);
     expect(summary.rows[0].numbers).toEqual([
@@ -174,24 +298,6 @@ describe("analyzeMonthlyDrawSummary", () => {
 });
 
 describe("analyzeStageIdealDrawModel", () => {
-  const repeatDraws = (month: string, count: number, start = 1): Draw[] => (
-    Array.from({ length: count }, (_, index) => {
-      const day = String(index + 1).padStart(2, "0");
-      const base = ((start + index * 3 - 1) % 45) + 1;
-      return draw(`${month}-${day}`, [
-        base,
-        ((base + 1 - 1) % 45) + 1,
-        ((base + 2 - 1) % 45) + 1,
-        ((base + 3 - 1) % 45) + 1,
-        ((base + 4 - 1) % 45) + 1,
-        ((base + 5 - 1) % 45) + 1,
-      ], [
-        ((base + 6 - 1) % 45) + 1,
-        ((base + 7 - 1) % 45) + 1,
-      ]);
-    })
-  );
-
   it("targets the next draw stage using only comparable same-size months", () => {
     const history = [
       ...repeatDraws("2026-01", 13, 1),
@@ -242,6 +348,22 @@ describe("analyzeStageIdealDrawModel", () => {
     expect(state?.completedDrawCount).toBe(13);
     expect(state?.targetStageDrawCount).toBe(13);
     expect(state?.warnings).toContain("Target stage was clamped to the expected 13 draws.");
+  });
+
+  it("rolls the stage working month forward when the latest month is cadence-complete", () => {
+    const mondayWednesdayFriday = [1, 3, 5];
+    const state = analyzeStageIdealDrawModel([
+      ...weekdayDraws("2025-10", mondayWednesdayFriday, 1),
+      ...weekdayDraws("2026-06", mondayWednesdayFriday, 4),
+    ], {
+      today: new Date("2026-06-30T12:00:00"),
+    });
+
+    expect(state).not.toBeNull();
+    expect(state?.workingMonthLabel).toBe("2026-07");
+    expect(state?.expectedDrawCount).toBe(14);
+    expect(state?.completedDrawCount).toBe(0);
+    expect(state?.targetStageDrawCount).toBe(1);
   });
 });
 

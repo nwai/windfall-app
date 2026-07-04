@@ -26,4 +26,22 @@ describe("UserSelectedNumbersPanel", () => {
     expect(droughtLockedButton?.getAttribute("aria-pressed")).toBe("true");
     expect(droughtLockedButton?.getAttribute("disabled")).not.toBeNull();
   });
+
+  it("disables user-excluded numbers and explains why they cannot be selected", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(UserSelectedNumbersPanel, {
+        userSelectedNumbers: [4],
+        setUserSelectedNumbers: vi.fn(),
+        excludedNumbers: [7, 12],
+      }),
+    );
+    const document = new DOMParser().parseFromString(html, "text/html");
+    const excludedButton = document.querySelector("button[aria-label='Number 7 is excluded by User Exclusions']");
+
+    expect(document.body.textContent).toContain("User exclusions active: 7, 12");
+    expect(document.body.textContent).toContain("Selected set: 4");
+    expect(excludedButton?.getAttribute("aria-pressed")).toBe("false");
+    expect(excludedButton?.getAttribute("disabled")).not.toBeNull();
+    expect(excludedButton?.getAttribute("title")).toContain("Clear it in WFMQYH User Exclusions");
+  });
 });

@@ -344,29 +344,35 @@ export function analyzeMonthlyDrawSummary(
   const grouped = groupParsedDrawsByMonth(parsed);
   const maxObservedDrawsPerMonth = Math.max(1, ...[...grouped.values()].map((items) => items.length));
   const drawLimit = normalizeDrawLimit(options.drawLimitPerMonth, maxObservedDrawsPerMonth);
-  const rows = buildRowsFromParsedDraws({ parsed, drawLimit, maxNumber, maxBucket, drawSize });
+  const observedRows = buildRowsFromParsedDraws({ parsed, drawLimit, maxNumber, maxBucket, drawSize });
 
   const todayMonthLabel = monthLabelFromLocalDate(options.today ?? new Date());
-  const latestRow = rows.length ? rows[rows.length - 1] : null;
-  const latestBucketSets = latestRow
-    ? bucketSetsFromDistribution(latestRow.numbers, latestRow.undrawn, maxBucket)
-    : createEmptyMonthlyBucketSets();
-  const latestBucketLabels = bucketLabelsFromSets(latestBucketSets, maxNumber);
   const effectiveMonth = resolveEffectiveMonthState({
-    rows,
+    rows: observedRows,
     todayMonthLabel,
     maxObservedDrawsPerMonth,
     maxNumber,
     maxBucket,
+    expectedDrawCountForMonth: (monthLabel) => expectedDrawCountFromRhythmOrFallback({
+      parsed,
+      monthLabel,
+      fallback: maxObservedDrawsPerMonth,
+    }),
   });
+  const rows = rowsWithSyntheticPlanningMonth(observedRows, effectiveMonth);
+  const latestRow = observedRows.length ? observedRows[observedRows.length - 1] : null;
+  const latestBucketSets = latestRow
+    ? bucketSetsFromDistribution(latestRow.numbers, latestRow.undrawn, maxBucket)
+    : createEmptyMonthlyBucketSets();
+  const latestBucketLabels = bucketLabelsFromSets(latestBucketSets, maxNumber);
   const effectiveBucketSets = effectiveMonth.row
     ? bucketSetsFromDistribution(effectiveMonth.row.numbers, effectiveMonth.row.undrawn, maxBucket)
     : createEmptyMonthlyBucketSets();
   const effectiveBucketLabels = bucketLabelsFromSets(effectiveBucketSets, maxNumber);
-  const drawCountOptions = [...new Set(rows.map((row) => row.totalDrawCount))].sort((a, b) => a - b);
+  const drawCountOptions = [...new Set(observedRows.map((row) => row.totalDrawCount))].sort((a, b) => a - b);
 
   const averageDrawCountFilter = options.averageDrawCountFilter ?? "all";
-  const pastRows = rows.filter((row) => row.monthLabel !== effectiveMonth.monthLabel);
+  const pastRows = observedRows.filter((row) => row.monthLabel !== effectiveMonth.monthLabel);
   const baselineRows = filterRowsForHistoryBaselines(pastRows, (row) => row.monthLabel);
   const eligibleRows = baselineRows.filter((row) => (
     averageDrawCountFilter === "all" || row.totalDrawCount === averageDrawCountFilter
@@ -457,6 +463,11 @@ export function analyzeStageIdealDrawModel(
     maxObservedDrawsPerMonth,
     maxNumber,
     maxBucket,
+    expectedDrawCountForMonth: (monthLabel) => expectedDrawCountFromRhythmOrFallback({
+      parsed,
+      monthLabel,
+      fallback: maxObservedDrawsPerMonth,
+    }),
   }).monthLabel;
   const workingMonthLabel = args.forceWorkingMonthLabel || resolvedWorkingMonth;
   if (!workingMonthLabel) return null;
@@ -466,8 +477,11 @@ export function analyzeStageIdealDrawModel(
   const override = args.expectedDrawCountOverride;
   const inferredExpectedDrawCount = override && override !== "auto"
     ? Math.max(1, Math.floor(override))
-    : inferExpectedDrawCountFromWeekdayRhythm({ parsed, workingMonthLabel })
-      ?? maxObservedDrawsPerMonth;
+    : expectedDrawCountFromRhythmOrFallback({
+      parsed,
+      monthLabel: workingMonthLabel,
+      fallback: maxObservedDrawsPerMonth,
+    });
   const expectedDrawCount = Math.max(1, inferredExpectedDrawCount);
   const expectedDrawCountSource: ExpectedDrawCountSource = override && override !== "auto" ? "override" : "auto";
   const unclampedTargetStage = completedDrawCount + 1;
@@ -709,7 +723,14 @@ function inferExpectedDrawCountFromWeekdayRhythm(args: {
   parsed: ParsedDraw[];
   workingMonthLabel: string;
 }): number | null {
-  const recent = args.parsed.slice(-90);
+  const monthLabels = [...new Set(args.parsed.map((draw) => draw.monthLabel))].sort();
+  const sourceMonthLabel = [...monthLabels]
+    .reverse()
+    .find((monthLabel) => monthLabel <= args.workingMonthLabel) ?? monthLabels[monthLabels.length - 1] ?? "";
+  const sourceMonthDraws = sourceMonthLabel
+    ? args.parsed.filter((draw) => draw.monthLabel === sourceMonthLabel)
+    : [];
+  const recent = sourceMonthDraws.length ? sourceMonthDraws : args.parsed.slice(-30);
   const weekdays = new Set<number>();
   for (const draw of recent) {
     const date = new Date(draw.timestamp);
@@ -731,8 +752,26 @@ function inferExpectedDrawCountFromWeekdayRhythm(args: {
   return count > 0 ? count : null;
 }
 
+function expectedDrawCountFromRhythmOrFallback(args: {
+  parsed: ParsedDraw[];
+  monthLabel: string;
+  fallback: number;
+}): number {
+  const fallback = Math.max(1, Math.floor(args.fallback));
+  const inferred = inferExpectedDrawCountFromWeekdayRhythm({
+    parsed: args.parsed,
+    workingMonthLabel: args.monthLabel,
+  });
+  if (!inferred) return fallback;
+
+  const plausibleUpperBound = Math.max(fallback + 1, Math.ceil(fallback * 1.25));
+  if (inferred > plausibleUpperBound) return fallback;
+  return Math.max(1, Math.floor(inferred));
+}
+
 function buildSyntheticMonthRow(args: {
   monthLabel: string;
+  totalDrawCount?: number;
   maxNumber: number;
   maxBucket: number;
 }): MonthlyDrawMonthRow {
@@ -741,7 +780,7 @@ function buildSyntheticMonthRow(args: {
   return {
     monthLabel: args.monthLabel,
     drawCount: 0,
-    totalDrawCount: 0,
+    totalDrawCount: Math.max(0, Math.floor(args.totalDrawCount ?? 0)),
     numbers: [],
     frequencyCounts: [],
     undrawn: Array.from({ length: args.maxNumber }, (_, index) => index + 1),
@@ -758,8 +797,13 @@ function resolveEffectiveMonthState(args: {
   maxObservedDrawsPerMonth: number;
   maxNumber: number;
   maxBucket: number;
+  expectedDrawCountForMonth?: (monthLabel: string) => number;
 }): EffectiveMonthState {
   const { rows, todayMonthLabel, maxObservedDrawsPerMonth, maxNumber, maxBucket } = args;
+  const expectedDrawCountForMonth = (monthLabel: string) => {
+    const expected = args.expectedDrawCountForMonth?.(monthLabel) ?? maxObservedDrawsPerMonth;
+    return Math.max(1, Math.floor(expected));
+  };
   const latestRow = rows.length ? rows[rows.length - 1] : null;
   const latestMonthLabel = latestRow?.monthLabel ?? "";
   const rowByMonth = new Map(rows.map((row) => [row.monthLabel, row]));
@@ -768,7 +812,12 @@ function resolveEffectiveMonthState(args: {
     if (!todayMonthLabel) {
       return { monthLabel: "", drawCount: 0, isSynthetic: false, row: null };
     }
-    const syntheticRow = buildSyntheticMonthRow({ monthLabel: todayMonthLabel, maxNumber, maxBucket });
+    const syntheticRow = buildSyntheticMonthRow({
+      monthLabel: todayMonthLabel,
+      totalDrawCount: expectedDrawCountForMonth(todayMonthLabel),
+      maxNumber,
+      maxBucket,
+    });
     return { monthLabel: todayMonthLabel, drawCount: 0, isSynthetic: true, row: syntheticRow };
   }
 
@@ -777,7 +826,8 @@ function resolveEffectiveMonthState(args: {
     if (todayMonthLabel > latestMonthLabel) {
       effectiveMonthLabel = todayMonthLabel;
     } else if (todayMonthLabel === latestMonthLabel) {
-      const shouldAdvanceToNextMonth = rows.length > 1 && latestRow.totalDrawCount >= maxObservedDrawsPerMonth;
+      const expectedLatestDrawCount = expectedDrawCountForMonth(latestMonthLabel);
+      const shouldAdvanceToNextMonth = rows.length > 1 && latestRow.totalDrawCount >= expectedLatestDrawCount;
       effectiveMonthLabel = shouldAdvanceToNextMonth ? nextMonthLabel(todayMonthLabel) : todayMonthLabel;
     }
   }
@@ -792,13 +842,31 @@ function resolveEffectiveMonthState(args: {
     };
   }
 
-  const syntheticRow = buildSyntheticMonthRow({ monthLabel: effectiveMonthLabel, maxNumber, maxBucket });
+  const syntheticRow = buildSyntheticMonthRow({
+    monthLabel: effectiveMonthLabel,
+    totalDrawCount: expectedDrawCountForMonth(effectiveMonthLabel),
+    maxNumber,
+    maxBucket,
+  });
   return {
     monthLabel: effectiveMonthLabel,
     drawCount: 0,
     isSynthetic: true,
     row: syntheticRow,
   };
+}
+
+function rowsWithSyntheticPlanningMonth(
+  observedRows: MonthlyDrawMonthRow[],
+  effectiveMonth: EffectiveMonthState,
+): MonthlyDrawMonthRow[] {
+  if (!observedRows.length || !effectiveMonth.isSynthetic || !effectiveMonth.row || !effectiveMonth.monthLabel) {
+    return observedRows;
+  }
+  if (observedRows.some((row) => row.monthLabel === effectiveMonth.monthLabel)) {
+    return observedRows;
+  }
+  return [...observedRows, effectiveMonth.row].sort((a, b) => a.monthLabel.localeCompare(b.monthLabel));
 }
 
 function sanitizeDrawNumbers(

@@ -20,6 +20,7 @@ Windfall is a dense analytical app, so the design goal is not decoration. The de
 - Keep buttons at or above the app's HIG target sizing unless inside a genuinely dense table.
 - Make controls wrap into rows on narrow screens.
 - Do not use color alone to communicate status.
+- Use one visible title source per panel, usually the `CollapsibleSection` heading. Do not repeat the same panel title inside the panel body.
 - Keep generator panels visually findable with `windfall-generator-panel`.
 - Use `WorkflowAnchor` and `AppWorkflowNav` when adding major workflow sections.
 - Use the shared disclosure affordance on collapsible panels; do not reintroduce browser-default markers or panel-specific collapse icons.
