@@ -234,6 +234,30 @@ const formatSumFilter = (sumFilter: unknown): string | null => {
   return `Sum filter: ${filter.min ?? "-"}-${filter.max ?? "-"}`;
 };
 
+const setupBucketLabels: Array<[PredictionBucketKey, string]> = [
+  ["undrawn", "0x"],
+  ["times1", "1x"],
+  ["times2", "2x"],
+  ["times3", "3x"],
+  ["times4", "4x"],
+  ["times5", "5x"],
+  ["times6", "6x"],
+  ["times7", "7x"],
+  ["times8", "8x+"],
+];
+
+const formatAcceptanceNeedsCounts = (counts: unknown): string => {
+  if (!counts || typeof counts !== "object") return "none";
+  const source = counts as Partial<Record<PredictionBucketKey, unknown>>;
+  const parts = setupBucketLabels
+    .map(([key, label]) => {
+      const value = Number(source[key] ?? 0);
+      return Number.isFinite(value) && value > 0 ? `${label}≥${Math.floor(value)}` : null;
+    })
+    .filter((value): value is string => value !== null);
+  return parts.length ? parts.join(" · ") : "none";
+};
+
 export function summarizePredictionJournalSetup(snapshot: AppPresetSnapshot | null | undefined): PredictionJournalSetupSummary | undefined {
   if (!snapshot) return undefined;
   const setup = snapshot as Partial<AppPresetSnapshot> & Record<string, any>;
@@ -241,7 +265,9 @@ export function summarizePredictionJournalSetup(snapshot: AppPresetSnapshot | nu
   const generation: string[] = [
     `Scoring influence: ${setup.scoringGenerationInfluence ?? "off"}`,
     `Month-end carry-over: ${setup.monthEndCarryOverBiasEnabled ? (setup.monthEndCarryOverStrength ?? "normal") : "off"}`,
-    `Acceptance needs: ${setup.acceptanceNeedsEnabled ? (setup.acceptanceNeedsHardExclude ? "hard exclude" : "on") : "off"}`,
+    `Use counts when constructing candidates: ${setup.monthlyConstructiveEnabled ? "on" : "off"}`,
+    `Acceptance needs counts: ${formatAcceptanceNeedsCounts(setup.acceptanceNeedsCounts)}`,
+    `Extra MiAN post-filter: ${setup.acceptanceNeedsEnabled ? (setup.acceptanceNeedsHardExclude ? "hard exclude" : "on") : "off"}`,
   ];
   const filters: string[] = [
     `SDE1 ${knobs.enableSDE1 ? "on" : "off"}`,
@@ -257,8 +283,8 @@ export function summarizePredictionJournalSetup(snapshot: AppPresetSnapshot | nu
 
   const selections: string[] = [];
   const selectionCounts: Array<[unknown, string]> = [
-    [setup.userSelectedNumbers, "User selected"],
-    [setup.excludedNumbers, "User excluded"],
+    [setup.userSelectedNumbers, "User-selected strip"],
+    [setup.excludedNumbers, "User exclusions"],
     [setup.hotColdForcedNumbers, "Hot/cold forced"],
     [setup.hotColdExcludedNumbers, "Hot/cold excluded"],
     [setup.droughtBreakSelectedNumbers, "Drought-break forced"],

@@ -25,25 +25,24 @@ export function chooseInitialDrawHistory(
   if (cached.length === 0 && bundled.length === 0) {
     return { history: [], source: "none", reason: "No cached or bundled draw history is available." };
   }
-  if (cachedIsSimulatedOnly) {
-    if (bundled.length > 0) {
-      return {
-        history: bundled,
-        source: "bundled-csv",
-        reason: "Ignored simulated-only browser cache and loaded bundled real draw history instead.",
-      };
-    }
+  if (bundled.length === 0) {
     return {
       history: [],
       source: "none",
-      reason: "Ignored simulated-only browser cache; no bundled real draw history is available.",
+      reason: cachedIsSimulatedOnly
+        ? "Default bundled CSV is unavailable and simulated-only browser cache was ignored; choose another CSV or explicitly load simulated demo rows."
+        : "Default bundled CSV is unavailable; choose another CSV or explicitly load simulated demo rows.",
+    };
+  }
+  if (cachedIsSimulatedOnly) {
+    return {
+      history: bundled,
+      source: "bundled-csv",
+      reason: "Ignored simulated-only browser cache and loaded bundled real draw history instead.",
     };
   }
   if (cached.length === 0) {
     return { history: bundled, source: "bundled-csv", reason: "No reviewed browser cache exists." };
-  }
-  if (bundled.length === 0) {
-    return { history: cached, source: "cache", reason: "No bundled CSV draw history is available." };
   }
 
   const cachedLatest = latestEpoch(cached);

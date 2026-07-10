@@ -45,17 +45,45 @@ const timeline: MonthlyBucketTimelineEntry[] = [
   {
     monthLabel: "2026-03",
     drawCount: 4,
+    totalDrawCount: 13,
     bucketSets: buildBucketSets({ 1: [1, 2, 3], 2: [4] }),
+    drawStates: [
+      { drawOrdinal: 1, drawDate: "2026-03-02", bucketSets: buildBucketSets({ 1: [1] }) },
+      { drawOrdinal: 2, drawDate: "2026-03-04", bucketSets: buildBucketSets({ 1: [1, 2] }) },
+      { drawOrdinal: 3, drawDate: "2026-03-06", bucketSets: buildBucketSets({ 1: [1, 2, 3] }) },
+      { drawOrdinal: 4, drawDate: "2026-03-09", bucketSets: buildBucketSets({ 1: [1, 2, 3], 2: [4] }) },
+    ],
   },
   {
     monthLabel: "2026-04",
     drawCount: 3,
+    totalDrawCount: 13,
     bucketSets: buildBucketSets({ 1: [10, 11], 3: [12], 8: [13] }),
+    drawStates: [
+      { drawOrdinal: 1, drawDate: "2026-04-01", bucketSets: buildBucketSets({ 1: [10] }) },
+      { drawOrdinal: 2, drawDate: "2026-04-03", bucketSets: buildBucketSets({ 1: [10, 11], 2: [12] }) },
+      { drawOrdinal: 3, drawDate: "2026-04-06", bucketSets: buildBucketSets({ 1: [10, 11], 3: [12], 8: [13] }) },
+    ],
   },
   {
     monthLabel: "2026-05",
     drawCount: 2,
+    totalDrawCount: 13,
     bucketSets: buildBucketSets({ 1: [7], 2: [8, 9], 4: [17] }),
+    drawStates: [
+      { drawOrdinal: 1, drawDate: "2026-05-01", bucketSets: buildBucketSets({ 1: [7], 2: [8] }) },
+      { drawOrdinal: 2, drawDate: "2026-05-04", bucketSets: buildBucketSets({ 1: [7], 2: [8, 9], 4: [17] }) },
+    ],
+  },
+  {
+    monthLabel: "2026-06",
+    drawCount: 1,
+    totalDrawCount: 13,
+    bucketSets: buildBucketSets({ 1: [21], 2: [22] }),
+    drawStates: [
+      { drawOrdinal: 1, drawDate: "2026-06-01", bucketSets: buildBucketSets({ 1: [21] }) },
+      { drawOrdinal: 2, drawDate: "2026-06-03", bucketSets: buildBucketSets({ 1: [21], 2: [22] }), isSimulated: true },
+    ],
   },
 ];
 
@@ -73,7 +101,7 @@ const mountGrid = async (
     root?.render(
       React.createElement(DGAMonthlyBucketStateGrid, {
         timeline,
-        currentMonthLabel: "2026-05",
+        currentMonthLabel: "2026-06",
         cellSize: 20,
         ...props,
       }),
@@ -103,18 +131,36 @@ afterEach(async () => {
 });
 
 describe("DGAMonthlyBucketStateGrid", () => {
-  it("pins the current month column before older months", async () => {
+  it("groups scheduled draw-slot subcolumns under each month with D1-D13 x-axis labels", async () => {
     const rendered = await mountGrid();
     await expandGrid();
 
-    const headers = Array.from(rendered.querySelectorAll("thead th"));
-    expect(headers).toHaveLength(4);
-    expect(headers[1]?.textContent).toContain("2026-05");
-    expect(headers[1]?.textContent).toContain("strip");
-    expect(headers[2]?.textContent).toContain("2026-04");
-    expect(headers[3]?.textContent).toContain("2026-03");
-    expect((headers[1] as HTMLTableCellElement).style.position).toBe("sticky");
-    expect((headers[1] as HTMLTableCellElement).style.left).toBe("46px");
+    const monthHeaders = Array.from(rendered.querySelectorAll("thead tr:first-child th"));
+    expect(monthHeaders[1]?.textContent).toContain("2026-06");
+    expect(monthHeaders[1]?.textContent).toContain("2/13");
+    expect(monthHeaders[1]?.textContent).toContain("strip");
+    expect(monthHeaders[2]?.textContent).toContain("2026-05");
+    expect(monthHeaders[3]?.textContent).toContain("2026-04");
+    expect(monthHeaders[4]?.textContent).toContain("2026-03");
+
+    const topAxis = rendered.querySelector("[aria-label='Current month draw-slot x-axis for 2026-06']");
+    expect(topAxis).toBeTruthy();
+    expect(topAxis?.textContent ?? "").toContain("X-axis");
+    expect(topAxis?.textContent ?? "").toContain("D1");
+    expect(topAxis?.textContent ?? "").toContain("D13");
+
+    const drawHeaders = Array.from(rendered.querySelectorAll("thead tr:nth-child(2) th"));
+    expect(drawHeaders).toHaveLength(52);
+    expect(drawHeaders.map((header) => header.textContent?.trim()).slice(0, 13)).toEqual(
+      Array.from({ length: 13 }, (_, index) => `D${index + 1}`),
+    );
+    expect(drawHeaders[1]?.getAttribute("title")).toContain("simulated");
+    expect(drawHeaders[12]?.getAttribute("title")).toContain("no recorded draw state");
+
+    const futureSlotCell = Array.from(rendered.querySelectorAll("tbody td")).find((cell) =>
+      cell.getAttribute("title")?.includes("21 · 2026-06 · D13"),
+    );
+    expect(futureSlotCell?.getAttribute("title")).toContain("no recorded draw state");
   });
 
   it("shows whole-column bucket totals on hover and exposes linked hover copy", async () => {
@@ -122,13 +168,13 @@ describe("DGAMonthlyBucketStateGrid", () => {
     const rendered = await mountGrid({ hoveredNumber: 17, onHoverNumber: hoverSpy });
     await expandGrid();
 
-    expect(rendered.textContent).toContain("Pinned current month totals");
+    expect(rendered.textContent).toContain("Pinned current draw-state totals");
     expect(rendered.textContent).toContain(
       "Linked hover: 17 is highlighted in the DGA strip and the pinned current-month cell.",
     );
 
     const aprilCell = Array.from(rendered.querySelectorAll("tbody td")).find((cell) =>
-      cell.getAttribute("title")?.includes("10 · 2026-04"),
+      cell.getAttribute("title")?.includes("13 · 2026-04 · D3"),
     );
     expect(aprilCell).toBeTruthy();
 
@@ -136,8 +182,8 @@ describe("DGAMonthlyBucketStateGrid", () => {
       aprilCell?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
     });
 
-    expect(rendered.textContent).toContain("Hovered month totals");
-    expect(rendered.textContent).toContain("2026-04");
+    expect(rendered.textContent).toContain("Hovered draw-state totals");
+    expect(rendered.textContent).toContain("2026-04 · D3");
     expect(rendered.textContent).toContain("8x+: 1");
 
     const currentRowLabel = Array.from(rendered.querySelectorAll("tbody td")).find((cell) =>

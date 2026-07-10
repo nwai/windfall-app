@@ -52,4 +52,14 @@ describe("chooseInitialDrawHistory", () => {
     expect(choice.history).toEqual([]);
     expect(choice.reason).toContain("simulated-only");
   });
+
+  it("does not restore cached real history when the default bundled CSV is unavailable", () => {
+    const cached = [draw("2026-05-25"), draw("2026-05-29")];
+
+    const choice = chooseInitialDrawHistory(cached, []);
+
+    expect(choice.source).toBe("none");
+    expect(choice.history).toEqual([]);
+    expect(choice.reason).toContain("Default bundled CSV");
+  });
 });

@@ -17,4 +17,17 @@ describe("Monthly acceptance-needs MiAN wiring", () => {
     expect(appSource).not.toContain("const b = monthlyConstraintPayload.buckets");
     expect(appSource).not.toContain("undrawn: b.undrawn.size");
   });
+
+  it("wires Acceptance needs Simulate 8 into the DGA simulation flow", () => {
+    const appSource = readAppSource();
+    const monthlySummaryCall = appSource.match(/<MonthlyDrawsSummaryPanel[\s\S]*?\/>/)?.[0] ?? "";
+    const handlerStart = appSource.indexOf("const handleSimulateAcceptanceNeeds");
+    const handlerEnd = appSource.indexOf("const handleSimulatePasteWeightedCandidate", handlerStart);
+    const handlerBlock = appSource.slice(handlerStart, handlerEnd);
+
+    expect(monthlySummaryCall).toContain("onSimulateNumbers={handleSimulateAcceptanceNeeds}");
+    expect(handlerBlock).toContain("setUserSelectedNumbers(simulatedNumbers);");
+    expect(handlerBlock).toContain("setSimulatedDraw({ main, supp, date: \"AcceptanceNeeds\", isSimulated: true }");
+    expect(handlerBlock).toContain("scrollToDGA();");
+  });
 });

@@ -4,11 +4,13 @@ import { buildAdaptiveShapeEvidence } from "../../lib/adaptiveCandidateShapes";
 import {
   bucketLabelForTimes,
   MONTHLY_BUCKET_KEYS,
+  type MonthlyBucketSets,
   type MonthlyFrequencyConstraints,
   type StageIdealDrawState,
 } from "../../lib/monthlyDrawSummary";
 import {
   generatePasteWeightedCandidates,
+  normalizeMonthlyAcceptanceNeedsCounts,
   parsePastedCandidateNumbers,
   reconcileStageIdmTargetCounts,
   type PasteWeightedGenerationResult,
@@ -25,6 +27,7 @@ interface PasteWeightedCandidatesPanelProps {
   activeHistory?: Draw[];
   activeWindowLabel?: string;
   stageIdealDrawState?: StageIdealDrawState | null;
+  monthlyBucketSets?: MonthlyBucketSets | null;
   monthlyAcceptanceNeeds?: MonthlyFrequencyConstraints | null;
 }
 
@@ -121,6 +124,15 @@ const formatStageIdmCounts = (counts: readonly number[]): string => (
     .join(" · ")
 );
 
+const formatAcceptanceNeedsCounts = (counts: readonly number[]): string => {
+  const activeCounts = counts
+    .map((count, times) => ({ count, label: compactBucketLabel(times) }))
+    .filter(({ count }) => count > 0);
+  return activeCounts.length > 0
+    ? activeCounts.map(({ count, label }) => `${label}≥${count}`).join(" · ")
+    : "none selected";
+};
+
 export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanelProps> = ({
   onSimulateCandidate,
   onGeneratedCandidatesChange,
@@ -131,6 +143,7 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
   activeHistory = [],
   activeWindowLabel = "WFMQYH",
   stageIdealDrawState = null,
+  monthlyBucketSets = null,
   monthlyAcceptanceNeeds = null,
 }) => {
   const [pasteText, setPasteText] = useState(initialPasteText);
@@ -143,6 +156,7 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
   const [adaptiveShapeMode, setAdaptiveShapeMode] = useState<"observe" | "quota">("observe");
   const [stageIdmEnabled, setStageIdmEnabled] = useState(false);
   const [stageIdmTargetCounts, setStageIdmTargetCounts] = useState<number[] | null>(null);
+  const [monthlyAcceptanceNeedsEnabled, setMonthlyAcceptanceNeedsEnabled] = useState(false);
   const [result, setResult] = useState<PasteWeightedGenerationResult | null>(null);
 
   const parsed = useMemo(() => parsePastedCandidateNumbers(pasteText), [pasteText]);
@@ -154,14 +168,20 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
   const countsForDisplay = parsed.counts;
   const oddEvenRatioOptions = parsed.oddEvenRatios;
   const adaptiveShapeProfiles = adaptiveShapeEvidence?.profileOptions ?? [];
-  const adaptiveShapeProfileRows = adaptiveShapeProfiles.slice(0, 8);
+  const adaptiveShapeProfileRows = adaptiveShapeProfiles.slice(0, 32);
   const defaultStageIdmTargetCounts = useMemo(
     () => reconcileStageIdmTargetCounts(stageIdealDrawState?.idealDrawBucketCounts, 6),
     [stageIdealDrawState],
   );
+  const monthlyAcceptanceNeedsCounts = useMemo(
+    () => normalizeMonthlyAcceptanceNeedsCounts(monthlyAcceptanceNeeds),
+    [monthlyAcceptanceNeeds],
+  );
   const activeStageIdmTargetCounts = stageIdmTargetCounts ?? defaultStageIdmTargetCounts;
   const stageIdmTargetTotal = activeStageIdmTargetCounts.reduce((sum, count) => sum + count, 0);
+  const monthlyAcceptanceNeedsTotal = monthlyAcceptanceNeedsCounts.reduce((sum, count) => sum + count, 0);
   const stageIdmAvailable = stageIdealDrawState !== null;
+  const monthlyAcceptanceNeedsAvailable = monthlyAcceptanceNeeds !== null && monthlyBucketSets !== null;
   const availableOddEvenRatioSet = new Set(oddEvenRatioOptions.map((option) => option.ratio));
   const activeSelectedOddEvenRatios = selectedOddEvenRatios.filter((ratio) => availableOddEvenRatioSet.has(ratio));
   const maxCount = countsForDisplay[0]?.count ?? 0;
@@ -172,10 +192,14 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
   const needsOddEvenSelection = oddEvenEnabled && activeSelectedOddEvenRatios.length === 0;
   const needsStageIdmState = stageIdmEnabled && !stageIdmAvailable;
   const needsStageIdmSixMains = stageIdmEnabled && stageIdmTargetTotal !== 6;
+  const needsMonthlyAcceptanceNeedsState = monthlyAcceptanceNeedsEnabled && !monthlyAcceptanceNeedsAvailable;
+  const needsMonthlyAcceptanceNeedsPossible = monthlyAcceptanceNeedsEnabled && monthlyAcceptanceNeedsTotal > 6;
   const canGenerate = parsed.uniqueNumbers >= 6
     && !needsOddEvenSelection
     && !needsStageIdmState
-    && !needsStageIdmSixMains;
+    && !needsStageIdmSixMains
+    && !needsMonthlyAcceptanceNeedsState
+    && !needsMonthlyAcceptanceNeedsPossible;
 
   const clearResult = () => {
     setResult(null);
@@ -202,6 +226,11 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
           enabled: stageIdmEnabled,
           bucketSets: stageIdealDrawState?.bucketSets ?? null,
           targetCounts: activeStageIdmTargetCounts,
+        },
+        monthlyAcceptanceNeeds: {
+          enabled: monthlyAcceptanceNeedsEnabled,
+          bucketSets: monthlyBucketSets,
+          targetCounts: monthlyAcceptanceNeedsCounts,
         },
       },
     });
@@ -256,6 +285,11 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
     clearResult();
   };
 
+  const updateMonthlyAcceptanceNeedsEnabled = (enabled: boolean) => {
+    setMonthlyAcceptanceNeedsEnabled(enabled);
+    clearResult();
+  };
+
   const updateStageIdmTargetCount = (times: number, count: number) => {
     setStageIdmTargetCounts((current) => {
       const next = [...(current ?? defaultStageIdmTargetCounts)];
@@ -287,6 +321,7 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
       }))
     : [];
   const stageIdmSummary = result?.stageIdmSummary;
+  const monthlyAcceptanceNeedsSummary = result?.monthlyAcceptanceNeedsSummary;
 
   return (
     <section className="windfall-ledger-panel windfall-generator-panel" aria-label="Paste-Weighted Candidate Generator">
@@ -516,6 +551,7 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
                 </div>
                 <div style={mutedStyle}>
                   Observe mode reports the generated mix. Quota filter mode accepts candidates according to these empirical profile percentages.
+                  Only Quota filter mode uses the full profile distribution.
                 </div>
               </>
             ) : (
@@ -550,7 +586,8 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
             {stageIdealDrawState ? (
               <>
                 <div style={mutedStyle}>
-                  Descriptive next-stage monthly bucket composition. Mains-only quota; not a probability.
+                  Descriptive next-stage monthly bucket composition. Exact mains-only quota; not a probability.
+                  This is separate from Monthly Acceptance Needs.
                   {" "}{stageIdealDrawState.workingMonthLabel} · draw {stageIdealDrawState.targetStageDrawCount} of {stageIdealDrawState.expectedDrawCount}.
                 </div>
                 <div style={mutedStyle}>
@@ -562,7 +599,6 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
                   gap: 8,
                 }}>
                   {MONTHLY_BUCKET_KEYS.map((key, times) => {
-                    const acceptanceNeed = monthlyAcceptanceNeeds?.[key] ?? null;
                     return (
                       <label key={key} style={{ display: "grid", gap: 3, fontSize: 11, color: "#334155", fontWeight: 700 }}>
                         {compactBucketLabel(times)}
@@ -575,7 +611,7 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
                         >
                           {stageBucketCountOptions.map((option) => (
                             <option key={option} value={option}>
-                              {option}{acceptanceNeed === option ? " (Acceptance needs)" : ""}
+                              {option}
                             </option>
                           ))}
                         </select>
@@ -599,6 +635,42 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
               </>
             ) : (
               <div style={mutedStyle}>Stage IDM appears here after Monthly Draws Summary has comparable month-stage evidence.</div>
+            )}
+          </div>
+          <div style={{ ...constraintControlStyle, gridColumn: "1 / -1" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 800, color: "#334155" }}>
+              <input
+                type="checkbox"
+                checked={monthlyAcceptanceNeedsEnabled}
+                disabled={!monthlyAcceptanceNeedsAvailable}
+                onChange={(event) => updateMonthlyAcceptanceNeedsEnabled(event.target.checked)}
+              />
+              Monthly Acceptance Needs
+            </label>
+            {monthlyAcceptanceNeedsAvailable ? (
+              <>
+                <div style={mutedStyle}>
+                  Literal minimums from Monthly Draws Summary. These counts are not rescaled; enabled generation requires each candidate to meet or exceed them.
+                </div>
+                <div style={mutedStyle}>
+                  Acceptance Needs required: {formatAcceptanceNeedsCounts(monthlyAcceptanceNeedsCounts)}
+                </div>
+                <div style={{
+                  ...mutedStyle,
+                  color: monthlyAcceptanceNeedsTotal <= 6 ? "#166534" : "#92400e",
+                  background: monthlyAcceptanceNeedsTotal <= 6 ? "#f0fdf4" : "#fffbeb",
+                  border: `1px solid ${monthlyAcceptanceNeedsTotal <= 6 ? "#bbf7d0" : "#fde68a"}`,
+                  borderRadius: 6,
+                  padding: 8,
+                }}>
+                  Selected Acceptance Needs total: {monthlyAcceptanceNeedsTotal}/6.
+                  {monthlyAcceptanceNeedsTotal <= 6
+                    ? " Enabled generation treats these as minimum mains-only requirements."
+                    : " This cannot run as-is because paste-weighted candidates contain only six mains."}
+                </div>
+              </>
+            ) : (
+              <div style={mutedStyle}>Acceptance Needs appears after Monthly Draws Summary provides selected bucket needs and current bucket data.</div>
             )}
           </div>
         </div>
@@ -629,7 +701,11 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
                 ? "Stage IDM is unavailable from Monthly Draws Summary."
                 : needsStageIdmSixMains
                   ? "Stage IDM bucket mix must total exactly six mains."
-                  : "Paste at least six distinct valid numbers to generate."}
+                  : needsMonthlyAcceptanceNeedsState
+                    ? "Monthly Acceptance Needs is unavailable from Monthly Draws Summary."
+                    : needsMonthlyAcceptanceNeedsPossible
+                      ? "Monthly Acceptance Needs must total six mains or fewer."
+                      : "Paste at least six distinct valid numbers to generate."}
           </span>
         )}
       </div>
@@ -665,6 +741,13 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
         <div style={{ ...mutedStyle, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 6, padding: 8 }}>
           Stage IDM accepted: {formatStageIdmCounts(stageIdmSummary.targetCounts)}
           {" "}· {stageIdmSummary.totalAccepted}/{stageIdmSummary.requested} candidate{stageIdmSummary.requested === 1 ? "" : "s"}
+        </div>
+      )}
+
+      {monthlyAcceptanceNeedsSummary && (
+        <div style={{ ...mutedStyle, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 6, padding: 8 }}>
+          Monthly Acceptance Needs accepted: {formatAcceptanceNeedsCounts(monthlyAcceptanceNeedsSummary.targetCounts)}
+          {" "}· {monthlyAcceptanceNeedsSummary.totalAccepted}/{monthlyAcceptanceNeedsSummary.requested} candidate{monthlyAcceptanceNeedsSummary.requested === 1 ? "" : "s"}
         </div>
       )}
 

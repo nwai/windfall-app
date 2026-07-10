@@ -1,6 +1,15 @@
 import { Draw } from '../types';
 import { parseCSVorJSON } from "../parseCSVorJSON";
-import fallbackCSV from "../windfall_history_lottolyzer.csv?raw";
+
+const fallbackCsvModules = import.meta.glob("../windfall_history_lottolyzer.csv", {
+  eager: true,
+  import: "default",
+  query: "?raw",
+}) as Record<string, string>;
+
+function bundledFallbackCsvText(): string {
+  return fallbackCsvModules["../windfall_history_lottolyzer.csv"] ?? "";
+}
 
 export type FetchDrawsParams = {
   apiUrl: string;
@@ -64,6 +73,7 @@ function parseCsvDateToEpoch(s: string): number {
 
 export function loadCsvFallbackDraws(strictValidateDraws: (draws: Draw[]) => Draw[]): Draw[] {
   try {
+    const fallbackCSV = bundledFallbackCsvText();
     if (!fallbackCSV || typeof fallbackCSV !== "string") return [];
     const rows = parseCSVorJSON(fallbackCSV) as { date: string; main: number[]; supp: number[] }[];
     const mapped: Draw[] = rows

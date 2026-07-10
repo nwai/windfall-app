@@ -75,6 +75,24 @@ describe("GeneratedCandidatesPanel", () => {
     expect(strip?.querySelector('[aria-label="Toggle user selected number 4"]')?.getAttribute("aria-pressed")).toBe("false");
   });
 
+  it("renders RwR45 as an explicit mode that disables the normal Count input when active", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(GeneratedCandidatesPanel, buildProps({
+        rwr45Enabled: true,
+        setRwr45Enabled: vi.fn(),
+      })),
+    );
+    const document = new DOMParser().parseFromString(html, "text/html");
+    const toggle = document.querySelector('input[aria-label="Toggle RwR45 random coverage mode"]');
+    const countInput = document.querySelector('input[aria-label="Generated candidate count"]');
+
+    expect(toggle).not.toBeNull();
+    expect(toggle?.getAttribute("checked")).toBe("");
+    expect(countInput?.getAttribute("disabled")).toBe("");
+    expect(document.body.textContent).toContain("Count ignored");
+    expect(document.body.textContent).toContain("exactly 7");
+  });
+
   it("renders the compact generated-candidate table with only decision-useful visible diagnostics", () => {
     const html = renderToStaticMarkup(
       React.createElement(GeneratedCandidatesPanel, buildProps({

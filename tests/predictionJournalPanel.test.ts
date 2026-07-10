@@ -2,7 +2,7 @@ import React from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import { PredictionJournalPanel } from "../src/components/PredictionJournalPanel";
 import { buildPredictionJournalEntry } from "../src/lib/predictionJournal";
@@ -23,6 +23,10 @@ const setInputValue = (input: HTMLInputElement | HTMLTextAreaElement, value: str
 };
 
 describe("PredictionJournalPanel", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
   it("renders a date-aware journal form without seeded fake prediction rows", () => {
     const html = renderToStaticMarkup(
       React.createElement(PredictionJournalPanel, {
@@ -41,6 +45,26 @@ describe("PredictionJournalPanel", () => {
     expect(html).toContain("No journal entries yet");
     expect(html).not.toContain("<h3");
     expect(html).not.toContain("1,2,3,4,5,6");
+  });
+
+  it("shows the next scheduled draw date beside the target window control", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(PredictionJournalPanel, {
+        history: [
+          draw("6/22/26", [2, 4, 6, 8, 10, 12], [14, 16]),
+          draw("6/24/26", [1, 3, 5, 7, 9, 11], [13, 15]),
+        ],
+        now: () => "2026-06-25T09:00:00.000Z",
+      }),
+    );
+
+    const targetFieldStart = html.indexOf("Target window");
+    const nextDrawDateIndex = html.indexOf("Next draw: Friday 2026-06-26", targetFieldStart);
+    const oddEvenIndex = html.indexOf("Odd/even ratio", targetFieldStart);
+
+    expect(targetFieldStart).toBeGreaterThanOrEqual(0);
+    expect(nextDrawDateIndex).toBeGreaterThan(targetFieldStart);
+    expect(nextDrawDateIndex).toBeLessThan(oddEvenIndex);
   });
 
   it("shows scored entry summaries and keeps full details collapsed by default", () => {
@@ -81,6 +105,57 @@ describe("PredictionJournalPanel", () => {
     expect(html).not.toContain("Predicted</th>");
     expect(html).not.toContain("Hits: 1, 12, 45");
     expect(html).not.toContain("Edit prediction");
+  });
+
+  it("keeps listed prediction numbers separate from notes and saved setup selections", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(React.createElement(PredictionJournalPanel, {
+        history: [
+          draw("6/22/26", [2, 4, 6, 8, 10, 12], [14, 16]),
+          draw("6/24/26", [1, 3, 5, 7, 9, 11], [13, 15]),
+        ],
+        getSetupSnapshot: () => ({
+          userSelectedNumbers: [1, 2, 3, 4, 5, 6, 7],
+        } as any),
+        now: () => "2026-06-24T10:30:00.000Z",
+      }));
+    });
+
+    const textAreas = Array.from(container.querySelectorAll("textarea")) as HTMLTextAreaElement[];
+    const numbersTextArea = textAreas.find((textarea) => textarea.placeholder === "12, 14, 22, 27") as HTMLTextAreaElement;
+    const notesTextArea = textAreas.find((textarea) => textarea.placeholder === "Why this looked plausible before the draw...") as HTMLTextAreaElement;
+
+    await act(async () => {
+      setInputValue(numbersTextArea, "1,10,12");
+      setInputValue(notesTextArea, "Note mentions 4, 5, 6 and 7, but they are not listed picks.");
+    });
+
+    const saveButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent === "Save prediction") as HTMLButtonElement;
+
+    await act(async () => {
+      saveButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    const rowButton = container.querySelector("button[aria-controls^='prediction-journal-entry-']") as HTMLButtonElement;
+    expect(rowButton.textContent).toContain("Listed numbers: 3");
+    expect(rowButton.textContent).not.toContain("7 numbers");
+
+    await act(async () => {
+      rowButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(container.textContent).toContain("User-selected strip: 7");
+    expect(container.textContent).not.toContain("User selected: 7");
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
   });
 
   it("mentions saved setup provenance in the entry summary without expanding it", () => {

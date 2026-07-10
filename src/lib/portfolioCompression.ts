@@ -18,6 +18,7 @@ export interface PortfolioCompressionNumber {
 export interface PortfolioCompressionResult {
   rows: PastedCandidateRow[];
   acceptedRows: number;
+  validGameRows: number;
   totalRows: number;
   totalCountedNumbers: number;
   uniqueNumbers: number;
@@ -62,6 +63,11 @@ export function compressPortfolioCandidates(
     !VALID_PORTFOLIO_ROW_SIZES.has(row.numbers.length)
     || row.duplicateNumbers.length > 0
     || row.outOfRangeNumbers.length > 0
+  )).length;
+  const validGameRows = rows.filter((row) => (
+    VALID_PORTFOLIO_ROW_SIZES.has(row.numbers.length)
+    && row.duplicateNumbers.length === 0
+    && row.outOfRangeNumbers.length === 0
   )).length;
   const duplicateGameMap = new Map<string, number[]>();
 
@@ -132,6 +138,7 @@ export function compressPortfolioCandidates(
   return {
     rows,
     acceptedRows,
+    validGameRows,
     totalRows: parsed.totalRows,
     totalCountedNumbers: rows.reduce((total, row) => total + row.numbers.length, 0),
     uniqueNumbers,

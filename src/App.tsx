@@ -16,7 +16,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { MonteCarloPanel } from "./components/candidates/MonteCarloPanel";
 import { NumberTrendsTable, NumberTrend, NUMBER_TREND_MONTH_DRAW_WINDOW } from "./components/NumberTrendsTable";
 import { entropy, minHamming, maxJaccard } from "./analytics";
-import { fetchDraws, loadCsvFallbackDraws } from "./lib/fetchDraws";
+import { buildDemoDrawHistory, fetchDraws, loadCsvFallbackDraws } from "./lib/fetchDraws";
 import { getUniqueRandomNumbers } from "./lib/random";
 import { parseCSVorJSON } from "./parseCSVorJSON";
 import { getSDE1FilteredPool } from "./sde1";
@@ -100,6 +100,7 @@ import {
   type ScoringGenerationInfluence,
 } from "./lib/scoringGenerationInfluence";
 import { PredictionJournalPanel } from "./components/PredictionJournalPanel";
+import { ResearchDiaryPanel } from "./components/ResearchDiaryPanel";
 import { PreviousNeighbourBacktestPanel } from "./components/PreviousNeighbourBacktestPanel";
 import { CollapsibleSection } from "./components/shared/CollapsibleSection";
 import { InlineCollapsibleCard } from "./components/shared/InlineCollapsibleCard";
@@ -136,7 +137,7 @@ import {
   rowsFromDraws,
 } from "./lib/drawHistoryReview";
 import { clearCachedDrawHistory, loadCachedDrawHistory, saveCachedDrawHistory } from "./lib/historyPersistence";
-import { chooseInitialDrawHistory } from "./lib/initialDrawHistory";
+import { chooseInitialDrawHistory, type InitialDrawHistoryChoice } from "./lib/initialDrawHistory";
 import {
   DIGIT_WIDTH_PERCENT_OPTIONS,
   deriveDigitWidthTargets,
@@ -159,6 +160,10 @@ import {
   getGeneratedCandidateCountWindowDefault,
   normalizeGeneratedCandidateCount,
 } from "./lib/generatedCandidateCount";
+import {
+  generateRwR45Candidates,
+  RWR45_CANDIDATE_COUNT,
+} from "./lib/rwr45Candidates";
 import {
   buildEffectiveMonthEndCarryOverWeights,
   buildMonthEndCarryOverWeighting,
@@ -479,6 +484,7 @@ function parseCsvDateToEpoch(s: string): number {
 function AppInner(): JSX.Element {
   const { runGenerate } = useGenerateWorker();
   const [history, setHistory] = useState<Draw[]>([]);
+  const [startupHistoryChoice, setStartupHistoryChoice] = useState<InitialDrawHistoryChoice | null>(null);
   const realHistoryResult = useMemo(
     () => filterRealDrawHistory(history, "app-wide evidence panels and generation weights"),
     [history],
@@ -842,6 +848,7 @@ function AppInner(): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scoringGenerationInfluence]);
   const [numCandidates, setNumCandidatesState] = useState<number>(DEFAULT_GENERATED_CANDIDATE_COUNT);
+  const [rwr45Enabled, setRwr45Enabled] = useState<boolean>(false);
   const lastWindowDefaultNumCandidatesRef = useRef<number>(DEFAULT_GENERATED_CANDIDATE_COUNT);
   const setNumCandidates = useCallback((nextCount: number) => {
     setNumCandidatesState(
@@ -956,31 +963,6 @@ function AppInner(): JSX.Element {
     () => monthlyBucketSetsAlways ?? monthlyConstraintPayload?.buckets ?? dgaLiveMonthlyBuckets,
     [dgaLiveMonthlyBuckets, monthlyBucketSetsAlways, monthlyConstraintPayload],
   );
-
-  const dgaMonthlyBucketTimelineBase = useMemo(
-    () => buildMonthlyBucketTimeline(realHistory),
-    [realHistory],
-  );
-
-  const dgaEffectiveMonthLabel = useMemo(() => {
-    if (monthlyBucketSetsAlways || monthlyConstraintPayload?.buckets) {
-      return dgaMonthlyBucketTimelineBase[dgaMonthlyBucketTimelineBase.length - 1]?.monthLabel ?? dgaCurrentCalendarMonthLabel;
-    }
-    return dgaCurrentCalendarMonthLabel;
-  }, [dgaCurrentCalendarMonthLabel, dgaMonthlyBucketTimelineBase, monthlyBucketSetsAlways, monthlyConstraintPayload]);
-
-  const dgaMonthlyBucketTimeline = useMemo(() => {
-    const next = dgaMonthlyBucketTimelineBase.slice();
-    if (next.length === 0) {
-      return [{ monthLabel: dgaEffectiveMonthLabel, bucketSets: dgaEffectiveMonthlyBuckets, drawCount: 0 }];
-    }
-    const last = next[next.length - 1];
-    if (last.monthLabel === dgaEffectiveMonthLabel) {
-      next[next.length - 1] = { ...last, bucketSets: dgaEffectiveMonthlyBuckets };
-      return next;
-    }
-    return [...next, { monthLabel: dgaEffectiveMonthLabel, bucketSets: dgaEffectiveMonthlyBuckets, drawCount: 0 }];
-  }, [dgaEffectiveMonthLabel, dgaEffectiveMonthlyBuckets, dgaMonthlyBucketTimelineBase]);
 
   const [numberCounts, setNumberCounts] = useState<number[]>([]);
   const [minCount, setMinCount] = useState<number>(0);
@@ -1128,6 +1110,7 @@ function AppInner(): JSX.Element {
 
   const commitHistory = useCallback((nextHistory: Draw[]) => {
     setHistory(nextHistory);
+    setStartupHistoryChoice(null);
     setHighlights([]);
     if (nextHistory.some((draw) => !draw.isSimulated)) {
       saveCachedDrawHistory(rowsFromDraws(nextHistory));
@@ -1140,32 +1123,22 @@ function AppInner(): JSX.Element {
     const cachedRows = loadCachedDrawHistory();
     const cachedHistory = cachedRows && cachedRows.length > 0 ? drawsFromRows(cachedRows) : null;
     const bundledHistory = loadCsvFallbackDraws(strictValidateDraws);
+    const choice = chooseInitialDrawHistory(cachedHistory, bundledHistory);
 
-    if (cachedHistory && cachedHistory.length > 0) {
-      const choice = chooseInitialDrawHistory(cachedHistory, bundledHistory);
-      if (choice.history.length > 0) {
-        commitHistory(choice.history);
-        setTraceMaybe((t) => [...t,
-          choice.source === "cache"
-            ? `[TRACE] Loaded ${choice.history.length} draws from saved local draw history state. ${choice.reason}`
-            : `[TRACE] Refreshed draw history from bundled CSV fallback (${choice.history.length} draws). ${choice.reason}`
-        ]);
-        return;
-      }
+    if (choice.history.length > 0) {
+      commitHistory(choice.history);
+      setTraceMaybe((t) => [...t,
+        choice.source === "cache"
+          ? `[TRACE] Loaded ${choice.history.length} draws from saved local draw history state. ${choice.reason}`
+          : `[TRACE] Loaded ${choice.history.length} draws from default bundled CSV (src/windfall_history_lottolyzer.csv). ${choice.reason}`
+      ]);
+      return;
     }
 
-    fetchDraws({
-      apiUrl: API_URL,
-      minValidDraws: MIN_VALID_DRAWS,
-      numMains: NUM_MAINS,
-      mainMin: MAIN_MIN,
-      mainMax: MAIN_MAX,
-      setHistory: commitHistory,
-      setTrace: setTraceMaybe,
-      setHighlights,
-      rng: getUniqueRandomNumbers,
-      strictValidateDraws,
-    });
+    setHistory([]);
+    setHighlights([]);
+    setStartupHistoryChoice(choice);
+    setTraceMaybe((t) => [...t, `[TRACE] No startup draw history loaded. ${choice.reason}`]);
   }, [commitHistory]);
 
   useEffect(() => {
@@ -1568,6 +1541,18 @@ function AppInner(): JSX.Element {
     () => removeUserExcludedNumbers(normalizeDgaSelectedNumbers(userSelectedNumbers), excludedNumbers),
     [excludedNumbers, userSelectedNumbers],
   );
+  const dgaStripSelectedKey = useMemo(
+    () => dgaStripSelectedNumbers.slice(0, 8).join(","),
+    [dgaStripSelectedNumbers],
+  );
+  const activeSimulatedDgaSelectionKey = useMemo(() => {
+    if (!simulatedDraw) return "";
+    return normalizeDgaSelectedNumbers([
+      ...(simulatedDraw.main ?? []),
+      ...(simulatedDraw.supp ?? []),
+    ]).slice(0, 8).join(",");
+  }, [simulatedDraw]);
+  const lastDgaStripSelectedKeyRef = useRef(dgaStripSelectedKey);
 
   const dgaStripPreviousNeighbourMatches = useMemo(() => {
     const targetSet = new Set(previousNeighbourConstraintTargetNumbers);
@@ -1631,7 +1616,9 @@ function AppInner(): JSX.Element {
   }, [applyDgaStripMirrorToPreviousNeighbour, excludedNumbers, mirrorDgaStripToPreviousNeighbour]);
 
   useEffect(() => {
-    if (simSource !== "dga-strip") return;
+    if (lastDgaStripSelectedKeyRef.current === dgaStripSelectedKey) return;
+    lastDgaStripSelectedKeyRef.current = dgaStripSelectedKey;
+
     const simulationNumbers = dgaStripSelectedNumbers.slice(0, 8);
     if (simulationNumbers.length === 0) {
       setSimulatedDraw(null);
@@ -1640,14 +1627,17 @@ function AppInner(): JSX.Element {
       return;
     }
 
+    if (activeSimulatedDgaSelectionKey === dgaStripSelectedKey) return;
+
     setSimulatedDraw({
       main: simulationNumbers.slice(0, 6),
       supp: simulationNumbers.slice(6, 8),
       date: "DGAStrip",
       isSimulated: true,
     } as any);
+    setSimSource("dga-strip");
     setSimCandidateIdx(null);
-  }, [dgaStripSelectedNumbers, simSource]);
+  }, [activeSimulatedDgaSelectionKey, dgaStripSelectedKey, dgaStripSelectedNumbers]);
 
   // Manual simulation is a prize-worthiness scratchpad for the generated-candidate table.
   const [manualSimSelected, setManualSimSelected] = useState<number[]>([]);
@@ -1750,6 +1740,24 @@ function AppInner(): JSX.Element {
     }
   }, [windowMode, filteredHistory.length, drawWindowMode, rangeFrom, rangeTo]);
 
+  const handleSimulateAcceptanceNeeds = useCallback((numbers: number[]) => {
+    const simulatedNumbers = numbers
+      .filter((value) => Number.isFinite(value))
+      .slice(0, 8);
+
+    if (simulatedNumbers.length < 6) return;
+
+    const main = simulatedNumbers.slice(0, 6).sort((a, b) => a - b);
+    const supp = simulatedNumbers.slice(6, 8).sort((a, b) => a - b);
+
+    setUserSelectedNumbers(simulatedNumbers);
+    setSelectedCandidateIdx(-1);
+    setSimulatedDraw({ main, supp, date: "AcceptanceNeeds", isSimulated: true } as any);
+    setSimSource('user');
+    setSimCandidateIdx(null);
+    scrollToDGA();
+  }, [scrollToDGA]);
+
   const handleSimulatePasteWeightedCandidate = useCallback((numbers: number[]) => {
     const main = numbers
       .filter((value) => Number.isFinite(value))
@@ -1759,6 +1767,7 @@ function AppInner(): JSX.Element {
     if (main.length < 6) return;
 
     setSelectedCandidateIdx(-1);
+    setUserSelectedNumbers(main);
     setSimulatedDraw({ main, supp: [], date: "PasteWeighted", isSimulated: true } as any);
     setSimSource('candidate');
     setSimCandidateIdx(null);
@@ -2336,6 +2345,33 @@ function AppInner(): JSX.Element {
   const handleGenerate = () => {
     setIsGenerating(true);
     setTrace([]);
+
+    if (rwr45Enabled) {
+      const t0 = performance.now();
+      const result = generateRwR45Candidates();
+      const processedCandidates = recomputeCompositeRanking(annotateCandidatesWithPreviousNeighbourShape(
+        [...result.candidates],
+        previousNeighbourLatestDraw,
+        "mains-plus-supps",
+      ));
+      const dt = Math.round(performance.now() - t0);
+
+      setCandidates(processedCandidates);
+      setRatioSummary(summarizeOddEvenRatios(
+        processedCandidates,
+        RWR45_CANDIDATE_COUNT,
+        RWR45_CANDIDATE_COUNT,
+      ));
+      setQuotaWarning(undefined);
+      setSelectedCandidateIdx(0);
+      setTraceMaybe((t) => [
+        ...t,
+        ...result.traceLines,
+        `[TRACE] RwR45 / PNUaRW45 completed: displayed ${processedCandidates.length} candidates in ${dt}ms.`,
+      ]);
+      setIsGenerating(false);
+      return;
+    }
 
     const entropyThresholdEff = entropyEnabled ? entropyThreshold : 0;
     const hammingThresholdEff = hammingEnabled ? hammingThreshold : 0;
@@ -2942,6 +2978,13 @@ function AppInner(): JSX.Element {
     reader.readAsText(file);
   };
 
+  const handleUseSimulatedStartupHistory = useCallback(() => {
+    const demoRows = buildDemoDrawHistory(MIN_VALID_DRAWS, NUM_MAINS, MAIN_MIN, MAIN_MAX, getUniqueRandomNumbers);
+    commitHistory(demoRows);
+    setTraceMaybe((t) => [...t, `[TRACE] DEMO MODE: user explicitly loaded ${demoRows.length} simulated rows into Draw History Manager because no default real history was available.`]);
+    showToast("Loaded simulated demo rows. Replace them with verified CSV history before analysis.");
+  }, [commitHistory, setTraceMaybe]);
+
   const handleRatioToggle = (ratio: string) => {
     setSelectedRatios((prev) => (prev.includes(ratio) ? prev.filter((r) => r !== ratio) : [...prev, ratio]));
     setUseTrickyRule(false);
@@ -2983,6 +3026,44 @@ function AppInner(): JSX.Element {
     if (!simulatedDraw) return realHistory;
     return [...realHistory, buildSimulatedNextDraw(realHistory, simulatedDraw)];
   }, [realHistory, simulatedDraw]);
+  const dgaMonthlyBucketTimelineBase = useMemo(
+    () => buildMonthlyBucketTimeline(dgaMonthlyBucketHeatmapHistory),
+    [dgaMonthlyBucketHeatmapHistory],
+  );
+  const dgaEffectiveMonthLabel = useMemo(() => {
+    if (monthlyBucketSetsAlways || monthlyConstraintPayload?.buckets || simulatedDraw) {
+      return dgaMonthlyBucketTimelineBase[dgaMonthlyBucketTimelineBase.length - 1]?.monthLabel ?? dgaCurrentCalendarMonthLabel;
+    }
+    return dgaCurrentCalendarMonthLabel;
+  }, [dgaCurrentCalendarMonthLabel, dgaMonthlyBucketTimelineBase, monthlyBucketSetsAlways, monthlyConstraintPayload, simulatedDraw]);
+  const dgaMonthlyBucketTimeline = useMemo(() => {
+    const next = dgaMonthlyBucketTimelineBase.slice();
+    const latestTimelineBuckets = simulatedDraw && next.length
+      ? next[next.length - 1].bucketSets
+      : dgaEffectiveMonthlyBuckets;
+
+    if (next.length === 0) {
+      return [{
+        monthLabel: dgaEffectiveMonthLabel,
+        bucketSets: latestTimelineBuckets,
+        drawCount: 0,
+        totalDrawCount: 0,
+        drawStates: [],
+      }];
+    }
+    const last = next[next.length - 1];
+    if (last.monthLabel === dgaEffectiveMonthLabel) {
+      next[next.length - 1] = { ...last, bucketSets: latestTimelineBuckets };
+      return next;
+    }
+    return [...next, {
+      monthLabel: dgaEffectiveMonthLabel,
+      bucketSets: latestTimelineBuckets,
+      drawCount: 0,
+      totalDrawCount: 0,
+      drawStates: [],
+    }];
+  }, [dgaEffectiveMonthLabel, dgaEffectiveMonthlyBuckets, dgaMonthlyBucketTimelineBase, simulatedDraw]);
   const dgaMonthlyBucketDrawSeriesFull = useMemo(
     () => buildMonthlyBucketDrawSeries(dgaMonthlyBucketHeatmapHistory),
     [dgaMonthlyBucketHeatmapHistory],
@@ -3150,6 +3231,49 @@ function AppInner(): JSX.Element {
         Active window: {activeWindowProvenance.realDraws} real / {activeWindowProvenance.totalDraws} loaded.
         {drawHistoryProvenance.warning ? <> <b>Warning:</b> {drawHistoryProvenance.warning}</> : null}
       </div>
+
+      {history.length === 0 && startupHistoryChoice?.source === "none" && (
+        <section
+          data-testid="startup-history-choice"
+          role="alert"
+          style={{
+            display: "grid",
+            gap: 10,
+            margin: "12px 0",
+            padding: 14,
+            border: "1px solid #f0c36d",
+            borderRadius: 8,
+            background: "#fff8e6",
+            color: "#4a3410",
+          }}
+        >
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 15 }}>No draw history loaded</div>
+            <div style={{ marginTop: 3, fontSize: 13, lineHeight: 1.45 }}>
+              The default history file <code>src/windfall_history_lottolyzer.csv</code> could not be loaded with valid real draws. {startupHistoryChoice.reason}
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              style={{ minHeight: 34, padding: "7px 12px", fontWeight: 700 }}
+            >
+              Use another CSV/JSON file
+            </button>
+            <button
+              type="button"
+              onClick={handleUseSimulatedStartupHistory}
+              style={{ minHeight: 34, padding: "7px 12px" }}
+            >
+              Load simulated demo rows
+            </button>
+          </div>
+          <div style={{ fontSize: 12, lineHeight: 1.45, color: "#6f531e" }}>
+            Simulated rows are marked as simulated and are not treated as real historical evidence by the app’s real-history diagnostics.
+          </div>
+        </section>
+      )}
 
       <AppWorkflowNav />
       <PanelFavoritesStrip
@@ -3776,6 +3900,15 @@ function AppInner(): JSX.Element {
         />
       </CollapsibleSection>
 
+      {/* [ORDER-ANCHOR] 07.16 Research Diary & Draw Reminders */}
+      <CollapsibleSection panelId="research-diary" title={<b>Research Diary & Draw Reminders</b>} summaryHint="observe-only recurring draw-context reminders" defaultOpen={false}>
+        <ResearchDiaryPanel
+          history={realHistory}
+          getSetupSnapshot={() => buildSnapshot({ includePanelFavorites: true })}
+          showTitle={false}
+        />
+      </CollapsibleSection>
+
       {/* [ORDER-ANCHOR] 07.2 Backtest Validation Dashboard */}
       <CollapsibleSection panelId="backtest-validation" title={<b>Backtest Validation</b>} defaultOpen={false}>
         <BacktestPanel history={realFilteredHistory} />
@@ -4016,6 +4149,7 @@ function AppInner(): JSX.Element {
           onAvgBucketsChange={setMonthlyAvgBuckets}
           onIdealDrawStateChange={setMonthlyIdealDrawState}
           onStageIdealDrawStateChange={setStageIdealDrawState}
+          onSimulateNumbers={handleSimulateAcceptanceNeeds}
         />
       </CollapsibleSection>
 
@@ -5662,6 +5796,7 @@ function AppInner(): JSX.Element {
             activeHistory={realFilteredHistory}
             activeWindowLabel={historyWindowName}
             stageIdealDrawState={stageIdealDrawState}
+            monthlyBucketSets={monthlyBucketSetsAlways ?? monthlyConstraintPayload?.buckets ?? null}
             monthlyAcceptanceNeeds={monthlyConstraintPayload?.constraints ?? null}
           />
         </div>
@@ -5690,12 +5825,18 @@ function AppInner(): JSX.Element {
               {
                 id: "generated-candidates",
                 label: "Generated Candidates",
-                candidates: candidates.map((candidate) => candidate.main),
+                candidates: candidates.map((candidate) => ([
+                  ...candidate.main,
+                  ...candidate.supp,
+                ])),
               },
               {
                 id: "paste-weighted-candidates",
                 label: "Paste-Weighted Candidates",
-                candidates: pasteWeightedPortfolioCandidates.map((candidate) => candidate.main),
+                candidates: pasteWeightedPortfolioCandidates.map((candidate) => ([
+                  ...candidate.main,
+                  ...candidate.supp,
+                ])),
               },
             ]}
           />
@@ -5712,6 +5853,8 @@ function AppInner(): JSX.Element {
             isGenerating={isGenerating}
             numCandidates={numCandidates}
             setNumCandidates={setNumCandidates}
+            rwr45Enabled={rwr45Enabled}
+            setRwr45Enabled={setRwr45Enabled}
             userSelectedNumbers={userSelectedNumbers}
             setUserSelectedNumbers={setUserSelectedNumbers}
             excludedNumbers={excludedNumbers}
@@ -5755,6 +5898,7 @@ function AppInner(): JSX.Element {
             enableOGA={knobs.enableOGA}
             ratioOptions={ratioOptions}
             exportSettings={({
+              rwr45Enabled,
               excludedNumbers: effectiveExcludedNumbers,
               hc3Exclusions,
               sde1Exclusions,
@@ -5849,7 +5993,27 @@ function AppInner(): JSX.Element {
         defaultOpen={false}
       >
         <div style={{ width: "100%", marginTop: 8, marginBottom: 10 }}>
-          <TattslottoTicketGridReplayPanel history={realFilteredHistory} />
+          <TattslottoTicketGridReplayPanel
+            history={realFilteredHistory}
+            candidateSources={[
+              {
+                id: "generated-candidates",
+                label: "Generated Candidates",
+                candidates: candidates.map((candidate) => ({
+                  main: candidate.main,
+                  supp: candidate.supp,
+                })),
+              },
+              {
+                id: "paste-weighted-candidates",
+                label: "Paste-Weighted Candidates",
+                candidates: pasteWeightedPortfolioCandidates.map((candidate) => ({
+                  main: candidate.main,
+                  supp: candidate.supp,
+                })),
+              },
+            ]}
+          />
         </div>
       </CollapsibleSection>
 
@@ -5940,6 +6104,7 @@ function AppInner(): JSX.Element {
                       highlightedColumns={dgaHeatmapHighlightedColumns}
                       showBucketLetters={showHeatmapLetters}
                       bucketLetters={dgaHeatmapBucketLetters}
+                      showDrawSlotAxis={isMonthlyBucketHeatmapView}
                     />
                   </div>
                   {/* Vertical simulation selections aligned to heatmap rows */}
@@ -6173,6 +6338,11 @@ function AppInner(): JSX.Element {
       attemptMultiplier,
       overgenFactor,
       scoringGenerationInfluence,
+      monthlyConstructiveEnabled,
+      acceptanceNeedsEnabled,
+      acceptanceNeedsCounts: monthlyConstructiveEnabled && monthlyConstraintPayload
+        ? monthlyConstraintPayload.constraints
+        : acceptanceNeedsCounts,
       acceptanceNeedsHardExclude,
       selectedBoostEnabled,
       selectedBoostFactor,

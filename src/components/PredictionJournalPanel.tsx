@@ -18,6 +18,7 @@ import {
   type PredictionScoreResult,
   type PredictionTargetKind,
 } from "../lib/predictionJournal";
+import { computeResearchDiaryNextDrawContext } from "../lib/researchDiary";
 
 export interface PredictionJournalPanelProps {
   history: Draw[];
@@ -119,7 +120,7 @@ const summarizePredictionInputs = (entry: PredictionJournalEntry): string[] => {
   const inputs = entry.inputs;
   const parts: string[] = [];
   if (inputs.oddEvenRatio) parts.push(`O/E ${inputs.oddEvenRatio}`);
-  if (inputs.numbers?.length) parts.push(`${inputs.numbers.length} numbers`);
+  if (inputs.numbers?.length) parts.push(`Listed numbers: ${inputs.numbers.length}`);
   if (inputs.terminalDigits?.length) parts.push(`${inputs.terminalDigits.length} terminal digits`);
   if (inputs.monthlyBuckets && Object.keys(inputs.monthlyBuckets).length > 0) parts.push("bucket mix");
   if (inputs.singleDouble) parts.push("single/double");
@@ -271,6 +272,10 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
 
   const hasControlledInitialEntries = initialEntries !== undefined;
   const latestDraw = useMemo(() => latestRealDraw(history), [history]);
+  const nextDrawContext = useMemo(
+    () => computeResearchDiaryNextDrawContext(history, { now: now() }),
+    [history, now],
+  );
   const scoredEntries = useMemo(
     () => entries.map((entry) => scorePredictionJournalEntry(entry, history)),
     [entries, history],
@@ -598,6 +603,9 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
             <option value="next3Draws">Next 3 draws</option>
             <option value="restOfMonth">Rest of current month</option>
           </select>
+          <div style={{ marginTop: 5, fontSize: 12, color: "#657385", fontWeight: 750 }}>
+            Next draw: {nextDrawContext.weekday} {nextDrawContext.nextDrawDate}
+          </div>
         </HigField>
         <HigField label="Odd/even ratio" help="Optional. Use mains + supps format, for example 2:6.">
           <input value={oddEvenRatio} onChange={(event) => setOddEvenRatio(event.target.value)} placeholder="2:6" />

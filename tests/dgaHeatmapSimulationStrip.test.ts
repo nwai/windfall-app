@@ -45,12 +45,16 @@ describe("DGA heatmap simulation strip wiring", () => {
     expect(gridBlock).toContain("only valid latest-draw ±1/±2 targets");
   });
 
-  it("keeps active DGA strip simulation aligned with shared user selections", () => {
+  it("updates DGA simulation from shared user selections regardless of which strip changed them", () => {
     const appSource = readAppSource();
-    const effectStart = appSource.indexOf('if (simSource !== "dga-strip") return;');
-    const effectBlock = appSource.slice(effectStart, appSource.indexOf("}, [dgaStripSelectedNumbers", effectStart));
+    const keyStart = appSource.indexOf("const dgaStripSelectedKey = useMemo");
+    const effectStart = appSource.indexOf("const simulationNumbers = dgaStripSelectedNumbers.slice(0, 8);", keyStart);
+    const effectBlock = appSource.slice(effectStart, appSource.indexOf("}, [", effectStart));
 
-    expect(effectStart).toBeGreaterThanOrEqual(0);
+    expect(keyStart).toBeGreaterThanOrEqual(0);
+    expect(effectStart).toBeGreaterThan(keyStart);
+    expect(effectBlock).not.toContain('if (simSource !== "dga-strip") return;');
+    expect(effectBlock).toContain("if (activeSimulatedDgaSelectionKey === dgaStripSelectedKey) return;");
     expect(effectBlock).toContain("const simulationNumbers = dgaStripSelectedNumbers.slice(0, 8);");
     expect(effectBlock).toContain("setSimulatedDraw(null);");
     expect(effectBlock).toContain("setSimSource(\"none\");");

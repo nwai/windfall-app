@@ -189,6 +189,7 @@
     <a href="#official-source-compare">Official / Reference Source Comparison</a>
 
     <a class="section" href="#generated-candidates">Generated Candidates</a>
+    <a href="#pnua-rw45">PNUaRW45 Random Coverage</a>
     <a href="#paste-weighted-generator">Paste-Weighted Generator</a>
     <a href="#portfolio-compression">Portfolio Compression</a>
     <a href="#portfolio-backtest-v1">Portfolio Backtest V1</a>
@@ -241,6 +242,7 @@
     <a class="section" href="#scoring-reference">Scoring Reference</a>
     <a href="#score-summary">Score Summary Table</a>
     <a href="#prediction-journal">Prediction Journal</a>
+    <a href="#research-diary">Research Diary</a>
     <a href="#previous-neighbour-backtest">Previous ±1 Neighbour Backtest</a>
     <a href="#analysis-findings">Analysis Findings</a>
 
@@ -480,6 +482,24 @@
 
   <p>The <strong>Generated Candidates</strong> panel is the main working area. After clicking <strong>Generate</strong>, it displays a table of candidate number sets with a rich set of analytical scores.</p>
 
+  <h3 id="pnua-rw45">PNUaRW45 / RwR45 Random Coverage Mode</h3>
+  <p><strong>PNUaRW45</strong> is a special random coverage mode in the main <strong>Generated Candidates</strong> panel. The toggle is labelled <strong>RwR45</strong>.</p>
+  <ul>
+    <li><strong>When OFF</strong> — the normal candidate generator is used and the <strong>Count</strong> input controls how many candidates are requested.</li>
+    <li><strong>When ON</strong> — the normal Count value is ignored and the app creates exactly <strong>7 candidates</strong>.</li>
+    <li>The generator shuffles numbers <code>1–45</code> uniformly at random.</li>
+    <li>The first <strong>42 numbers</strong> are split into seven non-overlapping six-number main sets, so main numbers are globally without replacement across the 7 candidates.</li>
+    <li>The remaining <strong>3 numbers</strong> become the supplementary pool. Each candidate receives 2 random supplementary numbers from that 3-number pool.</li>
+  </ul>
+
+  <div class="note">
+    <strong>Truthfulness note:</strong> PNUaRW45 is random coverage, not a prediction, score, or evidence-weighted strategy. Because the rule promises a strict 45-number random partition, normal generation filters such as Count, forced inclusions, exclusions, odd/even quotas, MiAN, and scoring influence are bypassed while RwR45 is ON.
+  </div>
+
+  <div class="tip">
+    The 3 leftover numbers cannot fill all 14 supplementary positions globally without reuse. Windfall therefore keeps the <strong>main numbers</strong> strictly global-without-replacement and reuses the 3-number supplementary pool row by row.
+  </div>
+
   <!-- ───────────────────────────────────────── -->
   <h3 id="paste-weighted-generator">Paste-Weighted Candidate Generator</h3>
 
@@ -516,24 +536,42 @@
     <li><strong>Observe only</strong> — generates candidates normally and reports which adaptive shapes appeared in the output.</li>
     <li><strong>Quota filter</strong> — uses the learned percentages as accept/reject quotas, so the final generated candidates try to follow the same shape distribution.</li>
   </ul>
+  <p><strong>Important:</strong> Only Quota filter mode uses the full profile distribution. Observe only mode reports what the generated rows happened to contain.</p>
 
   <div class="tip">
     <strong>Quick reading:</strong> adaptive shape is a more detailed version of odd/even balance. It asks not only "how many odd and even numbers?", but also "are those odd/even numbers coming from single-digit or double-digit ranges?"
   </div>
 
+  <h4>Stage IDM vs Monthly Acceptance Needs</h4>
+  <p>The paste-weighted generator has two separate monthly-bucket controls because they answer different questions:</p>
+  <ul>
+    <li><strong>Stage IDM bucket mix</strong> is an exact six-main composition filter. Its default is derived from the Stage IDM target and reconciled to six mains because paste-weighted candidates do not include supplementary numbers.</li>
+    <li><strong>Monthly Acceptance Needs</strong> uses the literal minimum counts selected in Monthly Draws Summary. For example, <code>0x≥2 · 1x≥1</code> means every accepted paste-weighted candidate must include at least two undrawn numbers and at least one 1x number.</li>
+  </ul>
+  <p>Monthly Acceptance Needs is not rescaled. If the selected requirements total more than six, the paste-weighted generator shows an impossible-for-mains-only warning instead of silently changing the user's selected needs.</p>
+  <div class="note">
+    <strong>Honesty note:</strong> Stage IDM is a descriptive stage-alignment filter. Monthly Acceptance Needs is a literal user-selected requirement filter. Neither should be read as a calibrated next-draw probability.
+  </div>
+
   <!-- ───────────────────────────────────────── -->
   <h3 id="portfolio-compression">Portfolio Compression / 12-Game Distiller</h3>
 
-  <p>The <strong>Portfolio Compression / 12-Game Distiller</strong> helps reduce a group of generated or pasted games into a six-number core plus alternates. It starts with count compression: numbers that appear more often across the supplied portfolio rows rise to the top.</p>
+  <p>The <strong>Portfolio Compression / 12-Game Distiller</strong> helps reduce a group of generated or pasted rows into a six-number core plus alternates. It starts with count compression: numbers that appear more often across the supplied portfolio rows rise to the top.</p>
 
-  <p>This panel is best used as a decision-support layer. It helps answer: "if I already have a portfolio of candidate games, which numbers are carrying the most repeated support across that portfolio?" It does not prove that those six numbers will be drawn.</p>
+  <p>This panel is best used as a decision-support layer. It helps answer: "if I already have a portfolio of candidate rows, which numbers are carrying the most repeated support across that portfolio?" It does not prove that those six numbers will be drawn.</p>
 
-  <h4 id="portfolio-backtest-v1">Backtest Portfolio Compression V1</h4>
+  <p><strong>Rows counted</strong> is every pasted or loaded row containing at least one valid number. <strong>Valid game rows</strong> is stricter: rows must contain exactly 6 or 8 unique in-range numbers. Rows needing review are still counted, but the panel flags them so malformed input cannot pass silently.</p>
 
-  <p><strong>Backtest Portfolio Compression V1</strong> is a validation tool, not a number-picking oracle. It asks whether the compressed structural method performs better in historical walk-forward testing than simpler controls.</p>
+  <p><strong>Load current generated candidates</strong> loads generated rows from the main and paste-weighted generators. Supplementary numbers are included when the source provides them; paste-weighted rows are usually mains only.</p>
+
+  <p>Optional evidence columns are observe-only and labelled by scope. For example, hot/cold uses mains + supps, while adjacent combos and window shape are mains-only diagnostics. These columns do not change the top-six core.</p>
+
+  <h4 id="portfolio-backtest-v1">Structural Strategy Backtest</h4>
+
+  <p><strong>Structural Strategy Backtest</strong> is a validation tool, not a number-picking oracle. It tests a separate historical structural-state strategy against simpler controls. It does <strong>not</strong> validate the pasted portfolio core currently shown above it.</p>
 
   <div class="note">
-    <strong>Core question:</strong> when this structural compression method is tested walk-forward, using only past draws at each point, does it behave better than simple frequency or random?
+    <strong>Core question:</strong> when this structural-state method is tested walk-forward, using only past draws at each point, does it behave better than simple frequency or random?
   </div>
 
   <table>
@@ -546,16 +584,16 @@
         <td>The number of historical draws tested out-of-sample. More evaluated draws gives a more stable read.</td>
       </tr>
       <tr>
-        <td><strong>Compressed vs simple prize delta</strong></td>
-        <td>Compressed structural method minus simple historical-frequency method. Positive is encouraging, but should not be trusted by itself.</td>
+        <td><strong>Structural vs simple prize delta</strong></td>
+        <td>Structural-state method minus simple historical-frequency method. Positive is encouraging, but should not be trusted by itself.</td>
       </tr>
       <tr>
-        <td><strong>Compressed advantage p-value</strong></td>
-        <td>The main honesty metric for compressed versus simple frequency. Below <code>0.05</code> is interesting, <code>0.05-0.10</code> is worth watching, and above <code>0.10</code> is weak evidence.</td>
+        <td><strong>Structural vs simple p-value</strong></td>
+        <td>The main honesty metric for structural-state versus simple frequency. Below <code>0.05</code> is interesting, <code>0.05-0.10</code> is worth watching, and above <code>0.10</code> is weak evidence.</td>
       </tr>
       <tr>
-        <td><strong>Monte Carlo random-history p-value</strong></td>
-        <td>Checks whether the compressed strategy's historical score is unusual compared with random 6/45 histories. A high value means the result sits inside normal luck.</td>
+        <td><strong>Random-history diagnostic p-value</strong></td>
+        <td>Checks whether the structural-state strategy's historical score is unusual compared with random 6/45 histories. A high value means the result sits inside normal luck.</td>
       </tr>
       <tr>
         <td><strong>Prize score</strong></td>
@@ -585,17 +623,17 @@
     <li>Use <strong>10,000</strong> Monte Carlo histories for serious reading.</li>
     <li>Run several training-window settings, such as <code>24</code>, <code>36</code>, <code>50</code>, <code>75</code>, and <code>100</code>.</li>
     <li>Look for stability across settings, not one lucky result.</li>
-    <li>Prefer results where compressed has a positive prize delta, higher mean matches, higher 3+ hit rate, lower or comparable drawdown, and a low p-value.</li>
+    <li>Prefer results where the structural-state strategy has a positive prize delta, higher mean matches, higher 3+ hit rate, lower or comparable drawdown, and a low p-value.</li>
     <li>Be suspicious if prize score is the only strong metric. That can be caused by one lucky historical spike.</li>
-    <li>If simple frequency beats compressed, listen to that result. It means the structural layer is not currently adding evidence.</li>
+    <li>If simple frequency beats the structural-state strategy, listen to that result. It means the structural layer is not currently adding evidence.</li>
   </ol>
 
   <div class="tip">
-    <strong>Rule of thumb:</strong> the useful signal is not "compressed won once." The useful signal is compressed repeatedly outperforming simple frequency across settings, with better 3+ hit rate and a respectable p-value.
+    <strong>Rule of thumb:</strong> the useful signal is not "structural won once." The useful signal is the structural-state method repeatedly outperforming simple frequency across settings, with better 3+ hit rate and a respectable p-value.
   </div>
 
   <div class="warn-box">
-    <strong>Honesty note:</strong> use the backtest to decide whether Portfolio Compression deserves attention. Do not use it to force belief in the final six.
+    <strong>Honesty note:</strong> use the backtest to decide whether structural-state evidence deserves attention. Do not use it to force belief in the pasted portfolio core or final six.
   </div>
 
   <!-- ───────────────────────────────────────── -->
@@ -1100,12 +1138,30 @@
   <h4>Selected numbers vs selected counts</h4>
   <p>This distinction is important:</p>
   <ul>
-    <li>The <strong>selected numbers themselves</strong> are used by the <strong>Use selected</strong> button and the <strong>Simulate 8</strong> button.</li>
+    <li>The <strong>selected numbers themselves</strong> are used by the <strong>Use selected</strong> button and the <strong>Simulate 8</strong> button. <strong>Simulate 8</strong> samples up to eight selected numbers, shows the result in this panel, and sends the same result to the DGA simulation view.</li>
     <li>The <strong>selected counts</strong> are what drive <strong>Constructive Fill</strong> and the synced <strong>MiAN</strong> values.</li>
   </ul>
 
+  <table>
+    <thead>
+      <tr><th>Control</th><th>Uses exact clicked numbers?</th><th>Affects generator structure?</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Use selected</strong></td>
+        <td>Yes. It sends the actual clicked numbers into the shared user-selected numbers state.</td>
+        <td>Only as selected numbers.</td>
+      </tr>
+      <tr>
+        <td><strong>Use counts when constructing candidates</strong></td>
+        <td>No. It ignores the exact clicked numbers and uses only the selected bucket counts.</td>
+        <td>Yes. It applies those counts as bucket minimums.</td>
+      </tr>
+    </tbody>
+  </table>
+
   <div class="tip">
-    When <strong>Use counts when constructing candidates</strong> is ON, the generator does <strong>not</strong> force the exact bucket numbers you clicked. It uses the <em>count</em> you selected in each bucket and then chooses that many numbers from the full eligible bucket pool.
+    <strong>Plain terms:</strong> <strong>Use selected</strong> means "use the actual numbers I clicked." <strong>Use counts when constructing candidates</strong> means "use the bucket quantities I clicked, but choose from the full eligible bucket pool." For example, <code>Undrawn 2/5</code> and <code>1x 3/17</code> means every candidate must include at least two undrawn numbers and at least three 1x numbers; it does not force the specific clicked numbers from those buckets.
   </div>
 
   <!-- ───────────────────────────────────────── -->
@@ -1441,6 +1497,10 @@
 
   <p>The panel is diagnostic only. It can help you inspect spatial density, carry-over numbers, adjacent +/-1/+/-2 traces, and running hot/cold status over time, but these overlays are not calibrated predictions.</p>
 
+  <p><strong>Candidate carousel</strong> changes the same 9x5 grid from historical replay to a slot-machine style scan of the candidate rows already generated elsewhere in the app. It can read rows from <strong>Generated Candidates</strong> and <strong>Paste-Weighted Candidates</strong>; it does not create new candidates, re-rank candidates, or alter draw history.</p>
+
+  <p>Use <strong>Spin</strong>, <strong>Pause</strong>, <strong>Back</strong>, and <strong>Next</strong> to cycle candidate rows. Click visible candidate numbers, or use <strong>Hold visible</strong>, to hold up to eight numbers locally in the grid. Once eight numbers are held, spinning is locked until <strong>Start over</strong> is pressed. Held numbers are a visual compression aid only; they do not become forced inclusions, exclusions, selected-number boosts, or DGA simulated numbers.</p>
+
   <table>
     <thead>
       <tr><th>Overlay</th><th>Meaning</th></tr>
@@ -1669,6 +1729,40 @@
   <div class="warn-box">
     <strong>Important:</strong> the saved setup snapshot is provenance. It does not change candidate generation, does not alter scoring, and does not make the prediction more or less true by itself.
   </div>
+
+  <h3 id="research-diary">Research Diary &amp; Draw Reminders</h3>
+
+  <p>The <strong>Research Diary &amp; Draw Reminders</strong> panel is an observe-only note system for recurring ideas. It can remind you that a saved observation may be relevant to the next draw's context, but it does not influence candidate generation, candidate ranking, filters, forced numbers, or scoring.</p>
+
+  <div class="note">
+    <strong>Use it for recurring setup notes:</strong> examples include "check SDE1 and HC3 on D3", "review Wednesday draw behaviour", or "watch month-end carry-over during 13-draw months". Use the Prediction Journal for one-off predictions that need post-draw scoring.
+  </div>
+
+  <h4>How reminders are matched</h4>
+  <ul>
+    <li>The panel calculates the next Monday / Wednesday / Friday draw date from the calendar and real draw history.</li>
+    <li>It labels the next draw by month ordinal, for example D1, D2, or D3.</li>
+    <li>Diary notes can be targeted by draw ordinal, weekday, month phase, and scheduled draw count for the month.</li>
+    <li>Rule tags such as SDE1, HC3, Stage IDM, Carry-over, Odd/even, Drought, Hot/cold, and Window shape help you scan notes quickly. Tags do not apply app settings.</li>
+  </ul>
+
+  <h4>Saved setup provenance</h4>
+  <p>When a diary note is saved, the panel can store a compact snapshot of the current setup, including WFMQYH, generation influence, carry-over state, acceptance-needs state, core SDE1/HC3 switches, selected ratios, and selected/excluded number counts. This is historical context only. It helps you understand what you were looking at when the note was written.</p>
+
+  <h4>Evidence status and review</h4>
+  <table>
+    <thead>
+      <tr><th>Field</th><th>Meaning</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>Observation</strong></td><td>A raw note that has not yet been tested.</td></tr>
+      <tr><td><strong>Needs testing</strong></td><td>A promising idea that should be watched over repeated matching draw contexts.</td></tr>
+      <tr><td><strong>Worth repeating</strong></td><td>An idea you have seen behave usefully enough to keep reviewing.</td></tr>
+      <tr><td><strong>Refuted</strong></td><td>An idea that currently looks unsupported.</td></tr>
+      <tr><td><strong>Retired</strong></td><td>A note kept for history but hidden from active reminders.</td></tr>
+      <tr><td><strong>Review after matches</strong></td><td>An optional reminder marker that asks you to reassess after the note has matched enough future contexts.</td></tr>
+    </tbody>
+  </table>
 
   <h4>Entry checker</h4>
   <p>Before saving, the journal checks for impossible quantities. For example, a next-draw odd/even ratio must total 8, a next-draw number shortlist cannot contain more than 8 unique numbers, terminal digit selections cannot exceed what the target window can draw, and count fields such as bucket mix, repeat count, drought count, carry-over count, and confidence must stay inside their possible ranges. Invalid entries are blocked and shown as a visible error list.</p>

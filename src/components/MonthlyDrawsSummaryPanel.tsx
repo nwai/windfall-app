@@ -48,6 +48,7 @@ interface MonthlyDrawsSummaryPanelProps {
   onAvgBucketsChange?: (avgBuckets: AvgBucketEntry[]) => void;
   onIdealDrawStateChange?: (state: MonthlyIdealDrawState | null) => void;
   onStageIdealDrawStateChange?: (state: StageIdealDrawState | null) => void;
+  onSimulateNumbers?: (numbers: number[]) => void;
   excludedNumbers?: number[];
 }
 
@@ -360,6 +361,7 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
   onAvgBucketsChange,
   onIdealDrawStateChange,
   onStageIdealDrawStateChange,
+  onSimulateNumbers,
   excludedNumbers = [],
 }) => {
   const [drawLimit, setDrawLimit] = useState<DrawLimit>("all");
@@ -384,10 +386,16 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
       averageDrawCountFilter,
     })
   ), [averageDrawCountFilter, drawLimit, history]);
-  const monthlyBucketDisplayRows = useMemo(
-    () => [...summary.rows].reverse(),
-    [summary.rows],
-  );
+  const monthlyBucketDisplayRows = useMemo(() => {
+    const rows = averageDrawCountFilter === "all"
+      ? summary.rows
+      : summary.rows.filter((row) => (
+        row.totalDrawCount === averageDrawCountFilter
+        || row.monthLabel === summary.effectiveMonthLabel
+      ));
+    return [...rows].reverse();
+  }, [averageDrawCountFilter, summary.effectiveMonthLabel, summary.rows]);
+  const monthlyBucketHiddenCount = summary.rows.length - monthlyBucketDisplayRows.length;
 
   const stageIdealDrawState = useMemo(() => analyzeStageIdealDrawModel(history, {
     drawLimitPerMonth: "all",
@@ -501,7 +509,9 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
   };
 
   const handleSimulate = () => {
-    setSimulateResult(sampleMonthlyNumbers(allSelected, 8));
+    const numbers = sampleMonthlyNumbers(allSelected, 8);
+    setSimulateResult(numbers);
+    onSimulateNumbers?.(numbers);
   };
 
   const clearSelections = () => {
@@ -593,6 +603,9 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
               <strong style={{ color: "#0f172a" }}>Monthly Buckets</strong>
               <span style={{ color: "#64748b", fontSize: 12 }}>
                 Counts are unique numbers per month; planning reset rows show 0/expected draws before the first draw lands.
+                {averageDrawCountFilter === "all"
+                  ? ""
+                  : ` Showing ${monthlyBucketDisplayRows.length} of ${summary.rows.length} months while filtering ${averageDrawCountFilter}-draw baseline months; current month stays visible${monthlyBucketHiddenCount ? `, ${monthlyBucketHiddenCount} hidden` : ""}.`}
               </span>
             </div>
             <div style={{ overflowX: "auto", maxHeight: 430 }}>

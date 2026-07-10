@@ -136,7 +136,19 @@ describe("predictionJournal", () => {
       scoringGenerationInfluence: "normal",
       monthEndCarryOverBiasEnabled: true,
       monthEndCarryOverStrength: "strong",
+      monthlyConstructiveEnabled: true,
       acceptanceNeedsEnabled: true,
+      acceptanceNeedsCounts: {
+        undrawn: 2,
+        times1: 3,
+        times2: 0,
+        times3: 1,
+        times4: 0,
+        times5: 0,
+        times6: 0,
+        times7: 0,
+        times8: 0,
+      },
       acceptanceNeedsHardExclude: true,
       previousNeighbourConstraintNumbers: [12, 14],
       userSelectedNumbers: [1, 2, 3],
@@ -163,7 +175,9 @@ describe("predictionJournal", () => {
       generation: expect.arrayContaining([
         "Scoring influence: normal",
         "Month-end carry-over: strong",
-        "Acceptance needs: hard exclude",
+        "Use counts when constructing candidates: on",
+        "Acceptance needs counts: 0x≥2 · 1x≥3 · 3x≥1",
+        "Extra MiAN post-filter: hard exclude",
       ]),
       filters: expect.arrayContaining([
         "SDE1 on",
@@ -172,13 +186,54 @@ describe("predictionJournal", () => {
         "Previous +/- targets: 2",
       ]),
       selections: expect.arrayContaining([
-        "User selected: 3",
-        "User excluded: 1",
+        "User-selected strip: 3",
+        "User exclusions: 1",
         "Hot/cold forced: 1",
         "Hot/cold excluded: 1",
         "Drought-break forced: 1",
       ]),
     });
+  });
+
+  it("distinguishes Monthly Draws Summary construction from the extra MiAN post-filter", () => {
+    const setupSnapshot = {
+      windowEnabled: true,
+      windowMode: "Custom",
+      customDrawCount: 13,
+      selectedRatios: [],
+      knobs: {},
+      scoringGenerationInfluence: "off",
+      monthEndCarryOverBiasEnabled: false,
+      monthlyConstructiveEnabled: true,
+      acceptanceNeedsEnabled: false,
+      acceptanceNeedsCounts: {
+        undrawn: 2,
+        times1: 1,
+        times2: 0,
+        times3: 0,
+        times4: 0,
+        times5: 0,
+        times6: 0,
+        times7: 0,
+        times8: 0,
+      },
+    } as any;
+
+    const entry = buildPredictionJournalEntry({
+      id: "prediction-setup-constructive-only",
+      now: "2026-06-24T10:30:00.000Z",
+      latestDraw: draw("6/24/26", [1, 3, 5, 7, 9, 11], [13, 15]),
+      targetKind: "nextDraw",
+      inputs: { notes: "Use counts only." },
+      setupSnapshot,
+    });
+
+    expect(entry.setupSummary?.generation).toEqual(expect.arrayContaining([
+      "Use counts when constructing candidates: on",
+      "Acceptance needs counts: 0x≥2 · 1x≥1",
+      "Extra MiAN post-filter: off",
+    ]));
+    expect(entry.setupSummary?.generation).not.toContain("MiAN filter: off");
   });
 
   it("persists journal entries locally without treating malformed storage as real entries", () => {

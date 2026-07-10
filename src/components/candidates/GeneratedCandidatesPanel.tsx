@@ -36,6 +36,8 @@ const GENERATED_CANDIDATE_VISIBLE_COLUMN_COUNT = 23;
 
 /** Settings snapshot captured at export time — written as ## comment rows in CSV */
 export interface ExportSettings {
+  /** Random coverage mode: exactly 7 rows, 42 globally unique mains, 3 leftover supplementaries. */
+  rwr45Enabled?: boolean;
   excludedNumbers: number[];
   /** HC3-excluded numbers (overlap of last two draws) — silently injected by generateCandidates */
   hc3Exclusions: number[];
@@ -84,6 +86,8 @@ export interface GeneratedCandidatesPanelProps {
   isGenerating?: boolean;
   numCandidates: number;
   setNumCandidates: (n: number) => void;
+  rwr45Enabled?: boolean;
+  setRwr45Enabled?: (enabled: boolean) => void;
   forcedNumbers?: number[];
   excludedNumbers?: number[];
   userSelectedNumbers: number[];
@@ -161,6 +165,8 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
   isGenerating = false,
   numCandidates,
   setNumCandidates,
+  rwr45Enabled = false,
+  setRwr45Enabled,
   userSelectedNumbers,
   setUserSelectedNumbers,
   onSelectCandidate,
@@ -1806,8 +1812,12 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
        tag("Draw window", `${historyForOGA?.length ?? 0} draws`);
        tag("OGA", `${enableOGA ? "ON" : "OFF"} | Spokes ${ogaSpokeCount ?? 9}`);
 
-       if (exportSettings) {
+      if (exportSettings) {
          const es = exportSettings;
+         tag("RwR45 / PNUaRW45", es.rwr45Enabled
+           ? "ON — Count ignored; 7 random coverage rows; normal generator filters bypassed"
+           : "OFF"
+         );
 
          // All effective exclusions — user, SDE1, HC3 clearly separated
          const userExcl = es.excludedNumbers.length > 0
@@ -1917,18 +1927,52 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
           <label style={{ fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6 }}>
            Count
             <input
+              aria-label="Generated candidate count"
               type="number"
               min={1}
+              disabled={rwr45Enabled}
               value={numCandidates}
               onChange={(e) =>
                 setNumCandidates(Math.max(1, Number(e.target.value) || 1))
               }
-             style={{ width: 80 }}
+             style={{ width: 80, opacity: rwr45Enabled ? 0.55 : 1 }}
            />
             <InfoHelp label="Candidate count help">
-              Defaults to the active draw window size until you type a manual count.
+              Defaults to the active draw window size until you type a manual count. RwR45 ignores Count and always creates exactly 7 candidates.
             </InfoHelp>
          </label>
+         {setRwr45Enabled && (
+           <label
+             style={{
+               fontSize: 12,
+               display: "inline-flex",
+               alignItems: "center",
+               gap: 6,
+               padding: "4px 8px",
+               border: `1px solid ${rwr45Enabled ? "#111827" : "#d8dee8"}`,
+               borderRadius: 999,
+               background: rwr45Enabled ? "#111827" : "#f8fafc",
+               color: rwr45Enabled ? "#fff" : "#334155",
+               fontWeight: 800,
+             }}
+           >
+             <input
+               type="checkbox"
+               aria-label="Toggle RwR45 random coverage mode"
+               checked={rwr45Enabled}
+               onChange={(event) => setRwr45Enabled(event.currentTarget.checked)}
+             />
+             RwR45
+             <InfoHelp label="RwR45 random coverage help">
+               PNUaRW45 is a random coverage mode. When On, Generate ignores Count, creates exactly 7 rows, assigns 42 globally unique main numbers across those rows, then uses the 3 leftover numbers as the supplementary pool.
+             </InfoHelp>
+           </label>
+         )}
+         {rwr45Enabled && (
+           <span style={{ color: "#334155", fontSize: 12, fontWeight: 700 }}>
+             Count ignored · exactly 7 random coverage rows
+           </span>
+         )}
            <HigButton variant="primary" disabled={isGenerating} onClick={onGenerate}>
              {isGenerating ? "Generating…" : "Generate"}
            </HigButton>

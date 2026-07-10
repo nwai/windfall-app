@@ -30,6 +30,28 @@ export interface TicketReplayStepInput {
   direction: -1 | 1;
 }
 
+export interface TicketGridCandidateInput {
+  main?: readonly unknown[];
+  supp?: readonly unknown[];
+}
+
+export interface TicketGridCandidateSourceInput {
+  id: string;
+  label: string;
+  candidates: readonly TicketGridCandidateInput[];
+}
+
+export interface TicketGridCandidateFrame {
+  index: number;
+  totalFrames: number;
+  sourceId: string;
+  sourceLabel: string;
+  sourceRowNumber: number;
+  main: number[];
+  supp: number[];
+  numbers: number[];
+}
+
 const isTicketNumber = (value: unknown): value is number => (
   typeof value === "number"
   && Number.isInteger(value)
@@ -94,6 +116,58 @@ export const stepTicketReplayFrame = ({
 }: TicketReplayStepInput): number => {
   if (frameCount <= 0) return 0;
   return Math.max(0, Math.min(frameCount - 1, currentIndex + direction));
+};
+
+export const stepTicketCarouselFrame = ({
+  currentIndex,
+  frameCount,
+  direction,
+}: TicketReplayStepInput): number => {
+  if (frameCount <= 0) return 0;
+  const safeIndex = Number.isFinite(currentIndex) ? Math.floor(currentIndex) : 0;
+  return (safeIndex + direction + frameCount) % frameCount;
+};
+
+export const buildTicketGridCandidateFrames = (
+  sources: readonly TicketGridCandidateSourceInput[],
+): TicketGridCandidateFrame[] => {
+  const frames: TicketGridCandidateFrame[] = [];
+
+  sources.forEach((source) => {
+    source.candidates.forEach((candidate, sourceIndex) => {
+      const main = normalizeTicketNumbers(candidate.main);
+      const supp = normalizeTicketNumbers(candidate.supp).filter((number) => !main.includes(number));
+      const numbers = normalizeTicketNumbers([...main, ...supp]);
+      if (numbers.length === 0) return;
+
+      frames.push({
+        index: frames.length,
+        totalFrames: 0,
+        sourceId: source.id,
+        sourceLabel: source.label,
+        sourceRowNumber: sourceIndex + 1,
+        main,
+        supp,
+        numbers,
+      });
+    });
+  });
+
+  return frames.map((frame) => ({ ...frame, totalFrames: frames.length }));
+};
+
+export const toggleTicketHeldNumber = (
+  heldNumbers: readonly number[],
+  number: number,
+  maxHeld = 8,
+): number[] => {
+  const normalizedHeld = Array.from(new Set(heldNumbers.filter(isTicketNumber)));
+  if (!isTicketNumber(number)) return normalizedHeld;
+  if (normalizedHeld.includes(number)) {
+    return normalizedHeld.filter((heldNumber) => heldNumber !== number);
+  }
+  if (normalizedHeld.length >= maxHeld) return normalizedHeld;
+  return [...normalizedHeld, number];
 };
 
 export interface TicketGridDensity {

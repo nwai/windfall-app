@@ -27,6 +27,7 @@
   --wf-generator-bg-strong: #fff4da;
   --wf-generator-rule: #d19a24;
   --wf-generator-ink: #5f4306;
+  --wf-sticky-nav-top: 0px;
 }
 
 * {
@@ -38,6 +39,7 @@ html {
   color: var(--wf-text);
   font-family: var(--wf-font-sans);
   overflow-x: clip;
+  scroll-padding-top: 76px;
 }
 
 body {
@@ -289,18 +291,20 @@ tbody tr:hover {
 
 .windfall-workflow-nav {
   position: sticky;
-  top: 0;
-  z-index: 20;
+  top: var(--wf-sticky-nav-top, 0px);
+  z-index: 80;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
+  max-width: 100%;
   margin: 0 0 16px;
   padding: 7px;
   border: 1px solid var(--wf-rule);
   border-radius: var(--wf-radius);
-  background: var(--wf-glass-surface);
+  background: var(--wf-glass-surface-strong);
   box-shadow: var(--wf-shadow-subtle);
+  -webkit-backdrop-filter: var(--wf-backdrop-blur);
   backdrop-filter: var(--wf-backdrop-blur);
 }
 
@@ -1590,16 +1594,28 @@ tbody tr:hover {
   }
 
   .windfall-workflow-nav {
-    position: static;
+    flex-wrap: nowrap;
     gap: 6px;
+    margin-right: -4px;
+    margin-left: -4px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .windfall-workflow-nav::-webkit-scrollbar {
+    display: none;
   }
 
   .windfall-workflow-nav__link {
-    flex: 1 1 calc(50% - 6px);
+    flex: 0 0 auto;
+    min-height: 32px;
+    white-space: nowrap;
   }
 
   .windfall-workflow-anchor {
-    scroll-margin-top: 12px;
+    scroll-margin-top: 70px;
   }
 
   .windfall-workflow-anchor__title {

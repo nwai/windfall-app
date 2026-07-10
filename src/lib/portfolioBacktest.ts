@@ -158,7 +158,7 @@ const emptyResult = (
   stakePerDraw: options.stakePerDraw,
   records: [],
   strategies: {
-    compressed: emptySummary("Compressed structural pattern"),
+    compressed: emptySummary("Structural-state strategy"),
     simpleFrequency: emptySummary("Simple historical frequency"),
     random: emptySummary("Seeded random ticket"),
   },
@@ -700,7 +700,7 @@ const randomHistoryPValues = (
 function buildMethodology(iterations: number): string[] {
   return [
     "Walk-forward only: every evaluated draw is selected using draws strictly before it.",
-    "Compressed strategy maps draws into structural states: deltas, odd/even, low/high, decade, modulo-3, and ending-digit counts.",
+    "Structural-state strategy maps draws into structural states: deltas, odd/even, low/high, decade, modulo-3, and ending-digit counts.",
     "Simple baseline ranks individual main numbers by historical frequency up to the previous draw.",
     "Random baseline is a seeded six-number ticket per evaluated draw.",
     `Monte Carlo null uses ${iterations.toLocaleString()} random 6/45 histories against the same walk-forward selections.`,
@@ -751,7 +751,7 @@ export function runPortfolioCompressionBacktest(
   }
 
   const strategies = {
-    compressed: buildStrategySummary(records, "compressed", "Compressed structural pattern", normalizedOptions.stakePerDraw),
+    compressed: buildStrategySummary(records, "compressed", "Structural-state strategy", normalizedOptions.stakePerDraw),
     simpleFrequency: buildStrategySummary(records, "simpleFrequency", "Simple historical frequency", normalizedOptions.stakePerDraw),
     random: buildStrategySummary(records, "random", "Seeded random ticket", normalizedOptions.stakePerDraw),
   };

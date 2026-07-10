@@ -8,7 +8,10 @@ import {
   computeRunningHotColdCounts,
   computeTicketGridDensity,
   getTicketGridPosition,
+  buildTicketGridCandidateFrames,
+  stepTicketCarouselFrame,
   stepTicketReplayFrame,
+  toggleTicketHeldNumber,
 } from "./tattslottoTicketGrid";
 
 const draw = (date: string, main: number[], supp: number[] = [44, 45], isSimulated = false): Draw => ({
@@ -65,6 +68,58 @@ describe("tattslotto ticket grid helpers", () => {
     expect(stepTicketReplayFrame({ currentIndex: 3, frameCount: 4, direction: -1 })).toBe(2);
     expect(stepTicketReplayFrame({ currentIndex: 0, frameCount: 4, direction: -1 })).toBe(0);
     expect(stepTicketReplayFrame({ currentIndex: 0, frameCount: 0, direction: 1 })).toBe(0);
+  });
+
+  it("builds candidate carousel frames from real candidate sources without inventing numbers", () => {
+    const frames = buildTicketGridCandidateFrames([
+      {
+        id: "generated",
+        label: "Generated Candidates",
+        candidates: [
+          { main: [6, 1, 2, 3, 4, 5], supp: [44, 45] },
+          { main: [0, 9, 10, 10, 46, 11], supp: [12, 13, 13] },
+        ],
+      },
+      {
+        id: "paste",
+        label: "Paste-Weighted Candidates",
+        candidates: [
+          { main: [14, 15, 16, 17, 18, 19] },
+        ],
+      },
+    ]);
+
+    expect(frames).toHaveLength(3);
+    expect(frames[0]).toMatchObject({
+      sourceId: "generated",
+      sourceLabel: "Generated Candidates",
+      sourceRowNumber: 1,
+      main: [1, 2, 3, 4, 5, 6],
+      supp: [44, 45],
+      numbers: [1, 2, 3, 4, 5, 6, 44, 45],
+    });
+    expect(frames[1].numbers).toEqual([9, 10, 11, 12, 13]);
+    expect(frames[2]).toMatchObject({
+      sourceId: "paste",
+      sourceLabel: "Paste-Weighted Candidates",
+      sourceRowNumber: 1,
+      supp: [],
+      numbers: [14, 15, 16, 17, 18, 19],
+    });
+  });
+
+  it("wraps carousel stepping and caps held ticket numbers at eight", () => {
+    expect(stepTicketCarouselFrame({ currentIndex: 0, frameCount: 3, direction: 1 })).toBe(1);
+    expect(stepTicketCarouselFrame({ currentIndex: 2, frameCount: 3, direction: 1 })).toBe(0);
+    expect(stepTicketCarouselFrame({ currentIndex: 0, frameCount: 3, direction: -1 })).toBe(2);
+    expect(stepTicketCarouselFrame({ currentIndex: 0, frameCount: 0, direction: 1 })).toBe(0);
+
+    let held = [1, 2, 3, 4, 5, 6, 7];
+    held = toggleTicketHeldNumber(held, 8);
+    expect(held).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(toggleTicketHeldNumber(held, 9)).toEqual(held);
+    expect(toggleTicketHeldNumber(held, 0)).toEqual(held);
+    expect(toggleTicketHeldNumber([1, 2, 3], 2)).toEqual([1, 3]);
   });
 
   it("computes carry-over markers from the previous real frame", () => {

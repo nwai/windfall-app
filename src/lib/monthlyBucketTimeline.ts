@@ -5,6 +5,15 @@ export interface MonthlyBucketTimelineEntry {
   monthLabel: string;
   bucketSets: MonthlyBucketSets;
   drawCount: number;
+  totalDrawCount: number;
+  drawStates: MonthlyBucketTimelineDrawState[];
+}
+
+export interface MonthlyBucketTimelineDrawState {
+  drawOrdinal: number;
+  drawDate: string;
+  bucketSets: MonthlyBucketSets;
+  isSimulated: boolean;
 }
 
 const DEFAULT_MAX_NUMBER = 45;
@@ -57,18 +66,55 @@ const bucketSetsFromCounts = (counts: readonly number[]): MonthlyBucketSets => {
   return sets;
 };
 
-export const buildMonthlyBucketTimeline = (history: Draw[]): MonthlyBucketTimelineEntry[] => {
-  const grouped = new Map<string, { timestamp: number; counts: number[]; drawCount: number }>();
+const parseMonthParts = (monthLabel: string): { year: number; month: number } | null => {
+  const [yearRaw, monthRaw] = monthLabel.split("-");
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) return null;
+  return { year, month };
+};
 
-  history.forEach((draw) => {
-    const timestamp = parseDrawTimestamp(draw.date);
-    if (timestamp === null) return;
-    const monthLabel = toMonthLabel(new Date(timestamp));
+const countScheduledDrawsInMonth = (monthLabel: string): number => {
+  const parts = parseMonthParts(monthLabel);
+  if (!parts) return 0;
+  let count = 0;
+  for (let day = 1; day <= 31; day += 1) {
+    const date = new Date(parts.year, parts.month - 1, day);
+    if (date.getMonth() !== parts.month - 1) break;
+    const weekday = date.getDay();
+    if (weekday === 1 || weekday === 3 || weekday === 5) count += 1;
+  }
+  return count;
+};
+
+export const buildMonthlyBucketTimeline = (history: Draw[]): MonthlyBucketTimelineEntry[] => {
+  const parsedDraws = history
+    .map((draw) => {
+      const timestamp = parseDrawTimestamp(draw.date);
+      if (timestamp === null) return null;
+      return {
+        draw,
+        timestamp,
+        monthLabel: toMonthLabel(new Date(timestamp)),
+      };
+    })
+    .filter((entry): entry is { draw: Draw; timestamp: number; monthLabel: string } => entry !== null)
+    .sort((a, b) => a.timestamp - b.timestamp);
+
+  const grouped = new Map<string, {
+    timestamp: number;
+    counts: number[];
+    drawCount: number;
+    drawStates: MonthlyBucketTimelineDrawState[];
+  }>();
+
+  parsedDraws.forEach(({ draw, timestamp, monthLabel }) => {
     const existing = grouped.get(monthLabel);
     const bucket = existing ?? {
       timestamp,
       counts: new Array<number>(DEFAULT_MAX_NUMBER).fill(0),
       drawCount: 0,
+      drawStates: [],
     };
 
     bucket.drawCount += 1;
@@ -78,6 +124,12 @@ export const buildMonthlyBucketTimeline = (history: Draw[]): MonthlyBucketTimeli
       if (seenInDraw.has(value)) return;
       seenInDraw.add(value);
       bucket.counts[value - 1] += 1;
+    });
+    bucket.drawStates.push({
+      drawOrdinal: bucket.drawCount,
+      drawDate: draw.date ?? "",
+      bucketSets: bucketSetsFromCounts(bucket.counts),
+      isSimulated: !!draw.isSimulated,
     });
 
     if (!existing) grouped.set(monthLabel, bucket);
@@ -89,6 +141,8 @@ export const buildMonthlyBucketTimeline = (history: Draw[]): MonthlyBucketTimeli
       monthLabel,
       bucketSets: bucketSetsFromCounts(bucket.counts),
       drawCount: bucket.drawCount,
+      totalDrawCount: Math.max(bucket.drawCount, countScheduledDrawsInMonth(monthLabel)),
+      drawStates: bucket.drawStates,
     }));
 };
 

@@ -17,7 +17,7 @@ describe("Tattslotto ticket grid replay app wiring", () => {
     expect(dgaIndex).toBeGreaterThan(ticketReplayIndex);
   });
 
-  it("passes realFilteredHistory only and does not wire generation or selection setters", () => {
+  it("passes realFilteredHistory and read-only candidate rows without wiring app-state setters", () => {
     const appSource = readAppSource();
     const panelStart = appSource.indexOf("<TattslottoTicketGridReplayPanel");
     const panelEnd = appSource.indexOf("/>", panelStart);
@@ -25,6 +25,9 @@ describe("Tattslotto ticket grid replay app wiring", () => {
 
     expect(panelStart).toBeGreaterThanOrEqual(0);
     expect(panelBlock).toContain("history={realFilteredHistory}");
+    expect(panelBlock).toContain("candidateSources=");
+    expect(panelBlock).toContain("Generated Candidates");
+    expect(panelBlock).toContain("Paste-Weighted Candidates");
     expect(panelBlock).not.toContain("setUserSelectedNumbers");
     expect(panelBlock).not.toContain("setManualSimSelected");
     expect(panelBlock).not.toContain("setSimulatedDraw");

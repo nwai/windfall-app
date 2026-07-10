@@ -1,6 +1,11 @@
 import type { CandidateSet } from "../types";
 import { candidateShapeProfile } from "./adaptiveCandidateShapes";
-import { bucketLabelForTimes, MONTHLY_BUCKET_KEYS, type MonthlyBucketSets } from "./monthlyDrawSummary";
+import {
+  bucketLabelForTimes,
+  MONTHLY_BUCKET_KEYS,
+  type MonthlyBucketSets,
+  type MonthlyFrequencyConstraints,
+} from "./monthlyDrawSummary";
 import {
   buildOddEvenRatioQuotas,
   oddEvenRatioForNumbers,
@@ -40,6 +45,11 @@ export interface PasteWeightedCandidateConstraints {
     bucketSets?: MonthlyBucketSets | null;
     targetCounts?: readonly number[];
   };
+  monthlyAcceptanceNeeds?: {
+    enabled?: boolean;
+    bucketSets?: MonthlyBucketSets | null;
+    targetCounts?: MonthlyFrequencyConstraints | readonly number[] | null;
+  };
 }
 
 export interface PastedCandidateRow {
@@ -74,6 +84,7 @@ export interface PasteWeightedGenerationResult extends PastedCandidateParseResul
   oddEvenRatioSummary?: OddEvenRatioSummary;
   adaptiveShapeSummary?: OddEvenRatioSummary;
   stageIdmSummary?: PasteWeightedStageIdmSummary;
+  monthlyAcceptanceNeedsSummary?: PasteWeightedMonthlyAcceptanceNeedsSummary;
 }
 
 export interface PasteWeightedStageIdmSummary {
@@ -83,6 +94,8 @@ export interface PasteWeightedStageIdmSummary {
   targetCounts: number[];
   acceptedBucketCounts: number[];
 }
+
+export type PasteWeightedMonthlyAcceptanceNeedsSummary = PasteWeightedStageIdmSummary;
 
 const clampInteger = (value: number, min: number, max: number): number => {
   const floored = Math.floor(Number.isFinite(value) ? value : min);
@@ -180,6 +193,19 @@ export const reconcileStageIdmTargetCounts = (
   return reconciled;
 };
 
+export const normalizeMonthlyAcceptanceNeedsCounts = (
+  rawCounts: MonthlyFrequencyConstraints | readonly number[] | null | undefined,
+): number[] => (
+  Array.from({ length: MONTHLY_BUCKET_KEYS.length }, (_, index) => {
+    const key = MONTHLY_BUCKET_KEYS[index];
+    const rawValue = Array.isArray(rawCounts)
+      ? rawCounts[index]
+      : (rawCounts as MonthlyFrequencyConstraints | null | undefined)?.[key];
+    const value = Number(rawValue ?? 0);
+    return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+  })
+);
+
 const normalizeStageIdmTargetCounts = (targetCounts: readonly number[] | undefined): number[] => (
   Array.from({ length: MONTHLY_BUCKET_KEYS.length }, (_, index) => {
     const value = Number(targetCounts?.[index] ?? 0);
@@ -214,6 +240,10 @@ const sameCounts = (left: readonly number[], right: readonly number[]): boolean 
   left.length === right.length && left.every((value, index) => value === right[index])
 );
 
+const countsMeetMinimums = (actualCounts: readonly number[], minimumCounts: readonly number[]): boolean => (
+  minimumCounts.every((minimum, index) => actualCounts[index] >= minimum)
+);
+
 const stageIdmConstraintWarnings = (
   eligibleNumbers: readonly number[],
   stageIdm: NonNullable<PasteWeightedCandidateConstraints["stageIdm"]> | undefined,
@@ -239,6 +269,36 @@ const stageIdmConstraintWarnings = (
   targetCounts.forEach((target, index) => {
     if (target > eligibleBucketCounts[index]) {
       warnings.push(`Stage IDM ${bucketLabelForTimes(index)} needs ${target} main number${target === 1 ? "" : "s"}, but only ${eligibleBucketCounts[index]} eligible pasted number${eligibleBucketCounts[index] === 1 ? "" : "s"} are available in that bucket.`);
+    }
+  });
+  return warnings;
+};
+
+const monthlyAcceptanceNeedsConstraintWarnings = (
+  eligibleNumbers: readonly number[],
+  monthlyAcceptanceNeeds: NonNullable<PasteWeightedCandidateConstraints["monthlyAcceptanceNeeds"]> | undefined,
+  targetCounts: readonly number[],
+): string[] => {
+  if (!monthlyAcceptanceNeeds?.enabled) return [];
+  const warnings: string[] = [];
+  const total = targetCounts.reduce((sum, value) => sum + value, 0);
+  if (!monthlyAcceptanceNeeds.bucketSets) {
+    warnings.push("Monthly Acceptance Needs bucket data is unavailable, so the paste-weighted filter cannot run.");
+    return warnings;
+  }
+  if (total > MAIN_COUNT) {
+    warnings.push(`Monthly Acceptance Needs requirements sum to ${total}, but paste-weighted candidates contain only six mains.`);
+    return warnings;
+  }
+
+  const eligibleBucketCounts = new Array(MONTHLY_BUCKET_KEYS.length).fill(0);
+  for (const number of eligibleNumbers) {
+    const bucketIndex = bucketIndexForNumber(monthlyAcceptanceNeeds.bucketSets, number);
+    if (bucketIndex !== null) eligibleBucketCounts[bucketIndex] += 1;
+  }
+  targetCounts.forEach((target, index) => {
+    if (target > eligibleBucketCounts[index]) {
+      warnings.push(`Monthly Acceptance Needs ${bucketLabelForTimes(index)} requires at least ${target} main number${target === 1 ? "" : "s"}, but only ${eligibleBucketCounts[index]} eligible pasted number${eligibleBucketCounts[index] === 1 ? "" : "s"} are available in that bucket.`);
     }
   });
   return warnings;
@@ -460,7 +520,11 @@ export function generatePasteWeightedCandidates(
   const oddEvenConstraint = constraints.oddEven;
   const adaptiveShapeConstraint = constraints.adaptiveShape;
   const stageIdmConstraint = constraints.stageIdm;
+  const monthlyAcceptanceNeedsConstraint = constraints.monthlyAcceptanceNeeds;
   const stageIdmTargetCounts = normalizeStageIdmTargetCounts(stageIdmConstraint?.targetCounts);
+  const monthlyAcceptanceNeedsTargetCounts = normalizeMonthlyAcceptanceNeedsCounts(
+    monthlyAcceptanceNeedsConstraint?.targetCounts,
+  );
   const activeOddEvenRatios = (oddEvenConstraint?.selectedRatios ?? [])
     .map((ratio) => String(ratio ?? "").trim())
     .filter(Boolean);
@@ -482,6 +546,15 @@ export function generatePasteWeightedCandidates(
         : undefined,
       stageIdmSummary: stageIdmConstraint?.enabled
         ? summarizeStageIdmNumbers([], stageIdmConstraint.bucketSets, requestedCount, 0, stageIdmTargetCounts)
+        : undefined,
+      monthlyAcceptanceNeedsSummary: monthlyAcceptanceNeedsConstraint?.enabled
+        ? summarizeStageIdmNumbers(
+          [],
+          monthlyAcceptanceNeedsConstraint.bucketSets,
+          requestedCount,
+          0,
+          monthlyAcceptanceNeedsTargetCounts,
+        )
         : undefined,
     };
   }
@@ -514,6 +587,27 @@ export function generatePasteWeightedCandidates(
         requestedCount,
         0,
         stageIdmTargetCounts,
+      ),
+    };
+  }
+  const monthlyAcceptanceNeedsWarnings = monthlyAcceptanceNeedsConstraint?.enabled
+    ? monthlyAcceptanceNeedsConstraintWarnings(
+      eligibleNumbers,
+      monthlyAcceptanceNeedsConstraint,
+      monthlyAcceptanceNeedsTargetCounts,
+    )
+    : [];
+  if (monthlyAcceptanceNeedsWarnings.length > 0) {
+    return {
+      ...parsed,
+      candidates: [],
+      warnings: monthlyAcceptanceNeedsWarnings,
+      monthlyAcceptanceNeedsSummary: summarizeStageIdmNumbers(
+        [],
+        monthlyAcceptanceNeedsConstraint?.bucketSets,
+        requestedCount,
+        0,
+        monthlyAcceptanceNeedsTargetCounts,
       ),
     };
   }
@@ -578,7 +672,8 @@ export function generatePasteWeightedCandidates(
   const seenCandidates = new Set<string>();
   const hasQuotaConstraint = !!oddEvenConstraint?.enabled
     || (adaptiveShapeConstraint?.enabled && adaptiveShapeConstraint.mode === "quota")
-    || !!stageIdmConstraint?.enabled;
+    || !!stageIdmConstraint?.enabled
+    || !!monthlyAcceptanceNeedsConstraint?.enabled;
   const attemptLimit = Math.max(1000, targetCount * (hasQuotaConstraint ? 1000 : 250));
   let attempts = 0;
 
@@ -600,6 +695,10 @@ export function generatePasteWeightedCandidates(
       const stageCounts = countStageIdmBuckets(main, stageIdmConstraint.bucketSets);
       if (!stageCounts || !sameCounts(stageCounts, stageIdmTargetCounts)) continue;
     }
+    if (monthlyAcceptanceNeedsConstraint?.enabled && monthlyAcceptanceNeedsConstraint.bucketSets) {
+      const acceptanceCounts = countStageIdmBuckets(main, monthlyAcceptanceNeedsConstraint.bucketSets);
+      if (!acceptanceCounts || !countsMeetMinimums(acceptanceCounts, monthlyAcceptanceNeedsTargetCounts)) continue;
+    }
     const key = main.join(",");
     if (seenCandidates.has(key)) continue;
     seenCandidates.add(key);
@@ -607,6 +706,9 @@ export function generatePasteWeightedCandidates(
     const trace = [`Paste-weighted score ${score.toFixed(0)} from pasted number counts.`];
     if (stageIdmConstraint?.enabled) {
       trace.push("Stage IDM bucket mix matched as an exact mains-only descriptive quota.");
+    }
+    if (monthlyAcceptanceNeedsConstraint?.enabled) {
+      trace.push("Monthly Acceptance Needs matched literal minimum bucket requirements.");
     }
     candidates.push({
       main,
@@ -647,6 +749,15 @@ export function generatePasteWeightedCandidates(
       stageIdmTargetCounts,
     )
     : undefined;
+  const monthlyAcceptanceNeedsSummary = monthlyAcceptanceNeedsConstraint?.enabled
+    ? summarizeStageIdmNumbers(
+      candidates.map((candidate) => candidate.main),
+      monthlyAcceptanceNeedsConstraint.bucketSets,
+      requestedCount,
+      attempts,
+      monthlyAcceptanceNeedsTargetCounts,
+    )
+    : undefined;
 
   if (candidates.length < requestedCount) {
     warnings.push(`Generated ${candidates.length} unique candidate${candidates.length === 1 ? "" : "s"} from the available pasted-number pool.`);
@@ -674,5 +785,6 @@ export function generatePasteWeightedCandidates(
     oddEvenRatioSummary,
     adaptiveShapeSummary,
     stageIdmSummary,
+    monthlyAcceptanceNeedsSummary,
   };
 }

@@ -36,8 +36,12 @@ describe("PortfolioCompressionPanel", () => {
 
     expect(html).toContain("Portfolio Compression / 12-Game Distiller");
     expect(html).toContain("Paste portfolio games");
+    expect(html).toContain("Rows counted");
+    expect(html).toContain("Valid game rows");
     expect(html).toContain("Top-six core");
     expect(html).toContain("Alternates");
+    expect(html).toContain("Structural Strategy Backtest");
+    expect(html).not.toContain("Backtest Portfolio Compression V1");
     expect(panel?.classList.contains("windfall-ledger-panel")).toBe(true);
     expect(html).not.toContain("1,2,3,4,5,6");
   });
@@ -96,7 +100,7 @@ describe("PortfolioCompressionPanel", () => {
       loadButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    expect(container.textContent).toContain("Games parsed3");
+    expect(container.textContent).toContain("Rows counted3");
     expect(container.textContent).toContain("3 rows loaded");
     expect(container.textContent).toContain("Duplicate games1");
     expect(container.textContent).toContain("Loaded source rows");
@@ -260,10 +264,11 @@ describe("PortfolioCompressionPanel", () => {
     });
 
     expect(container.textContent).toContain("1, 2, 3, 4, 5, 6");
-    expect(container.textContent).toContain("Backtest Portfolio Compression V1");
+    expect(container.textContent).toContain("Structural Strategy Backtest");
+    expect(container.textContent).toContain("This backtests the historical structural-state strategy, not the pasted portfolio core.");
 
     const runButton = Array.from(container.querySelectorAll("button"))
-      .find((button) => button.textContent === "Run portfolio backtest");
+      .find((button) => button.textContent === "Run structural backtest");
     expect(runButton).toBeDefined();
 
     await act(async () => {
@@ -271,9 +276,9 @@ describe("PortfolioCompressionPanel", () => {
     });
 
     expect(container.textContent).toContain("Walk-forward results");
-    expect(container.textContent).toContain("Compressed structural pattern");
+    expect(container.textContent).toContain("Structural-state strategy");
     expect(container.textContent).toContain("Simple historical frequency");
-    expect(container.textContent).toContain("Monte Carlo random-history p-value");
+    expect(container.textContent).toContain("Random-history diagnostic p-value");
     expect(container.textContent).toContain("Walk-forward only");
     expect(container.textContent).toContain("1, 2, 3, 4, 5, 6");
 
@@ -295,11 +300,13 @@ describe("PortfolioCompressionPanel", () => {
     expect(html).toContain("Paste-weighted frequency");
     expect(html).toContain("Adjacent combos");
     expect(html).toContain("Hot/cold");
+    expect(html).toContain("Recent draw behaviour, mains + supps");
     expect(html).toContain("Window shape");
+    expect(html).toContain("Recent low/mid/high, odd/even, and sum profile, mains only");
     expect(html).toContain("Monthly buckets");
     expect(html).toContain("Carry-over bias");
     expect(html).toContain("Selected boosts");
-    expect(html).toContain("Backtest calibration");
+    expect(html).toContain("Structural backtest calibration");
     expect(html).toContain("0 optional signals active");
   });
 
@@ -661,7 +668,7 @@ describe("PortfolioCompressionPanel", () => {
     expect(container.textContent).toContain("1, 2, 3, 4, 5, 6");
 
     const hotColdToggle = container.querySelector(
-      "input[aria-label='Toggle Hot/cold evidence']",
+      "input[aria-label='Toggle Hot/cold (mains + supps) evidence']",
     ) as HTMLInputElement | null;
     expect(hotColdToggle).not.toBeNull();
 
@@ -735,7 +742,7 @@ describe("PortfolioCompressionPanel", () => {
     expect(container.textContent).toContain("1, 2, 3, 4, 5, 6");
 
     const windowShapeToggle = container.querySelector(
-      "input[aria-label='Toggle Window shape evidence']",
+      "input[aria-label='Toggle Window shape (mains) evidence']",
     ) as HTMLInputElement | null;
     expect(windowShapeToggle).not.toBeNull();
 
@@ -788,7 +795,7 @@ describe("PortfolioCompressionPanel", () => {
     expect(container.textContent).toContain("1, 2, 3, 4, 5, 6");
 
     const adjacentCombosToggle = container.querySelector(
-      "input[aria-label='Toggle Adjacent combos evidence']",
+      "input[aria-label='Toggle Adjacent combos (mains) evidence']",
     ) as HTMLInputElement | null;
     expect(adjacentCombosToggle).not.toBeNull();
 

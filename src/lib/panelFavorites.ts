@@ -20,6 +20,7 @@ export const FAVORITE_PANEL_REGISTRY: FavoritePanelMeta[] = [
   { id: "drought-break-shortlist", title: "Drought-break shortlist", workflow: "Signals" },
   { id: "most-likely-not-drawn", title: "Most Likely NOT Drawn", workflow: "Signals" },
   { id: "prediction-journal", title: "Prediction Journal & Scorecard", workflow: "Validation" },
+  { id: "research-diary", title: "Research Diary & Draw Reminders", workflow: "Validation" },
   { id: "backtest-validation", title: "Backtest Validation", workflow: "Validation" },
   { id: "trend-ratio-history", title: "Trend Ratio Diagnostics", workflow: "Validation" },
   { id: "group-pattern-analyzer", title: "Group Pattern Analyzer", workflow: "Validation" },

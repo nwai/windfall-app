@@ -285,35 +285,35 @@ const evidenceSignalDefinitions: EvidenceSignalDefinition[] = [
     name: "Generated frequency",
     evidenceType: "Heuristic",
     defaultState: "off",
-    explanation: "Repeated numbers from the main generated candidate table.",
+    explanation: "Repeated numbers from generated candidate rows, including supps when the source provides them.",
   },
   {
     key: "pasteWeightedFrequency",
     name: "Paste-weighted frequency",
     evidenceType: "Heuristic",
     defaultState: "off",
-    explanation: "Repeated numbers from paste-weighted generated rows.",
+    explanation: "Repeated numbers from paste-weighted generated rows, usually mains only.",
   },
   {
     key: "adjacentCombos",
-    name: "Adjacent combos",
+    name: "Adjacent combos (mains)",
     evidenceType: "Descriptive",
     defaultState: "off",
-    explanation: "Core pair/triple cohesion and alternate swap compatibility.",
+    explanation: "Core pair/triple cohesion and alternate swap compatibility, mains only.",
   },
   {
     key: "hotCold",
-    name: "Hot/cold",
+    name: "Hot/cold (mains + supps)",
     evidenceType: "Descriptive",
     defaultState: "off",
-    explanation: "Recent draw behaviour; descriptive, not a direct prediction.",
+    explanation: "Recent draw behaviour, mains + supps; descriptive, not a direct prediction.",
   },
   {
     key: "windowShape",
-    name: "Window shape",
+    name: "Window shape (mains)",
     evidenceType: "Descriptive",
     defaultState: "off",
-    explanation: "Fit to recent low/mid/high, odd/even, and sum profile.",
+    explanation: "Recent low/mid/high, odd/even, and sum profile, mains only.",
   },
   {
     key: "monthlyBuckets",
@@ -338,10 +338,10 @@ const evidenceSignalDefinitions: EvidenceSignalDefinition[] = [
   },
   {
     key: "backtestCalibration",
-    name: "Backtest calibration",
+    name: "Structural backtest calibration",
     evidenceType: "Validation",
     defaultState: "always",
-    explanation: "Run below; validates compressed structural selection against simple frequency and random controls.",
+    explanation: "Run below; validates a separate historical structural-state strategy against simple frequency and random controls.",
   },
 ];
 
@@ -893,14 +893,14 @@ export const PortfolioCompressionPanel: React.FC<PortfolioCompressionPanelProps>
     enabledEvidenceSignals.hotCold
       ? {
         key: "hotCold",
-        heading: "Hot/cold",
+        heading: "Hot/cold (M+S)",
         valueForNumber: hotColdEvidenceLabel,
       }
       : null,
     enabledEvidenceSignals.windowShape
       ? {
         key: "windowShape",
-        heading: "Window shape",
+        heading: "Window shape (mains)",
         valueForNumber: windowShapeEvidenceLabel,
       }
       : null,
@@ -1076,8 +1076,14 @@ export const PortfolioCompressionPanel: React.FC<PortfolioCompressionPanelProps>
 
       <div className="windfall-status-strip">
         <div className="windfall-status-chip">
-          <div style={mutedStyle}>Games parsed</div>
+          <div style={mutedStyle}>Rows counted</div>
           <div style={{ fontWeight: 800 }}>{result.acceptedRows}</div>
+        </div>
+        <div className="windfall-status-chip">
+          <div style={mutedStyle}>Valid game rows</div>
+          <div style={{ fontWeight: 800, color: result.validGameRows === result.acceptedRows ? "#166534" : "#92400e" }}>
+            {result.validGameRows}
+          </div>
         </div>
         <div className="windfall-status-chip">
           <div style={mutedStyle}>Unique numbers</div>
@@ -1215,9 +1221,9 @@ export const PortfolioCompressionPanel: React.FC<PortfolioCompressionPanelProps>
 
       <div style={{ display: "grid", gap: 10 }}>
         <div>
-          <div style={{ fontWeight: 800, fontSize: 13 }}>Backtest Portfolio Compression V1</div>
+          <div style={{ fontWeight: 800, fontSize: 13 }}>Structural Strategy Backtest</div>
           <div style={mutedStyle}>
-            Strict walk-forward comparison of compressed structural pattern selection against simple historical frequency and a seeded random ticket.
+            Strict walk-forward comparison of a separate historical structural-state strategy against simple historical frequency and a seeded random ticket.
           </div>
         </div>
         <div className="windfall-status-strip">
@@ -1261,11 +1267,11 @@ export const PortfolioCompressionPanel: React.FC<PortfolioCompressionPanelProps>
             disabled={backtestHistoryCount === 0}
             style={backtestHistoryCount === 0 ? { opacity: 0.58, cursor: "not-allowed" } : undefined}
           >
-            Run portfolio backtest
+            Run structural backtest
           </button>
         </div>
         <div style={{ ...mutedStyle, color: "#334155", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 6, padding: 8 }}>
-          This is validation only. It does not change the Portfolio core ranking, and it never lets a tested draw influence its own selection.
+          This backtests the historical structural-state strategy, not the pasted portfolio core. It does not change the Portfolio core ranking, and it never lets a tested draw influence its own selection.
         </div>
 
         {backtestResult && (
@@ -1286,15 +1292,15 @@ export const PortfolioCompressionPanel: React.FC<PortfolioCompressionPanelProps>
                     <div style={{ fontWeight: 800 }}>{backtestResult.drawsEvaluated} draws</div>
                   </div>
                   <div className="windfall-status-chip">
-                    <div style={mutedStyle}>Compressed vs simple prize delta</div>
+                    <div style={mutedStyle}>Structural vs simple prize delta</div>
                     <div style={{ fontWeight: 800 }}>{formatDecimal(backtestResult.compressedVsSimple.totalPrizeDelta, 0)}</div>
                   </div>
                   <div className="windfall-status-chip">
-                    <div style={mutedStyle}>Compressed advantage p-value</div>
+                    <div style={mutedStyle}>Structural vs simple p-value</div>
                     <div style={{ fontWeight: 800 }}>{formatDecimal(backtestResult.compressedVsSimple.pValue, 4)}</div>
                   </div>
                   <div className="windfall-status-chip">
-                    <div style={mutedStyle}>Monte Carlo random-history p-value</div>
+                    <div style={mutedStyle}>Random-history diagnostic p-value</div>
                     <div style={{ fontWeight: 800 }}>{formatDecimal(backtestResult.monteCarlo.compressedPValue, 4)}</div>
                   </div>
                 </div>
@@ -1332,7 +1338,7 @@ export const PortfolioCompressionPanel: React.FC<PortfolioCompressionPanelProps>
                   <PortfolioBacktestChart
                     title="Equity curves"
                     series={[
-                      { label: "Compressed", values: backtestResult.strategies.compressed.equityCurve, color: "#111827" },
+                      { label: "Structural", values: backtestResult.strategies.compressed.equityCurve, color: "#111827" },
                       { label: "Simple frequency", values: backtestResult.strategies.simpleFrequency.equityCurve, color: "#2563eb" },
                       { label: "Random", values: backtestResult.strategies.random.equityCurve, color: "#94a3b8" },
                     ]}
@@ -1341,7 +1347,7 @@ export const PortfolioCompressionPanel: React.FC<PortfolioCompressionPanelProps>
                     title="Drawdown profiles"
                     percent
                     series={[
-                      { label: "Compressed", values: backtestResult.strategies.compressed.drawdownCurve, color: "#111827" },
+                      { label: "Structural", values: backtestResult.strategies.compressed.drawdownCurve, color: "#111827" },
                       { label: "Simple frequency", values: backtestResult.strategies.simpleFrequency.drawdownCurve, color: "#2563eb" },
                       { label: "Random", values: backtestResult.strategies.random.drawdownCurve, color: "#94a3b8" },
                     ]}

@@ -8,6 +8,9 @@ describe("Tattslotto Ticket Grid Replay manual entry", () => {
 
     expect(manual).toContain("Tattslotto Ticket Grid Replay");
     expect(manual).toContain("observed historical draws");
+    expect(manual).toContain("Candidate carousel");
+    expect(manual).toContain("does not create new candidates");
+    expect(manual).toContain("Held numbers are a visual compression aid only");
     expect(manual).toContain("running hot/cold");
     expect(manual).toContain("not calibrated predictions");
     expect(manual).not.toContain("ticket-grid prediction");

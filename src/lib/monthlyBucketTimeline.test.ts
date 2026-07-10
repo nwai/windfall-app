@@ -21,6 +21,22 @@ describe("buildMonthlyBucketTimeline", () => {
     expect(timeline.map((entry) => entry.monthLabel)).toEqual(["2026-04", "2026-05"]);
     expect(timeline[0].drawCount).toBe(2);
     expect(timeline[1].drawCount).toBe(2);
+    expect(timeline[0].totalDrawCount).toBe(13);
+    expect(timeline[0].drawStates).toHaveLength(2);
+    expect(timeline[0].drawStates[0]).toMatchObject({
+      drawOrdinal: 1,
+      drawDate: "2026-04-03",
+      isSimulated: false,
+    });
+    expect(timeline[0].drawStates[1]).toMatchObject({
+      drawOrdinal: 2,
+      drawDate: "2026-04-10",
+      isSimulated: false,
+    });
+    expect(timeline[0].drawStates[0].bucketSets.times1.has(1)).toBe(true);
+    expect(timeline[0].drawStates[0].bucketSets.undrawn.has(2)).toBe(true);
+    expect(timeline[0].drawStates[1].bucketSets.times2.has(1)).toBe(true);
+    expect(timeline[0].drawStates[1].bucketSets.times1.has(2)).toBe(true);
 
     expect([...timeline[0].bucketSets.times2]).toEqual([1]);
     expect([...timeline[0].bucketSets.times1]).toEqual([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
@@ -40,6 +56,7 @@ describe("buildMonthlyBucketTimeline", () => {
     expect(timeline).toHaveLength(1);
     expect(timeline[0].monthLabel).toBe("2026-05");
     expect([...timeline[0].bucketSets.times1]).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(timeline[0].drawStates.map((state) => state.drawOrdinal)).toEqual([1]);
     expect(timeline[0].bucketSets.undrawn.has(7)).toBe(true);
   });
 });

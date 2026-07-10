@@ -94,6 +94,7 @@ describe("PasteWeightedCandidatesPanel", () => {
     expect(html).toContain("Weekly");
     expect(html).toContain("20 active draws");
     expect(html).toContain("shrunk toward latest 50");
+    expect(html).toContain("Only Quota filter mode uses the full profile distribution");
     expect(html).toContain("S1:0 D0:5");
     expect(html).toContain("56%");
   });
@@ -108,6 +109,29 @@ describe("PasteWeightedCandidatesPanel", () => {
     expect(html).toContain("2026-06 · draw 6 of 13");
     expect(html).toContain("Mains-only default: 0x 0 · 1x 2 · 2x 2 · 3x 1 · 4x 1");
     expect(html).toContain("Reset to Stage IDM");
+  });
+
+  it("renders Monthly Acceptance Needs as a separate literal minimum filter", () => {
+    const html = renderToStaticMarkup(React.createElement(PasteWeightedCandidatesPanel, {
+      stageIdealDrawState: stageState(),
+      monthlyBucketSets: stageState().bucketSets,
+      monthlyAcceptanceNeeds: {
+        undrawn: 2,
+        times1: 1,
+        times2: 0,
+        times3: 0,
+        times4: 0,
+        times5: 0,
+        times6: 0,
+        times7: 0,
+        times8: 0,
+      },
+    }));
+
+    expect(html).toContain("Monthly Acceptance Needs");
+    expect(html).toContain("Literal minimums from Monthly Draws Summary");
+    expect(html).toContain("Acceptance Needs required: 0x≥2 · 1x≥1");
+    expect(html).toContain("Selected Acceptance Needs total: 3/6");
   });
 
   it("sends a generated paste-weighted row to simulation", async () => {

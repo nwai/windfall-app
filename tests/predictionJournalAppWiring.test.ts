@@ -22,4 +22,13 @@ describe("Prediction Journal app wiring", () => {
     expect(registry).toContain('title: "Prediction Journal & Scorecard"');
     expect(registry).toContain('workflow: "Validation"');
   });
+
+  it("captures Acceptance Needs construction state in the saved setup snapshot", () => {
+    const app = readProjectFile("src/App.tsx");
+    const snapshotBlock = app.slice(app.indexOf("function buildSnapshot"), app.indexOf("function applySnapshot"));
+
+    expect(snapshotBlock).toContain("monthlyConstructiveEnabled");
+    expect(snapshotBlock).toContain("acceptanceNeedsEnabled");
+    expect(snapshotBlock).toContain("acceptanceNeedsCounts");
+  });
 });

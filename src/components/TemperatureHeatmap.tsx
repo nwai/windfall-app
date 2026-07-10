@@ -3,7 +3,7 @@ import { Draw } from "../types";
 import { DGA_CELL_SIZE } from "../constants/ui";
 import { computeDroughtHazard } from "../lib/droughtHazard";
 import { getHeatmapColumnOpacity, normalizeHeatmapContextWindow } from "../lib/heatmapContextWindow";
-import { sortDrawsChronologically } from "../lib/recentDraws";
+import { parseDrawDateToEpoch, sortDrawsChronologically } from "../lib/recentDraws";
 
 export interface TemperatureHeatmapProps {
   history: Draw[];
@@ -41,6 +41,9 @@ export interface TemperatureHeatmapProps {
   // Letter overlay
   showBucketLetters?: boolean;
   bucketLetters?: string[];
+
+  // Draw slot x-axis overlay
+  showDrawSlotAxis?: boolean;
 }
 
 // Helpers
@@ -73,6 +76,22 @@ const DEFAULT_BUCKET_COLORS = [
 "#e53935", // volcanic
 ];
 const DEFAULT_BUCKET_LETTERS = ["pR","F","pF","<C","C>","tT","W","H","tR","V"];
+const DRAW_SLOT_COLUMN_BORDER_COLOR = "rgba(226,232,240,0.86)";
+
+const monthLabelForDraw = (draw: Draw): string => {
+  const date = new Date(parseDrawDateToEpoch(draw.date));
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+};
+
+export const buildDrawSlotAxisLabels = (draws: Draw[]): string[] => {
+  const monthCounts = new Map<string, number>();
+  return sortDrawsChronologically(draws).map((draw) => {
+    const monthLabel = monthLabelForDraw(draw);
+    const nextCount = (monthCounts.get(monthLabel) ?? 0) + 1;
+    monthCounts.set(monthLabel, nextCount);
+    return String(nextCount);
+  });
+};
 
 export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
   history,
@@ -95,6 +114,7 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
   overlayNumbers = [],
   showBucketLetters = false,
   bucketLetters,
+  showDrawSlotAxis = false,
   bucketAssignments,
   bucketColors,
   bucketIndexSeries,
@@ -116,6 +136,10 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
   const displayChrono = useMemo(() => {
     return sortDrawsChronologically(displayHistory ?? history);
   }, [displayHistory, history]);
+  const drawSlotAxisLabels = useMemo(
+    () => showDrawSlotAxis ? buildDrawSlotAxisLabels(displayChrono) : [],
+    [displayChrono, showDrawSlotAxis],
+  );
   const analysisT = chrono.length;
   const displayT = displayChrono.length;
   const T = bucketIndexSeries ? displayT : analysisT;
@@ -296,6 +320,27 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
       }
     }
 
+    if (showDrawSlotAxis && T > 0) {
+      ctx.save();
+      ctx.strokeStyle = DRAW_SLOT_COLUMN_BORDER_COLOR;
+      ctx.lineWidth = .5;
+      ctx.globalAlpha = 1;
+      const topY = gutter + 0.5;
+      const bottomY = gutter + heightNumbers * cellSize + 0.5;
+      ctx.beginPath();
+      for (let t = 0; t <= T; t++) {
+        const x = gutter + t * cellSize + 0.5;
+        ctx.moveTo(x, topY);
+        ctx.lineTo(x, bottomY);
+      }
+      ctx.moveTo(gutter + 0.5, topY);
+      ctx.lineTo(gutter + T * cellSize + 0.5, topY);
+      ctx.moveTo(gutter + 0.5, bottomY);
+      ctx.lineTo(gutter + T * cellSize + 0.5, bottomY);
+      ctx.stroke();
+      ctx.restore();
+    }
+
     if (overlayNumbers && overlayNumbers.length > 0) {
       ctx.save();
       ctx.fillStyle = "#fff";
@@ -314,13 +359,33 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
       ctx.restore();
     }
 
-    ctx.fillStyle = "#444";
-    ctx.font = "14px monospace";
-    ctx.fillText("older → newer", gutter, gutter - 2);
+    ctx.save();
+    if (showDrawSlotAxis && drawSlotAxisLabels.length > 0) {
+      ctx.font = `700 ${Math.max(8, Math.min(10, Math.floor(cellSize * 0.48)))}px Helvetica, Arial, sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "alphabetic";
+      for (let t = 0; t < T; t++) {
+        const label = drawSlotAxisLabels[t] ?? "";
+        if (!label) continue;
+        const x = gutter + t * cellSize + cellSize / 2;
+        const y = Math.max(10, gutter - 3);
+        const isHighlighted = highlightedColumns.includes(t);
+        ctx.fillStyle = isHighlighted ? "#7c2d12" : "#334155";
+        ctx.fillText(label, x, y);
+      }
+    } else {
+      ctx.fillStyle = "#444";
+      ctx.font = "14px monospace";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "alphabetic";
+      ctx.fillText("older → newer", gutter, gutter - 2);
+    }
+    ctx.restore();
   }, [
     canvasRef, widthPx, heightPx, gutter, heightNumbers, T, cellSize,
     valueSeries, colors, stops, overlayNumbers,
-    showBucketLetters, letters, effectiveBucketIndexSeries, contextWindow, dimmedWindowOpacity, highlightedColumns
+    showBucketLetters, letters, effectiveBucketIndexSeries, contextWindow, dimmedWindowOpacity, highlightedColumns,
+    showDrawSlotAxis, drawSlotAxisLabels,
   ]);
 
   // Legend counts should match bucket assignments if provided

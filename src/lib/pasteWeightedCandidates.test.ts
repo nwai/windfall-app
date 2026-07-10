@@ -326,4 +326,82 @@ describe("generatePasteWeightedCandidates", () => {
     expect(result.candidates).toEqual([]);
     expect(result.warnings).toContain("Stage IDM bucket mix must total exactly six mains before it can filter paste-weighted candidates.");
   });
+
+  it("enforces literal Monthly Acceptance Needs as minimum mains-only bucket counts", () => {
+    const input = Array.from({ length: 45 }, (_, index) => index + 1).join(",");
+    const buckets = monthlyBuckets({
+      undrawn: [1, 2, 3, 4, 5, 6],
+      times1: [7, 8, 9, 10, 11, 12],
+      times2: [13, 14, 15, 16, 17, 18],
+      times3: [19, 20, 21, 22, 23, 24],
+      times4: [25, 26, 27, 28, 29, 30],
+      times5: [31, 32, 33, 34, 35],
+      times6: [36, 37, 38, 39],
+      times7: [40, 41],
+      times8: [42, 43, 44, 45],
+    });
+
+    const result = generatePasteWeightedCandidates(input, {
+      candidateCount: 8,
+      rng: seededRng(9090),
+      constraints: {
+        monthlyAcceptanceNeeds: {
+          enabled: true,
+          bucketSets: buckets,
+          targetCounts: {
+            undrawn: 2,
+            times1: 1,
+            times2: 0,
+            times3: 0,
+            times4: 0,
+            times5: 0,
+            times6: 0,
+            times7: 0,
+            times8: 0,
+          },
+        },
+      },
+    });
+
+    expect(result.candidates).toHaveLength(8);
+    expect(result.monthlyAcceptanceNeedsSummary?.targetCounts).toEqual([2, 1, 0, 0, 0, 0, 0, 0, 0]);
+    for (const candidate of result.candidates) {
+      const counts = countCandidateBuckets(candidate.main, buckets);
+      expect(counts[0]).toBeGreaterThanOrEqual(2);
+      expect(counts[1]).toBeGreaterThanOrEqual(1);
+      expect(candidate.trace).toContain("Monthly Acceptance Needs matched literal minimum bucket requirements.");
+    }
+  });
+
+  it("warns honestly when Monthly Acceptance Needs exceed six mains", () => {
+    const input = Array.from({ length: 45 }, (_, index) => index + 1).join(",");
+    const result = generatePasteWeightedCandidates(input, {
+      candidateCount: 4,
+      rng: seededRng(9191),
+      constraints: {
+        monthlyAcceptanceNeeds: {
+          enabled: true,
+          bucketSets: monthlyBuckets({
+            undrawn: [1, 2, 3, 4],
+            times1: [5, 6, 7],
+            times2: [8, 9, 10],
+          }),
+          targetCounts: {
+            undrawn: 4,
+            times1: 3,
+            times2: 0,
+            times3: 0,
+            times4: 0,
+            times5: 0,
+            times6: 0,
+            times7: 0,
+            times8: 0,
+          },
+        },
+      },
+    });
+
+    expect(result.candidates).toEqual([]);
+    expect(result.warnings).toContain("Monthly Acceptance Needs requirements sum to 7, but paste-weighted candidates contain only six mains.");
+  });
 });

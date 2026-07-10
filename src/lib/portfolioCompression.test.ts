@@ -57,6 +57,7 @@ describe("compressPortfolioCandidates", () => {
     ].join("\n"));
 
     expect(result.acceptedRows).toBe(3);
+    expect(result.validGameRows).toBe(1);
     expect(result.rowIssueCount).toBe(2);
     expect(result.warnings).toContain("2 rows do not look like a 6-number or 8-number game; they were counted but should be reviewed.");
   });

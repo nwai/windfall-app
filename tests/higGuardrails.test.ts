@@ -32,6 +32,9 @@ describe("HIG contributor guardrails", () => {
     expect(controlsSource).toContain("HigButton");
     expect(controlsSource).toContain("InfoHelp");
     expect(cssSource).toContain(".windfall-workflow-nav");
+    expect(cssSource).toContain("position: sticky");
+    expect(cssSource).toContain("top: var(--wf-sticky-nav-top, 0px)");
+    expect(cssSource).not.toContain(".windfall-workflow-nav {\n    position: static;");
     expect(cssSource).toContain(".windfall-hig-button");
     expect(cssSource).toContain(".windfall-info-help");
     expect(appSource).not.toContain('fontFamily: "monospace"');
