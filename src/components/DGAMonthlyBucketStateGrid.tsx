@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 
+import { HigSlider } from "./shared/HigControls";
 import { normalizeDgaSelectedNumbers, summarizeDgaSelectedNumbers } from "../lib/dgaSelectedNumbers";
 import type { MonthlyBucketTimelineDrawState, MonthlyBucketTimelineEntry } from "../lib/monthlyBucketTimeline";
 import type { MonthlyBucketSets } from "../lib/monthlyDrawSummary";
@@ -11,6 +12,8 @@ interface DGAMonthlyBucketStateGridProps {
   hoveredNumber?: number | null;
   onHoverNumber?: (value: number | null) => void;
   selectedNumbers?: number[];
+  cellOpacity?: number;
+  onCellOpacityChange?: (value: number) => void;
 }
 
 const colorForTimes = (times: number): string => {
@@ -43,6 +46,13 @@ const drawStateLabel = (state: MonthlyBucketTimelineDrawState): string => (
 );
 
 const drawSlotLabel = (slotNumber: number): string => `D${slotNumber}`;
+const drawSlotAxisLabel = (slotNumber: number): string => String(slotNumber);
+const DRAW_SLOT_COLUMN_BORDER = "1px solid #d1d5db";
+const normalizeGridCellOpacity = (value: unknown): number => {
+  const numeric = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(numeric)) return 1;
+  return Math.max(0.25, Math.min(1, Math.round(numeric * 20) / 20));
+};
 
 const columnKeyForSlot = (
   entry: MonthlyBucketTimelineEntry,
@@ -157,15 +167,15 @@ const drawSlotsForEntry = (entry: MonthlyBucketTimelineEntry): DrawSlotColumn[] 
     }
   });
 
-  return Array.from({ length: slotCount }, (_, index) => {
-    const slotNumber = index + 1;
+  return Array.from({ length: slotCount }, (_, displayIndex) => {
+    const slotNumber = slotCount - displayIndex;
     const state = statesByOrdinal.get(slotNumber) ?? null;
     return {
       entry,
       slotNumber,
       state,
-      slotIndex: index,
-      key: columnKeyForSlot(entry, slotNumber, state, index),
+      slotIndex: displayIndex,
+      key: columnKeyForSlot(entry, slotNumber, state, displayIndex),
     };
   });
 };
@@ -177,9 +187,12 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
   hoveredNumber,
   onHoverNumber,
   selectedNumbers,
+  cellOpacity = 1,
+  onCellOpacityChange,
 }) => {
   const [expanded, setExpanded] = useState<boolean>(false);
   const [hoveredColumnKey, setHoveredColumnKey] = useState<string | null>(null);
+  const normalizedCellOpacity = useMemo(() => normalizeGridCellOpacity(cellOpacity), [cellOpacity]);
   const normalizedSelectedNumbers = useMemo(
     () => normalizeDgaSelectedNumbers(selectedNumbers),
     [selectedNumbers],
@@ -299,39 +312,62 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline", flexWrap: "wrap", margin: "10px 12px 8px" }}>
         <div>
           <div style={{ color: "#64748b", fontSize: 12, marginTop: 2 }}>
-            45 rows by month and scheduled draw slot. The current month is grouped first; blank future slots are labelled but do not carry bucket-state data.
+            45 rows by month and scheduled draw slot. The current month is grouped first; each month runs latest scheduled slot on the left down to draw 1 on the right.
             {hasActiveStripSelection ? " Non-selected rows are dimmed while strip selections are active." : ""}
           </div>
         </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
-          {legendTimes.map((times) => (
-            <span
-              key={times}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 5,
-                padding: "2px 6px",
-                borderRadius: 999,
-                background: colorForTimes(times),
-                color: "#fff",
-                fontSize: 11,
-                fontWeight: 800,
-              }}
-            >
-              <span
-                aria-hidden="true"
-                style={{
-                  width: 10,
-                  height: 10,
-                  borderRadius: 999,
-                  background: "rgba(255,255,255,0.95)",
-                  opacity: 0.95,
-                }}
-              />
-              {labelForTimes(times)}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", justifyContent: "flex-end" }}>
+          <label
+            style={{
+              display: "inline-grid",
+              gap: 3,
+              minWidth: 180,
+              fontSize: 12,
+              color: "#334155",
+            }}
+            title="Adjust the Monthly bucket state grid cell fill opacity. This does not affect the DGA heatmap above."
+          >
+            <span>
+              Grid opacity: <b>{Math.round(normalizedCellOpacity * 100)}%</b>
             </span>
-          ))}
+            <HigSlider
+              min={0.25}
+              max={1}
+              step={0.05}
+              value={normalizedCellOpacity}
+              onCommit={(value) => onCellOpacityChange?.(normalizeGridCellOpacity(value))}
+            />
+          </label>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+            {legendTimes.map((times) => (
+              <span
+                key={times}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 5,
+                  padding: "2px 6px",
+                  borderRadius: 999,
+                  background: colorForTimes(times),
+                  color: "#fff",
+                  fontSize: 11,
+                  fontWeight: 800,
+                }}
+              >
+                <span
+                  aria-hidden="true"
+                  style={{
+                    width: 10,
+                    height: 10,
+                    borderRadius: 999,
+                    background: "rgba(255,255,255,0.95)",
+                    opacity: 0.95,
+                  }}
+                />
+                {labelForTimes(times)}
+              </span>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -389,7 +425,7 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
                     alignItems: "center",
                     justifyContent: "center",
                     borderRadius: 6,
-                    border: isEmptySlot ? "1px solid #dbe3ef" : "1px solid #bfdbfe",
+                    border: DRAW_SLOT_COLUMN_BORDER,
                     background: isEmptySlot ? "#f8fafc" : "#eff6ff",
                     color: isEmptySlot ? "#94a3b8" : "#0d47a1",
                     fontSize: 10,
@@ -397,7 +433,7 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
                     fontVariantNumeric: "tabular-nums",
                   }}
                 >
-                  {drawSlotLabel(column.slotNumber)}
+                  {drawSlotAxisLabel(column.slotNumber)}
                 </span>
               );
             })}
@@ -420,7 +456,7 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
         }}
       >
         <div><strong>Rows:</strong> numbers 1–45.</div>
-        <div><strong>Columns:</strong> scheduled D1–D13/D14 draw slots inside each month.</div>
+        <div><strong>Columns:</strong> scheduled 13/14-to-1 draw slots inside each month, keeping future blanks to the left.</div>
         <div><strong>Current month group:</strong> the current strip month stays first.</div>
         <div><strong>Header chip:</strong> recorded or simulated draw slot over calculated month capacity.</div>
         <div><strong>Left colour rail:</strong> current strip colour for each number.</div>
@@ -647,12 +683,8 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
                           minWidth: columnWidth,
                           height: 38,
                           borderBottom: "1px solid #dbe3ef",
-                          borderLeft: slotIndex === 0
-                            ? (isCurrent ? "2px solid #1565c0" : "1px solid #edf2f7")
-                            : "1px solid #edf2f7",
-                          borderRight: slotIndex === slots.length - 1
-                            ? (isCurrent ? "2px solid #1565c0" : "1px solid #edf2f7")
-                            : "1px solid #edf2f7",
+                          borderLeft: DRAW_SLOT_COLUMN_BORDER,
+                          borderRight: DRAW_SLOT_COLUMN_BORDER,
                           background: isEmptySlot
                             ? (isCurrent ? "#f8fbff" : "#f8fafc")
                             : isCurrent
@@ -660,12 +692,13 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
                               : (isHoveredColumn ? "#eef6ff" : "#ffffff"),
                           color: isEmptySlot ? "#94a3b8" : (state.isSimulated ? "#7c2d12" : (isCurrent ? "#0d47a1" : "#334155")),
                           padding: 0,
+                          textAlign: "center",
                           boxShadow: isHoveredColumn ? "inset 0 0 0 1px rgba(21,101,192,0.18)" : undefined,
                           fontVariantNumeric: "tabular-nums",
                         }}
                       >
                         <span style={{ fontWeight: 900, fontSize: 10 }}>
-                          {drawSlotLabel(slotNumber)}
+                          {drawSlotAxisLabel(slotNumber)}
                         </span>
                       </th>
                     );
@@ -694,7 +727,8 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
                           position: "sticky",
                           left: 0,
                           zIndex: 6,
-                          background: colorForTimes(currentBucketSets ? timesForNumber(n, currentBucketSets) : 0),
+                          background: "#ffffff",
+                          borderLeft: `5px solid ${colorForTimes(currentBucketSets ? timesForNumber(n, currentBucketSets) : 0)}`,
                           borderRight: "1px solid #dbe3ef",
                           borderBottom: "1px solid #edf2f7",
                           padding: "0 6px",
@@ -704,15 +738,16 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
                           maxWidth: ROW_LABEL_WIDTH,
                           textAlign: "right",
                           fontWeight: 800,
-                          color: "#fff",
+                          color: "#0f172a",
                           fontVariantNumeric: "tabular-nums",
+                          boxSizing: "border-box",
                           boxShadow: rowLabelBoxShadow,
                           opacity: isDimmedRow ? UNSELECTED_ROW_OPACITY : 1,
                         }}
                       >
                         <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "flex-end", gap: 4, width: "100%" }}>
                           {isSelectedRow ? (
-                            <span aria-hidden="true" style={{ fontSize: 9, fontWeight: 900, lineHeight: 1 }}>
+                            <span aria-hidden="true" style={{ color: "#1565c0", fontSize: 9, fontWeight: 900, lineHeight: 1 }}>
                               ✓
                             </span>
                           ) : null}
@@ -732,10 +767,6 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
                       const isCrossHighlight = !!state && isCurrent && hoveredNumber === n;
                       const stickyLeft = ROW_LABEL_WIDTH + slotIndex * columnWidth;
                       const columnSummary = columnSummaryByKey.get(key);
-                      const cellBoxShadow = [
-                        isHoveredColumn ? "inset 0 0 0 1px rgba(255,255,255,0.40)" : "",
-                        isCrossHighlight ? "inset 0 0 0 2px rgba(255,255,255,0.94), 0 0 0 2px rgba(13,71,161,0.34)" : "",
-                      ].filter(Boolean).join(", ") || undefined;
                       const title = state
                         ? `${n} · ${entry.monthLabel} · ${drawStateLabel(state)} · ${labelForTimes(times ?? 0)}${state.drawDate ? ` · ${state.drawDate}` : ""}${columnSummary ? ` · totals: ${columnSummary.totalsLabel}` : ""}${state.isSimulated ? " · simulated draw state" : ""}${isCurrent ? " · current strip month" : ""}${isSelectedRow ? " · selected in DGA strip" : ""}${isDimmedRow ? " · dimmed because it is not selected in the DGA strip" : ""}${isCrossHighlight ? " · linked to DGA strip hover" : ""}`
                         : `${n} · ${entry.monthLabel} · ${drawSlotLabel(slotNumber)} · no recorded draw state${isCurrent ? " · current strip month" : ""}${isSelectedRow ? " · selected in DGA strip" : ""}${isDimmedRow ? " · dimmed because it is not selected in the DGA strip" : ""}`;
@@ -752,17 +783,12 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
                             minWidth: columnWidth,
                             height: cellSize,
                             background: state ? colorForTimes(times ?? 0) : "#f8fafc",
-                            borderLeft: slotIndex === 0
-                              ? (isCurrent ? "2px solid #1565c0" : "1px solid #edf2f7")
-                              : "1px solid #edf2f7",
-                            borderRight: slotIndex === slots.length - 1
-                              ? (isCurrent ? "2px solid #1565c0" : "1px solid #edf2f7")
-                              : "1px solid #edf2f7",
+                            borderLeft: DRAW_SLOT_COLUMN_BORDER,
+                            borderRight: DRAW_SLOT_COLUMN_BORDER,
                             borderBottom: "1px solid #edf2f7",
                             padding: 0,
                             boxSizing: "border-box",
-                            boxShadow: cellBoxShadow,
-                            opacity: isDimmedRow ? UNSELECTED_ROW_OPACITY : (state ? 1 : 0.72),
+                            opacity: isDimmedRow ? UNSELECTED_ROW_OPACITY : (state ? normalizedCellOpacity : 0.72),
                             filter: isHoveredColumn ? "brightness(1.03)" : undefined,
                           }}
                         />

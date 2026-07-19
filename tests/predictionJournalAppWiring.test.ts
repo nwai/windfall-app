@@ -8,7 +8,7 @@ describe("Prediction Journal app wiring", () => {
   it("places the journal under Validation using real history", () => {
     const app = readProjectFile("src/App.tsx");
 
-    expect(app).toContain('import { PredictionJournalPanel } from "./components/PredictionJournalPanel";');
+    expect(app).toContain('import { PredictionJournalPanel, type PredictionJournalDraftRequest } from "./components/PredictionJournalPanel";');
     expect(app).toContain('panelId="prediction-journal"');
     expect(app.indexOf('id="workflow-validation"')).toBeLessThan(app.indexOf('panelId="prediction-journal"'));
     expect(app.indexOf('panelId="prediction-journal"')).toBeLessThan(app.indexOf('panelId="backtest-validation"'));

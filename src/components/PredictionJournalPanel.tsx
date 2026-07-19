@@ -4,6 +4,7 @@ import { HigButton, HigField, InfoHelp } from "./shared/HigControls";
 import type { Draw } from "../types";
 import type { AppPresetSnapshot } from "../lib/presets";
 import {
+  buildPredictionJournalDraftFromSetup,
   buildPredictionJournalEntry,
   canEditPredictionJournalEntry,
   loadPredictionJournalEntries,
@@ -25,6 +26,12 @@ export interface PredictionJournalPanelProps {
   initialEntries?: PredictionJournalEntry[];
   now?: () => string;
   getSetupSnapshot?: () => AppPresetSnapshot | undefined;
+  newPredictionDraft?: PredictionJournalDraftRequest | null;
+}
+
+export interface PredictionJournalDraftRequest {
+  id: number;
+  setupSnapshot?: AppPresetSnapshot;
 }
 
 type BucketTextState = Record<PredictionBucketKey, string>;
@@ -239,12 +246,15 @@ const validateNonNegativeIntegerText = (label: string, value: string): string | 
 const normalizeTerminalDigit = (number: number): number => (number <= 9 ? number : number % 10);
 const maxUniqueDrawSum = (drawCount: number): number => 332 * drawCount;
 const minUniqueDrawSum = (drawCount: number): number => 36 * drawCount;
+const PREDICTION_JOURNAL_AUTHOR_EMAIL = "";
+const MAILTO_BODY_JSON_LIMIT = 6500;
 
 export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
   history,
   initialEntries,
   now = () => new Date().toISOString(),
   getSetupSnapshot,
+  newPredictionDraft,
 }) => {
   const [entries, setEntries] = useState<PredictionJournalEntry[]>(() => (
     initialEntries ?? (typeof window === "undefined" ? [] : loadPredictionJournalEntries())
@@ -391,7 +401,7 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
       bucketTotal += integerOrUndefined(bucketText[field.key]) ?? 0;
     }
     if (numberLimit !== null && bucketTotal > numberLimit) {
-      errors.push(`Monthly bucket mix cannot total more than ${numberLimit} for this target window.`);
+      errors.push(`Target draw bucket-origin mix cannot total more than ${numberLimit} for this target window.`);
     }
 
     const singleError = validateNonNegativeIntegerText("Single-digit count", singleText);
@@ -459,31 +469,7 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
     terminalDigitsText,
   ]);
 
-  const resetForm = () => {
-    setEditingId(null);
-    setTargetKind("nextDraw");
-    setOddEvenRatio("");
-    setNumbersText("");
-    setTerminalDigitsText("");
-    setBucketText(emptyBuckets());
-    setSingleText("");
-    setDoubleText("");
-    setSumMinText("");
-    setSumMaxText("");
-    setTrendRatio("");
-    setPreviousRepeatCount("");
-    setPreviousNeighbourHitCount("");
-    setDroughtBreakCount("");
-    setCarryOverCount("");
-    setConfidence("");
-    setNotes("");
-    setShowValidationErrors(false);
-  };
-
-  const fillFormFromEntry = (entry: PredictionJournalEntry) => {
-    const inputs = entry.inputs;
-    setEditingId(entry.id);
-    setTargetKind(entry.targetKind);
+  const fillFormFromInputs = (inputs: PredictionJournalInputs) => {
     setOddEvenRatio(inputs.oddEvenRatio ?? "");
     setNumbersText(numberText(inputs.numbers));
     setTerminalDigitsText(numberText(inputs.terminalDigits));
@@ -505,8 +491,33 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
     setCarryOverCount(inputs.carryOverCount === undefined ? "" : String(inputs.carryOverCount));
     setConfidence(inputs.confidence === undefined ? "" : String(inputs.confidence));
     setNotes(inputs.notes ?? "");
+  };
+
+  const resetForm = () => {
+    setEditingId(null);
+    setTargetKind("nextDraw");
+    fillFormFromInputs({});
+    setShowValidationErrors(false);
+  };
+
+  const fillFormFromEntry = (entry: PredictionJournalEntry) => {
+    const inputs = entry.inputs;
+    setEditingId(entry.id);
+    setTargetKind(entry.targetKind);
+    fillFormFromInputs(inputs);
     setMessage(`Editing prediction anchored to ${entry.anchorLatestDrawDate}.`);
   };
+
+  useEffect(() => {
+    if (!newPredictionDraft) return;
+    const draft = buildPredictionJournalDraftFromSetup(newPredictionDraft.setupSnapshot ?? getSetupSnapshot?.());
+    setEditingId(null);
+    setTargetKind(draft.targetKind);
+    fillFormFromInputs(draft.inputs);
+    setShowValidationErrors(false);
+    setExpandedEntryId(null);
+    setMessage(`New prediction draft created from current setup (${draft.sourceSummary.length} context lines). Review before saving.`);
+  }, [newPredictionDraft?.id]);
 
   const handleSave = () => {
     if (!latestDraw && !editingEntry) {
@@ -555,7 +566,7 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
     setMessage("Pending prediction removed.");
   };
 
-  const handleExport = () => {
+  const downloadJournalJson = () => {
     if (typeof document === "undefined" || typeof URL === "undefined") return;
     const blob = new Blob([JSON.stringify(entries, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -564,7 +575,40 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
     anchor.download = "windfall-prediction-journal.json";
     anchor.click();
     URL.revokeObjectURL(url);
-    setMessage("Prediction journal exported.");
+  };
+
+  const handleEmailToAuthor = async () => {
+    if (typeof window === "undefined") return;
+    const json = JSON.stringify(entries, null, 2);
+    const subject = "Windfall Prediction Journal export";
+    const header = [
+      "Windfall Prediction Journal export",
+      `Entries: ${entries.length}`,
+      `Generated: ${now()}`,
+      "",
+    ].join("\n");
+    let body = `${header}${json}`;
+    let fallbackMessage = "";
+
+    if (body.length > MAILTO_BODY_JSON_LIMIT) {
+      body = [
+        header,
+        "The journal JSON was too large for a reliable mailto body.",
+        "Windfall tried to copy the JSON to the clipboard; if that failed, it downloaded windfall-prediction-journal.json.",
+      ].join("\n");
+      try {
+        if (!navigator.clipboard?.writeText) throw new Error("Clipboard API unavailable");
+        await navigator.clipboard.writeText(json);
+        fallbackMessage = " JSON copied to clipboard because it was too large for the email body.";
+      } catch {
+        downloadJournalJson();
+        fallbackMessage = " JSON downloaded because it was too large for the email body and clipboard was unavailable.";
+      }
+    }
+
+    const mailto = `mailto:${PREDICTION_JOURNAL_AUTHOR_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    window.location.href = mailto;
+    setMessage(`Email draft prepared for the prediction journal.${fallbackMessage || " Review and send it from your mail app."}`);
   };
 
   return (
@@ -573,12 +617,38 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
         <div>
           <p style={{ margin: 0, color: "#51606f", maxWidth: 780 }}>
             Record your own draw hypotheses, then let Windfall score them only after real target draws arrive.
-            No prediction fields are required; notes-only entries are allowed.
+            Use New Prediction in the panel heading to draft from the current setup. No prediction fields are required; notes-only entries are allowed.
           </p>
         </div>
         <InfoHelp label="Prediction Journal help">
-          The journal is observe-only. Entries are anchored to the latest real draw when saved, can be edited before the first target draw arrives, and lock once scoring has begun.
+          The journal is observe-only. New Prediction drafts from current app state, entries are anchored to the latest real draw when saved, can be edited before the first target draw arrives, and lock once scoring has begun.
         </InfoHelp>
+      </div>
+
+      <div
+        style={{
+          marginTop: 12,
+          border: "1px solid #d6e4f0",
+          borderRadius: 8,
+          background: "#f8fbff",
+          padding: 12,
+          color: "#334155",
+        }}
+      >
+        <div style={{ fontSize: 13, fontWeight: 900, color: "#0f172a", marginBottom: 6 }}>
+          New user guide
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10, fontSize: 12, lineHeight: 1.45 }}>
+          <div>
+            <strong>Fill only what you are testing.</strong> For example, enter <code>2:6</code> in Odd/even ratio, <code>7, 14, 22, 31</code> in Numbers, or <code>1, 4, 9</code> in Terminal digits.
+          </div>
+          <div>
+            <strong>Use bucket-origin counts for target draws.</strong> For Next draw, predict how many of the 8 drawn balls will come from each current-month bucket, such as Undrawn <code>3</code>, 1x <code>4</code>, 2x <code>1</code>. Do not enter the whole month bucket state here.
+          </div>
+          <div>
+            <strong>Save before the draw.</strong> At least one prediction entry per draw is useful; more entries are better when they test different ideas. Over time, this gives the app creators clean evidence for adjusting and improving the app's possible winning-entry logic.
+          </div>
+        </div>
       </div>
 
       <div
@@ -651,7 +721,10 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
 
       <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
         <div style={{ border: "1px solid #e1e7ef", borderRadius: 8, padding: 10 }}>
-          <div style={{ fontWeight: 800, marginBottom: 8 }}>Monthly bucket mix</div>
+          <div style={{ fontWeight: 800, marginBottom: 8 }}>Target draw bucket-origin mix</div>
+          <div style={{ fontSize: 12, color: "#657385", marginBottom: 8 }}>
+            Counts of drawn balls expected to originate from each current-month bucket, not the full bucket state at entry time.
+          </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(58px, 1fr))", gap: 8 }}>
             {BUCKET_FIELDS.map((field) => (
               <label key={field.key} style={{ display: "grid", gap: 3, fontSize: 12, fontWeight: 700, color: "#51606f" }}>
@@ -710,7 +783,7 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
           {editingId ? "Update prediction" : "Save prediction"}
         </HigButton>
         <HigButton variant="quiet" onClick={resetForm}>Clear form</HigButton>
-        <HigButton variant="secondary" onClick={handleExport} disabled={entries.length === 0}>Export JSON</HigButton>
+        <HigButton variant="secondary" onClick={() => void handleEmailToAuthor()} disabled={entries.length === 0}>Email to author</HigButton>
         {message ? <span role="status" style={{ fontSize: 12, color: "#51606f" }}>{message}</span> : null}
       </div>
 

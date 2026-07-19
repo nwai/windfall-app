@@ -19,6 +19,7 @@ export interface MonteCarloPanelProps {
   excludedNumbers: number[];
   trendWeights?: Record<number, number> | null;
   defaultWindow?: number;
+  historyScopeLabel?: string;
   drawSize?: number;
   showSimulation?: boolean;
   forcedNumbers?: number[];
@@ -34,6 +35,7 @@ export const MonteCarloPanel: React.FC<MonteCarloPanelProps> = ({
   excludedNumbers,
   trendWeights,
   defaultWindow = 30,
+  historyScopeLabel,
   drawSize = 8,
   showSimulation = true,
   forcedNumbers = [],
@@ -299,7 +301,7 @@ export const MonteCarloPanel: React.FC<MonteCarloPanelProps> = ({
       </header>
 
       <div style={{ fontSize: 12, marginBottom: 6, color: '#555' }}>
-        Probabilities from last {recent.length} draws. Exclusions zeroed then renormalized.
+        Current-window weights from last {recent.length} draws. Scope: {historyScopeLabel ?? 'provided history'}. Exclusions zeroed then renormalized.
       </div>
 
       {layout === 'table' ? (

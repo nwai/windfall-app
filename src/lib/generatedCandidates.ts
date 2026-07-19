@@ -23,6 +23,14 @@ export function selectRowsForCandidateExport<TCandidate>(
   return rows.filter((row) => row.matched === true);
 }
 
+export function formatCandidateRowsForPasteWeightedGenerator<TCandidate extends { main: readonly number[] }>(
+  rows: readonly GeneratedCandidateViewRow<TCandidate>[],
+): string {
+  return rows
+    .map(({ c }) => c.main.join(","))
+    .join("\n");
+}
+
 const dateRank = (date: string): number => {
   const parsed = Date.parse(date);
   return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY;

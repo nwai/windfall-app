@@ -9,6 +9,7 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import "./App.css";
 
+import { LotteryPlatformShell } from "./components/lottery/LotteryPlatformShell";
 import { ForcedNumbersProvider } from "./context/ForcedNumbersContext";
 import { ZPASettingsProvider, useZPASettings } from "./context/ZPASettingsContext";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -24,6 +25,7 @@ import { buildDrawGrid, findDiamondsAllRadii, getPredictedNumbers } from "./dga"
 import { normalizeDgaSelectedNumbers } from "./lib/dgaSelectedNumbers";
 import { DGAVisualizer } from "./components/DGAVisualizer";
 import { computeOGA, getOGAPercentile } from "./utils/oga";
+import { ogaPercentileToSimilarity } from "./lib/ogaQuality";
 import { Draw, Knobs, CandidateSet } from "./types";
 import { GeneratedCandidatesPanel, ExportSettings } from "./components/candidates/GeneratedCandidatesPanel";
 import { PasteWeightedCandidatesPanel } from "./components/candidates/PasteWeightedCandidatesPanel";
@@ -99,12 +101,12 @@ import {
   buildScoringGenerationProfile,
   type ScoringGenerationInfluence,
 } from "./lib/scoringGenerationInfluence";
-import { PredictionJournalPanel } from "./components/PredictionJournalPanel";
+import { PredictionJournalPanel, type PredictionJournalDraftRequest } from "./components/PredictionJournalPanel";
 import { ResearchDiaryPanel } from "./components/ResearchDiaryPanel";
 import { PreviousNeighbourBacktestPanel } from "./components/PreviousNeighbourBacktestPanel";
 import { CollapsibleSection } from "./components/shared/CollapsibleSection";
 import { InlineCollapsibleCard } from "./components/shared/InlineCollapsibleCard";
-import { HigField, HigSlider, InfoHelp } from "./components/shared/HigControls";
+import { HigButton, HigField, HigSlider, InfoHelp } from "./components/shared/HigControls";
 import { AppWorkflowNav, WorkflowAnchor } from "./components/layout/AppWorkflowNav";
 import { PanelFavoritesStrip } from "./components/layout/PanelFavoritesStrip";
 import { PanelFavoritesProvider } from "./context/PanelFavoritesContext";
@@ -117,6 +119,8 @@ import { TattslottoTicketGridReplayPanel } from "./components/TattslottoTicketGr
 import UndrawnPatternsPanel from "./components/UndrawnPatternsPanel";
 import MonthlyOverlapPanel from "./components/MonthlyOverlapPanel";
 import MonthlyDrawsSummaryPanel, { type MonthlyConstraintPayload, type MonthlyFrequencyConstraints, type MonthlyBucketSets, type MonthlyIdealDrawState, type StageIdealDrawState } from "./components/MonthlyDrawsSummaryPanel";
+import { computeIdealMonthlyDraw } from "./lib/monthlyDrawSummary";
+import MonthlyBucketTransitionLabPanel from "./components/MonthlyBucketTransitionLabPanel";
 import MonthlyFirstLastPanel from "./components/MonthlyFirstLastPanel";
 import MonthlyDigitOccurrencePanel from "./components/MonthlyDigitOccurrencePanel";
 import MonthEndCarryOverBucketsPanel from "./components/MonthEndCarryOverBucketsPanel";
@@ -137,6 +141,10 @@ import {
   rowsFromDraws,
 } from "./lib/drawHistoryReview";
 import { clearCachedDrawHistory, loadCachedDrawHistory, saveCachedDrawHistory } from "./lib/historyPersistence";
+import {
+  computeWeekdayWindfallPrizeDivision,
+  rankWeekdayWindfallPrizeDivision,
+} from "./lib/prizeDivisions";
 import { chooseInitialDrawHistory, type InitialDrawHistoryChoice } from "./lib/initialDrawHistory";
 import {
   DIGIT_WIDTH_PERCENT_OPTIONS,
@@ -186,6 +194,11 @@ import { filterRealDrawHistory } from "./lib/realDrawHistory";
 import { strictValidateDraws } from "./lib/strictDrawValidation";
 import { formatWfmqyhDateRange } from "./lib/wfmqyhWindowDateRange";
 import { drawResultTemperatureStyle } from "./lib/drawResultTemperature";
+import { getLatestObservedMonthDrawCount } from "./lib/repeatWindowDefault";
+import {
+  filterRowsForHistoryBaselines,
+  getExcludedMonthLabelsForHistoryBaselines,
+} from "./lib/monthlyAverageScope";
 import {
   loadFavoritePanelIds,
   normalizeFavoritePanelIds,
@@ -230,6 +243,310 @@ const formatScoringInfluenceLabel = (value: ScoringGenerationInfluence): string 
   value === "off" ? "Off" : `${value.slice(0, 1).toUpperCase()}${value.slice(1)}`
 );
 
+const READINESS_HARD_FILTER_KEYS = ["idm", "conv", "oga"] as const;
+type ReadinessHardFilterKey = typeof READINESS_HARD_FILTER_KEYS[number];
+
+interface ReadinessHardFilterRule {
+  enabled: boolean;
+  thresholdPercent: number;
+}
+
+type ReadinessHardFilterState = Record<ReadinessHardFilterKey, ReadinessHardFilterRule>;
+type ReadinessHardFilterRejects = Record<ReadinessHardFilterKey, number>;
+
+const DEFAULT_READINESS_HARD_FILTERS: ReadinessHardFilterState = {
+  idm: { enabled: false, thresholdPercent: 0 },
+  conv: { enabled: false, thresholdPercent: 0 },
+  oga: { enabled: false, thresholdPercent: 0 },
+};
+
+const READINESS_HARD_FILTER_LABELS: Record<ReadinessHardFilterKey, string> = {
+  idm: "IDM",
+  conv: "Conv",
+  oga: "OGA",
+};
+
+const READINESS_HARD_FILTER_COPY: Record<ReadinessHardFilterKey, {
+  label: string;
+  help: string;
+}> = {
+  idm: {
+    label: "IDM minimum",
+    help: "Rejects candidates below this Ideal Draw Match percentage. IDM is descriptive bucket alignment, not a win probability.",
+  },
+  conv: {
+    label: "Conv impact minimum",
+    help: "Rejects candidates below this pool-normalised absolute Conv impact. Direction is ignored because Conv direction is not predictive.",
+  },
+  oga: {
+    label: "OGA component minimum",
+    help: "Rejects candidates below this Rdy-normalised OGA component. This is OGA similarity, not raw OGA percentile.",
+  },
+};
+
+const cloneDefaultReadinessHardFilters = (): ReadinessHardFilterState => ({
+  idm: { ...DEFAULT_READINESS_HARD_FILTERS.idm },
+  conv: { ...DEFAULT_READINESS_HARD_FILTERS.conv },
+  oga: { ...DEFAULT_READINESS_HARD_FILTERS.oga },
+});
+
+const clampPercent = (value: unknown, fallback = 0): number => {
+  const numeric = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.max(0, Math.min(100, Math.round(numeric)));
+};
+
+const clampDgaMonthlyBucketStateOpacity = (value: unknown): number => {
+  const numeric = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(numeric)) return 1;
+  return Math.max(0.25, Math.min(1, Math.round(numeric * 20) / 20));
+};
+
+const normalizeReadinessHardFilters = (input: unknown): ReadinessHardFilterState => {
+  const defaults = cloneDefaultReadinessHardFilters();
+  if (!input || typeof input !== "object") return defaults;
+  const source = input as Partial<Record<ReadinessHardFilterKey, Partial<ReadinessHardFilterRule>>>;
+  READINESS_HARD_FILTER_KEYS.forEach((key) => {
+    const rule = source[key];
+    if (!rule || typeof rule !== "object") return;
+    defaults[key] = {
+      enabled: !!rule.enabled,
+      thresholdPercent: clampPercent(rule.thresholdPercent, 0),
+    };
+  });
+  return defaults;
+};
+
+const formatReadinessHardFilterSummary = (filters: ReadinessHardFilterState): string => {
+  const active = READINESS_HARD_FILTER_KEYS
+    .filter((key) => filters[key].enabled)
+    .map((key) => `${READINESS_HARD_FILTER_LABELS[key]}>=${filters[key].thresholdPercent}%`);
+  return active.length ? active.join(" · ") : "off";
+};
+
+const emptyReadinessHardFilterRejects = (): ReadinessHardFilterRejects => ({
+  idm: 0,
+  conv: 0,
+  oga: 0,
+});
+
+const totalReadinessHardFilterRejects = (rejects: ReadinessHardFilterRejects): number => (
+  READINESS_HARD_FILTER_KEYS.reduce((sum, key) => sum + rejects[key], 0)
+);
+
+const toNineBucketDistribution = (values: readonly number[] | null | undefined): number[] | null => {
+  if (!Array.isArray(values) || values.length === 0) return null;
+  const next = Array(9).fill(0);
+  values.slice(0, 9).forEach((value, index) => {
+    next[index] = Number.isFinite(value) ? Math.max(0, value) : 0;
+  });
+  return next;
+};
+
+const buildNumberToMonthlyBucketMap = (bucketSets: MonthlyBucketSets | null | undefined): Map<number, number> | null => {
+  if (!bucketSets) return null;
+  const numberToBucket = new Map<number, number>();
+  const sets = [
+    bucketSets.undrawn,
+    bucketSets.times1,
+    bucketSets.times2,
+    bucketSets.times3,
+    bucketSets.times4,
+    bucketSets.times5,
+    bucketSets.times6,
+    bucketSets.times7,
+    bucketSets.times8,
+  ];
+  sets.forEach((set, bucketIndex) => {
+    set.forEach((number) => numberToBucket.set(number, bucketIndex));
+  });
+  return numberToBucket;
+};
+
+const distributionFromBucketMap = (numberToBucket: Map<number, number> | null): number[] | null => {
+  if (!numberToBucket) return null;
+  const distribution = Array(9).fill(0);
+  numberToBucket.forEach((bucket) => {
+    if (bucket >= 0 && bucket <= 8) distribution[bucket] += 1;
+  });
+  return distribution;
+};
+
+const targetDistributionFromMonthlyAverages = (monthlyAvgBuckets: { times: number; avg: number }[]): number[] | null => {
+  if (!monthlyAvgBuckets.length) return null;
+  const rawDistribution = Array(9).fill(0);
+  monthlyAvgBuckets.forEach((bucket) => {
+    const bucketIndex = Math.min(Math.max(0, Math.floor(bucket.times)), 8);
+    if (bucketIndex > 0 && Number.isFinite(bucket.avg)) rawDistribution[bucketIndex] += bucket.avg;
+  });
+  const distribution = rawDistribution.map((value, index) => (index > 0 ? Math.round(value) : 0));
+  const drawnTotal = distribution.slice(1).reduce((sum, value) => sum + value, 0);
+  distribution[0] = Math.max(0, 45 - drawnTotal);
+  return distribution;
+};
+
+const sumSquaredDistance = (left: number[], right: number[]): number => {
+  let sum = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    const delta = (left[index] ?? 0) - (right[index] ?? 0);
+    sum += delta * delta;
+  }
+  return sum;
+};
+
+const scoreCandidateIdealDrawMatch = (
+  numbers: number[],
+  numberToBucket: Map<number, number>,
+  idealDrawComposition: number[],
+): number | null => {
+  const candidateComposition = Array(9).fill(0);
+  numbers.forEach((number) => {
+    const bucket = numberToBucket.get(number);
+    if (bucket !== undefined) candidateComposition[bucket] += 1;
+  });
+  let totalDiff = 0;
+  for (let index = 0; index < 9; index += 1) {
+    totalDiff += Math.abs(candidateComposition[index] - (idealDrawComposition[index] ?? 0));
+  }
+  return Math.max(0, 1 - totalDiff / 16);
+};
+
+const scoreCandidateConvergence = (
+  numbers: number[],
+  numberToBucket: Map<number, number>,
+  currentDistribution: number[],
+  targetDistribution: number[],
+  preDrawDistance: number,
+): number | null => {
+  const postDistribution = [...currentDistribution];
+  numbers.forEach((number) => {
+    const bucket = numberToBucket.get(number);
+    if (bucket === undefined) return;
+    postDistribution[bucket] -= 1;
+    postDistribution[Math.min(bucket + 1, 8)] += 1;
+  });
+  return preDrawDistance - sumSquaredDistance(postDistribution, targetDistribution);
+};
+
+interface ApplyReadinessHardFiltersContext {
+  monthlyBuckets: MonthlyBucketSets | null | undefined;
+  monthlyIdealDrawState: MonthlyIdealDrawState | null;
+  monthlyAvgBuckets: { times: number; avg: number }[];
+  historyForOga: Draw[];
+  ogaRefScores: number[];
+  ogaSpokeCount: number;
+  trustCandidateOgaScores?: boolean;
+}
+
+interface ApplyReadinessHardFiltersResult {
+  candidates: CandidateSet[];
+  rejects: ReadinessHardFilterRejects;
+  skipped: string[];
+}
+
+const applyReadinessHardFiltersToCandidates = (
+  candidates: CandidateSet[],
+  filters: ReadinessHardFilterState,
+  context: ApplyReadinessHardFiltersContext,
+): ApplyReadinessHardFiltersResult => {
+  const activeKeys = READINESS_HARD_FILTER_KEYS.filter((key) => filters[key].enabled);
+  if (!activeKeys.length || !candidates.length) {
+    return { candidates, rejects: emptyReadinessHardFilterRejects(), skipped: [] };
+  }
+
+  const rejects = emptyReadinessHardFilterRejects();
+  const skipped: string[] = [];
+  const bucketSets = context.monthlyIdealDrawState?.bucketSets ?? context.monthlyBuckets ?? null;
+  const numberToBucket = buildNumberToMonthlyBucketMap(bucketSets);
+  const currentDistribution = distributionFromBucketMap(numberToBucket);
+  const targetDistribution = toNineBucketDistribution(context.monthlyIdealDrawState?.targetDistribution)
+    ?? targetDistributionFromMonthlyAverages(context.monthlyAvgBuckets);
+  const idealDrawComposition = toNineBucketDistribution(context.monthlyIdealDrawState?.idealDrawBucketCounts)
+    ?? (currentDistribution && targetDistribution
+      ? computeIdealMonthlyDraw({
+        currentDistribution,
+        targetDistribution,
+        drawSize: 8,
+      }).bucketCounts.map(({ count }) => count)
+      : null);
+
+  const needsMonthlyScores = filters.idm.enabled || filters.conv.enabled;
+  const monthlyScoresAvailable = !needsMonthlyScores || !!(numberToBucket && currentDistribution && targetDistribution && idealDrawComposition);
+  if (!monthlyScoresAvailable) {
+    if (filters.idm.enabled) skipped.push("IDM skipped: monthly bucket ideal state unavailable");
+    if (filters.conv.enabled) skipped.push("Conv skipped: monthly bucket target state unavailable");
+  }
+
+  const idmScores = new Map<number, number>();
+  const convRawScores = new Map<number, number>();
+  let maxAbsConv = 0;
+  if (monthlyScoresAvailable && numberToBucket && currentDistribution && targetDistribution && idealDrawComposition) {
+    const preDrawDistance = sumSquaredDistance(currentDistribution, targetDistribution);
+    candidates.forEach((candidate, index) => {
+      const numbers = [...candidate.main, ...candidate.supp];
+      if (filters.idm.enabled) {
+        const idmScore = scoreCandidateIdealDrawMatch(numbers, numberToBucket, idealDrawComposition);
+        if (idmScore !== null) idmScores.set(index, idmScore);
+      }
+      if (filters.conv.enabled) {
+        const convScore = scoreCandidateConvergence(numbers, numberToBucket, currentDistribution, targetDistribution, preDrawDistance);
+        if (convScore !== null) {
+          convRawScores.set(index, convScore);
+          maxAbsConv = Math.max(maxAbsConv, Math.abs(convScore));
+        }
+      }
+    });
+  }
+
+  const ogaReferenceScores = context.ogaRefScores.filter((score) => Number.isFinite(score));
+  const ogaScoresAvailable = !filters.oga.enabled || (context.historyForOga.length > 0 && ogaReferenceScores.length > 0);
+  if (!ogaScoresAvailable) {
+    skipped.push("OGA skipped: OGA reference history unavailable");
+  }
+
+  const ogaSimilarityScores = new Map<number, number>();
+  if (filters.oga.enabled && ogaScoresAvailable) {
+    candidates.forEach((candidate, index) => {
+      const numbers = [...candidate.main, ...candidate.supp];
+      const candidateOga = context.trustCandidateOgaScores && Number.isFinite(candidate.ogaScore)
+        ? candidate.ogaScore as number
+        : computeOGA(numbers, context.historyForOga, context.ogaSpokeCount);
+      const candidatePercentile = context.trustCandidateOgaScores && Number.isFinite(candidate.ogaPercentile)
+        ? candidate.ogaPercentile as number
+        : getOGAPercentile(candidateOga, ogaReferenceScores);
+      ogaSimilarityScores.set(index, ogaPercentileToSimilarity(candidatePercentile));
+    });
+  }
+
+  const filtered = candidates.filter((_candidate, index) => {
+    if (filters.idm.enabled && monthlyScoresAvailable) {
+      const idmScore = idmScores.get(index);
+      if (idmScore === undefined || idmScore * 100 < filters.idm.thresholdPercent) {
+        rejects.idm += 1;
+        return false;
+      }
+    }
+    if (filters.conv.enabled && monthlyScoresAvailable) {
+      const rawConv = convRawScores.get(index);
+      const convPercent = maxAbsConv > 0 && rawConv !== undefined ? (Math.abs(rawConv) / maxAbsConv) * 100 : 0;
+      if (rawConv === undefined || convPercent < filters.conv.thresholdPercent) {
+        rejects.conv += 1;
+        return false;
+      }
+    }
+    if (filters.oga.enabled && ogaScoresAvailable) {
+      const ogaSimilarity = ogaSimilarityScores.get(index);
+      if (ogaSimilarity === undefined || ogaSimilarity * 100 < filters.oga.thresholdPercent) {
+        rejects.oga += 1;
+        return false;
+      }
+    }
+    return true;
+  });
+
+  return { candidates: filtered, rejects, skipped };
+};
+
 type GenerationRejectionStats = GenerateCandidatesResult["rejectionStats"];
 
 const formatTracePairs = (pairs: Array<[string, number | string]>): string => (
@@ -245,6 +562,7 @@ const formatGenerationTraceLines = (options: {
   monthlyRejects: number;
   prizeRejects: number;
   capRejects: number;
+  readinessRejects?: number;
   poolSize?: number;
   overgenFactor?: number;
   filteredCount?: number;
@@ -259,6 +577,7 @@ const formatGenerationTraceLines = (options: {
     monthlyRejects,
     prizeRejects,
     capRejects,
+    readinessRejects,
     poolSize,
     overgenFactor,
     filteredCount,
@@ -296,6 +615,7 @@ const formatGenerationTraceLines = (options: {
       ["oddEven", stats.oddEven],
       ["tricky", stats.tricky],
       ["repeat", stats.repeatUnion],
+      ["ld±1", stats.latestNeighbourSupport],
       ["recMin", stats.minRecent],
       ["recMax", stats.maxLastDraw],
       ["recBias", stats.recentBias],
@@ -305,6 +625,7 @@ const formatGenerationTraceLines = (options: {
     ])}`,
     `[TRACE] ${label} Rejects · post filters: ${formatTracePairs([
       ["monthly", monthlyRejects],
+      ["readiness", readinessRejects ?? 0],
       ["prize", prizeRejects],
       ["ogaCap", capRejects],
     ])}`,
@@ -407,9 +728,9 @@ const defaultMainDecadeBiases: Record<GenerationConstraintDecadeKey, number> = {
 };
 
 const defaultKnobs: Knobs = {
-  enableSDE1: true,
-  enableHC3: true,
-  enableOGA: true,
+  enableSDE1: false,
+  enableHC3: false,
+  enableOGA: false,
   enableGPWF: false,
   enableEntropy: false,
   enableHamming: false,
@@ -481,8 +802,15 @@ function parseCsvDateToEpoch(s: string): number {
   return Number.isNaN(t) ? 0 : t;
 }
 
+function monthLabelForHistoryScope(draw: Draw): string | null {
+  const epoch = parseCsvDateToEpoch(draw.date);
+  if (!Number.isFinite(epoch) || epoch <= 0) return null;
+  const date = new Date(epoch);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
 function AppInner(): JSX.Element {
-  const { runGenerate } = useGenerateWorker();
+  const { runGenerate, cancelGenerate } = useGenerateWorker();
   const [history, setHistory] = useState<Draw[]>([]);
   const [startupHistoryChoice, setStartupHistoryChoice] = useState<InitialDrawHistoryChoice | null>(null);
   const realHistoryResult = useMemo(
@@ -490,6 +818,21 @@ function AppInner(): JSX.Element {
     [history],
   );
   const realHistory = realHistoryResult.history;
+  const baselineHistoryScope = useMemo(() => {
+    const rows = realHistory
+      .map((draw) => ({ draw, monthLabel: monthLabelForHistoryScope(draw) }))
+      .filter((row): row is { draw: Draw; monthLabel: string } => Boolean(row.monthLabel));
+    const excludedMonthLabels = getExcludedMonthLabelsForHistoryBaselines(rows, (row) => row.monthLabel);
+    const historyForBaselines = filterRowsForHistoryBaselines(rows, (row) => row.monthLabel).map((row) => row.draw);
+    return {
+      history: historyForBaselines,
+      excludedMonthLabels,
+    };
+  }, [realHistory]);
+  const baselineHistory = baselineHistoryScope.history;
+  const baselineHistoryScopeLabel = baselineHistoryScope.excludedMonthLabels.length
+    ? `Windfall baseline history (${baselineHistory.length} real draws; excludes ${baselineHistoryScope.excludedMonthLabels.join(", ")})`
+    : `Windfall baseline history (${baselineHistory.length} real draws)`;
   const [windowMode, setWindowMode] = useState<"W" | "F" | "M" | "Q" | "Y" | "H" | "Custom">("H");
   const [customDrawCount, setCustomDrawCount] = useState<number>(1);
   const [windowEnabled, setWindowEnabled] = useState<boolean>(true);
@@ -513,7 +856,9 @@ function AppInner(): JSX.Element {
 
   const [rankingWeights, setRankingWeights] = useState<RankingWeights>({
       oga: 0.7,
+      selHitsEnabled: false,
       sel: 0.2,
+      recentHitsEnabled: false,
       recent: 0.1,
       selBonusThreshold: 3,
       selBonusWeight: 0,
@@ -856,6 +1201,7 @@ function AppInner(): JSX.Element {
     );
   }, []);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
+  const generationStopRequestedRef = useRef(false);
   const [octagonalTop, setOctagonalTop] = useState<number>(defaultKnobs.octagonal_top);
   const [ogaSpokeCount, setOgaSpokeCount] = useState<number>(9);
   // Batch frequency debug
@@ -880,6 +1226,7 @@ function AppInner(): JSX.Element {
 
   // Readiness (Rdy) score weights — user-configurable in Candidate Generation Influences
   const [rdyWeights, setRdyWeights] = useState<{ idm: number; conv: number; oga: number }>({ idm: 0.70, conv: 0.10, oga: 0.20 });
+  const [readinessHardFilters, setReadinessHardFilters] = useState<ReadinessHardFilterState>(cloneDefaultReadinessHardFilters);
 
   // Monthly Repeat Bias — boost numbers drawn exactly once in the current month
   const [mrbEnabled, setMrbEnabled] = useState<boolean>(false);
@@ -973,6 +1320,7 @@ function AppInner(): JSX.Element {
   const [maxLastDrawMatchesEnabled, setMaxLastDrawMatchesEnabled] = useState<boolean>(false);
   const [maxLastDrawMatchesValue, setMaxLastDrawMatchesValue] = useState<number>(3);
   const [previousNeighbourConstraintNumbers, setPreviousNeighbourConstraintNumbers] = useState<number[]>([]);
+  const [latestNeighbourSupportEnabled, setLatestNeighbourSupportEnabled] = useState<boolean>(false);
   const [recentMatchBias, setRecentMatchBias] = useState<number>(0);
   const [highlightMsg, setHighlightMsg] = useState<string>("");
   const [highlights, setHighlights] = useState<any[]>([]);
@@ -1013,6 +1361,7 @@ function AppInner(): JSX.Element {
   const [showHeatmapLetters, setShowHeatmapLetters] = useState(false);
   const [tempMetric, setTempMetric] = useState<"ema" | "recency" | "hybrid">("hybrid");
   const [dgaHeatmapView, setDgaHeatmapView] = useState<DgaHeatmapViewMode>("temperature");
+  const [dgaMonthlyBucketStateOpacity, setDgaMonthlyBucketStateOpacity] = useState<number>(1);
   const [repeatWindowSizeW, setRepeatWindowSizeW] = useState<number>(12);
   const [minFromRecentUnionM, setMinFromRecentUnionM] = useState<number>(0);
   const [presets, setPresets] = useState<AppPreset[]>(() => listPresets());
@@ -1451,6 +1800,18 @@ function AppInner(): JSX.Element {
   const mainDecadeGenerationBiases = useMemo(() => ({ ...mainDecadeBiases }), [mainDecadeBiases]);
 
   const activeWindowSize = realFilteredHistory.length;
+  const latestObservedMonthDrawCount = useMemo(
+    () => getLatestObservedMonthDrawCount(realHistory),
+    [realHistory],
+  );
+  const repeatWindowDefaultFromLatestMonth = latestObservedMonthDrawCount
+    ? Math.min(latestObservedMonthDrawCount.drawCount, activeWindowSize || latestObservedMonthDrawCount.drawCount)
+    : activeWindowSize;
+  const effectiveRepeatWindowSizeW = Math.min(Math.max(0, repeatWindowSizeW), activeWindowSize);
+  const repeatUnionEnabled = repeatWindowSizeW > 0 && minFromRecentUnionM > 0 && activeWindowSize > 0;
+  const repeatUnionSummary = repeatUnionEnabled
+    ? `W ${repeatWindowSizeW}${effectiveRepeatWindowSizeW !== repeatWindowSizeW ? ` (${effectiveRepeatWindowSizeW} effective)` : ""} · M ${minFromRecentUnionM}`
+    : `off (W ${repeatWindowSizeW} · M ${minFromRecentUnionM})`;
   const generatedCandidateCountWindowDefault = useMemo(
     () => getGeneratedCandidateCountWindowDefault(activeWindowSize, DEFAULT_GENERATED_CANDIDATE_COUNT),
     [activeWindowSize],
@@ -1463,12 +1824,12 @@ function AppInner(): JSX.Element {
     return latestDraw.date || "unknown date";
   }, [realHistory]);
 
-  // Sync repeat window W to the WFMQYH window size when it changes
+  // Default the repeat pool to the latest observed month, capped by the active WFMQYH window.
   useEffect(() => {
     if (activeWindowSize > 0) {
-      setRepeatWindowSizeW(activeWindowSize);
+      setRepeatWindowSizeW(repeatWindowDefaultFromLatestMonth);
     }
-  }, [activeWindowSize]);
+  }, [activeWindowSize, repeatWindowDefaultFromLatestMonth]);
 
   useEffect(() => {
     const previousWindowDefault = lastWindowDefaultNumCandidatesRef.current;
@@ -1533,6 +1894,9 @@ function AppInner(): JSX.Element {
   const [simulatedDraw, setSimulatedDraw] = useState<Draw | null>(null);
   const [simSource, setSimSource] = useState<'none' | 'user' | 'candidate' | 'dga-strip'>('none');
   const [simCandidateIdx, setSimCandidateIdx] = useState<number | null>(null);
+  const [predictionJournalOpen, setPredictionJournalOpen] = useState<boolean>(false);
+  const [predictionJournalDraftRequest, setPredictionJournalDraftRequest] = useState<PredictionJournalDraftRequest | null>(null);
+  const predictionJournalDraftIdRef = useRef(0);
 
   // DGA grid strips mirror the shared user-selected numbers; DGA simulation uses the first 8.
   const [mirrorDgaStripToPreviousNeighbour, setMirrorDgaStripToPreviousNeighbour] = useState<boolean>(false);
@@ -1912,6 +2276,9 @@ function AppInner(): JSX.Element {
     () => buildConditionalProb(realFilteredHistory, temperatureSignal, 0.5, 0.3),
     [realFilteredHistory, temperatureSignal]
   );
+  const ratioOptionValues = useMemo(() => ratioOptions.map((option) => option.ratio), [ratioOptions]);
+  const allVisibleRatiosSelected = ratioOptionValues.length > 0
+    && ratioOptionValues.every((ratio) => selectedRatios.includes(ratio));
 
   // Minimum number of prior draws required for a stable OGA baseline.
   // Draws computed against fewer than this many draws produce unreliable scores
@@ -2154,34 +2521,78 @@ function AppInner(): JSX.Element {
       .sort((a, b) => b.s - a.s || a.n - b.n);
   }, [finalScores]);
 
+  function getSurvivorSelectionState() {
+    const hasRecentDraw = realFilteredHistory.length > 0;
+    const carryOverWeight = monthEndCarryOverBiasEnabled ? monthEndCarryOverStrengthSettings.rankingWeight : 0;
+    return {
+      oga: knobs.enableOGA && rankingWeights.oga > 0,
+      selected: rankingWeights.selHitsEnabled && userSelectedNumbers.length > 0 && rankingWeights.sel > 0,
+      recent: rankingWeights.recentHitsEnabled && hasRecentDraw && rankingWeights.recent > 0,
+      carryOver: monthEndCarryOverBiasEnabled && carryOverWeight > 0,
+      scoring: Boolean(activeScoringGenerationProfile),
+      carryOverWeight,
+    };
+  }
+
+  function compareFinalSurvivorCandidates(a: CandidateSet, b: CandidateSet): number {
+    const survivorState = getSurvivorSelectionState();
+    if ((b.finalCompositeAdj ?? 0) !== (a.finalCompositeAdj ?? 0)) {
+      return (b.finalCompositeAdj ?? 0) - (a.finalCompositeAdj ?? 0);
+    }
+    if (survivorState.scoring && (b.scoreEvidence ?? 0) !== (a.scoreEvidence ?? 0)) {
+      return (b.scoreEvidence ?? 0) - (a.scoreEvidence ?? 0);
+    }
+    if (survivorState.oga && (b.ogaPercentile ?? 0) !== (a.ogaPercentile ?? 0)) {
+      return (b.ogaPercentile ?? 0) - (a.ogaPercentile ?? 0);
+    }
+    return 0;
+  }
+
+  function buildSurvivorSelectionTrace(label: string, poolBeforeSlice: number, kept: number, requested: number): string {
+    const survivorState = getSurvivorSelectionState();
+    const activeSignals: string[] = [];
+    if (survivorState.oga) activeSignals.push(`OGA weight ${rankingWeights.oga}`);
+    if (survivorState.selected) activeSignals.push(`SelHits weight ${rankingWeights.sel}`);
+    if (survivorState.recent) activeSignals.push(`RecentHits weight ${rankingWeights.recent}`);
+    if (survivorState.carryOver) activeSignals.push(`carry-over weight ${survivorState.carryOverWeight}`);
+    if (survivorState.scoring && activeScoringGenerationProfile) {
+      activeSignals.push(`Scoring Diagnostics ${activeScoringGenerationProfile.influence}`);
+    }
+    if (selectedRatios.length > 0) activeSignals.push(`odd/even quota ${selectedRatios.join(", ")}`);
+
+    const sliceSummary = poolBeforeSlice > requested
+      ? `pool ${poolBeforeSlice} -> kept ${kept}`
+      : `pool ${poolBeforeSlice}; no final overgen slice needed`;
+    const signalSummary = activeSignals.length
+      ? `chosen by ${activeSignals.join(" · ")}`
+      : "no active survivor-ranking signals; generated order preserved";
+    return `[TRACE] ${label} survivor selection: ${sliceSummary}; ${signalSummary}.`;
+  }
+
   function recomputeCompositeRanking(base: CandidateSet[]): CandidateSet[] {
     if (!base.length) return base;
     const manualMainSet = new Set(manualSimSelected.slice(0, 6));
     const manualSuppSet = new Set(manualSimSelected.slice(6, 8));
     const computePrize = (main: number[], supp: number[]) => {
-      if (manualMainSet.size < 6 || manualSuppSet.size < 2) return { label: "—", rank: 99 };
-      const mainHits = main.filter((n) => manualMainSet.has(n)).length;
-      const suppHits = supp.filter((n) => manualSuppSet.has(n)).length;
-      if (mainHits === 6) return { label: "Div1", rank: 1 };
-      if (mainHits === 5 && suppHits >= 1) return { label: "Div2", rank: 2 };
-      if (mainHits === 5) return { label: "Div3", rank: 3 };
-      if (mainHits === 4) return { label: "Div4", rank: 4 };
-      if (mainHits === 3 && suppHits >= 1) return { label: "Div5", rank: 5 };
-      if (mainHits >= 1 && suppHits >= 2) return { label: "Div6", rank: 6 };
-      return { label: "—", rank: 99 };
+      const label = computeWeekdayWindfallPrizeDivision(main, supp, manualMainSet, manualSuppSet);
+      return { label, rank: rankWeekdayWindfallPrizeDivision(label) };
     };
      const recentDraw = realFilteredHistory[realFilteredHistory.length - 1];
      const recentSet = recentDraw ? new Set([...recentDraw.main, ...recentDraw.supp]) : null;
      const selectedSet = new Set(userSelectedNumbers);
       const carryOverWeight = monthEndCarryOverBiasEnabled ? monthEndCarryOverStrengthSettings.rankingWeight : 0;
       const carryOverWeights = monthEndCarryOverBiasEnabled ? monthEndCarryOverWeightsForGeneration : undefined;
-      const sumW = rankingWeights.oga + rankingWeights.sel + rankingWeights.recent + carryOverWeight || 1;
+     const survivorState = getSurvivorSelectionState();
+      const sumW =
+        (survivorState.oga ? rankingWeights.oga : 0) +
+        (survivorState.selected ? rankingWeights.sel : 0) +
+        (survivorState.recent ? rankingWeights.recent : 0) +
+        (survivorState.carryOver ? carryOverWeight : 0) ||
+        1;
      const wOGA = rankingWeights.oga / sumW;
      const wSel = rankingWeights.sel / sumW;
      const wRecent = rankingWeights.recent / sumW;
       const wCarryOver = carryOverWeight / sumW;
-     const hasUserSelected = userSelectedNumbers && userSelectedNumbers.length > 0;
-     const applySelBoost = hasUserSelected && rankingWeights.sel > 0;
 
     return base
       .map((c: any) => {
@@ -2197,7 +2608,11 @@ function AppInner(): JSX.Element {
         const recentHits = recentSet ? nums.filter(n => recentSet.has(n)).length : 0;
         const carryOver = scoreMonthEndCarryOverCandidate(nums, carryOverWeights);
         const ogaNorm = knobs.enableOGA ? Math.max(0, Math.min(1, ogaPercentile / 100)) : 0;
-        const finalComposite = wOGA * ogaNorm + wSel * (selHits / 8) + wRecent * (recentHits / 8) + wCarryOver * carryOver.normalizedScore;
+        const finalComposite =
+          (survivorState.oga ? wOGA * ogaNorm : 0) +
+          (survivorState.selected ? wSel * (selHits / 8) : 0) +
+          (survivorState.recent ? wRecent * (recentHits / 8) : 0) +
+          (survivorState.carryOver ? wCarryOver * carryOver.normalizedScore : 0);
         const { label: prizeLabel, rank: prizeRank } = computePrize(c.main, c.supp);
         return {
           ...c,
@@ -2217,15 +2632,38 @@ function AppInner(): JSX.Element {
         // and must NOT influence pool ranking (otherwise Manual Prize Check
         // changes which candidates survive the over-generation slice).
         if (b.finalCompositeAdj !== a.finalCompositeAdj) return b.finalCompositeAdj - a.finalCompositeAdj;
-        if (monthEndCarryOverBiasEnabled && b.carryOverScore !== a.carryOverScore) return b.carryOverScore - a.carryOverScore;
-        if (monthEndCarryOverBiasEnabled && b.carryOverHits !== a.carryOverHits) return b.carryOverHits - a.carryOverHits;
-        if (b.selHits !== a.selHits) return b.selHits - a.selHits;
-        if (b.recentHits !== a.recentHits) return b.recentHits - a.recentHits;
+        if (survivorState.carryOver && b.carryOverScore !== a.carryOverScore) return b.carryOverScore - a.carryOverScore;
+        if (survivorState.carryOver && b.carryOverHits !== a.carryOverHits) return b.carryOverHits - a.carryOverHits;
+        if (survivorState.selected && b.selHits !== a.selHits) return b.selHits - a.selHits;
+        if (survivorState.recent && b.recentHits !== a.recentHits) return b.recentHits - a.recentHits;
         // Skip OGA tiebreaker when disabled
-        if (knobs.enableOGA && b.ogaPercentile !== a.ogaPercentile) return b.ogaPercentile - a.ogaPercentile;
+        if (survivorState.oga && b.ogaPercentile !== a.ogaPercentile) return b.ogaPercentile - a.ogaPercentile;
         return 0;
       });
    }
+
+  function applyConfiguredReadinessHardFilters(pool: CandidateSet[]): ApplyReadinessHardFiltersResult {
+    return applyReadinessHardFiltersToCandidates(pool, readinessHardFilters, {
+      monthlyBuckets: monthlyBucketSetsAlways ?? monthlyConstraintPayload?.buckets ?? null,
+      monthlyIdealDrawState,
+      monthlyAvgBuckets,
+      historyForOga: realFilteredHistory.length ? realFilteredHistory : realHistory,
+      ogaRefScores: pastOGAScoresRef,
+      ogaSpokeCount,
+      trustCandidateOgaScores: knobs.enableOGA,
+    });
+  }
+
+  function emitReadinessHardFilterTrace(label: string, result: ApplyReadinessHardFiltersResult): void {
+    const rejectTotal = totalReadinessHardFilterRejects(result.rejects);
+    if (readinessHardFiltersActive || rejectTotal > 0 || result.skipped.length > 0) {
+      setTraceMaybe((traceLines) => [
+        ...traceLines,
+        `[TRACE] ${label}: Rdy component hard filters ${readinessHardFilterSummary}; rejected IDM:${result.rejects.idm} Conv:${result.rejects.conv} OGA:${result.rejects.oga}`,
+        ...result.skipped.map((message) => `[TRACE] ${label}: ${message}`),
+      ]);
+    }
+  }
 
   function meetsMonthlyConstraints(candidate: CandidateSet): boolean {
     if (!monthlyConstraintPayload) return true;
@@ -2343,17 +2781,36 @@ function AppInner(): JSX.Element {
   }
 
   const handleGenerate = () => {
+    generationStopRequestedRef.current = false;
     setIsGenerating(true);
     setTrace([]);
 
     if (rwr45Enabled) {
       const t0 = performance.now();
-      const result = generateRwR45Candidates();
-      const processedCandidates = recomputeCompositeRanking(annotateCandidatesWithPreviousNeighbourShape(
+      const rwr45MianExcl = getMianHardExclusions();
+      const rwr45ExcludedNumbers = Array.from(new Set([...allExclusions, ...rwr45MianExcl])).sort((a, b) => a - b);
+      if (rwr45MianExcl.length > 0) {
+        setTraceMaybe((t) => [...t, `[TRACE] MiAN hard-exclude applied to RwR45: removed ${rwr45MianExcl.length} numbers from zero-count buckets`]);
+      }
+      if (generationForcedNumbers.length > 0) {
+        setTraceMaybe((t) => [...t,
+          `[TRACE] RwR45 forced generation numbers active: ${generationForcedNumbers.join(", ")} (trend selections ${trendSelectedNumbers.length}; latest ±1/±2 targets ${previousNeighbourConstraintNumbers.length}; hot/cold row selections ${hotColdForcedNumbers.length}; drought-break selections ${droughtBreakSelectedNumbers.length})`
+        ]);
+      }
+      if (latestNeighbourSupportEnabled) {
+        setTraceMaybe((t) => [...t, "[TRACE] LD±1 is ON but RwR45/PNUaRW45 bypasses evidence filters; LD±1 was not applied to this random-coverage run."]);
+      }
+      const result = generateRwR45Candidates(Math.random, {
+        forcedNumbers: generationForcedNumbers,
+        excludedNumbers: rwr45ExcludedNumbers,
+      });
+      let processedCandidates = recomputeCompositeRanking(annotateCandidatesWithPreviousNeighbourShape(
         [...result.candidates],
         previousNeighbourLatestDraw,
         "mains-plus-supps",
       ));
+      const readinessFilterResult = applyConfiguredReadinessHardFilters(processedCandidates);
+      processedCandidates = readinessFilterResult.candidates;
       const dt = Math.round(performance.now() - t0);
 
       setCandidates(processedCandidates);
@@ -2367,6 +2824,12 @@ function AppInner(): JSX.Element {
       setTraceMaybe((t) => [
         ...t,
         ...result.traceLines,
+        ...(readinessHardFiltersActive || totalReadinessHardFilterRejects(readinessFilterResult.rejects) > 0 || readinessFilterResult.skipped.length > 0
+          ? [
+            `[TRACE] RwR45 / PNUaRW45: Rdy component hard filters ${readinessHardFilterSummary}; rejected IDM:${readinessFilterResult.rejects.idm} Conv:${readinessFilterResult.rejects.conv} OGA:${readinessFilterResult.rejects.oga}`,
+            ...readinessFilterResult.skipped.map((message) => `[TRACE] RwR45 / PNUaRW45: ${message}`),
+          ]
+          : []),
         `[TRACE] RwR45 / PNUaRW45 completed: displayed ${processedCandidates.length} candidates in ${dt}ms.`,
       ]);
       setIsGenerating(false);
@@ -2390,11 +2853,17 @@ function AppInner(): JSX.Element {
     const baselineForOGAForecast = ogaBaselineMode === "window" ? realFilteredHistory : realHistory;
     const ogaStats = forecastOGA(realFilteredHistory, baselineForOGAForecast, ogaSpokeCount);
     const monthEndCarryOverWeights = monthEndCarryOverBiasEnabled ? monthEndCarryOverWeightsForGeneration : undefined;
+    const latestNeighbourMonthlyBuckets = monthlyBucketSetsAlways ?? monthlyConstraintPayload?.buckets ?? dgaLiveMonthlyBuckets;
     const monthlyBucketOptions = monthlyConstructiveEnabled && monthlyConstraintPayload ? {
       constraints: monthlyConstraintPayload.constraints,
       buckets: monthlyConstraintPayload.buckets,
       allowShortfall: true,
       boostPenalize: monthlyConstraintPayload.boostPenalize ?? false,
+    } : latestNeighbourSupportEnabled ? {
+      constraints: zeroMonthlyFrequencyConstraints(),
+      buckets: latestNeighbourMonthlyBuckets,
+      allowShortfall: true,
+      boostPenalize: false,
     } : undefined;
 
     // Over-generate: request a larger pool so post-generation filters (MiAN, monthly, prize, OGA)
@@ -2504,6 +2973,7 @@ function AppInner(): JSX.Element {
       monthlyRepeatBiasWeights: monthlyRepeatBiasResult?.weights,
       monthEndCarryOverWeights,
       scoringGenerationProfile: activeScoringGenerationProfile,
+      latestNeighbourSupportOptions: { enabled: latestNeighbourSupportEnabled },
     };
 
     // Trace callback: appends messages as they arrive from the worker
@@ -2523,6 +2993,7 @@ function AppInner(): JSX.Element {
 
     // Result callback: post-processing on main thread (fast)
     const onResult = (result: import("./generateCandidates").GenerateCandidatesResult) => {
+      const stoppedByUser = generationStopRequestedRef.current;
       const monthlyTrace = buildMonthlyTrace();
       setTraceMaybe((t) => [
         ...t,
@@ -2569,6 +3040,9 @@ function AppInner(): JSX.Element {
       // Prize ranking must not influence which candidates survive the pool slice,
       // otherwise Manual Prize Check numbers would change the final candidate set.
       processedCandidates = recomputeCompositeRanking(processedCandidates);
+      const readinessFilterResult = applyConfiguredReadinessHardFilters(processedCandidates);
+      processedCandidates = readinessFilterResult.candidates;
+      emitReadinessHardFilterTrace("Generation", readinessFilterResult);
       const prizeRejects = 0;
       let capRejects = 0;
       if (knobs.enableOGA && typeof knobs.octagonal_top === "number" && processedCandidates.length > 0) {
@@ -2592,12 +3066,7 @@ function AppInner(): JSX.Element {
       let finalRatioTargets = result.ratioSummary.targetRatios;
       let finalRatioQuotaWarning: string | undefined;
       if (processedCandidates.length > numCandidates) {
-        processedCandidates.sort((a: any, b: any) => {
-          if (b.finalCompositeAdj !== a.finalCompositeAdj) return b.finalCompositeAdj - a.finalCompositeAdj;
-          if (activeScoringGenerationProfile && (b.scoreEvidence ?? 0) !== (a.scoreEvidence ?? 0)) return (b.scoreEvidence ?? 0) - (a.scoreEvidence ?? 0);
-          if (knobs.enableOGA && b.ogaPercentile !== a.ogaPercentile) return b.ogaPercentile - a.ogaPercentile;
-          return 0;
-        });
+        processedCandidates.sort(compareFinalSurvivorCandidates);
         if (selectedRatios.length > 0) {
           const quotaResult = applyOddEvenRatioQuotas(processedCandidates, numCandidates, selectedRatios, ratioOptions);
           processedCandidates = quotaResult.candidates;
@@ -2629,8 +3098,11 @@ function AppInner(): JSX.Element {
       const st = result.rejectionStats;
       setTraceMaybe((t) => [
         ...t,
+        ...(stoppedByUser
+          ? [`[TRACE] ⏹ Generation stopped by user: using latest accepted partial pool (${result.candidates.length}/${poolSize} generated before post-filters; attempts ${st.totalAttempts}).`]
+          : []),
         ...formatGenerationTraceLines({
-          label: "Generation",
+          label: stoppedByUser ? "Stopped generation" : "Generation",
           requested: numCandidates,
           poolSize,
           overgenFactor,
@@ -2642,19 +3114,43 @@ function AppInner(): JSX.Element {
           monthlyRejects,
           prizeRejects,
           capRejects,
+          readinessRejects: totalReadinessHardFilterRejects(readinessFilterResult.rejects),
         }),
+        buildSurvivorSelectionTrace(
+          stoppedByUser ? "Stopped generation" : "Generation",
+          poolBeforeSlice,
+          processedCandidates.length,
+          numCandidates
+        ),
       ]);
 
+      generationStopRequestedRef.current = false;
       setIsGenerating(false);
     };
 
     const onError = (err: string) => {
       setTraceMaybe((t) => [...t, `[TRACE] ❌ Generation failed: ${err}`]);
+      generationStopRequestedRef.current = false;
       setIsGenerating(false);
     };
 
     // Dispatch to Web Worker (or fallback to async main-thread)
     runGenerate(workerArgs, onTrace, onResult, onError);
+  };
+
+  const handleStopGenerate = () => {
+    if (!isGenerating) return;
+    generationStopRequestedRef.current = true;
+    const stopped = cancelGenerate();
+    if (!stopped.cancelled) return;
+    if (!stopped.hadPartial) {
+      setTraceMaybe((t) => [
+        ...t,
+        "[TRACE] ⏹ Generation stopped by user before any accepted partial candidates were available.",
+      ]);
+      generationStopRequestedRef.current = false;
+      setIsGenerating(false);
+    }
   };
 
   const runBatch = (target: number, traceLabel: string) => {
@@ -2674,11 +3170,17 @@ function AppInner(): JSX.Element {
     const baselineForOGAForecast = ogaBaselineMode === "window" ? realFilteredHistory : realHistory;
     const ogaStats = forecastOGA(realFilteredHistory, baselineForOGAForecast, ogaSpokeCount);
     const monthEndCarryOverWeights = monthEndCarryOverBiasEnabled ? monthEndCarryOverWeightsForGeneration : undefined;
+    const latestNeighbourMonthlyBuckets = monthlyBucketSetsAlways ?? monthlyConstraintPayload?.buckets ?? dgaLiveMonthlyBuckets;
     const monthlyBucketOptions = monthlyConstructiveEnabled && monthlyConstraintPayload ? {
       constraints: monthlyConstraintPayload.constraints,
       buckets: monthlyConstraintPayload.buckets,
       allowShortfall: true,
       boostPenalize: monthlyConstraintPayload.boostPenalize ?? false,
+    } : latestNeighbourSupportEnabled ? {
+      constraints: zeroMonthlyFrequencyConstraints(),
+      buckets: latestNeighbourMonthlyBuckets,
+      allowShortfall: true,
+      boostPenalize: false,
     } : undefined;
 
     // MiAN hard exclusions for batch
@@ -2783,7 +3285,9 @@ function AppInner(): JSX.Element {
       monthlyRepeatBiasResult?.weights,
       mainDecadeGenerationBiases,
       monthEndCarryOverWeights,
-      activeScoringGenerationProfile
+      activeScoringGenerationProfile,
+      undefined,
+      { enabled: latestNeighbourSupportEnabled }
     );
 
     const monthlyTrace = buildMonthlyTrace();
@@ -2828,6 +3332,9 @@ function AppInner(): JSX.Element {
         setTraceMaybe((t) => [...t, `[TRACE] MiAN required: 0x≥${ac.undrawn} 1x≥${ac.times1} 2x≥${ac.times2} 3x≥${ac.times3} 4x≥${ac.times4} 5x≥${ac.times5} 6x≥${ac.times6} 7x≥${ac.times7} 8x+≥${ac.times8} | rejected ${acceptanceNeedsRejects2} of ${beforeMiAN2} candidates${acceptanceNeedsHardExclude ? " (hard-exclude ON)" : ""}`]);
       }
     }
+    const readinessFilterResult = applyConfiguredReadinessHardFilters(processed);
+    processed = readinessFilterResult.candidates;
+    emitReadinessHardFilterTrace(traceLabel, readinessFilterResult);
     processed = processed.filter(withinSumRange);
 
     const prizeRejects = 0;
@@ -2845,13 +3352,9 @@ function AppInner(): JSX.Element {
       capRejects = before - processed.length;
       processed = recomputeCompositeRanking(processed);
     }
+    const poolBeforeSlice = processed.length;
     if (processed.length > target) {
-      processed.sort((a: any, b: any) => {
-        if (b.finalCompositeAdj !== a.finalCompositeAdj) return b.finalCompositeAdj - a.finalCompositeAdj;
-        if (activeScoringGenerationProfile && (b.scoreEvidence ?? 0) !== (a.scoreEvidence ?? 0)) return (b.scoreEvidence ?? 0) - (a.scoreEvidence ?? 0);
-        if (knobs.enableOGA && b.ogaPercentile !== a.ogaPercentile) return b.ogaPercentile - a.ogaPercentile;
-        return 0;
-      });
+      processed.sort(compareFinalSurvivorCandidates);
       if (selectedRatios.length > 0) {
         const quotaResult = applyOddEvenRatioQuotas(processed, target, selectedRatios, ratioOptions);
         processed = quotaResult.candidates;
@@ -2885,7 +3388,9 @@ function AppInner(): JSX.Element {
         monthlyRejects,
         prizeRejects,
         capRejects,
+        readinessRejects: totalReadinessHardFilterRejects(readinessFilterResult.rejects),
       }),
+      buildSurvivorSelectionTrace(traceLabel, poolBeforeSlice, processed.length, target),
     ]);
 
     return { processed, prizeRejects, capRejects, freqArr, dt, st };
@@ -2989,6 +3494,10 @@ function AppInner(): JSX.Element {
     setSelectedRatios((prev) => (prev.includes(ratio) ? prev.filter((r) => r !== ratio) : [...prev, ratio]));
     setUseTrickyRule(false);
   };
+  const handleSelectAllRatios = useCallback(() => {
+    setSelectedRatios(ratioOptionValues);
+    setUseTrickyRule(false);
+  }, [ratioOptionValues]);
 
   const [selectedCandidateIdx, setSelectedCandidateIdx] = useState<number>(-1);
   const currentCandidate = candidates[selectedCandidateIdx];
@@ -3121,6 +3630,9 @@ function AppInner(): JSX.Element {
     setLegendTotal(values.length);
   }, [trendValueSeries]);
 
+  const readinessHardFilterSummary = formatReadinessHardFilterSummary(readinessHardFilters);
+  const readinessHardFiltersActive = readinessHardFilterSummary !== "off";
+
   const endDigitSetSummary = [
     `0=${mainZeroSetEnabled ? `max ${maxMainZeroSetCount}` : "off"}`,
     `1=${mainOneSetEnabled ? `max ${maxMainOneSetCount}` : "off"}`,
@@ -3151,6 +3663,7 @@ function AppInner(): JSX.Element {
         { label: "Entropy", value: entropyEnabled ? entropyThreshold : "off" },
         { label: "Hamming", value: hammingEnabled ? hammingThreshold : "off" },
         { label: "Jaccard", value: jaccardEnabled ? jaccardThreshold : "off" },
+        { label: "Rdy hard filters", value: readinessHardFilterSummary },
         { label: "Sum", value: sumFilter.enabled ? `${sumFilter.min}-${sumFilter.max}${sumFilter.includeSupp ? "+supp" : ""}` : "off" },
       ],
     },
@@ -3159,9 +3672,10 @@ function AppInner(): JSX.Element {
       items: [
         { label: "RecMin", value: minRecentMatches },
         { label: "RecBias", value: recentMatchBias },
+        { label: "LD±1", value: latestNeighbourSupportEnabled ? "on" : "off" },
         { label: "Prev ±1/±2", value: previousNeighbourConstraintNumbers.length ? previousNeighbourConstraintNumbers.join(", ") : "off" },
         { label: "Drought-break", value: droughtBreakSelectedNumbers.length ? droughtBreakSelectedNumbers.join(", ") : "off" },
-        { label: "Repeat", value: `W ${repeatWindowSizeW} · M ${minFromRecentUnionM}` },
+        { label: "Repeat", value: repeatUnionSummary },
         { label: "GPWF", value: gpwfEnabled ? "on" : "off" },
         { label: "Lambda", value: lambdaEnabled ? lambda.toFixed(2) : "off" },
       ],
@@ -3195,6 +3709,20 @@ function AppInner(): JSX.Element {
       ],
     },
   ];
+
+  const handleNewPredictionDraft = () => {
+    predictionJournalDraftIdRef.current += 1;
+    setPredictionJournalDraftRequest({
+      id: predictionJournalDraftIdRef.current,
+      setupSnapshot: buildSnapshot({ includePanelFavorites: true }),
+    });
+    setPredictionJournalOpen(true);
+    if (typeof window !== "undefined") {
+      window.requestAnimationFrame(() => {
+        document.getElementById("panel-prediction-journal")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    }
+  };
 
   return (
     <PanelFavoritesProvider favoritePanelIds={favoritePanelIds} onToggleFavorite={toggleFavoritePanel}>
@@ -3769,6 +4297,29 @@ function AppInner(): JSX.Element {
             </>
           )}
         </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", marginBottom: 10 }}>
+          <button
+            type="button"
+            onClick={handleSelectAllRatios}
+            disabled={useTrickyRule || ratioOptionValues.length === 0 || allVisibleRatiosSelected}
+            title={useTrickyRule ? "Turn off Tricky Rule before selecting odd/even ratios" : "Select all odd/even ratios currently observed in the active window"}
+            style={{
+              minHeight: 32,
+              padding: "6px 11px",
+              border: "1px solid #cbd5e1",
+              borderRadius: 8,
+              background: useTrickyRule || ratioOptionValues.length === 0 || allVisibleRatiosSelected ? "#f1f5f9" : "#fff",
+              color: useTrickyRule || ratioOptionValues.length === 0 || allVisibleRatiosSelected ? "#94a3b8" : "#174ea6",
+              fontWeight: 800,
+              cursor: useTrickyRule || ratioOptionValues.length === 0 || allVisibleRatiosSelected ? "not-allowed" : "pointer",
+            }}
+          >
+            Select all observed
+          </button>
+          <span style={{ fontSize: 12, color: "#64748b" }}>
+            {selectedRatios.length}/{ratioOptionValues.length} ratios selected
+          </span>
+        </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 18 }}>
           {ratioOptions.map(({ ratio, count, percent }) => (
             <label key={ratio} style={{ marginRight: 16, opacity: useTrickyRule ? 0.4 : 1 }}>
@@ -3810,11 +4361,11 @@ function AppInner(): JSX.Element {
       {/* [ORDER-ANCHOR] 05 Survival Analyzer */}
       <CollapsibleSection panelId="survival-analyzer" title={<b>Survival Analyzer</b>} defaultOpen={false}>
         <SurvivalAnalyzer
-          history={realFilteredHistory}
+          history={baselineHistory}
           excludedNumbers={allExclusions}
           probabilityHeading="Probability of Appearance in Next Draw (Per Number):"
-          trendWeights={trendWeights}
-          externalWindowSize={activeWindowSize}
+          externalWindowSize={baselineHistory.length}
+          historyScopeLabel={baselineHistoryScopeLabel}
           enableSDE1Global={knobs.enableSDE1}
           enableHC3Global={knobs.enableHC3}
           hideBiasToggles={true}
@@ -3831,7 +4382,8 @@ function AppInner(): JSX.Element {
       {/* [ORDER-ANCHOR] 06 Temperature Transition */}
       <CollapsibleSection panelId="temperature-transition" title={<b>Temperature Transition</b>} defaultOpen={false}>
         <TemperatureTransitionPanel
-          history={realFilteredHistory}
+          history={baselineHistory}
+          historyScopeLabel={baselineHistoryScopeLabel}
           alpha={0.25}
           metric={tempMetric}
           buckets={10}
@@ -3849,6 +4401,7 @@ function AppInner(): JSX.Element {
       <CollapsibleSection panelId="monte-carlo-analyzer" title={<b>Monte Carlo Analyzer</b>} defaultOpen={false}>
         <MonteCarloPanel
           history={realFilteredHistory}
+          historyScopeLabel={`Current WFMQYH window (${realFilteredHistory.length} real draws)`}
           enableSDE1={knobs.enableSDE1}
           excludedNumbers={allExclusions}
           trendWeights={trendWeights}
@@ -3883,7 +4436,7 @@ function AppInner(): JSX.Element {
 
       {/* [ORDER-ANCHOR] 07.1 Most Likely NOT Drawn */}
       <CollapsibleSection panelId="most-likely-not-drawn" title={<b>Most Likely NOT Drawn</b>} defaultOpen={false}>
-        <MostLikelyNotDrawnPanel history={realFilteredHistory} title="Most Likely NOT Drawn" />
+        <MostLikelyNotDrawnPanel history={realFilteredHistory} allHistory={realHistory} title="Most Likely NOT Drawn" />
       </CollapsibleSection>
 
       <WorkflowAnchor
@@ -3893,10 +4446,28 @@ function AppInner(): JSX.Element {
       />
 
       {/* [ORDER-ANCHOR] 07.15 Prediction Journal & Scorecard */}
-      <CollapsibleSection panelId="prediction-journal" title={<b>Prediction Journal & Scorecard</b>} summaryHint="observe-only saved hypotheses and post-draw scorecard" defaultOpen={false}>
+      <CollapsibleSection
+        panelId="prediction-journal"
+        title={<b>Prediction Journal & Scorecard</b>}
+        summaryHint="observe-only saved hypotheses and post-draw scorecard"
+        defaultOpen={false}
+        open={predictionJournalOpen}
+        onOpenChange={setPredictionJournalOpen}
+        headerActions={
+          <HigButton
+            size="compact"
+            variant="primary"
+            onClick={handleNewPredictionDraft}
+            title="Open the journal and prefill a new prediction from the current app setup"
+          >
+            New Prediction
+          </HigButton>
+        }
+      >
         <PredictionJournalPanel
           history={realHistory}
           getSetupSnapshot={() => buildSnapshot({ includePanelFavorites: true })}
+          newPredictionDraft={predictionJournalDraftRequest}
         />
       </CollapsibleSection>
 
@@ -3911,7 +4482,7 @@ function AppInner(): JSX.Element {
 
       {/* [ORDER-ANCHOR] 07.2 Backtest Validation Dashboard */}
       <CollapsibleSection panelId="backtest-validation" title={<b>Backtest Validation</b>} defaultOpen={false}>
-        <BacktestPanel history={realFilteredHistory} />
+        <BacktestPanel history={baselineHistory} historyScopeLabel={baselineHistoryScopeLabel} />
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 07.25 Previous ±1 Neighbour Backtest */}
@@ -4153,6 +4724,10 @@ function AppInner(): JSX.Element {
         />
       </CollapsibleSection>
 
+      <CollapsibleSection panelId="monthly-bucket-transition-lab" title={<b>Monthly Bucket Transition Lab</b>} defaultOpen={false} summaryHint="Observe bucket movement, survival, and month-length differences">
+        <MonthlyBucketTransitionLabPanel history={realHistory} />
+      </CollapsibleSection>
+
       <CollapsibleSection panelId="month-end-carry-over-buckets" title={<b>Month-End Carry-Over Buckets</b>} defaultOpen={false} summaryHint="Last draw → first draw by monthly frequency bucket">
         <MonthEndCarryOverBucketsPanel
           history={realHistory}
@@ -4283,6 +4858,8 @@ function AppInner(): JSX.Element {
               <span className="windfall-generation-setup-summary-chip">Excluded {allExclusions.length}</span>
               <span className="windfall-generation-setup-summary-chip">Ratios {selectedRatios.length ? selectedRatios.join(" ") : "off"}</span>
               <span className="windfall-generation-setup-summary-chip">Scoring {formatScoringInfluenceLabel(scoringGenerationInfluence)}</span>
+              <span className="windfall-generation-setup-summary-chip">LD±1 {latestNeighbourSupportEnabled ? "on" : "off"}</span>
+              <span className="windfall-generation-setup-summary-chip">Rdy filters {readinessHardFilterSummary}</span>
               <span className="windfall-generation-setup-summary-chip">Carry-over {monthEndCarryOverBiasEnabled ? monthEndCarryOverStrengthSettings.label : "off"}</span>
               <span className="windfall-generation-setup-summary-chip">Stage IDM {stageIdealDrawState ? `${stageIdealDrawState.comparableMonthCount} comps` : "unavailable"}</span>
             </div>
@@ -4290,8 +4867,8 @@ function AppInner(): JSX.Element {
             <div className="windfall-generation-setup-stack">
               <InlineCollapsibleCard
                 title="Engine & Ranking"
-                subtitle="Ranking references, diagnostic influence, recency weighting, and GPWF controls."
-                collapsedSummary={`Scoring ${formatScoringInfluenceLabel(scoringGenerationInfluence)} · OGA ${ogaRefMode} · λ ${lambdaEnabled ? lambda.toFixed(2) : "off"} · GPWF ${gpwfEnabled ? "on" : "off"}`}
+                subtitle="Ranking references, OGA forecast bias, diagnostic influence, recency weighting, and GPWF controls."
+                collapsedSummary={`Scoring ${formatScoringInfluenceLabel(scoringGenerationInfluence)} · OGA ${ogaRefMode} · KDE ${enableOGAForecastBias ? "on" : "off"} · λ ${lambdaEnabled ? lambda.toFixed(2) : "off"} · GPWF ${gpwfEnabled ? "on" : "off"}`}
                 defaultExpanded={true}
               >
                 <div className="windfall-influences-grid">
@@ -4336,7 +4913,91 @@ function AppInner(): JSX.Element {
                     />
                   </HigField>
                 </div>
-                <RankingWeightsPanel weights={rankingWeights} setWeights={setRankingWeights} />
+                <RankingWeightsPanel
+                  weights={rankingWeights}
+                  setWeights={setRankingWeights}
+                  scope="oga"
+                  title="OGA Survivor Weight"
+                />
+
+                {/* OGA Forecast Bias (KDE) */}
+                <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px dashed #d7dde8" }}>
+                  <div style={{ fontWeight: 800, marginBottom: 6, color: "#0f172a" }}>OGA Forecast Bias (KDE)</div>
+                  <p style={{ margin: "0 0 8px", color: "#64748b", fontSize: 12, lineHeight: 1.4 }}>
+                    Optional generation acceptance bias from the OGA forecast distribution. This is diagnostic evidence, not a probability guarantee.
+                  </p>
+                  <label style={{ display: "block", marginBottom: 8, fontSize: 12, fontWeight: 800 }}>
+                    <input type="checkbox" checked={enableOGAForecastBias} onChange={(e) => setEnableOGAForecastBias(e.target.checked)} style={{ marginRight: 6 }} />
+                    Enable bias by Next Draw OGA forecast
+                  </label>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, alignItems: "end", marginBottom: 8 }}>
+                    <HigField label="Forecast baseline" help="Windowed uses the active WFMQYH history. Full History uses every valid real draw loaded in the app.">
+                      <select value={ogaBaselineMode} onChange={(e) => setOGABaselineMode(e.target.value as any)} style={{ width: "100%" }}>
+                        <option value="window">Windowed</option>
+                        <option value="all">Full History</option>
+                      </select>
+                    </HigField>
+                    <HigField label="Preferred band" help="Auto chooses the strongest KDE-supported band. Manual bands restrict candidates by low, mid, or high OGA region.">
+                      <select value={ogaPreferredBand} onChange={(e) => setOGAPreferredBand(e.target.value as any)} style={{ width: "100%" }}>
+                        <option value="auto">Auto</option>
+                        <option value="low">Low (≤p10)</option>
+                        <option value="mid">Mid (p10–p90)</option>
+                        <option value="high">High (≥p90)</option>
+                      </select>
+                    </HigField>
+                  </div>
+                  {(() => {
+                    const dec = forecastOGA(realFilteredHistory, ogaBaselineMode === 'window' ? realFilteredHistory : realHistory, ogaSpokeCount).deciles;
+                    const thresholds = dec?.thresholds || [];
+                    return (
+                      <div style={{ marginTop: 6 }}>
+                        <div style={{ fontSize: 12, fontWeight: 800, color: "#334155" }}>Preferred decile bands</div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
+                          {Array.from({ length: 10 }, (_, i) => i).map((i) => (
+                            <label key={i} style={{ border: '1px solid #e5e7eb', borderRadius: 6, padding: '4px 6px', background: "#fff", fontSize: 12 }}>
+                              <input
+                                type="checkbox"
+                                checked={ogaPreferredDeciles.some(d => d.index === i)}
+                                onChange={() => {
+                                  setOGAPreferredDeciles(prev => {
+                                    const exists = prev.some(d => d.index === i);
+                                    if (exists) return prev.filter(d => d.index !== i);
+                                    return [...prev, { index: i, weight: 1 }];
+                                  });
+                                }}
+                                style={{ marginRight: 6 }}
+                              />
+                              D{i} {thresholds[i - 1] !== undefined ? `≥ ${thresholds[i - 1].toFixed(2)}` : '(min)'}
+                              <input
+                                type="number"
+                                min={0}
+                                step={0.1}
+                                value={ogaPreferredDeciles.find(d => d.index === i)?.weight ?? 1}
+                                onChange={(e) => {
+                                  const w = Number(e.target.value);
+                                  setOGAPreferredDeciles(prev => {
+                                    const idx = prev.findIndex(d => d.index === i);
+                                    if (idx >= 0) {
+                                      const next = prev.slice();
+                                      next[idx] = { ...next[idx], weight: w };
+                                      return next;
+                                    }
+                                    return [...prev, { index: i, weight: w }];
+                                  });
+                                }}
+                                style={{ width: 60, marginLeft: 6 }}
+                                title="Weight"
+                              />
+                            </label>
+                          ))}
+                        </div>
+                        <div style={{ fontSize: 11, color: '#64748b', marginTop: 5, lineHeight: 1.4 }}>
+                          Select one or more deciles and assign weights; candidates whose OGA falls in selected deciles are accepted with probability proportional to weight. If none are selected, low/mid/high is used.
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
               </div>
 
               <div className="windfall-influence-card">
@@ -5244,17 +5905,17 @@ function AppInner(): JSX.Element {
 
               <InlineCollapsibleCard
                 title="Recency & Latest Draw Rules"
-                subtitle="Odd/even, last-draw overlap, latest ±1/±2 targets, repeat-window rules, and OGA forecast bias."
-                collapsedSummary={`Recent min ${minRecentMatches} · latest ±1/±2 ${previousNeighbourConstraintNumbers.length || "off"} · repeat W ${repeatWindowSizeW}/M ${minFromRecentUnionM}`}
+                subtitle="Odd/even, selected/recent survivor weights, last-draw overlap, latest ±1/±2 targets, and repeat-window rules."
+                collapsedSummary={`Recent min ${minRecentMatches} · SelHits ${rankingWeights.selHitsEnabled ? "on" : "off"} · RecentHits ${rankingWeights.recentHitsEnabled ? "on" : "off"} · LD±1 ${latestNeighbourSupportEnabled ? "on" : "off"} · latest ±1/±2 ${previousNeighbourConstraintNumbers.length || "off"} · repeat ${repeatUnionEnabled ? `last ${effectiveRepeatWindowSizeW}/M ${minFromRecentUnionM}` : "off"}`}
                 defaultExpanded={false}
               >
                 <div className="windfall-influences-grid">
 
-              {/* Column 2: Composition & Recency + OGA Bias */}
+              {/* Composition and recency-only generation controls */}
               <div className="windfall-influence-card">
                 <h3 className="windfall-influence-card__title">Composition & Recency</h3>
                 <p className="windfall-influence-card__subtitle">
-                  Odd/even, last-draw overlap, repeat-window, and OGA forecast constraints.
+                  Odd/even, last-draw overlap, latest-draw neighbour targets, and repeat-window rules.
                 </p>
                 <label>
                   <input type="checkbox" checked={useTrickyRule} onChange={(e) => setUseTrickyRule(e.target.checked)} style={{ marginRight: 6 }} />
@@ -5262,6 +5923,28 @@ function AppInner(): JSX.Element {
                 </label>
                 <div style={{ marginTop: 6 }}>
                   <b>Odd/Even ratios</b> (disable Tricky to use):
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginTop: 6 }}>
+                    <button
+                      type="button"
+                      onClick={handleSelectAllRatios}
+                      disabled={useTrickyRule || ratioOptionValues.length === 0 || allVisibleRatiosSelected}
+                      title={useTrickyRule ? "Turn off Tricky Rule before selecting odd/even ratios" : "Select all odd/even ratios currently observed in the active window"}
+                      style={{
+                        minHeight: 30,
+                        padding: "4px 9px",
+                        border: "1px solid #cbd5e1",
+                        borderRadius: 8,
+                        background: useTrickyRule || ratioOptionValues.length === 0 || allVisibleRatiosSelected ? "#f1f5f9" : "#fff",
+                        color: useTrickyRule || ratioOptionValues.length === 0 || allVisibleRatiosSelected ? "#94a3b8" : "#174ea6",
+                        fontWeight: 800,
+                        cursor: useTrickyRule || ratioOptionValues.length === 0 || allVisibleRatiosSelected ? "not-allowed" : "pointer",
+                        fontSize: 12,
+                      }}
+                    >
+                      Select all observed
+                    </button>
+                    <span style={{ fontSize: 11, color: "#64748b" }}>{selectedRatios.length}/{ratioOptionValues.length} selected</span>
+                  </div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 6 }}>
                     {ratioOptions.map(({ ratio }) => (
                       <label key={ratio} style={{ opacity: useTrickyRule ? 0.4 : 1 }}>
@@ -5271,32 +5954,31 @@ function AppInner(): JSX.Element {
                     ))}
                   </div>
                 </div>
-                <div style={{ marginTop: 6 }}>
-                  <label>
-                    Minimum matches to last draw:
-                    <input type="number" min={0} max={8} value={minRecentMatches} onChange={(e) => setMinRecentMatches(Number(e.target.value))} style={{ width: 60, marginLeft: 6 }} />
-                  </label>
-                </div>
-                <div style={{ marginTop: 6 }}>
-                  <label title="Reject candidates that share more than the chosen number of matches with the last draw">
+                <div
+                  style={{
+                    marginTop: 8,
+                    padding: "8px 10px",
+                    border: `1px solid ${latestNeighbourSupportEnabled ? "#93c5fd" : "#e5e7eb"}`,
+                    borderRadius: 6,
+                    background: latestNeighbourSupportEnabled ? "#eff6ff" : "#fafafa",
+                    display: "grid",
+                    gap: 6,
+                  }}
+                >
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 800 }}>
                     <input
                       type="checkbox"
-                      checked={maxLastDrawMatchesEnabled}
-                      onChange={(e) => setMaxLastDrawMatchesEnabled(e.target.checked)}
-                      style={{ marginRight: 6 }}
+                      checked={latestNeighbourSupportEnabled}
+                      onChange={(event) => setLatestNeighbourSupportEnabled(event.target.checked)}
                     />
-                    Maximum matches to last draw:
-                    <select
-                      value={maxLastDrawMatchesValue}
-                      onChange={(e) => setMaxLastDrawMatchesValue(Number(e.target.value))}
-                      disabled={!maxLastDrawMatchesEnabled}
-                      style={{ marginLeft: 6, opacity: maxLastDrawMatchesEnabled ? 1 : 0.4 }}
-                    >
-                      {[1,2,3,4,5,6,7,8].map((v) => (
-                        <option key={v} value={v}>{v}</option>
-                      ))}
-                    </select>
+                    Latest ±1 Support (LD±1)
+                    <InfoHelp label="Latest ±1 Support help">
+                      Experimental default-off rule. When enabled, Windfall builds the +1/-1 neighbours of the latest real draw, removes targets that fail recent-streak, exclusion, and monthly terminal-family drought screens, then requires every generated candidate to contain at least one remaining eligible target. Trace records the eligible targets and rejections.
+                    </InfoHelp>
                   </label>
+                  <div style={{ color: "#64748b", fontSize: 11, lineHeight: 1.45 }}>
+                    Uses the latest WFMQYH draw, recent 10-draw streak cap &gt;7, current monthly buckets when available, and existing 0/5 ending-digit rules as coordination checks. It is evidence-based filtering, not a probability claim.
+                  </div>
                 </div>
                 <div
                   style={{
@@ -5526,99 +6208,87 @@ function AppInner(): JSX.Element {
                     </div>
                   ) : null}
                 </div>
-                <div style={{ marginTop: 6 }}>
-                  <label title="Bias acceptance probability by overlap with last draw">
-                    Recent-match bias:
-                    <input type="number" min={0} max={5} step={0.1} value={recentMatchBias} onChange={(e) => setRecentMatchBias(Number(e.target.value))} style={{ width: 70, marginLeft: 6 }} />
-                  </label>
-                </div>
-                <div style={{ marginTop: 6 }}>
-                  <label title="Require at least M numbers from union of last W draws">
-                    Repeat window W:
-                    <input type="number" min={0} max={realHistory.length} value={repeatWindowSizeW} onChange={(e) => setRepeatWindowSizeW(Number(e.target.value))} style={{ width: 70, marginLeft: 6 }} />
-                  </label>
-                  <label style={{ marginLeft: 10 }}>
-                    Min from union M:
-                    <input type="number" min={0} max={8} value={minFromRecentUnionM} onChange={(e) => setMinFromRecentUnionM(Number(e.target.value))} style={{ width: 60, marginLeft: 6 }} />
-                  </label>
-                </div>
-
-                {/* OGA Forecast Bias (KDE) */}
-                <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px dashed #ddd" }}>
-                  <div style={{ fontWeight: 600, marginBottom: 6 }}>OGA Forecast Bias (KDE)</div>
-                  <label style={{ display: "block", marginBottom: 6 }}>
-                    <input type="checkbox" checked={enableOGAForecastBias} onChange={(e) => setEnableOGAForecastBias(e.target.checked)} style={{ marginRight: 6 }} />
-                    Enable bias by Next Draw OGA forecast
-                  </label>
-                  <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 6 }}>
-                    <label style={{ fontSize: 12 }}>
-                      Baseline:
-                      <select value={ogaBaselineMode} onChange={(e) => setOGABaselineMode(e.target.value as any)} style={{ marginLeft: 6 }}>
-                        <option value="window">Windowed</option>
-                        <option value="all">Full History</option>
-                      </select>
+                <div
+                  aria-label="Last draw match bias and repeat pool controls"
+                  style={{
+                    marginTop: 10,
+                    padding: "10px 12px",
+                    border: "1px solid rgba(239, 68, 68, 0.5)",
+                    borderRadius: 8,
+                    background: "rgba(254, 242, 242, 0.5)",
+                  }}
+                >
+                  <div style={{ fontSize: 12, fontWeight: 800, color: "#991b1b" }}>
+                    Latest-draw overlap controls
+                  </div>
+                  <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: "8px 14px", alignItems: "center" }}>
+                    <label title="Strictly require each candidate to contain at least this many numbers from the most recent draw.">
+                      Minimum matches to last draw:
+                      <input type="number" min={0} max={8} value={minRecentMatches} onChange={(e) => setMinRecentMatches(Number(e.target.value))} style={{ width: 60, marginLeft: 6 }} />
                     </label>
-                    <label style={{ fontSize: 12 }}>
-                      Preferred band:
-                      <select value={ogaPreferredBand} onChange={(e) => setOGAPreferredBand(e.target.value as any)} style={{ marginLeft: 6 }}>
-                        <option value="auto">Auto</option>
-                        <option value="low">Low (≤p10)</option>
-                        <option value="mid">Mid (p10–p90)</option>
-                        <option value="high">High (≥p90)</option>
+                    <label title="Reject candidates that share more than the chosen number of matches with the last draw">
+                      <input
+                        type="checkbox"
+                        checked={maxLastDrawMatchesEnabled}
+                        onChange={(e) => setMaxLastDrawMatchesEnabled(e.target.checked)}
+                        style={{ marginRight: 6 }}
+                      />
+                      Maximum matches to last draw:
+                      <select
+                        value={maxLastDrawMatchesValue}
+                        onChange={(e) => setMaxLastDrawMatchesValue(Number(e.target.value))}
+                        disabled={!maxLastDrawMatchesEnabled}
+                        style={{ marginLeft: 6, opacity: maxLastDrawMatchesEnabled ? 1 : 0.4 }}
+                      >
+                        {[1,2,3,4,5,6,7,8].map((v) => (
+                          <option key={v} value={v}>{v}</option>
+                        ))}
                       </select>
                     </label>
                   </div>
-                  {/* NEW: Decile selector */}
-                  {(() => {
-                    const dec = forecastOGA(realFilteredHistory, ogaBaselineMode === 'window' ? realFilteredHistory : realHistory, ogaSpokeCount).deciles;
-                    const thresholds = dec?.thresholds || [];
-                    return (
-                      <div style={{ marginTop: 6 }}>
-                        <div style={{ fontSize: 12, fontWeight: 600 }}>Preferred decile bands:</div>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
-                          {Array.from({ length: 10 }, (_, i) => i).map((i) => (
-                            <label key={i} style={{ border: '1px solid #eee', borderRadius: 4, padding: '4px 6px' }}>
-                              <input
-                                type="checkbox"
-                                checked={ogaPreferredDeciles.some(d => d.index === i)}
-                                onChange={(e) => {
-                                  setOGAPreferredDeciles(prev => {
-                                    const exists = prev.some(d => d.index === i);
-                                    if (exists) return prev.filter(d => d.index !== i);
-                                    return [...prev, { index: i, weight: 1 }];
-                                  });
-                                }}
-                                style={{ marginRight: 6 }}
-                              />
-                              D{i} {thresholds[i - 1] !== undefined ? `≥ ${thresholds[i - 1].toFixed(2)}` : '(min)'}
-                              <input
-                                type="number"
-                                min={0}
-                                step={0.1}
-                                value={ogaPreferredDeciles.find(d => d.index === i)?.weight ?? 1}
-                                onChange={(e) => {
-                                  const w = Number(e.target.value);
-                                  setOGAPreferredDeciles(prev => {
-                                    const idx = prev.findIndex(d => d.index === i);
-                                    if (idx >= 0) {
-                                      const next = prev.slice();
-                                      next[idx] = { ...next[idx], weight: w };
-                                      return next;
-                                    }
-                                    return [...prev, { index: i, weight: w }];
-                                  });
-                                }}
-                                style={{ width: 60, marginLeft: 6 }}
-                                title="Weight"
-                              />
-                            </label>
-                          ))}
-                        </div>
-                        <div style={{ fontSize: 11, color: '#888', marginTop: 4 }}>Select one or more deciles and assign weights; candidates whose OGA falls in selected deciles are accepted with probability proportional to weight. If none are selected, low/mid/high is used.</div>
-                      </div>
-                    );
-                  })()}
+                  <div style={{ marginTop: 4, color: "#64748b", fontSize: 11, lineHeight: 1.45 }}>
+                    Minimum and maximum matches are strict filters. Last-draw match bias below is only a soft weighting strength.
+                  </div>
+                  <div style={{ marginTop: 8 }}>
+                    <label title="Soft last-draw overlap strength. With minimum matches at 0 it penalizes latest-draw numbers; with minimum matches above 0 it favours higher overlap among candidates that pass the minimum.">
+                      Last-draw match bias:
+                      <input type="number" min={0} max={5} step={0.1} value={recentMatchBias} onChange={(e) => setRecentMatchBias(Number(e.target.value))} style={{ width: 70, marginLeft: 6 }} />
+                    </label>
+                    <span style={{ marginLeft: 6, color: "#b91c1c", fontSize: 11, fontWeight: 700 }}>
+                      max 5
+                    </span>
+                    <div style={{ marginTop: 4, color: "#64748b", fontSize: 11, lineHeight: 1.45 }}>
+                      0 is off. This is a local generation bias, not a WFMQYH control.
+                    </div>
+                  </div>
+                  <div style={{ marginTop: 8 }}>
+                    <label title="Within the active WFMQYH history, build a pool from every number seen in the newest W real draws.">
+                      Look back over newest draws:
+                      <input type="number" min={0} max={realHistory.length} value={repeatWindowSizeW} onChange={(e) => setRepeatWindowSizeW(Number(e.target.value))} style={{ width: 70, marginLeft: 6 }} />
+                    </label>
+                    <label style={{ marginLeft: 10 }}>
+                      Minimum candidate numbers from that pool:
+                      <input type="number" min={0} max={8} value={minFromRecentUnionM} onChange={(e) => setMinFromRecentUnionM(Number(e.target.value))} style={{ width: 60, marginLeft: 6 }} />
+                    </label>
+                    <div style={{ marginTop: 4, color: "#475569", fontSize: 11, lineHeight: 1.45 }}>
+                      Default follows the latest observed month: {latestObservedMonthDrawCount
+                        ? <>{latestObservedMonthDrawCount.monthLabel} has {latestObservedMonthDrawCount.drawCount} completed draw{latestObservedMonthDrawCount.drawCount === 1 ? "" : "s"}{repeatWindowDefaultFromLatestMonth !== latestObservedMonthDrawCount.drawCount ? `; active WFMQYH caps this to ${repeatWindowDefaultFromLatestMonth}` : ""}.</>
+                        : <>no dated real month is available, so the active WFMQYH size is used.</>}
+                    </div>
+                    <div style={{ marginTop: 4, color: "#64748b", fontSize: 11, lineHeight: 1.45 }}>
+                      {repeatUnionEnabled
+                        ? <>Builds a pool from every number seen in the newest {effectiveRepeatWindowSizeW} active WFMQYH draw{effectiveRepeatWindowSizeW === 1 ? "" : "s"}. Each candidate must contain at least {minFromRecentUnionM} number{minFromRecentUnionM === 1 ? "" : "s"} from that pool.</>
+                        : <>Off because the minimum is 0. If the minimum is raised above 0, the pool will use the newest {effectiveRepeatWindowSizeW} active WFMQYH draw{effectiveRepeatWindowSizeW === 1 ? "" : "s"}.</>}
+                      {" "}It never uses the oldest draws first and does not change WFMQYH.
+                    </div>
+                  </div>
                 </div>
+                <RankingWeightsPanel
+                  weights={rankingWeights}
+                  setWeights={setRankingWeights}
+                  scope="recency"
+                  title="SelHits / RecentHits Survivor Weights"
+                />
               </div>
                 </div>
               </InlineCollapsibleCard>
@@ -5626,7 +6296,7 @@ function AppInner(): JSX.Element {
               <InlineCollapsibleCard
                 title="Hard Filters"
                 subtitle="Entropy, distance filters, and readiness scoring controls."
-                collapsedSummary={`Entropy ${entropyEnabled ? entropyThreshold : "off"} · Hamming ${hammingEnabled ? hammingThreshold : "off"} · Jaccard ${jaccardEnabled ? `${Math.round(jaccardThreshold * 100)}%` : "off"}`}
+                collapsedSummary={`Entropy ${entropyEnabled ? entropyThreshold : "off"} · Hamming ${hammingEnabled ? hammingThreshold : "off"} · Jaccard ${jaccardEnabled ? `${Math.round(jaccardThreshold * 100)}%` : "off"} · Rdy filters ${readinessHardFilterSummary}`}
                 defaultExpanded={false}
               >
                 <div className="windfall-influences-grid">
@@ -5666,6 +6336,54 @@ function AppInner(): JSX.Element {
                       </span>
                       <HigSlider className="windfall-core-filter-control__range" min={0} max={1} step={0.01} value={jaccardThreshold} onCommit={setJaccardThreshold} />
                     </label>
+                  </div>
+
+                  <div style={{ borderTop: "1px dashed #ddd", marginTop: 12, paddingTop: 10 }}>
+                    <h4 style={{ margin: "0 0 4px", color: "#0f172a", fontSize: 13 }}>Readiness component hard filters</h4>
+                    <p className="windfall-influence-card__subtitle" style={{ margin: "0 0 10px" }}>
+                      Optional lower-bound filters for the same IDM, Conv, and OGA components used by Rdy. Defaults are OFF and 0%.
+                    </p>
+                    <div className="windfall-core-filter-grid">
+                      {READINESS_HARD_FILTER_KEYS.map((key) => {
+                        const rule = readinessHardFilters[key];
+                        const copy = READINESS_HARD_FILTER_COPY[key];
+                        return (
+                          <label key={key} className="windfall-core-filter-control">
+                            <span className="windfall-core-filter-control__label" title={copy.help}>
+                              <input
+                                type="checkbox"
+                                checked={rule.enabled}
+                                onChange={(event) => setReadinessHardFilters((previous) => ({
+                                  ...previous,
+                                  [key]: {
+                                    ...previous[key],
+                                    enabled: event.target.checked,
+                                  },
+                                }))}
+                              />
+                              {copy.label} ({rule.thresholdPercent}%)
+                            </span>
+                            <HigSlider
+                              className="windfall-core-filter-control__range"
+                              min={0}
+                              max={100}
+                              step={5}
+                              value={rule.thresholdPercent}
+                              onCommit={(value) => setReadinessHardFilters((previous) => ({
+                                ...previous,
+                                [key]: {
+                                  ...previous[key],
+                                  thresholdPercent: clampPercent(value, 0),
+                                },
+                              }))}
+                            />
+                            <span style={{ color: "#64748b", fontSize: 11, fontWeight: 600, lineHeight: 1.35 }}>
+                              {copy.help}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
 
@@ -5848,6 +6566,7 @@ function AppInner(): JSX.Element {
         <div style={{ padding: 32, fontFamily: "sans-serif" }}>
           <GeneratedCandidatesPanel
             onGenerate={handleGenerate}
+            onStopGenerate={handleStopGenerate}
             candidates={candidates}
             quotaWarning={quotaWarning}
             isGenerating={isGenerating}
@@ -5921,6 +6640,7 @@ function AppInner(): JSX.Element {
               minRecentMatches,
               recentMatchBias,
               previousNeighbourConstraintNumbers: [...previousNeighbourConstraintNumbers],
+              latestNeighbourSupportEnabled,
               entropyEnabled,
               entropyThreshold,
               hammingEnabled,
@@ -6239,6 +6959,8 @@ function AppInner(): JSX.Element {
             hoveredNumber={dgaHoveredNumber}
             onHoverNumber={(value) => setDgaHoveredNumber(value)}
             selectedNumbers={dgaStripSelectedNumbers}
+            cellOpacity={dgaMonthlyBucketStateOpacity}
+            onCellOpacityChange={(value) => setDgaMonthlyBucketStateOpacity(clampDgaMonthlyBucketStateOpacity(value))}
           />
         </div>
       </CollapsibleSection>
@@ -6354,6 +7076,7 @@ function AppInner(): JSX.Element {
       minRecentMatches,
       recentMatchBias,
       previousNeighbourConstraintNumbers: [...previousNeighbourConstraintNumbers],
+      latestNeighbourSupportEnabled,
       repeatWindowSizeW,
       minFromRecentUnionM,
       sumFilter: { ...sumFilter },
@@ -6365,6 +7088,7 @@ function AppInner(): JSX.Element {
       dgaHeatmapView,
       tempMetric,
       showHeatmapLetters,
+      dgaMonthlyBucketStateOpacity,
       ogaRefMode,
       enableOGAForecastBias,
       ogaBaselineMode,
@@ -6378,6 +7102,7 @@ function AppInner(): JSX.Element {
       selectedCarryOverBoostNumbers: [...selectedCarryOverBoostNumbers],
       selectedCarryOverBoostMode,
       rdyWeights: { ...rdyWeights },
+      readinessHardFilters: normalizeReadinessHardFilters(readinessHardFilters),
     };
 
     if (includePanelFavorites) {
@@ -6416,7 +7141,9 @@ function AppInner(): JSX.Element {
     setDroughtBreakSelectedNumbers(normalizeHotColdGenerationNumbers(s.droughtBreakSelectedNumbers).slice(0, MAX_DROUGHT_BREAK_FORCED_NUMBERS));
     setRankingWeights({
           oga: s.rankingWeights?.oga ?? 0.7,
+          selHitsEnabled: s.rankingWeights?.selHitsEnabled ?? false,
           sel: s.rankingWeights?.sel ?? 0.2,
+          recentHitsEnabled: s.rankingWeights?.recentHitsEnabled ?? false,
           recent: s.rankingWeights?.recent ?? 0.1,
           selBonusThreshold: s.rankingWeights?.selBonusThreshold ?? 3,
           selBonusWeight: s.rankingWeights?.selBonusWeight ?? 0,
@@ -6520,6 +7247,7 @@ function AppInner(): JSX.Element {
     setTrendThreshold(Math.max(0, Math.min(1, Number.isFinite(s.trendThreshold) ? s.trendThreshold : 0.02)));
     setAllowedTrendRatios(Array.from(new Set((s.allowedTrendRatios ?? []).filter((tag) => /^\d+-\d+-\d+$/.test(tag)))));
     setPreviousNeighbourConstraintNumbers(normalizePreviousNeighbourConstraintNumbers(s.previousNeighbourConstraintNumbers ?? []));
+    setLatestNeighbourSupportEnabled(!!s.latestNeighbourSupportEnabled);
     setRepeatWindowSizeW(s.repeatWindowSizeW ?? 12);
     setMinFromRecentUnionM(s.minFromRecentUnionM ?? 0);
     setSumFilter(s.sumFilter ?? { enabled: false, min: 0, max: 0, includeSupp: true });
@@ -6531,6 +7259,7 @@ function AppInner(): JSX.Element {
     setDgaHeatmapView(s.dgaHeatmapView === 'monthlyBucketState' ? 'monthlyBucketState' : 'temperature');
     setTempMetric(s.tempMetric ?? 'hybrid');
     setShowHeatmapLetters(s.showHeatmapLetters ?? false);
+    setDgaMonthlyBucketStateOpacity(clampDgaMonthlyBucketStateOpacity(s.dgaMonthlyBucketStateOpacity ?? 1));
     setOgaRefMode(s.ogaRefMode ?? 'window');
     setEnableOGAForecastBias(s.enableOGAForecastBias ?? false);
     setOGABaselineMode(s.ogaBaselineMode ?? 'window');
@@ -6553,6 +7282,7 @@ function AppInner(): JSX.Element {
     );
     setSelectedCarryOverBoostMode(normalizeSelectedCarryOverBoostMode(s.selectedCarryOverBoostMode));
     setRdyWeights(s.rdyWeights ?? { idm: 0.70, conv: 0.10, oga: 0.20 });
+    setReadinessHardFilters(normalizeReadinessHardFilters(s.readinessHardFilters));
     if (Array.isArray(s.favoritePanelIds)) {
       setFavoritePanelIds(normalizeFavoritePanelIds(s.favoritePanelIds));
     }
@@ -6859,7 +7589,7 @@ const UserExclusionsStrip: React.FC<UserExclusionsStripProps> = ({
   );
 };
 
-export default function App() {
+function WindfallApp(): JSX.Element {
   return (
     <ForcedNumbersProvider>
       <ZPASettingsProvider>
@@ -6869,4 +7599,8 @@ export default function App() {
       </ZPASettingsProvider>
     </ForcedNumbersProvider>
   );
+}
+
+export default function App() {
+  return <LotteryPlatformShell windfallExperience={<WindfallApp />} />;
 }

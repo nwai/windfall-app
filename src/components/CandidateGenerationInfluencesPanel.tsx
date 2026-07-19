@@ -537,7 +537,7 @@ export const CandidateGenerationInfluencesPanel: React.FC<CandidateGenerationInf
       </section>
 
       <section style={sectionStyle}>
-        <div style={{ fontWeight: 800, marginBottom: 8, color: "#0f172a" }}>Composition, Recency, And Forecast Bias</div>
+        <div style={{ fontWeight: 800, marginBottom: 8, color: "#0f172a" }}>Composition And Recency</div>
         <div style={compactGrid}>
           <div style={{ display: "grid", gap: 8 }}>
             <label style={{ display: "inline-flex", gap: 6, alignItems: "center", fontSize: 12, fontWeight: 800 }}>
@@ -552,30 +552,47 @@ export const CandidateGenerationInfluencesPanel: React.FC<CandidateGenerationInf
                 </label>
               ))}
             </div>
+          </div>
+
+          <div
+            aria-label="Last draw match bias and repeat pool controls"
+            style={{
+              display: "grid",
+              gap: 8,
+              padding: 10,
+              border: "1px solid rgba(239, 68, 68, 0.5)",
+              borderRadius: 8,
+              background: "rgba(254, 242, 242, 0.5)",
+            }}
+          >
+            <div style={{ fontSize: 12, fontWeight: 800, color: "#991b1b" }}>
+              Latest-Draw Overlap Controls
+            </div>
             <label style={labelStyle}>
               Minimum Matches To Last Draw
               <input type="number" min={0} max={8} value={props.minRecentMatches} onChange={(event) => props.setMinRecentMatches(clampInt(Number(event.target.value), 0, 8))} style={inputStyle} />
             </label>
             <label style={{ display: "inline-flex", gap: 6, alignItems: "center", fontSize: 12 }}>
               <input type="checkbox" checked={props.maxLastDrawMatchesEnabled} onChange={(event) => props.setMaxLastDrawMatchesEnabled(event.target.checked)} />
-              Maximum matches
+              Maximum Matches To Last Draw
               <select value={props.maxLastDrawMatchesValue} disabled={!props.maxLastDrawMatchesEnabled} onChange={(event) => props.setMaxLastDrawMatchesValue(clampInt(Number(event.target.value), 1, 8))} style={inputStyle}>
                 {[1, 2, 3, 4, 5, 6, 7, 8].map((value) => <option key={value} value={value}>{value}</option>)}
               </select>
             </label>
-          </div>
-
-          <div style={{ display: "grid", gap: 8 }}>
+            <div style={{ color: "#64748b", fontSize: 11, lineHeight: 1.45 }}>
+              Minimum and maximum matches are strict filters. Last-draw match bias is only a soft weighting strength.
+            </div>
             <label style={labelStyle}>
-              Recent Match Bias
+              Last-Draw Match Bias
               <input type="number" min={0} max={5} step={0.1} value={props.recentMatchBias} onChange={(event) => props.setRecentMatchBias(clampFloat(Number(event.target.value), 0, 5))} style={inputStyle} />
+              <span style={{ marginLeft: 4, color: "#b91c1c", fontSize: 11, fontWeight: 700 }}>max 5</span>
             </label>
             <label style={labelStyle}>
-              Repeat Window W
+              Look Back Over Newest Draws
               <input type="number" min={0} max={props.maxRepeatWindow} value={props.repeatWindowSizeW} onChange={(event) => props.setRepeatWindowSizeW(clampInt(Number(event.target.value), 0, props.maxRepeatWindow))} style={inputStyle} />
             </label>
             <label style={labelStyle}>
-              Min From Union M
+              Minimum Candidate Numbers From That Pool
               <input type="number" min={0} max={8} value={props.minFromRecentUnionM} onChange={(event) => props.setMinFromRecentUnionM(clampInt(Number(event.target.value), 0, 8))} style={inputStyle} />
             </label>
           </div>

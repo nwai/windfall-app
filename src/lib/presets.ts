@@ -130,7 +130,15 @@ export interface AppPresetSnapshot {
   trendSelectedNumbers: number[];
 
   // Ranking / targets
-  rankingWeights: { oga: number; sel: number; recent: number; selBonusThreshold?: number; selBonusWeight?: number };
+  rankingWeights: {
+    oga: number;
+    selHitsEnabled?: boolean;
+    sel: number;
+    recentHitsEnabled?: boolean;
+    recent: number;
+    selBonusThreshold?: number;
+    selBonusWeight?: number;
+  };
   weightedTargets: Record<number, number>;
 
   // Candidate zone bias (ranking)
@@ -225,6 +233,7 @@ export interface AppPresetSnapshot {
   minRecentMatches?: number;
   recentMatchBias?: number;
   previousNeighbourConstraintNumbers?: number[];
+  latestNeighbourSupportEnabled?: boolean;
   maxLastDrawMatchesEnabled?: boolean;
   maxLastDrawMatchesValue?: number;
   repeatWindowSizeW?: number;
@@ -238,6 +247,7 @@ export interface AppPresetSnapshot {
   dgaHeatmapView?: "temperature" | "monthlyBucketState";
   tempMetric?: "ema" | "recency" | "hybrid";
   showHeatmapLetters?: boolean;
+  dgaMonthlyBucketStateOpacity?: number;
   ogaRefMode?: "window" | "all";
   enableOGAForecastBias?: boolean;
   ogaBaselineMode?: "window" | "all";
@@ -252,6 +262,7 @@ export interface AppPresetSnapshot {
   selectedCarryOverBoostMode?: "normal" | "strong" | "nearForced";
   // Readiness (Rdy) score weights
   rdyWeights?: { idm: number; conv: number; oga: number };
+  readinessHardFilters?: Partial<Record<"idm" | "conv" | "oga", { enabled?: boolean; thresholdPercent?: number }>>;
 
   // Parameter search and probability overlay
   batesParams?: Partial<BatesParameterSet>;
@@ -370,6 +381,15 @@ export function normalizeAppPresetSnapshot(snapshot: AppPresetSnapshot): AppPres
     trendLookback: clampIntegerOrFallback(snapshot.trendLookback, 1, 52, DEFAULT_TREND_LOOKBACK),
     trendThreshold: Math.max(0, Math.min(1, finiteNumber(snapshot.trendThreshold, DEFAULT_TREND_THRESHOLD))),
     allowedTrendRatios: normalizeTrendRatios(snapshot.allowedTrendRatios),
+    rankingWeights: {
+      oga: Math.max(0, finiteNumber(snapshot.rankingWeights?.oga, 0.7)),
+      selHitsEnabled: !!snapshot.rankingWeights?.selHitsEnabled,
+      sel: Math.max(0, finiteNumber(snapshot.rankingWeights?.sel, 0.2)),
+      recentHitsEnabled: !!snapshot.rankingWeights?.recentHitsEnabled,
+      recent: Math.max(0, finiteNumber(snapshot.rankingWeights?.recent, 0.1)),
+      selBonusThreshold: Math.max(0, Math.floor(finiteNumber(snapshot.rankingWeights?.selBonusThreshold, 3))),
+      selBonusWeight: Math.max(0, finiteNumber(snapshot.rankingWeights?.selBonusWeight, 0)),
+    },
     acceptanceNeedsEnabled: !!snapshot.acceptanceNeedsEnabled,
     acceptanceNeedsCounts: normalizeMonthlyCounts(snapshot.acceptanceNeedsCounts),
     acceptanceNeedsHardExclude: !!snapshot.acceptanceNeedsHardExclude,
@@ -377,6 +397,7 @@ export function normalizeAppPresetSnapshot(snapshot: AppPresetSnapshot): AppPres
     hotColdExcludedNumbers: normalizeWeightedTargetNumbers(snapshot.hotColdExcludedNumbers),
     droughtBreakSelectedNumbers: normalizeWeightedTargetNumbers(snapshot.droughtBreakSelectedNumbers).slice(0, 3),
     previousNeighbourConstraintNumbers: normalizeWeightedTargetNumbers(snapshot.previousNeighbourConstraintNumbers).slice(0, 8),
+    latestNeighbourSupportEnabled: !!snapshot.latestNeighbourSupportEnabled,
     maxLastDrawMatchesEnabled: !!snapshot.maxLastDrawMatchesEnabled,
     maxLastDrawMatchesValue: clampInteger(snapshot.maxLastDrawMatchesValue, 0, 6, DEFAULT_LAST_DRAW_MATCH_CAP),
     numCandidates: clampInteger(snapshot.numCandidates, 1, 1000, DEFAULT_NUM_CANDIDATES),

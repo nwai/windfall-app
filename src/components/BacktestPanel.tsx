@@ -9,9 +9,10 @@ import { WalkForwardChart } from './WalkForwardChart';
 
 interface BacktestPanelProps {
   history: Draw[];
+  historyScopeLabel?: string;
 }
 
-export const BacktestPanel: React.FC<BacktestPanelProps> = ({ history }) => {
+export const BacktestPanel: React.FC<BacktestPanelProps> = ({ history, historyScopeLabel }) => {
   const [windowSize, setWindowSize] = useState<number>(Math.max(36, Math.min(200, Math.floor(history.length / 2))));
   const [randomTrials, setRandomTrials] = useState<number>(200);
   const [bootstrapIters, setBootstrapIters] = useState<number>(500);
@@ -183,6 +184,9 @@ export const BacktestPanel: React.FC<BacktestPanelProps> = ({ history }) => {
       {/* Controls row */}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         <b>Backtest MLND</b>
+        {historyScopeLabel && (
+          <span style={{ fontSize: 12, color: '#64748b' }}>Scope: {historyScopeLabel}</span>
+        )}
         <label style={{ marginLeft: 12 }}>Window (W):
           <input type="number" value={windowSize} min={36} max={Math.max(36, history.length - 1)}
             onChange={(e) => setWindowSize(Math.max(36, Math.min(history.length - 1, Number(e.target.value) || 36)))}

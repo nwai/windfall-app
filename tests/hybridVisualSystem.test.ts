@@ -33,6 +33,29 @@ describe("hybrid visual system shell", () => {
     expect(html).toContain("Dense table");
   });
 
+  it("renders collapsible header actions without forcing the section open", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(
+        CollapsibleSection,
+        {
+          title: "Prediction Journal & Scorecard",
+          summaryHint: "observe-only",
+          defaultOpen: false,
+          open: false,
+          headerActions: React.createElement("button", { type: "button" }, "New Prediction"),
+        },
+        React.createElement("div", null, "Journal body"),
+      ),
+    );
+    const document = new DOMParser().parseFromString(html, "text/html");
+    const details = document.querySelector("details");
+    const actions = document.querySelector(".windfall-section__actions");
+
+    expect(details?.hasAttribute("open")).toBe(false);
+    expect(actions).not.toBeNull();
+    expect(actions?.textContent).toContain("New Prediction");
+  });
+
   it("renders inline collapsible cards with Windfall card classes", () => {
     const html = renderToStaticMarkup(
       React.createElement(

@@ -3,6 +3,7 @@ import { generateExhaustiveCombos } from "../../lib/exhaustiveGenerator";
 import { isDisplayedValueInRange } from "../../lib/generatedCandidateFilterUtils";
 import {
   buildHistoricalPrizeBacktest,
+  formatCandidateRowsForPasteWeightedGenerator,
   selectRowsForCandidateExport,
   type GeneratedCandidateViewRow,
 } from "../../lib/generatedCandidates";
@@ -36,7 +37,7 @@ const GENERATED_CANDIDATE_VISIBLE_COLUMN_COUNT = 23;
 
 /** Settings snapshot captured at export time — written as ## comment rows in CSV */
 export interface ExportSettings {
-  /** Random coverage mode: exactly 7 rows, 42 globally unique mains, 3 leftover supplementaries. */
+  /** Random coverage mode: exactly 7 rows; hard inclusions/exclusions are honored before random fill. */
   rwr45Enabled?: boolean;
   excludedNumbers: number[];
   /** HC3-excluded numbers (overlap of last two draws) — silently injected by generateCandidates */
@@ -79,6 +80,7 @@ export interface ExportSettings {
 
 export interface GeneratedCandidatesPanelProps {
   onGenerate: () => void;
+  onStopGenerate?: () => void;
   candidates: CandidateSet[];
   /** Settings fingerprint written as ## comment rows at the top of every CSV export */
   exportSettings?: ExportSettings;
@@ -150,6 +152,28 @@ export interface GeneratedCandidatesPanelProps {
 
 const MONTHLY_BUCKET_LABELS = ["0x", "1x", "2x", "3x", "4x", "5x", "6x", "7x", "8x+"] as const;
 
+const writeTextToClipboard = async (text: string): Promise<void> => {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  textarea.style.top = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  try {
+    const copied = document.execCommand("copy");
+    if (!copied) throw new Error("Copy command was not accepted.");
+  } finally {
+    document.body.removeChild(textarea);
+  }
+};
+
 const toNineBucketDistribution = (values: readonly number[] | null | undefined): number[] | null => {
   if (!values?.length) return null;
   return Array.from({ length: 9 }, (_, index) => {
@@ -160,6 +184,7 @@ const toNineBucketDistribution = (values: readonly number[] | null | undefined):
 
 export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> = ({
   onGenerate,
+  onStopGenerate,
   candidates,
   quotaWarning,
   isGenerating = false,
@@ -222,6 +247,8 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
     const [exTotal, setExTotal] = useState<number>(0);
     const [exCapped, setExCapped] = useState<boolean>(false);
      const [pressedButton, setPressedButton] = useState<string | null>(null);
+     const [copyPasteStatus, setCopyPasteStatus] = useState<string>("");
+     const copyPasteStatusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const userExcludedNumbers = useMemo(
       () => normalizeUserExclusionLocks(excludedNumbers),
       [excludedNumbers],
@@ -258,6 +285,14 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
       };
     }, [isGenerating]);
 
+    useEffect(() => {
+      return () => {
+        if (copyPasteStatusTimerRef.current) {
+          clearTimeout(copyPasteStatusTimerRef.current);
+        }
+      };
+    }, []);
+
     const formatElapsed = useCallback((ms: number): string => {
       if (ms < 1000) return `${Math.round(ms)}ms`;
       return `${(ms / 1000).toFixed(1)}s`;
@@ -265,7 +300,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
 
     // --- Column sorting ---
     type SortKey = "nrr" | "ns" | "win" | "rdy" | "idm" | "stageIdm" | "conv" | "comp" | "ogaRaw" | "ogaPct" | "selHits" | "recentHits" | "previousNeighbourHits" | "previousNeighbourDuplicateHits" | "previousNeighbourSingletonHits" | "oddEven" | "prize" | "b0x" | "b1x" | "b2x" | "b3x" | "b4x" | "b5x" | "b6x" | "b7x" | "b8x" | "recommended" | null;
-    const [sortKey, setSortKey] = useState<SortKey>("prize");
+    const [sortKey, setSortKey] = useState<SortKey>(null);
     const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
     const toggleSort = (key: SortKey) => {
       if (sortKey === key) {
@@ -506,70 +541,25 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
       if (!filterEnabled) setFilterPinned("off");
     };
 
-    // Auto-switch sort on meaningful transitions:
-    //   → 8 selected: snapshot current sort+filter state to localStorage, then switch to Prize
-    //   8 → fewer: restore the snapshot so the user's previous view is preserved
-    // Intermediate changes (e.g. 7→6) do NOT override the current sort.
-    const prevManualLenRef = useRef(manualSimSelected.length);
-    // Refs to capture latest values for the snapshot (avoids stale closures)
-    const sortKeyRef = useRef(sortKey);
-    sortKeyRef.current = sortKey;
-    const sortDirRef = useRef(sortDir);
-    sortDirRef.current = sortDir;
-    const rangeFilterRef = useRef(rangeFilter);
-    rangeFilterRef.current = rangeFilter;
-    const committedFilterRef = useRef(committedFilter);
-    committedFilterRef.current = committedFilter;
-    const filterEnabledRef = useRef(filterEnabled);
-    filterEnabledRef.current = filterEnabled;
-    const filterPinnedRef = useRef(filterPinned);
-    filterPinnedRef.current = filterPinned;
-
-    useEffect(() => {
-      const prev = prevManualLenRef.current;
-      const curr = manualSimSelected.length;
-      prevManualLenRef.current = curr;
-      if (curr >= 8 && prev < 8) {
-        // Snapshot full state before overriding to Prize sort
-        try {
-          localStorage.setItem("wf_sort_snapshot", JSON.stringify({
-            sortKey: sortKeyRef.current,
-            sortDir: sortDirRef.current,
-            rangeFilter: rangeFilterRef.current,
-            committedFilter: committedFilterRef.current,
-            filterEnabled: filterEnabledRef.current,
-            filterPinned: filterPinnedRef.current,
-          }));
-        } catch { /* ignore */ }
-        setSortKey("prize");
-        setSortDir("desc");
-      } else if (curr < 8 && prev >= 8) {
-        // Restore full state from snapshot
-        try {
-          const raw = localStorage.getItem("wf_sort_snapshot");
-          if (raw) {
-            const snap = JSON.parse(raw);
-            setSortKey(snap.sortKey ?? "nrr");
-            setSortDir(snap.sortDir ?? "desc");
-            if (snap.rangeFilter) setRangeFilter({ ...emptyFilter, ...snap.rangeFilter });
-            if (snap.committedFilter) setCommittedFilter({ ...emptyFilter, ...snap.committedFilter });
-            if (snap.filterEnabled !== undefined) setFilterEnabled(snap.filterEnabled);
-            if (snap.filterPinned !== undefined) setFilterPinned(snap.filterPinned);
-          } else {
-            setSortKey("nrr");
-            setSortDir("desc");
-          }
-        } catch {
-          setSortKey("nrr");
-          setSortDir("desc");
-        }
-      }
-    }, [manualSimSelected.length]);
-
     const normalizedUserSelectedNumbers = useMemo(
       () => normalizeUserSelectedNumbers(userSelectedNumbers),
       [userSelectedNumbers],
     );
+    const [manualPrizeCheckFollowsUserSelected, setManualPrizeCheckFollowsUserSelected] = useState(false);
+    const syncedManualPrizeCheckNumbers = useMemo(
+      () => normalizedUserSelectedNumbers.slice(0, 8),
+      [normalizedUserSelectedNumbers],
+    );
+    useEffect(() => {
+      if (!manualPrizeCheckFollowsUserSelected) return;
+      setManualSimSelected(syncedManualPrizeCheckNumbers);
+      onManualSimulationChanged?.(syncedManualPrizeCheckNumbers);
+    }, [
+      manualPrizeCheckFollowsUserSelected,
+      onManualSimulationChanged,
+      setManualSimSelected,
+      syncedManualPrizeCheckNumbers,
+    ]);
     const selSet = useMemo(() => new Set(normalizedUserSelectedNumbers), [normalizedUserSelectedNumbers]);
     const forcedSet = useMemo(() => new Set(forcedNumbers), [forcedNumbers]);
     const hitSet = useMemo(() => new Set<number>([...selSet, ...forcedSet]), [selSet, forcedSet]);
@@ -1157,7 +1147,22 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
       return (va - vb) * dir;
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [candidates, sortKey, sortDir, convergenceScores, readinessScores, idmScores, stageIdmScores, winScores, nrrScores, nsScores]);
+  }, [
+    candidates,
+    sortKey,
+    sortDir,
+    convergenceScores,
+    readinessScores,
+    idmScores,
+    stageIdmScores,
+    winScores,
+    nrrScores,
+    nsScores,
+    manualMainSet,
+    manualSuppSet,
+    hitSet,
+    recentSet,
+  ]);
 
   // --- Multi-column range filter applied to sorted candidates ---
   const filteredCandidates = useMemo((): Required<GeneratedCandidateViewRow>[] => {
@@ -1568,7 +1573,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
 
      const activeSortLabel = sortKey
        ? `${sortKey}${sortDir === "asc" ? " ↑" : " ↓"}`
-       : "original";
+       : "generated order";
      const visibleRowsLabel = candidates.length === 0
        ? "0"
        : isFilteringActive
@@ -1683,6 +1688,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
     }
 
    function toggleManualPick(n: number) {
+     if (manualPrizeCheckFollowsUserSelected) return;
      if (userExcludedSet.has(n)) return;
      setManualSimSelected((prev) => {
        const next = prev.includes(n)
@@ -1739,6 +1745,17 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
        onMouseUp: () => setPressedButton(null),
        onMouseLeave: () => setPressedButton((prev) => (prev === key ? null : prev)),
      });
+
+     const showCopyPasteStatus = useCallback((message: string) => {
+       setCopyPasteStatus(message);
+       if (copyPasteStatusTimerRef.current) {
+         clearTimeout(copyPasteStatusTimerRef.current);
+       }
+       copyPasteStatusTimerRef.current = setTimeout(() => {
+         setCopyPasteStatus("");
+         copyPasteStatusTimerRef.current = null;
+       }, 3500);
+     }, []);
 
      /** Export candidates to CSV — when filter is active, only filtered rows are exported */
      const exportCSV = useCallback(() => {
@@ -1815,7 +1832,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
       if (exportSettings) {
          const es = exportSettings;
          tag("RwR45 / PNUaRW45", es.rwr45Enabled
-           ? "ON — Count ignored; 7 random coverage rows; normal generator filters bypassed"
+           ? "ON — Count ignored; 7 random coverage rows; hard inclusions/exclusions honored; evidence filters bypassed"
            : "OFF"
          );
 
@@ -1918,8 +1935,24 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
          : `candidates.csv`;
        a.click();
        URL.revokeObjectURL(url);
-     // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
       }, [sortedCandidates, filteredCandidates, isFilteringActive, matchedCount, convergenceScores, idmScores, stageIdmScores, readinessScores, winScores, nrrScores, nsScores, exportSettings, enableOGA, numCandidates, overgenFactor, attemptMultiplier, ogaSpokeCount, forcedNumbers, userSelectedNumbers, monthlyBuckets, historyForOGA]);
+
+     const copyCandidatesForPasteWeightedGenerator = useCallback(async () => {
+       const copyRows = selectRowsForCandidateExport(
+         isFilteringActive ? filteredCandidates : sortedCandidates,
+         isFilteringActive,
+       );
+       if (!copyRows.length) return;
+
+       const text = formatCandidateRowsForPasteWeightedGenerator(copyRows);
+       try {
+         await writeTextToClipboard(text);
+         showCopyPasteStatus(`Copied ${copyRows.length} candidate main row${copyRows.length === 1 ? "" : "s"} for Paste-Weighted input.`);
+       } catch (error) {
+         showCopyPasteStatus(`Copy failed: ${error instanceof Error ? error.message : "clipboard unavailable"}`);
+       }
+     }, [filteredCandidates, isFilteringActive, showCopyPasteStatus, sortedCandidates]);
 
      return (
      <section style={panel}>
@@ -1964,18 +1997,27 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
              />
              RwR45
              <InfoHelp label="RwR45 random coverage help">
-               PNUaRW45 is a random coverage mode. When On, Generate ignores Count, creates exactly 7 rows, assigns 42 globally unique main numbers across those rows, then uses the 3 leftover numbers as the supplementary pool.
+               PNUaRW45 is a random coverage mode. When On, Generate ignores Count and creates exactly 7 rows. Forced inclusions are seeded first and hard exclusions are removed before random fill. With no constraints, it assigns 42 globally unique main numbers and uses the 3 leftover numbers as the supplementary pool.
              </InfoHelp>
            </label>
          )}
          {rwr45Enabled && (
            <span style={{ color: "#334155", fontSize: 12, fontWeight: 700 }}>
-             Count ignored · exactly 7 random coverage rows
+             Count ignored · 7 forced-aware random coverage rows
            </span>
          )}
            <HigButton variant="primary" disabled={isGenerating} onClick={onGenerate}>
              {isGenerating ? "Generating…" : "Generate"}
            </HigButton>
+           {isGenerating && onStopGenerate && (
+             <HigButton
+               variant="secondary"
+               onClick={onStopGenerate}
+               aria-label="Stop generating and show accepted candidates so far"
+             >
+               Stop and show partial
+             </HigButton>
+           )}
            <HigButton
              variant="quiet"
              disabled={candidates.length === 0}
@@ -1984,6 +2026,20 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
            >
              Export CSV
            </HigButton>
+           <HigButton
+             variant="secondary"
+             disabled={candidates.length === 0}
+             onClick={copyCandidatesForPasteWeightedGenerator}
+             aria-label="Copy generated candidate mains as comma-separated rows for the Paste-Weighted Candidate Generator"
+             title="Copies the current table rows as six-main-number comma-separated lines, ready for Paste-Weighted Candidate Generator input."
+           >
+             Copy candidates
+           </HigButton>
+          {copyPasteStatus && (
+            <span role="status" style={{ fontSize: 12, color: "#166534", fontWeight: 700 }}>
+              {copyPasteStatus}
+            </span>
+          )}
           {(isGenerating || elapsedMs > 0) && (
             <span
               style={{
@@ -2165,6 +2221,21 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                title={`Recommended Ranking Strategy (diagnostic):\n1. 2x bucket count ↓  (strongest observed association in the internal candidate sample)\n2. Nrr ↓  (number rarity rank within this generated pool)\n3. |Conv| magnitude ↓  (distribution impact)\n\nThis ranks candidates by historical candidate-sample diagnostics. It is not a calibrated next-draw win probability.`}
              >
                Recommended
+             </button>
+             <button
+               type="button"
+               aria-pressed={sortKey === null}
+               onClick={() => setSortKey(null)}
+               style={{
+                 padding: "4px 10px", borderRadius: 4, fontSize: 11, fontWeight: 600,
+                 border: sortKey === null ? "1px solid #1565c0" : "1px solid #ccc",
+                 background: sortKey === null ? "#e3f2fd" : "#f5f5f5",
+                 color: sortKey === null ? "#1565c0" : "#555",
+                 cursor: "pointer",
+               }}
+               title="Reset to the exact order candidates were produced by the generation engine. This is the default view and does not rank by Prize or diagnostics."
+             >
+               Generated order
              </button>
             {prizeQualifyingCount > 0 && (() => {
               const divOrder = ["Div1","Div2","Div3","Div4","Div5","Div6"];
@@ -2657,8 +2728,8 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                 const previousNeighbourSingletonHits = c.previousNeighbourSingletonHits;
                 const odd = nums.filter((n: number) => n % 2 === 1).length;
                 const even = nums.length - odd;
-                const manualMainHits = c.main.filter((n: number) => manualMainSet.has(n)).length;
-                const manualSuppHits = c.supp.filter((n: number) => manualSuppSet.has(n)).length;
+                const manualMainHits = nums.filter((n: number) => manualMainSet.has(n)).length;
+                const manualSuppHits = nums.filter((n: number) => manualSuppSet.has(n)).length;
                 const prizeLabel = computePrizeDivision(c.main, c.supp, manualMainSet, manualSuppSet);
                 const shade = selHits
                   ? `rgba(25,118,210,${0.08 + 0.3 * (selHits / 8)})`
@@ -2737,10 +2808,13 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                         || (n >= 10 && committedTwoDigitSearchSet.has(n))
                       ),
                     ))}</td>
-                   <td style={manualTd} title="Matches vs Manual Prize Check (M/S)">
-                     {renderDots(manualMainHits, "#c62828", "#999", "Manual main hits")}
+                   <td
+                     style={manualTd}
+                     title="Prize hits from this 8-number candidate row: red = winning main hits, green = winning supplementary hits."
+                   >
+                     {renderDots(manualMainHits, "#c62828", "#999", "Manual main hits from candidate row")}
                      <span style={{ color: "#bbb", padding: "0 3px" }}>/</span>
-                     {renderDots(manualSuppHits, "#2e7d32", "#999", "Manual supp hits")}
+                     {renderDots(manualSuppHits, "#2e7d32", "#999", "Manual supp hits from candidate row")}
                    </td>
                     <td style={tdCenter}>{prizeLabel}</td>
                     <td style={tdCenter}>{`${odd}:${even}`}</td>
@@ -2987,14 +3061,12 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                                   {(() => {
                                     const winDiv = qualifying[0]?.div ?? "—";
                                     const divColor = (divColors as Record<string, string>)[winDiv] ?? "#555";
-                                    const manualMain = manualSimSelected.slice(0, 6);
-                                    const manualSupp = manualSimSelected.slice(6, 8);
+                                    const manualNumbers = manualSimSelected.slice(0, 8);
                                     const drawMainSet = new Set(draw.main);
                                     const drawSuppSet = new Set(draw.supp);
-                                    const mainHits = manualMain.filter((n) => drawMainSet.has(n));
-                                    const suppHits = manualSupp.filter((n) => drawSuppSet.has(n));
-                                    const mainMisses = manualMain.filter((n) => !drawMainSet.has(n));
-                                    const suppMisses = manualSupp.filter((n) => !drawSuppSet.has(n));
+                                    const mainHits = manualNumbers.filter((n) => drawMainSet.has(n));
+                                    const suppHits = manualNumbers.filter((n) => drawSuppSet.has(n));
+                                    const misses = manualNumbers.filter((n) => !drawMainSet.has(n) && !drawSuppSet.has(n));
                                     return (
                                       <div style={{ fontSize: 11 }}>
                                         <span style={{ fontWeight: 700, color: "#7b5800", marginRight: 10 }}>
@@ -3006,20 +3078,21 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                                           fontWeight: 700, fontSize: 11, marginRight: 10,
                                         }}>{winDiv}</span>
                                         <span style={{ color: "#555" }}>
-                                          Main hits:{" "}
+                                          Prize main hits:{" "}
                                           {mainHits.map((n, i) => (
                                             <span key={i} style={{ fontWeight: 700, color: "#1565c0", marginRight: 3 }}>{n}</span>
                                           ))}
-                                          {mainMisses.map((n, i) => (
-                                            <span key={i} style={{ color: "#bbb", marginRight: 3 }}>{n}</span>
-                                          ))}
-                                          {" | Supp hits: "}
+                                          {!mainHits.length && <span style={{ color: "#bbb", marginRight: 3 }}>none</span>}
+                                          {" | Prize supp hits: "}
                                           {suppHits.map((n, i) => (
                                             <span key={i} style={{ fontWeight: 700, color: "#6a1b9a", marginRight: 3 }}>{n}</span>
                                           ))}
-                                          {suppMisses.map((n, i) => (
+                                          {!suppHits.length && <span style={{ color: "#bbb", marginRight: 3 }}>none</span>}
+                                          {" | Misses: "}
+                                          {misses.map((n, i) => (
                                             <span key={i} style={{ color: "#bbb", marginRight: 3 }}>{n}</span>
                                           ))}
+                                          {!misses.length && <span style={{ color: "#bbb" }}>none</span>}
                                         </span>
                                       </div>
                                     );
@@ -3041,6 +3114,9 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
          <ManualSim
            manualSimSelected={manualSimSelected}
           toggleManualPick={toggleManualPick}
+          followUserSelected={manualPrizeCheckFollowsUserSelected}
+          onFollowUserSelectedChange={setManualPrizeCheckFollowsUserSelected}
+          syncedUserSelectedNumbers={syncedManualPrizeCheckNumbers}
           excludedNumbers={userExcludedNumbers}
           numberToBucket={numberToBucket}
           currentDist={currentDist}
@@ -3446,6 +3522,9 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
 const ManualSim: React.FC<{
   manualSimSelected: number[];
   toggleManualPick: (n: number) => void;
+  followUserSelected: boolean;
+  onFollowUserSelectedChange: (checked: boolean) => void;
+  syncedUserSelectedNumbers: number[];
   excludedNumbers?: readonly number[];
   numberToBucket: Map<number, number> | null;
   currentDist: number[] | null;
@@ -3453,6 +3532,9 @@ const ManualSim: React.FC<{
 }> = ({
   manualSimSelected,
   toggleManualPick,
+  followUserSelected,
+  onFollowUserSelectedChange,
+  syncedUserSelectedNumbers,
   excludedNumbers = [],
   numberToBucket,
   currentDist,
@@ -3482,9 +3564,42 @@ const ManualSim: React.FC<{
 
   return (
       <div style={manual}>
-        <div style={{ marginBottom: 6, fontWeight: 600, fontSize: 13 }}>
-        Manual Prize Check (select up to 8; first 6 main, next 2 supp)
+        <div style={{ marginBottom: 6, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10 }}>
+          <div style={{ fontWeight: 600, fontSize: 13 }}>
+            Manual Prize Check (select up to 8; first 6 main, next 2 supp)
+          </div>
+          <label
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 5,
+              minHeight: 28,
+              padding: "3px 8px",
+              borderRadius: 7,
+              border: followUserSelected ? "1px solid #111827" : "1px solid #d8dee8",
+              background: followUserSelected ? "#111827" : "#fff",
+              color: followUserSelected ? "#fff" : "#334155",
+              fontSize: 11,
+              fontWeight: 800,
+              cursor: "pointer",
+              userSelect: "none",
+            }}
+            title="When on, Manual Prize Check mirrors the normalized User Selected strip. Turn off to edit Manual Prize Check directly."
+          >
+            <input
+              type="checkbox"
+              aria-label="Sync Manual Prize Check with User Selected numbers"
+              checked={followUserSelected}
+              onChange={(event) => onFollowUserSelectedChange(event.currentTarget.checked)}
+            />
+            Use User Selected
+          </label>
       </div>
+      {followUserSelected && (
+        <div role="status" style={{ marginBottom: 8, color: "#475569", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "6px 8px", fontSize: 11 }}>
+          Using normalized User Selected order: {syncedUserSelectedNumbers.length}/8 copied. The first six synced values are treated as mains and the next two as supps; turn this off to choose Manual Prize Check slots directly.
+        </div>
+      )}
       {userExclusionReminder && (
         <div role="status" style={{ marginBottom: 8, color: "#475569", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "6px 8px", fontSize: 11 }}>
           {userExclusionReminder}. Clear these in WFMQYH User Exclusions before selecting them here.
@@ -3563,7 +3678,7 @@ const ManualSim: React.FC<{
           const picked = !isUserExcluded && idx !== -1;
           const atCapacity = manualSimSelected.length >= 8 && !picked;
           const slotColor = picked ? (idx < 6 ? "#4a6fe3" : "#8e44ad") : "#fff";
-          const disabled = isUserExcluded || atCapacity;
+          const disabled = followUserSelected || isUserExcluded || atCapacity;
           return (
             <label
               key={n}
@@ -3577,12 +3692,14 @@ const ManualSim: React.FC<{
                 borderRadius: 6,
                 background: isUserExcluded ? "#f1f5f9" : slotColor,
                 color: picked ? "#fff" : isUserExcluded ? "#94a3b8" : "#333",
-                opacity: disabled ? 0.35 : 1,
-                cursor: disabled ? "not-allowed" : "pointer",
+                opacity: isUserExcluded || (atCapacity && !picked) ? 0.35 : 1,
+                cursor: followUserSelected ? "default" : disabled ? "not-allowed" : "pointer",
                 fontSize: 11,
               }}
               title={
-                isUserExcluded
+                followUserSelected
+                  ? "Synced from User Selected numbers. Turn off Use User Selected to edit manually."
+                  : isUserExcluded
                   ? `Clear it in WFMQYH User Exclusions before selecting ${n}.`
                   : picked
                   ? `Slot ${idx + 1}`

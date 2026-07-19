@@ -59,7 +59,11 @@ describe("Candidate Generation Influences control relocation", () => {
     expect(influencesBlock).toContain("setOgaRefMode");
     expect(influencesBlock).toContain("value={ogaSpokeCount}");
     expect(influencesBlock).toContain("setOgaSpokeCount");
-    expect(influencesBlock).toContain("<RankingWeightsPanel weights={rankingWeights} setWeights={setRankingWeights} />");
+    expect(influencesBlock).toContain("<RankingWeightsPanel");
+    expect(influencesBlock).toContain("weights={rankingWeights}");
+    expect(influencesBlock).toContain("setWeights={setRankingWeights}");
+    expect(influencesBlock).toContain('scope="oga"');
+    expect(influencesBlock).toContain('title="OGA Survivor Weight"');
     expect(influencesBlock).toContain("checked={lambdaEnabled}");
     expect(influencesBlock).toContain("setLambdaEnabled");
     expect(influencesBlock).toContain("value={lambda}");

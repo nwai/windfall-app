@@ -12,6 +12,16 @@ describe("RwR45 Generated Candidates wiring", () => {
     expect(appSource).toMatch(/summarizeOddEvenRatios\(\s*processedCandidates,\s*RWR45_CANDIDATE_COUNT/);
   });
 
+  it("passes active forced inclusions and combined exclusions into RwR45", () => {
+    const rwr45Block = appSource.match(/if \(rwr45Enabled\) \{[\s\S]*?return;\s*\}/)?.[0] ?? "";
+
+    expect(rwr45Block).toContain("rwr45ExcludedNumbers");
+    expect(rwr45Block).toContain("allExclusions");
+    expect(rwr45Block).toContain("getMianHardExclusions()");
+    expect(rwr45Block).toContain("forcedNumbers: generationForcedNumbers");
+    expect(rwr45Block).toContain("excludedNumbers: rwr45ExcludedNumbers");
+  });
+
   it("passes the RwR45 toggle state into GeneratedCandidatesPanel", () => {
     const panelBlock = appSource.match(/<GeneratedCandidatesPanel[\s\S]*?\/>/)?.[0] ?? "";
 

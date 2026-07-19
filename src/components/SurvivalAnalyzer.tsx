@@ -13,6 +13,12 @@ import {
   selectTopSurvivalNumbers,
   type SurvivalRow,
 } from "../lib/survivalAnalysis";
+import {
+  analyzeMonthlyBucketTransitions,
+  buildMonthlyTransitionNumberContext,
+  type MonthlyTransitionNumberContext,
+  type MonthlyTransitionSupport,
+} from "../lib/monthlyBucketTransitions";
 import { useZPASettings } from "../context/ZPASettingsContext";
 import { getSavedZoneWeights, type WeightsByNumber } from "../lib/zpaStorage";
 
@@ -29,6 +35,7 @@ interface SurvivalAnalyzerProps {
   probabilityHeading?: string;
   trendWeights?: Record<number, number>;
   externalWindowSize?: number;
+  historyScopeLabel?: string;
   enableSDE1Global?: boolean;
   enableHC3Global?: boolean;
   hideBiasToggles?: boolean;
@@ -88,6 +95,11 @@ const tdRightStyle: React.CSSProperties = {
 
 const formatPercent = (value: number, digits = 1): string => `${(clampProbability(value) * 100).toFixed(digits)}%`;
 const formatNumber = (value: number, digits = 2): string => (Number.isFinite(value) ? value.toFixed(digits) : "0");
+const formatSignedPercent = (value: number, digits = 1): string => {
+  if (!Number.isFinite(value)) return "n/a";
+  const percent = value * 100;
+  return `${percent >= 0 ? "+" : ""}${percent.toFixed(digits)}%`;
+};
 
 const uniqueValidNumbers = (values: number[] | undefined): number[] => {
   const seen = new Set<number>();
@@ -194,12 +206,55 @@ function SegmentButton({
   );
 }
 
+const transitionSupportCopy: Record<MonthlyTransitionSupport, { label: string; color: string; background: string; border: string }> = {
+  above: { label: "Above", color: "#047857", background: "#ecfdf5", border: "#a7f3d0" },
+  neutral: { label: "Neutral", color: "#475569", background: "#f8fafc", border: "#e2e8f0" },
+  below: { label: "Below", color: "#b45309", background: "#fffbeb", border: "#fde68a" },
+  thin: { label: "Thin", color: "#7c2d12", background: "#fff7ed", border: "#fed7aa" },
+};
+
+function TransitionSupportPill({ support }: { support: MonthlyTransitionSupport }): JSX.Element {
+  const copy = transitionSupportCopy[support];
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        minWidth: 52,
+        height: 22,
+        padding: "0 7px",
+        borderRadius: 999,
+        border: `1px solid ${copy.border}`,
+        background: copy.background,
+        color: copy.color,
+        fontSize: 11,
+        fontWeight: 850,
+      }}
+    >
+      {copy.label}
+    </span>
+  );
+}
+
+function transitionContextTitle(context: MonthlyTransitionNumberContext | undefined): string {
+  if (!context) return "Monthly transition context unavailable";
+  return [
+    `Current monthly bucket: ${context.label}`,
+    `Stage movement support: ${transitionSupportCopy[context.support].label}`,
+    `Smoothed movement rate: ${formatPercent(context.smoothedRate, 2)}`,
+    `Stage trials: ${context.hits}/${context.trials}`,
+    "Observe-only context; it does not change survival ranking.",
+  ].join(" · ");
+}
+
 export const SurvivalAnalyzer: React.FC<SurvivalAnalyzerProps> = ({
   history,
   excludedNumbers,
   probabilityHeading,
   trendWeights,
   externalWindowSize,
+  historyScopeLabel,
   enableSDE1Global,
   enableHC3Global,
   hideBiasToggles = true,
@@ -255,6 +310,14 @@ export const SurvivalAnalyzer: React.FC<SurvivalAnalyzerProps> = ({
   const analysis = useMemo(
     () => analyzeSurvival(analysisHistory, { includeSupp: true, excludedNumbers: excluded }),
     [analysisHistory, excluded],
+  );
+  const monthlyTransitionAnalysis = useMemo(
+    () => analyzeMonthlyBucketTransitions(history, { includeSupp: true }),
+    [history],
+  );
+  const monthlyTransitionByNumber = useMemo(
+    () => buildMonthlyTransitionNumberContext(monthlyTransitionAnalysis),
+    [monthlyTransitionAnalysis],
   );
 
   const savedZoneWeights: WeightsByNumber | null = useMemo(() => {
@@ -414,6 +477,11 @@ export const SurvivalAnalyzer: React.FC<SurvivalAnalyzerProps> = ({
           <div style={{ ...mutedStyle, marginTop: 3 }}>
             {probabilityHeading ?? "Discrete-time drought hazard with Bayesian shrinkage and budgeted bias scores."}
           </div>
+          {historyScopeLabel && (
+            <div style={{ ...mutedStyle, marginTop: 3 }}>
+              Scope: {historyScopeLabel}. Built-in trend bias uses this scope unless a custom trend window is enabled.
+            </div>
+          )}
         </div>
         <div style={{ display: "inline-flex", border: "1px solid #cbd5e1", borderRadius: 8, overflow: "hidden" }}>
           <SegmentButton active={sortBy === "biased"} onClick={() => setSortBy("biased")}>Biased</SegmentButton>
@@ -424,11 +492,41 @@ export const SurvivalAnalyzer: React.FC<SurvivalAnalyzerProps> = ({
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8 }}>
-        <Metric label="Draws" value={String(analysis.summary.draws)} detail={externalWindowSize ? "locked by WFMQY" : "local window"} />
+        <Metric label="Draws" value={String(analysis.summary.draws)} detail={historyScopeLabel ? "baseline scope" : externalWindowSize ? "locked scope" : "local window"} />
         <Metric label="Mean Picks" value={formatNumber(analysis.summary.meanValidSelections, 1)} detail={`baseline ${formatPercent(analysis.summary.baselineRate, 1)}`} />
         <Metric label="Biased Budget" value={formatNumber(totalBiasedProbability, 2)} detail="sum of budgeted probabilities" />
         <Metric label="Max Drought" value={String(maxDrought)} detail={`${exactEvidenceCount}/45 exact evidence`} />
         <Metric label="Selected" value={`${selectedList.length}/8`} detail={selectedList.length ? selectedList.join(", ") : "none"} />
+      </div>
+
+      <div style={{ ...cardStyle, background: "#f8fafc" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
+          <div>
+            <div style={{ color: "#0f172a", fontWeight: 850 }}>Monthly Transition Context</div>
+            <div style={{ ...mutedStyle, marginTop: 3 }}>
+              Observe-only bucket movement evidence from the Monthly Bucket Transition Lab. These columns do not change Survival Analysis scores or sorting.
+            </div>
+          </div>
+          <div style={{ ...mutedStyle, textAlign: "right", lineHeight: 1.45 }}>
+            {monthlyTransitionAnalysis.planningState ? (
+              <>
+                <div>
+                  {monthlyTransitionAnalysis.planningState.monthLabel} · D{monthlyTransitionAnalysis.planningState.nextDrawOrdinal} of {monthlyTransitionAnalysis.planningState.expectedDrawCount}
+                </div>
+                <div>
+                  {monthlyTransitionAnalysis.selectedMonthLength === "all" ? "All month lengths" : `${monthlyTransitionAnalysis.selectedMonthLength}d evidence`} · {monthlyTransitionAnalysis.selectedMonthCount} month{monthlyTransitionAnalysis.selectedMonthCount === 1 ? "" : "s"}
+                </div>
+              </>
+            ) : (
+              <div>No monthly transition context available.</div>
+            )}
+          </div>
+        </div>
+        {monthlyTransitionAnalysis.warnings.length > 0 && (
+          <div style={{ marginTop: 6, color: "#92400e", fontSize: 12, lineHeight: 1.4 }}>
+            {monthlyTransitionAnalysis.warnings.join(" ")}
+          </div>
+        )}
       </div>
 
       {analysis.caveats.length > 0 && (
@@ -521,7 +619,7 @@ export const SurvivalAnalyzer: React.FC<SurvivalAnalyzerProps> = ({
         <div style={{ ...cardStyle, color: "#991b1b" }}>At least two valid draws are required for survival analysis.</div>
       ) : (
         <div style={{ ...cardStyle, overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 880 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1120 }}>
             <thead>
               <tr>
                 <th style={thStyle}>Rank</th>
@@ -529,6 +627,9 @@ export const SurvivalAnalyzer: React.FC<SurvivalAnalyzerProps> = ({
                 <th style={thStyle}>Base hit</th>
                 <th style={thStyle}>95% interval</th>
                 <th style={thStyle}>Biased hit</th>
+                <th style={thStyle}>Month bucket</th>
+                <th style={thStyle}>Stage move</th>
+                <th style={thStyle}>Move support</th>
                 <th style={thStyle}>Drought</th>
                 <th style={thStyle}>Evidence</th>
                 <th style={thStyle}>Bias weight</th>
@@ -540,6 +641,7 @@ export const SurvivalAnalyzer: React.FC<SurvivalAnalyzerProps> = ({
                 const selected = selectedNums.has(row.number);
                 const focused = row.number === focusNumber;
                 const background = focused ? "#fef9c3" : selected ? highlightColor : undefined;
+                const transitionContext = monthlyTransitionByNumber.get(row.number);
                 return (
                   <tr
                     key={row.number}
@@ -552,6 +654,22 @@ export const SurvivalAnalyzer: React.FC<SurvivalAnalyzerProps> = ({
                     <td style={tdRightStyle}>{formatPercent(row.baseProbability, 2)}</td>
                     <td style={tdRightStyle}>{formatPercent(row.credibleInterval95[0], 1)}-{formatPercent(row.credibleInterval95[1], 1)}</td>
                     <td style={{ ...tdRightStyle, fontWeight: 850, color: "#047857" }}>{formatPercent(row.biasedProbability, 2)}</td>
+                    <td style={tdStyle} title={transitionContextTitle(transitionContext)}>
+                      {transitionContext ? transitionContext.label : "n/a"}
+                    </td>
+                    <td style={tdRightStyle} title={transitionContextTitle(transitionContext)}>
+                      {transitionContext
+                        ? `${formatPercent(transitionContext.smoothedRate, 1)} (${transitionContext.hits}/${transitionContext.trials})`
+                        : "n/a"}
+                    </td>
+                    <td style={tdRightStyle} title={transitionContextTitle(transitionContext)}>
+                      {transitionContext ? (
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, justifyContent: "flex-end" }}>
+                          <span>{formatSignedPercent(transitionContext.rateLift, 1)}</span>
+                          <TransitionSupportPill support={transitionContext.support} />
+                        </span>
+                      ) : "n/a"}
+                    </td>
                     <td style={tdRightStyle}>{row.lastSeenDrawsAgo === null ? "never" : row.currentDrought}</td>
                     <td style={tdRightStyle}>{row.evidence} ({formatNumber(row.exactHits, 0)}/{formatNumber(row.exactExposure, 0)})</td>
                     <td style={tdRightStyle}>{formatNumber(row.biasWeight, 3)}</td>
@@ -563,6 +681,7 @@ export const SurvivalAnalyzer: React.FC<SurvivalAnalyzerProps> = ({
           </table>
           <div style={{ ...mutedStyle, marginTop: 8 }}>
             Base hit is the posterior mean of the current drought hazard. Biased hit is budgeted so all displayed number probabilities sum to the observed draw size instead of being falsely clamped.
+            Monthly transition columns are observe-only context from bucket movement history; they do not change the survival ranking.
           </div>
         </div>
       )}

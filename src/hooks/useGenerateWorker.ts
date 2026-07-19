@@ -84,13 +84,20 @@ export function serializeTrendMap(
 type OnTrace = (msg: string) => void;
 type OnResult = (result: GenerateCandidatesResult) => void;
 type OnError = (err: string) => void;
+type CancelGenerateResult = {
+  cancelled: boolean;
+  hadPartial: boolean;
+  accepted: number;
+  attempts: number;
+};
 
 /**
  * React hook that manages a single generate-worker instance.
- * Returns `runGenerate(args, onTrace, onResult, onError)`.
+ * Returns generation start/cancel helpers.
  */
 export function useGenerateWorker() {
   const workerRef = useRef<Worker | null>(null);
+  const latestPartialRef = useRef<GenerateCandidatesResult | null>(null);
   const callbacksRef = useRef<{
     onTrace: OnTrace;
     onResult: OnResult;
@@ -110,11 +117,23 @@ export function useGenerateWorker() {
         const cbs = callbacksRef.current;
         if (!cbs) return;
         if (type === "trace") cbs.onTrace(msg);
-        else if (type === "result") cbs.onResult(result);
-        else if (type === "error") cbs.onError(error);
+        else if (type === "partial") latestPartialRef.current = result;
+        else if (type === "result") {
+          latestPartialRef.current = null;
+          callbacksRef.current = null;
+          cbs.onResult(result);
+        }
+        else if (type === "error") {
+          latestPartialRef.current = null;
+          callbacksRef.current = null;
+          cbs.onError(error);
+        }
       });
       w.addEventListener("error", (e) => {
-        callbacksRef.current?.onError(e.message ?? "Worker error");
+        const cbs = callbacksRef.current;
+        latestPartialRef.current = null;
+        callbacksRef.current = null;
+        cbs?.onError(e.message ?? "Worker error");
       });
       workerRef.current = w;
       return w;
@@ -129,6 +148,8 @@ export function useGenerateWorker() {
     return () => {
       workerRef.current?.terminate();
       workerRef.current = null;
+      latestPartialRef.current = null;
+      callbacksRef.current = null;
     };
   }, []);
 
@@ -140,6 +161,7 @@ export function useGenerateWorker() {
       onError: OnError
     ) => {
       const worker = getWorker();
+      latestPartialRef.current = null;
       if (!worker) {
         // Fallback: run synchronously on main thread
         import("../generateCandidates").then(({ generateCandidates }) => {
@@ -191,8 +213,13 @@ export function useGenerateWorker() {
               trendMap, args.allowedTrendRatios, args.sumFilter,
               args.patternOptions, args.ogaBiasOptions, args.div5Options, args.mainZeroOptions, args.mainFiveOptions, args.mainOneOptions, args.mainTwoOptions, args.mainThreeOptions, args.mainFourOptions, args.mainSixOptions, args.mainSevenOptions, args.mainEightOptions, args.mainNineOptions, args.digitWidthConstraint,
               monthlyBucketOptions, args.attemptMultiplier, args.ogaSpokeCount,
-                args.maxLastDrawMatches, args.monthlyRepeatBiasWeights, args.mainDecadeBiases, args.monthEndCarryOverWeights, args.scoringGenerationProfile
+                args.maxLastDrawMatches, args.monthlyRepeatBiasWeights, args.mainDecadeBiases, args.monthEndCarryOverWeights, args.scoringGenerationProfile,
+                (partialResult) => {
+                  latestPartialRef.current = partialResult;
+                },
+                args.latestNeighbourSupportOptions
             );
+            latestPartialRef.current = null;
             onResult(result);
           } catch (e: any) {
             onError(String(e?.message ?? e));
@@ -208,5 +235,31 @@ export function useGenerateWorker() {
     [getWorker]
   );
 
-  return { runGenerate };
+  const cancelGenerate = useCallback((): CancelGenerateResult => {
+    const worker = workerRef.current;
+    const callbacks = callbacksRef.current;
+    const latestPartial = latestPartialRef.current;
+    if (!worker && !callbacks) {
+      return { cancelled: false, hadPartial: false, accepted: 0, attempts: 0 };
+    }
+
+    worker?.terminate();
+    workerRef.current = null;
+    callbacksRef.current = null;
+    latestPartialRef.current = null;
+
+    if (latestPartial && callbacks) {
+      callbacks.onResult(latestPartial);
+      return {
+        cancelled: true,
+        hadPartial: true,
+        accepted: latestPartial.candidates.length,
+        attempts: latestPartial.rejectionStats.totalAttempts,
+      };
+    }
+
+    return { cancelled: true, hadPartial: false, accepted: 0, attempts: 0 };
+  }, []);
+
+  return { runGenerate, cancelGenerate };
 }

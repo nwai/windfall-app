@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { generateCandidates } from "../src/generateCandidates";
+import { generateCandidates, type GenerateCandidatesResult } from "../src/generateCandidates";
 import type { Draw, Knobs } from "../src/types";
 
 const knobs: Knobs = {
@@ -51,7 +51,12 @@ function withSeededRandom<T>(seed: number, run: () => T): T {
   }
 }
 
-function runGenerator(overrides: Partial<{ minOGAPercentile: number; pastOGAScores: number[]; history: Draw[] }> = {}) {
+function runGenerator(overrides: Partial<{
+  minOGAPercentile: number;
+  pastOGAScores: number[];
+  history: Draw[];
+  progressSetter: (result: GenerateCandidatesResult) => void;
+}> = {}) {
   return withFixedRandom(0, () =>
     generateCandidates(
       3,
@@ -91,7 +96,16 @@ function runGenerator(overrides: Partial<{ minOGAPercentile: number; pastOGAScor
       undefined,
       undefined,
       undefined,
+      undefined,
+      undefined,
       20,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      overrides.progressSetter,
     )
   );
 }
@@ -154,6 +168,19 @@ describe("generateCandidates summaries and OGA floor", () => {
     expect(result.candidates.length).toBeGreaterThan(0);
     expect(result.ratioSummary.totalAccepted).toBe(result.candidates.length);
     expect(Object.values(result.ratioSummary.acceptedRatios).reduce((sum, count) => sum + count, 0)).toBe(result.candidates.length);
+  });
+
+  it("emits partial progress snapshots as candidates are accepted", () => {
+    const snapshots: GenerateCandidatesResult[] = [];
+    const result = runGenerator({
+      progressSetter: (snapshot) => snapshots.push(snapshot),
+    });
+
+    expect(result.candidates.length).toBeGreaterThan(0);
+    expect(snapshots.length).toBeGreaterThan(0);
+    expect(snapshots[0].candidates.length).toBeGreaterThan(0);
+    expect(snapshots[0].rejectionStats.accepted).toBe(snapshots[0].candidates.length);
+    expect(snapshots[0].rejectionStats.totalAttempts).toBeGreaterThan(0);
   });
 
   it("enforces selected odd/even ratio quotas from their relative history percentages", () => {

@@ -98,6 +98,12 @@ export interface ScoredPredictionJournalEntry extends PredictionJournalEntry {
   reason?: string;
 }
 
+export interface PredictionJournalDraft {
+  targetKind: PredictionTargetKind;
+  inputs: PredictionJournalInputs;
+  sourceSummary: string[];
+}
+
 interface OrderedDraw {
   draw: Draw;
   time: number;
@@ -258,12 +264,132 @@ const formatAcceptanceNeedsCounts = (counts: unknown): string => {
   return parts.length ? parts.join(" · ") : "none";
 };
 
+const formatDraftNumbers = (numbers: number[]): string => (
+  numbers.length ? numbers.join(", ") : "none"
+);
+
+const uniqueDraftNumbers = (...lists: Array<number[] | undefined>): number[] => {
+  const seen = new Set<number>();
+  const output: number[] = [];
+  for (const list of lists) {
+    for (const value of list ?? []) {
+      if (!Number.isInteger(value) || value < 1 || value > 45 || seen.has(value)) continue;
+      seen.add(value);
+      output.push(value);
+    }
+  }
+  return output;
+};
+
+const positiveBucketCounts = (counts: PredictionBucketCounts | undefined): PredictionBucketCounts | undefined => {
+  if (!counts) return undefined;
+  const output: PredictionBucketCounts = {};
+  for (const key of BUCKET_KEYS) {
+    const value = normalizeInteger(counts[key]);
+    if (value !== undefined && value > 0) output[key] = value;
+  }
+  return Object.keys(output).length ? output : undefined;
+};
+
+const sumBucketCounts = (counts: PredictionBucketCounts | undefined): number => (
+  BUCKET_KEYS.reduce((sum, key) => sum + (normalizeInteger(counts?.[key]) ?? 0), 0)
+);
+
+const formatBucketDraft = (counts: PredictionBucketCounts | undefined): string => (
+  counts ? formatBucketCounts(counts) : "none"
+);
+
+export function buildPredictionJournalDraftFromSetup(snapshot: AppPresetSnapshot | null | undefined): PredictionJournalDraft {
+  if (!snapshot) {
+    const notes = [
+      "New prediction draft started without an app setup snapshot.",
+      "Review the current app setup manually before saving.",
+    ];
+    return {
+      targetKind: "nextDraw",
+      inputs: { notes: notes.join("\n") },
+      sourceSummary: notes,
+    };
+  }
+
+  const setup = snapshot as Partial<AppPresetSnapshot> & Record<string, any>;
+  const knobs = (setup.knobs && typeof setup.knobs === "object" ? setup.knobs : {}) as Record<string, unknown>;
+  const userSelected = normalizeNumberList(setup.userSelectedNumbers, 1, 45) ?? [];
+  const trendForced = normalizeNumberList(setup.trendSelectedNumbers, 1, 45) ?? [];
+  const latestNeighbourForced = normalizeNumberList(setup.previousNeighbourConstraintNumbers, 1, 45) ?? [];
+  const hotColdForced = normalizeNumberList(setup.hotColdForcedNumbers, 1, 45) ?? [];
+  const droughtForced = normalizeNumberList(setup.droughtBreakSelectedNumbers, 1, 45) ?? [];
+  const carryOverBoosted = normalizeNumberList(setup.selectedCarryOverBoostNumbers, 1, 45) ?? [];
+  const userExcluded = normalizeNumberList(setup.excludedNumbers, 1, 45) ?? [];
+  const hotColdExcluded = normalizeNumberList(setup.hotColdExcludedNumbers, 1, 45) ?? [];
+  const forcedUnion = uniqueDraftNumbers(trendForced, latestNeighbourForced, hotColdForced, droughtForced, carryOverBoosted);
+  const candidateNumbers = uniqueDraftNumbers(userSelected, forcedUnion);
+  const copiedNumbers = candidateNumbers.slice(0, 8);
+  const selectedRatios = Array.isArray(setup.selectedRatios)
+    ? setup.selectedRatios.filter((ratio): ratio is string => typeof ratio === "string" && /^\d+\s*:\s*\d+$/.test(ratio))
+    : [];
+  const monthlyBuckets = positiveBucketCounts(normalizeBucketCounts(setup.acceptanceNeedsCounts));
+  const monthlyBucketTotal = sumBucketCounts(monthlyBuckets);
+  const inputs: PredictionJournalInputs = {};
+  const notes: string[] = [
+    "New prediction draft created from the current app setup.",
+    `WFMQYH setup: ${formatWindowSummary(setup)}.`,
+  ];
+
+  if (selectedRatios.length === 1) {
+    inputs.oddEvenRatio = selectedRatios[0];
+    notes.push(`Odd/even ratio copied: ${selectedRatios[0]}.`);
+  } else if (selectedRatios.length > 1) {
+    notes.push(`Multiple odd/even ratios selected; review manually: ${selectedRatios.join(", ")}.`);
+  } else if (copiedNumbers.length === 8) {
+    const oddEven = countOddEven(copiedNumbers);
+    inputs.oddEvenRatio = `${oddEven.odd}:${oddEven.even}`;
+    notes.push(`Odd/even ratio inferred from the copied 8 numbers: ${inputs.oddEvenRatio}.`);
+  }
+
+  if (setup.useTrickyRule) notes.push("Tricky Rule is ON; selected odd/even ratios may be overridden in generation.");
+
+  if (copiedNumbers.length > 0) {
+    inputs.numbers = copiedNumbers;
+    notes.push(`Numbers copied into the prediction field: ${formatDraftNumbers(copiedNumbers)}.`);
+    if (candidateNumbers.length > copiedNumbers.length) {
+      notes.push(`Additional selected/forced numbers kept in this note only: ${formatDraftNumbers(candidateNumbers.slice(copiedNumbers.length))}.`);
+    }
+  }
+
+  if ((setup.monthlyConstructiveEnabled || setup.acceptanceNeedsEnabled) && monthlyBuckets) {
+    if (monthlyBucketTotal <= 8) {
+      inputs.monthlyBuckets = monthlyBuckets;
+      notes.push(`Acceptance-needs counts copied as a target draw bucket-origin draft: ${formatBucketDraft(monthlyBuckets)}.`);
+    } else {
+      notes.push(`Acceptance-needs counts were not copied into bucket-origin fields because they total ${monthlyBucketTotal}, which is above the 8-ball next-draw limit: ${formatBucketDraft(monthlyBuckets)}.`);
+    }
+  }
+
+  notes.push(`SDE1: ${knobs.enableSDE1 ? "ON" : "OFF"}.`);
+  notes.push(`HC3: ${knobs.enableHC3 ? "ON" : "OFF"}.`);
+  notes.push(`User selected numbers: ${formatDraftNumbers(userSelected)}.`);
+  notes.push(`Forced/boosted inclusion sources: trend ${formatDraftNumbers(trendForced)}; latest +/- targets ${formatDraftNumbers(latestNeighbourForced)}; hot/cold ${formatDraftNumbers(hotColdForced)}; drought-break ${formatDraftNumbers(droughtForced)}; carry-over boosted ${formatDraftNumbers(carryOverBoosted)}.`);
+  notes.push(`Forced exclusions: user ${formatDraftNumbers(userExcluded)}; hot/cold ${formatDraftNumbers(hotColdExcluded)}.`);
+  notes.push(`Scoring influence: ${setup.scoringGenerationInfluence ?? "off"}; selected-number boost: ${setup.selectedBoostEnabled ? `ON x${setup.selectedBoostFactor ?? "-"}` : "OFF"}.`);
+  notes.push("Review this draft before saving; copied values are starting points, not predictions made by Windfall.");
+
+  inputs.notes = notes.join("\n");
+
+  return {
+    targetKind: "nextDraw",
+    inputs: normalizePredictionJournalInputs(inputs),
+    sourceSummary: notes,
+  };
+}
+
 export function summarizePredictionJournalSetup(snapshot: AppPresetSnapshot | null | undefined): PredictionJournalSetupSummary | undefined {
   if (!snapshot) return undefined;
   const setup = snapshot as Partial<AppPresetSnapshot> & Record<string, any>;
   const knobs = (setup.knobs && typeof setup.knobs === "object" ? setup.knobs : {}) as Record<string, unknown>;
   const generation: string[] = [
     `Scoring influence: ${setup.scoringGenerationInfluence ?? "off"}`,
+    `Latest +/-1 support: ${setup.latestNeighbourSupportEnabled ? "on" : "off"}`,
     `Month-end carry-over: ${setup.monthEndCarryOverBiasEnabled ? (setup.monthEndCarryOverStrength ?? "normal") : "off"}`,
     `Use counts when constructing candidates: ${setup.monthlyConstructiveEnabled ? "on" : "off"}`,
     `Acceptance needs counts: ${formatAcceptanceNeedsCounts(setup.acceptanceNeedsCounts)}`,

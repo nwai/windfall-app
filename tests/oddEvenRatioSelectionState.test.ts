@@ -9,6 +9,10 @@ describe("Odd/even ratio selection state", () => {
     expect(appSource).toContain("const nextRatioOptions = computeOddEvenRatios(realFilteredHistory);");
     expect(appSource).toContain("setRatioOptions(nextRatioOptions);");
     expect(appSource).toContain("nextRatioOptions.some((opt) => opt.ratio === r)");
+    expect(appSource).toContain("const ratioOptionValues = useMemo(() => ratioOptions.map((option) => option.ratio), [ratioOptions]);");
+    expect(appSource).toContain("const handleSelectAllRatios = useCallback");
+    expect(appSource).toContain("setSelectedRatios(ratioOptionValues);");
+    expect(appSource).toContain("Select all observed");
     expect(appSource).not.toContain("setSelectedRatios((ratios) => ratios.filter((r) => ratioOptions.some((opt) => opt.ratio === r)))");
   });
 });

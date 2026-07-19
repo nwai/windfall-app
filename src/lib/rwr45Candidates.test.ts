@@ -54,4 +54,51 @@ describe("generateRwR45Candidates", () => {
     expect(result.traceLines.join("\n")).toContain("42 globally unique mains");
     expect(result.traceLines.join("\n")).toContain("3-number supplementary pool");
   });
+
+  it("honors forced inclusions and exclusions while keeping non-forced main coverage unique", () => {
+    const forcedNumbers = [4, 7, 22];
+    const excludedNumbers = [1, 2, 3, 44, 45];
+    const result = generateRwR45Candidates(seededRandom(20260711), {
+      forcedNumbers,
+      excludedNumbers,
+    });
+    const forcedSet = new Set(forcedNumbers);
+    const excludedSet = new Set(excludedNumbers);
+
+    expect(result.candidates).toHaveLength(7);
+    for (const candidate of result.candidates) {
+      const nums = [...candidate.main, ...candidate.supp];
+      expect(candidate.main).toHaveLength(6);
+      expect(candidate.supp).toHaveLength(2);
+      expect(new Set(nums).size).toBe(8);
+      expect(forcedNumbers.every((number) => nums.includes(number))).toBe(true);
+      expect(nums.some((number) => excludedSet.has(number))).toBe(false);
+    }
+
+    const nonForcedMains = result.candidates
+      .flatMap((candidate) => candidate.main)
+      .filter((number) => !forcedSet.has(number));
+    expect(nonForcedMains).toHaveLength(21);
+    expect(new Set(nonForcedMains).size).toBe(21);
+    expect(result.traceLines.join("\n")).toContain("forced-aware");
+    expect(result.traceLines.join("\n")).toContain("exclusions=5");
+    expect(result.traceLines.join("\n")).toContain("forced=3");
+  });
+
+  it("falls back to row-safe random fill when exclusions make a global 42-main partition impossible", () => {
+    const result = generateRwR45Candidates(seededRandom(123), {
+      excludedNumbers: [1, 2, 3, 4, 5, 6, 7],
+    });
+    const excludedSet = new Set([1, 2, 3, 4, 5, 6, 7]);
+
+    expect(result.candidates).toHaveLength(7);
+    for (const candidate of result.candidates) {
+      const nums = [...candidate.main, ...candidate.supp];
+      expect(candidate.main).toHaveLength(6);
+      expect(candidate.supp).toHaveLength(2);
+      expect(new Set(nums).size).toBe(8);
+      expect(nums.some((number) => excludedSet.has(number))).toBe(false);
+    }
+    expect(result.traceLines.join("\n")).toContain("row-safe fallback");
+  });
 });

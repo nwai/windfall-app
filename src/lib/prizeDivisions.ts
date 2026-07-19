@@ -23,21 +23,23 @@ const DIVISION_SORT_WEIGHT: Record<WeekdayWindfallPrizeDivision, number> = {
 export function computeWeekdayWindfallPrizeHits(
   playerMain: number[],
   drawnMain: Set<number>,
-  drawnSupp: Set<number>
+  drawnSupp: Set<number>,
+  playerSupp: number[] = []
 ): { mainHits: number; suppHits: number } {
-  const mainHits = playerMain.filter((n) => drawnMain.has(n)).length;
-  const suppHits = playerMain.filter((n) => drawnSupp.has(n)).length;
+  const selectedNumbers = Array.from(new Set([...playerMain, ...playerSupp]));
+  const mainHits = selectedNumbers.filter((n) => drawnMain.has(n)).length;
+  const suppHits = selectedNumbers.filter((n) => drawnSupp.has(n)).length;
   return { mainHits, suppHits };
 }
 
 export function computeWeekdayWindfallPrizeDivision(
   playerMain: number[],
-  _playerSupp: number[],
+  playerSupp: number[],
   drawnMain: Set<number>,
   drawnSupp: Set<number>
 ): WeekdayWindfallPrizeDivision {
   if (drawnMain.size < 6 || drawnSupp.size < 2) return "—";
-  const { mainHits, suppHits } = computeWeekdayWindfallPrizeHits(playerMain, drawnMain, drawnSupp);
+  const { mainHits, suppHits } = computeWeekdayWindfallPrizeHits(playerMain, drawnMain, drawnSupp, playerSupp);
   if (mainHits === 6) return "Div1";
   if (mainHits === 5 && suppHits >= 1) return "Div2";
   if (mainHits === 5) return "Div3";
@@ -58,6 +60,6 @@ export function computeWeekdayWindfallPrizeScore(
   drawnSupp: Set<number>
 ): number {
   const division = computeWeekdayWindfallPrizeDivision(playerMain, playerSupp, drawnMain, drawnSupp);
-  const { mainHits, suppHits } = computeWeekdayWindfallPrizeHits(playerMain, drawnMain, drawnSupp);
+  const { mainHits, suppHits } = computeWeekdayWindfallPrizeHits(playerMain, drawnMain, drawnSupp, playerSupp);
   return DIVISION_SORT_WEIGHT[division] * 100 + mainHits * 10 + suppHits;
 }

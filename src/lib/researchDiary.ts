@@ -295,6 +295,7 @@ export function summarizeResearchDiarySetup(snapshot: AppPresetSnapshot | null |
   const knobs = (setup.knobs && typeof setup.knobs === "object" ? setup.knobs : {}) as Record<string, unknown>;
   const generation = [
     `Scoring influence: ${setup.scoringGenerationInfluence ?? "off"}`,
+    `Latest +/-1 support: ${setup.latestNeighbourSupportEnabled ? "on" : "off"}`,
     `Month-end carry-over: ${setup.monthEndCarryOverBiasEnabled ? (setup.monthEndCarryOverStrength ?? "normal") : "off"}`,
     `Use counts when constructing candidates: ${setup.monthlyConstructiveEnabled ? "on" : "off"}`,
     `Acceptance needs counts: ${formatAcceptanceNeedsCounts(setup.acceptanceNeedsCounts)}`,

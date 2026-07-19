@@ -41,6 +41,7 @@ export const FAVORITE_PANEL_REGISTRY: FavoritePanelMeta[] = [
   { id: "monthly-overlap", title: "Monthly Numbers Overlap", workflow: "Generation" },
   { id: "monthly-first-last-hits", title: "Monthly First <-> Last Draw Hits", workflow: "Generation" },
   { id: "monthly-draws-summary", title: "Monthly Draws Summary", workflow: "Generation" },
+  { id: "monthly-bucket-transition-lab", title: "Monthly Bucket Transition Lab", workflow: "Generation" },
   { id: "month-end-carry-over-buckets", title: "Month-End Carry-Over Buckets", workflow: "Generation" },
   { id: "monthly-digit-occurrences", title: "Monthly 1-Digit vs 2-Digit Occurrences", workflow: "Generation" },
   { id: "hot-cold-ranking", title: "Hot vs Cold Ranking", workflow: "Generation" },

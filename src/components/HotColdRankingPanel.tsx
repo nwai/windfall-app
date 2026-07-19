@@ -30,7 +30,22 @@ interface HotColdRankingPanelProps {
   onToggleExcludedNumber?: (number: number) => void;
 }
 
-type BreakdownSortKey = "hotRank" | "historicalCount" | "historicalRank" | "recentCount" | "recentRank" | "priorRate" | "weightedRate" | "weightedRank";
+type BreakdownSortKey =
+  | "hotRank"
+  | "number"
+  | "digitWidth"
+  | "status"
+  | "historicalCount"
+  | "historicalRank"
+  | "recentCount"
+  | "recentRank"
+  | "priorRate"
+  | "recentDelta"
+  | "weightedRate"
+  | "weightedRank"
+  | "hotScore"
+  | "generation";
+type BreakdownSortDir = "asc" | "desc";
 type BreakdownSelectionMode = "off" | "include" | "exclude";
 
 const formatPercent = (value: number): string => `${(value * 100).toFixed(1)}%`;
@@ -45,6 +60,99 @@ const statusStyles: Record<HotColdStatus, { label: string; background: string; c
   neutral: { label: "Neutral", background: "#f8fafc", color: "#475569", border: "1px solid #cbd5e1" },
   cool: { label: "Cool", background: "#eff6ff", color: "#1d4ed8", border: "1px solid #bfdbfe" },
   cold: { label: "Cold", background: "#e0f2fe", color: "#0369a1", border: "1px solid #7dd3fc" },
+};
+
+const statusSortValue: Record<HotColdStatus, number> = {
+  cold: 1,
+  cool: 2,
+  neutral: 3,
+  warm: 4,
+  hot: 5,
+};
+
+const defaultBreakdownSortDir: Record<BreakdownSortKey, BreakdownSortDir> = {
+  hotRank: "asc",
+  number: "asc",
+  digitWidth: "asc",
+  status: "desc",
+  historicalCount: "desc",
+  historicalRank: "asc",
+  recentCount: "desc",
+  recentRank: "asc",
+  priorRate: "desc",
+  recentDelta: "desc",
+  weightedRate: "desc",
+  weightedRank: "asc",
+  hotScore: "desc",
+  generation: "desc",
+};
+
+const breakdownThStyle: React.CSSProperties = {
+  padding: "0",
+  borderBottom: "1px solid #e2e8f0",
+  textAlign: "center",
+  color: "#475569",
+  whiteSpace: "nowrap",
+};
+
+const breakdownSortButtonStyle: React.CSSProperties = {
+  width: "100%",
+  minHeight: 34,
+  padding: "8px 10px",
+  border: "none",
+  background: "transparent",
+  color: "inherit",
+  cursor: "pointer",
+  font: "inherit",
+  fontWeight: 800,
+  userSelect: "none",
+  whiteSpace: "nowrap",
+};
+
+const getSortArrow = (isActive: boolean, sortDir: BreakdownSortDir): string => (
+  isActive ? (sortDir === "asc" ? " ▲" : " ▼") : " ⇅"
+);
+
+interface SortableBreakdownHeaderProps {
+  sortKey: BreakdownSortKey;
+  label: string;
+  activeSortKey: BreakdownSortKey;
+  sortDir: BreakdownSortDir;
+  title: string;
+  onSort: (key: BreakdownSortKey) => void;
+}
+
+const SortableBreakdownHeader: React.FC<SortableBreakdownHeaderProps> = ({
+  sortKey,
+  label,
+  activeSortKey,
+  sortDir,
+  title,
+  onSort,
+}) => {
+  const active = activeSortKey === sortKey;
+  return (
+    <th
+      scope="col"
+      aria-sort={active ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
+      style={breakdownThStyle}
+    >
+      <button
+        type="button"
+        onClick={() => onSort(sortKey)}
+        title={title}
+        aria-label={`Sort by ${label}`}
+        style={{
+          ...breakdownSortButtonStyle,
+          background: active ? "#eef5ff" : "transparent",
+          color: active ? "#174ea6" : "#475569",
+        }}
+      >
+        {label}
+        <span aria-hidden="true">{getSortArrow(active, sortDir)}</span>
+      </button>
+    </th>
+  );
 };
 
 const TopListCard: React.FC<{ title: string; hint: string; rows: HotColdRankingRow[]; accent: string }> = ({ title, hint, rows, accent }) => (
@@ -94,7 +202,7 @@ export const HotColdRankingPanel: React.FC<HotColdRankingPanelProps> = ({
   const [digitFilter, setDigitFilter] = useState<HotColdDigitFilter>("all");
   const [breakdownOpen, setBreakdownOpen] = useState<boolean>(true);
   const [breakdownSortKey, setBreakdownSortKey] = useState<BreakdownSortKey>("hotRank");
-  const [breakdownSortDir, setBreakdownSortDir] = useState<"asc" | "desc">("asc");
+  const [breakdownSortDir, setBreakdownSortDir] = useState<BreakdownSortDir>("asc");
   const [breakdownSelectionMode, setBreakdownSelectionMode] = useState<BreakdownSelectionMode>("off");
 
   const resolvedRecentWindow = useMemo(() => {
@@ -148,13 +256,24 @@ export const HotColdRankingPanel: React.FC<HotColdRankingPanelProps> = ({
   const sortedBreakdownRows = useMemo(() => {
     const selector: Record<BreakdownSortKey, (row: HotColdRankingRow) => number> = {
       hotRank: (row) => row.hotRank,
+      number: (row) => row.number,
+      digitWidth: (row) => (row.digitWidth === "oneDigit" ? 1 : 2),
+      status: (row) => statusSortValue[row.status],
       historicalCount: (row) => row.totalCount,
       historicalRank: (row) => row.historicalRank,
       recentCount: (row) => row.recentCount,
       recentRank: (row) => row.recentRank,
       priorRate: (row) => row.priorRate,
+      recentDelta: (row) => row.recentDelta,
       weightedRate: (row) => row.weightedRate,
       weightedRank: (row) => row.weightedRank,
+      hotScore: (row) => row.hotScore,
+      generation: (row) => {
+        if (userExcludedNumberSet.has(row.number)) return 3;
+        if (forcedNumberSet.has(row.number)) return 2;
+        if (excludedNumberSet.has(row.number)) return 1;
+        return 0;
+      },
     };
 
     return [...filteredRows].sort((left, right) => {
@@ -165,7 +284,7 @@ export const HotColdRankingPanel: React.FC<HotColdRankingPanelProps> = ({
       }
       return left.number - right.number;
     });
-  }, [filteredRows, breakdownSortDir, breakdownSortKey]);
+  }, [breakdownSortDir, breakdownSortKey, excludedNumberSet, filteredRows, forcedNumberSet, userExcludedNumberSet]);
 
   const toggleBreakdownSort = (key: BreakdownSortKey): void => {
     if (breakdownSortKey === key) {
@@ -173,12 +292,8 @@ export const HotColdRankingPanel: React.FC<HotColdRankingPanelProps> = ({
       return;
     }
     setBreakdownSortKey(key);
-    setBreakdownSortDir(key === "historicalRank" || key === "recentRank" || key === "weightedRank" || key === "hotRank" ? "asc" : "desc");
+    setBreakdownSortDir(defaultBreakdownSortDir[key]);
   };
-
-  const getSortIndicator = (key: BreakdownSortKey): string => (
-    breakdownSortKey === key ? (breakdownSortDir === "asc" ? " ▲" : " ▼") : ""
-  );
 
   const includeRowsMode = breakdownSelectionMode === "include";
   const excludeRowsMode = breakdownSelectionMode === "exclude";
@@ -348,20 +463,20 @@ export const HotColdRankingPanel: React.FC<HotColdRankingPanelProps> = ({
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
               <thead>
                 <tr style={{ background: "#f8fafc" }}>
-                  <th style={{ padding: "8px 10px", borderBottom: "1px solid #e2e8f0", textAlign: "center", color: "#475569", whiteSpace: "nowrap", cursor: "pointer", userSelect: "none" }} onClick={() => toggleBreakdownSort("hotRank")} title="Sort by overall hot rank">#{getSortIndicator("hotRank")}</th>
-                  <th style={{ padding: "8px 10px", borderBottom: "1px solid #e2e8f0", textAlign: "center", color: "#475569", whiteSpace: "nowrap" }}>Num</th>
-                  <th style={{ padding: "8px 10px", borderBottom: "1px solid #e2e8f0", textAlign: "center", color: "#475569", whiteSpace: "nowrap" }}>Type</th>
-                  <th style={{ padding: "8px 10px", borderBottom: "1px solid #e2e8f0", textAlign: "center", color: "#475569", whiteSpace: "nowrap" }}>Status</th>
-                  <th style={{ padding: "8px 10px", borderBottom: "1px solid #e2e8f0", textAlign: "center", color: "#475569", whiteSpace: "nowrap", cursor: "pointer", userSelect: "none" }} onClick={() => toggleBreakdownSort("historicalCount")} title="Sort by historical count">Hist count{getSortIndicator("historicalCount")}</th>
-                  <th style={{ padding: "8px 10px", borderBottom: "1px solid #e2e8f0", textAlign: "center", color: "#475569", whiteSpace: "nowrap", cursor: "pointer", userSelect: "none" }} onClick={() => toggleBreakdownSort("historicalRank")} title="Sort by historical rank">Hist rank{getSortIndicator("historicalRank")}</th>
-                  <th style={{ padding: "8px 10px", borderBottom: "1px solid #e2e8f0", textAlign: "center", color: "#475569", whiteSpace: "nowrap", cursor: "pointer", userSelect: "none" }} onClick={() => toggleBreakdownSort("recentCount")} title={`Sort by appearances in the last ${summary.recentWindow} draws`}>{`Recent ${summary.recentWindow}`}{getSortIndicator("recentCount")}</th>
-                  <th style={{ padding: "8px 10px", borderBottom: "1px solid #e2e8f0", textAlign: "center", color: "#475569", whiteSpace: "nowrap", cursor: "pointer", userSelect: "none" }} onClick={() => toggleBreakdownSort("recentRank")} title="Sort by recent rank">Recent rank{getSortIndicator("recentRank")}</th>
-                  <th style={{ padding: "8px 10px", borderBottom: "1px solid #e2e8f0", textAlign: "center", color: "#475569", whiteSpace: "nowrap", cursor: "pointer", userSelect: "none" }} onClick={() => toggleBreakdownSort("priorRate")} title="Sort by prior-window hit rate">Prior rate{getSortIndicator("priorRate")}</th>
-                  <th style={{ padding: "8px 10px", borderBottom: "1px solid #e2e8f0", textAlign: "center", color: "#475569", whiteSpace: "nowrap" }}>Recent Δ</th>
-                  <th style={{ padding: "8px 10px", borderBottom: "1px solid #e2e8f0", textAlign: "center", color: "#475569", whiteSpace: "nowrap", cursor: "pointer", userSelect: "none" }} onClick={() => toggleBreakdownSort("weightedRate")} title="Sort by recency-weighted hit rate">Weighted rate{getSortIndicator("weightedRate")}</th>
-                  <th style={{ padding: "8px 10px", borderBottom: "1px solid #e2e8f0", textAlign: "center", color: "#475569", whiteSpace: "nowrap", cursor: "pointer", userSelect: "none" }} onClick={() => toggleBreakdownSort("weightedRank")} title="Sort by recency-weighted rank">Weighted rank{getSortIndicator("weightedRank")}</th>
-                  <th style={{ padding: "8px 10px", borderBottom: "1px solid #e2e8f0", textAlign: "center", color: "#475569", whiteSpace: "nowrap" }}>Hot score</th>
-                  <th style={{ padding: "8px 10px", borderBottom: "1px solid #e2e8f0", textAlign: "center", color: "#475569", whiteSpace: "nowrap" }}>Generation</th>
+                  <SortableBreakdownHeader sortKey="hotRank" label="#" activeSortKey={breakdownSortKey} sortDir={breakdownSortDir} onSort={toggleBreakdownSort} title="Sort by overall hot rank" />
+                  <SortableBreakdownHeader sortKey="number" label="Num" activeSortKey={breakdownSortKey} sortDir={breakdownSortDir} onSort={toggleBreakdownSort} title="Sort by number" />
+                  <SortableBreakdownHeader sortKey="digitWidth" label="Type" activeSortKey={breakdownSortKey} sortDir={breakdownSortDir} onSort={toggleBreakdownSort} title="Sort by 1-digit or 2-digit type" />
+                  <SortableBreakdownHeader sortKey="status" label="Status" activeSortKey={breakdownSortKey} sortDir={breakdownSortDir} onSort={toggleBreakdownSort} title="Sort by hot/warm/neutral/cool/cold status" />
+                  <SortableBreakdownHeader sortKey="historicalCount" label="Hist count" activeSortKey={breakdownSortKey} sortDir={breakdownSortDir} onSort={toggleBreakdownSort} title="Sort by historical count" />
+                  <SortableBreakdownHeader sortKey="historicalRank" label="Hist rank" activeSortKey={breakdownSortKey} sortDir={breakdownSortDir} onSort={toggleBreakdownSort} title="Sort by historical rank" />
+                  <SortableBreakdownHeader sortKey="recentCount" label={`Recent ${summary.recentWindow}`} activeSortKey={breakdownSortKey} sortDir={breakdownSortDir} onSort={toggleBreakdownSort} title={`Sort by appearances in the last ${summary.recentWindow} draws`} />
+                  <SortableBreakdownHeader sortKey="recentRank" label="Recent rank" activeSortKey={breakdownSortKey} sortDir={breakdownSortDir} onSort={toggleBreakdownSort} title="Sort by recent rank" />
+                  <SortableBreakdownHeader sortKey="priorRate" label="Prior rate" activeSortKey={breakdownSortKey} sortDir={breakdownSortDir} onSort={toggleBreakdownSort} title="Sort by prior-window hit rate" />
+                  <SortableBreakdownHeader sortKey="recentDelta" label="Recent Δ" activeSortKey={breakdownSortKey} sortDir={breakdownSortDir} onSort={toggleBreakdownSort} title="Sort by recent-vs-prior delta" />
+                  <SortableBreakdownHeader sortKey="weightedRate" label="Weighted rate" activeSortKey={breakdownSortKey} sortDir={breakdownSortDir} onSort={toggleBreakdownSort} title="Sort by recency-weighted hit rate" />
+                  <SortableBreakdownHeader sortKey="weightedRank" label="Weighted rank" activeSortKey={breakdownSortKey} sortDir={breakdownSortDir} onSort={toggleBreakdownSort} title="Sort by recency-weighted rank" />
+                  <SortableBreakdownHeader sortKey="hotScore" label="Hot score" activeSortKey={breakdownSortKey} sortDir={breakdownSortDir} onSort={toggleBreakdownSort} title="Sort by combined hot/cold score" />
+                  <SortableBreakdownHeader sortKey="generation" label="Generation" activeSortKey={breakdownSortKey} sortDir={breakdownSortDir} onSort={toggleBreakdownSort} title="Sort by candidate-generation selection state" />
                 </tr>
               </thead>
               <tbody>

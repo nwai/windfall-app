@@ -530,6 +530,424 @@ tbody tr:hover {
   opacity: 0.48;
 }
 
+.lottery-platform {
+  min-height: 100vh;
+  background: var(--wf-page);
+  color: var(--wf-text);
+  font-family: var(--wf-font-sans);
+}
+
+.lottery-platform__header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: end;
+  max-width: 1720px;
+  margin: 0 auto;
+  padding: 18px 22px 12px;
+}
+
+.lottery-platform__copy {
+  min-width: 0;
+}
+
+.lottery-platform__label {
+  margin: 0 0 4px;
+  color: var(--wf-muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.lottery-platform__copy h1 {
+  margin: 0;
+  color: var(--wf-ink);
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1.05;
+}
+
+.lottery-platform__copy p:last-child {
+  max-width: 760px;
+  margin: 6px 0 0;
+  color: var(--wf-muted);
+  font-size: 13px;
+}
+
+.lottery-platform__switcher {
+  display: grid;
+  gap: 6px;
+  justify-items: end;
+}
+
+.lottery-platform__switcher-label {
+  color: var(--wf-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.lottery-platform__segments {
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(120px, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--wf-rule);
+  border-radius: var(--wf-radius);
+  background: var(--wf-glass-surface-strong);
+  box-shadow: var(--wf-shadow-subtle);
+}
+
+.lottery-platform__segment {
+  display: grid;
+  min-height: 44px;
+  align-content: center;
+  gap: 1px;
+  padding: 7px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--wf-radius-tight);
+  background: transparent;
+  color: var(--wf-text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.lottery-platform__segment[aria-pressed="true"] {
+  border-color: rgba(10, 99, 206, 0.2);
+  background: #ffffff;
+  color: var(--wf-primary);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.09);
+}
+
+.lottery-platform__segment span {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.lottery-platform__segment small {
+  color: var(--wf-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.lottery-platform__game-summary {
+  max-width: 1720px;
+  margin: 0 auto;
+  padding: 0 22px 8px;
+}
+
+.lottery-platform__game-summary span {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  padding: 5px 10px;
+  border: 1px solid var(--wf-soft-rule);
+  border-radius: var(--wf-radius-tight);
+  background: rgba(255, 255, 255, 0.68);
+  color: var(--wf-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.lottery-platform__content {
+  min-width: 0;
+}
+
+.powerball-app {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 14px 22px 36px;
+}
+
+.powerball-app__hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.72fr);
+  gap: 18px;
+  align-items: stretch;
+  margin-bottom: 14px;
+}
+
+.powerball-app__hero-copy,
+.powerball-app__rule-strip,
+.powerball-generator {
+  border: 1px solid var(--wf-rule);
+  border-radius: var(--wf-radius);
+  background: var(--wf-surface);
+  box-shadow: var(--wf-shadow-subtle);
+}
+
+.powerball-app__hero-copy {
+  padding: 18px;
+}
+
+.powerball-app__hero-copy h1 {
+  margin: 0;
+  color: var(--wf-ink);
+  font-size: 30px;
+  font-weight: 800;
+  line-height: 1.05;
+}
+
+.powerball-app__hero-copy p {
+  max-width: 760px;
+  margin: 8px 0 0;
+  color: var(--wf-muted);
+  font-size: 14px;
+}
+
+.powerball-app__rule-strip {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  background: var(--wf-soft-rule);
+}
+
+.powerball-app__rule-strip > div {
+  display: grid;
+  gap: 3px;
+  align-content: center;
+  min-height: 84px;
+  padding: 14px;
+  background: #ffffff;
+}
+
+.powerball-app__rule-value {
+  color: #b42318;
+  font-size: 24px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.powerball-app__rule-label {
+  color: var(--wf-muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.powerball-generator {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+
+.powerball-generator__controls {
+  display: grid;
+  grid-template-columns: minmax(150px, 220px) minmax(0, 1fr);
+  gap: 14px;
+  align-items: end;
+}
+
+.powerball-generator__field-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.powerball-generator__entry-count input {
+  width: 100%;
+  min-height: 36px;
+  padding: 7px 9px;
+}
+
+.powerball-generator__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.powerball-generator__status-row,
+.powerball-resources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  align-items: center;
+  color: var(--wf-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.powerball-summary {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.powerball-summary > div {
+  display: grid;
+  gap: 2px;
+  min-height: 64px;
+  align-content: center;
+  padding: 10px;
+  border: 1px solid var(--wf-soft-rule);
+  border-radius: var(--wf-radius-tight);
+  background: #f8fafc;
+}
+
+.powerball-summary__value {
+  color: var(--wf-ink);
+  font-size: 21px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.powerball-summary__label {
+  color: var(--wf-muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.powerball-entry-list {
+  display: grid;
+  gap: 8px;
+}
+
+.powerball-entry {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--wf-soft-rule);
+  border-radius: var(--wf-radius);
+  background: #ffffff;
+}
+
+.powerball-entry__header,
+.powerball-entry__numbers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.powerball-entry__index {
+  color: var(--wf-ink);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.powerball-entry__meta {
+  color: var(--wf-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.powerball-entry__main-numbers,
+.powerball-entry__powerball {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.powerball-entry__powerball {
+  padding-left: 10px;
+  border-left: 1px solid var(--wf-soft-rule);
+}
+
+.powerball-entry__powerball-label {
+  color: #b42318;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.powerball-number {
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.powerball-number--main {
+  border: 1px solid rgba(10, 99, 206, 0.2);
+  background: #eaf3ff;
+  color: #064a98;
+}
+
+.powerball-number--powerball {
+  border: 1px solid rgba(180, 35, 24, 0.2);
+  background: #fee4e2;
+  color: #9f1d16;
+}
+
+.powerball-entry__bands {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+}
+
+.powerball-entry__band {
+  display: flex;
+  min-height: 30px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: var(--wf-radius-tight);
+  background: #f8fafc;
+  color: var(--wf-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.powerball-entry__band dt,
+.powerball-entry__band dd {
+  margin: 0;
+}
+
+.powerball-entry__band dd {
+  color: var(--wf-ink);
+}
+
+.powerball-empty-state {
+  min-height: 96px;
+  display: grid;
+  place-items: center;
+  border: 1px dashed var(--wf-rule);
+  border-radius: var(--wf-radius);
+  background: #f8fafc;
+  color: var(--wf-muted);
+  font-weight: 800;
+}
+
+.powerball-generator__csv {
+  display: grid;
+  gap: 5px;
+}
+
+.powerball-generator__csv label {
+  color: var(--wf-ink);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.powerball-generator__csv textarea {
+  width: 100%;
+  min-height: 112px;
+  padding: 9px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.powerball-resources {
+  padding-top: 2px;
+}
+
+.powerball-resources a {
+  color: var(--wf-primary);
+  font-weight: 800;
+}
+
 .windfall-info-help {
   position: relative;
   display: inline-flex;
@@ -691,6 +1109,15 @@ tbody tr:hover {
   padding: 2px 0 8px;
 }
 
+.windfall-section__actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-left: auto;
+}
+
 .windfall-section--body-only {
   margin-top: 0;
   border-top: 0;
@@ -731,7 +1158,6 @@ tbody tr:hover {
   align-items: center;
   justify-content: center;
   gap: 5px;
-  margin-left: auto;
   padding: 4px 8px;
   border: 1px solid var(--wf-rule);
   border-radius: 999px;
@@ -1671,5 +2097,82 @@ tbody tr:hover {
   .windfall-number-trend-row {
     grid-template-columns: minmax(50px, max-content) minmax(0, 1fr);
     padding: 10px;
+  }
+}
+
+@media (max-width: 980px) {
+  .lottery-platform__header,
+  .powerball-app__hero,
+  .powerball-generator__controls {
+    grid-template-columns: 1fr;
+  }
+
+  .lottery-platform__switcher,
+  .powerball-generator__actions {
+    justify-items: stretch;
+    justify-content: flex-start;
+  }
+
+  .lottery-platform__switcher {
+    grid-template-columns: minmax(0, 1fr);
+    width: 100%;
+  }
+
+  .lottery-platform__segments {
+    display: grid;
+    width: 100%;
+    justify-self: stretch;
+  }
+
+  .powerball-summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 620px) {
+  .lottery-platform__header {
+    padding: 14px 12px 10px;
+  }
+
+  .lottery-platform__copy h1 {
+    font-size: 24px;
+  }
+
+  .lottery-platform__segments {
+    grid-template-columns: 1fr;
+  }
+
+  .lottery-platform__game-summary {
+    padding: 0 12px 8px;
+  }
+
+  .powerball-app {
+    padding: 12px 12px 28px;
+  }
+
+  .powerball-app__hero-copy h1 {
+    font-size: 25px;
+  }
+
+  .powerball-app__rule-strip,
+  .powerball-summary,
+  .powerball-entry__bands {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .powerball-generator {
+    padding: 12px;
+  }
+
+  .powerball-entry__numbers {
+    align-items: flex-start;
+  }
+
+  .powerball-entry__powerball {
+    width: 100%;
+    padding-top: 8px;
+    padding-left: 0;
+    border-top: 1px solid var(--wf-soft-rule);
+    border-left: 0;
   }
 }

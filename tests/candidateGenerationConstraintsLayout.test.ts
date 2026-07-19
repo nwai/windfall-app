@@ -24,7 +24,7 @@ describe("Candidate Generation Influences constraints layout", () => {
     const constraintsBlock = blockBetween(
       influencesBlock,
       "Generation Constraints",
-      "{/* Column 2: Composition & Recency + OGA Bias */}",
+      'title="Recency & Latest Draw Rules"',
     );
 
     expect(constraintsBlock).toContain("Ending Digit Limits");

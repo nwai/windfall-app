@@ -13,7 +13,9 @@ interface CollapsibleSectionProps {
   favoriteable?: boolean;
   chrome?: "default" | "bodyOnly";
   open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   bodyId?: string;
+  headerActions?: React.ReactNode;
 }
 
 export const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
@@ -27,7 +29,9 @@ export const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
   favoriteable = true,
   chrome = "default",
   open: controlledOpen,
+  onOpenChange,
   bodyId,
+  headerActions,
 }) => {
   const derivedKey = storageKey ?? (typeof title === "string" ? `cs-${title.replace(/\s+/g, "-").toLowerCase()}` : undefined);
   const [open, setOpen] = useState<boolean>(defaultOpen);
@@ -37,6 +41,8 @@ export const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
   const resolvedPanelTitle = panelTitle ?? registryMeta?.title;
   const canFavorite = favoriteable && !!panelId && !!resolvedPanelTitle && !!panelFavorites;
   const isFavorite = !!panelId && !!panelFavorites?.favoritePanelIdSet.has(panelId);
+  const isControlled = controlledOpen !== undefined;
+  const resolvedOpen = controlledOpen ?? open;
 
   useEffect(() => {
     if (!derivedKey || typeof window === "undefined") {
@@ -44,19 +50,25 @@ export const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
       return;
     }
     const saved = window.localStorage.getItem(derivedKey);
-    if (saved === "true") setOpen(true);
-    if (saved === "false") setOpen(false);
+    if (!isControlled && saved === "true") setOpen(true);
+    if (!isControlled && saved === "false") setOpen(false);
     setLoadedStorageKey(derivedKey);
-  }, [derivedKey]);
+  }, [derivedKey, isControlled]);
 
   useEffect(() => {
-    if (!derivedKey || loadedStorageKey !== derivedKey || typeof window === "undefined") return;
+    if (isControlled || !derivedKey || loadedStorageKey !== derivedKey || typeof window === "undefined") return;
     window.localStorage.setItem(derivedKey, open ? "true" : "false");
-  }, [open, derivedKey, loadedStorageKey]);
+  }, [isControlled, open, derivedKey, loadedStorageKey]);
 
   const handleToggle: React.ReactEventHandler<HTMLDetailsElement> = (e) => {
     const isOpen = e.currentTarget.open;
-    setOpen(isOpen);
+    if (!isControlled) setOpen(isOpen);
+    onOpenChange?.(isOpen);
+  };
+
+  const handleHeaderActionsClick: React.MouseEventHandler<HTMLSpanElement> = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
   };
 
   const handleFavoriteClick = (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -67,7 +79,7 @@ export const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
   };
 
   if (chrome === "bodyOnly") {
-    const bodyOnlyOpen = controlledOpen ?? open;
+    const bodyOnlyOpen = resolvedOpen;
 
     return (
       <section
@@ -90,13 +102,13 @@ export const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
       className={`windfall-section ${isFavorite ? "windfall-section--favorite" : ""}`}
       data-panel-id={panelId}
       tabIndex={panelId ? -1 : undefined}
-      open={open}
+      open={resolvedOpen}
       onToggle={handleToggle}
     >
       <summary className="windfall-section__summary">
         <span className="windfall-section__heading">
           <span className="windfall-section__disclosure-button" aria-hidden="true">
-            <span className="windfall-section__disclosure-icon">{open ? "▾" : "▸"}</span>
+            <span className="windfall-section__disclosure-icon">{resolvedOpen ? "▾" : "▸"}</span>
           </span>
           <span className="windfall-section__heading-copy">
             <span className="windfall-section__title">{title}</span>
@@ -105,17 +117,22 @@ export const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
             ) : null}
           </span>
         </span>
-        {canFavorite ? (
-          <button
-            type="button"
-            className="windfall-section__favorite-button"
-            aria-pressed={isFavorite}
-            aria-label={`${isFavorite ? "Remove" : "Add"} ${resolvedPanelTitle} ${isFavorite ? "from" : "to"} favorites`}
-            onClick={handleFavoriteClick}
-          >
-            <span className="windfall-section__favorite-icon" aria-hidden="true">{isFavorite ? "★" : "☆"}</span>
-            <span className="windfall-section__favorite-text">{isFavorite ? "Favorite" : "Mark"}</span>
-          </button>
+        {headerActions || canFavorite ? (
+          <span className="windfall-section__actions" onClick={handleHeaderActionsClick}>
+            {headerActions}
+            {canFavorite ? (
+              <button
+                type="button"
+                className="windfall-section__favorite-button"
+                aria-pressed={isFavorite}
+                aria-label={`${isFavorite ? "Remove" : "Add"} ${resolvedPanelTitle} ${isFavorite ? "from" : "to"} favorites`}
+                onClick={handleFavoriteClick}
+              >
+                <span className="windfall-section__favorite-icon" aria-hidden="true">{isFavorite ? "★" : "☆"}</span>
+                <span className="windfall-section__favorite-text">{isFavorite ? "Favorite" : "Mark"}</span>
+              </button>
+            ) : null}
+          </span>
         ) : null}
       </summary>
       <div className="windfall-section__body">

@@ -22,6 +22,12 @@ import {
   scoringInfluenceMultiplier,
   type ScoringGenerationProfile,
 } from "./lib/scoringGenerationInfluence";
+import {
+  analyzeLatestNeighbourSupport,
+  candidateSatisfiesLatestNeighbourSupport,
+  LATEST_NEIGHBOUR_SUPPORT_TRACE_TAG,
+  type LatestNeighbourSupportOptions,
+} from "./lib/latestNeighbourSupport";
 export {
   applyOddEvenRatioQuotas,
   buildOddEvenRatioQuotas,
@@ -50,6 +56,7 @@ export interface GenerateCandidatesResult {
     maxLastDraw: number;
     recentBias: number;
     repeatUnion: number;
+    latestNeighbourSupport: number;
     trendRatio: number;
     sumRange: number;
     patternConstraint: number;
@@ -71,6 +78,8 @@ export interface GenerateCandidatesResult {
     accepted: number;
   };
 }
+
+export type GenerateCandidatesProgressSetter = (result: GenerateCandidatesResult) => void;
 
 interface MainDigitConstraintOptions {
   maxCount?: number;
@@ -201,6 +210,10 @@ export function generateCandidates(
   monthEndCarryOverWeights?: Record<number, number>,
   /** Optional diagnostic scoring profile used as evidence weighting during construction. */
   scoringGenerationProfile?: ScoringGenerationProfile,
+  /** Optional progress callback used by the worker to expose accepted partial results. */
+  progressSetter?: GenerateCandidatesProgressSetter,
+  /** Default-off experimental rule requiring at least one eligible latest-draw +/-1 support number. */
+  latestNeighbourSupportOptions?: LatestNeighbourSupportOptions,
 ): GenerateCandidatesResult {
 
   if (DEBUG) {
@@ -253,6 +266,7 @@ export function generateCandidates(
     maxLastDraw: 0,
     recentBias: 0,
     repeatUnion: 0,
+    latestNeighbourSupport: 0,
     trendRatio: 0,
     sumRange: 0,
     patternConstraint: 0,
@@ -272,6 +286,33 @@ export function generateCandidates(
     exclusions: 0,
     totalAttempts: 0,
     accepted: 0
+  };
+
+  let lastProgressAt = 0;
+  let lastProgressAccepted = 0;
+  const buildResultSnapshot = (): GenerateCandidatesResult => {
+    stats.totalAttempts = attempts;
+    stats.accepted = candidates.length;
+    const acceptedCandidates = candidates.slice(0, num);
+    return {
+      candidates: acceptedCandidates,
+      ratioSummary: summarizeOddEvenRatios(
+        acceptedCandidates,
+        num,
+        attempts,
+        selectedOddEvenRatios.length > 0 ? oddEvenQuotas : undefined
+      ),
+      rejectionStats: { ...stats },
+    };
+  };
+  const maybeEmitProgress = (force = false) => {
+    if (!progressSetter || candidates.length === 0) return;
+    const now = Date.now();
+    const acceptedSinceLast = candidates.length - lastProgressAccepted;
+    if (!force && candidates.length !== 1 && acceptedSinceLast < 25 && now - lastProgressAt < 500) return;
+    progressSetter(buildResultSnapshot());
+    lastProgressAt = now;
+    lastProgressAccepted = candidates.length;
   };
 
   const warnings: string[] = [];
@@ -311,6 +352,12 @@ export function generateCandidates(
     const boost = n >= 1 && n <= 9 ? boosts.singleDigitBoost : boosts.twoDigitBoost;
     return boost > 0 ? 1 + boost * 0.5 : 1;
   };
+  const hasActiveTerminalCoordinationRule = (options?: MainDigitConstraintOptions): boolean => (
+    typeof options?.maxCount === "number" ||
+    clampMainDigitBoost(options?.boost) > 0 ||
+    clampMainDigitBoost(options?.singleDigitBoost) > 0 ||
+    clampMainDigitBoost(options?.twoDigitBoost) > 0
+  );
   const normalizedMainDecadeBiases: Record<'decade0x' | 'decade1x' | 'decade2x' | 'decade3x' | 'decade4x', number> = {
     decade0x: clampSignedDecadeBias(mainDecadeBiases?.decade0x),
     decade1x: clampSignedDecadeBias(mainDecadeBiases?.decade1x),
@@ -390,6 +437,22 @@ export function generateCandidates(
 
   // Filter mainPool accordingly
   mainPool = mainPool.filter(n => !fullExcludedSet.has(n));
+
+  const latestNeighbourSupport = analyzeLatestNeighbourSupport(history, monthlyBucketOptions?.buckets, {
+    ...latestNeighbourSupportOptions,
+    terminalRuleActive: {
+      0: hasActiveTerminalCoordinationRule(mainZeroOptions),
+      5: hasActiveTerminalCoordinationRule(mainFiveOptions),
+    },
+    excludedNumbers: fullExcludedNumbers,
+  });
+  const latestNeighbourSupportSet = new Set(latestNeighbourSupport.targetNumbers);
+  if (latestNeighbourSupport.enabled) {
+    traceSetter(`[TRACE] ${latestNeighbourSupport.traceSummary}`);
+    for (const warning of latestNeighbourSupport.warnings) {
+      traceSetter(`[TRACE] ${LATEST_NEIGHBOUR_SUPPORT_TRACE_TAG} warning: ${warning}`);
+    }
+  }
 
   // Monthly bucket boost/penalize: exclude undrawn numbers, boost drawn numbers
   const monthlyBoostMap = new Map<number, number>(); // number -> boost multiplier
@@ -635,6 +698,9 @@ export function generateCandidates(
         factor *= carryOverBias;
       }
       factor *= scoringInfluenceMultiplier(n, scoringGenerationProfile);
+      if (latestNeighbourSupport.active && latestNeighbourSupportSet.has(n)) {
+        factor *= latestNeighbourSupport.supportBoostFactor;
+      }
       if (factor < 1) {
         // Probabilistic inclusion: e.g. factor=0.3 → 30 % chance of 1 rep
         if (Math.random() < factor) out.push(n);
@@ -961,6 +1027,11 @@ export function generateCandidates(
       if (hits < minFromRecentUnionM) { stats.repeatUnion++; continue; }
     }
 
+    if (!candidateSatisfiesLatestNeighbourSupport(nums8, latestNeighbourSupport)) {
+      stats.latestNeighbourSupport++;
+      continue;
+    }
+
     // Recent match constraints
     if (lastDrawSet) {
       const matches = nums8.filter(n => lastDrawSet.has(n)).length;
@@ -1101,6 +1172,7 @@ if (patternOptions?.constraints?.length && patternOptions?.mode === 'restrict') 
       oddEvenQuotaCounts[oddEvenRatio] = (oddEvenQuotaCounts[oddEvenRatio] ?? 0) + 1;
     }
     stats.accepted++;
+    maybeEmitProgress();
   }
 
   stats.totalAttempts = attempts;
@@ -1140,6 +1212,15 @@ if (patternOptions?.constraints?.length && patternOptions?.mode === 'restrict') 
   if (digitWidthTargets.enabled) {
     traceSetter(
       `[TRACE] Digit-width rule: ${digitWidthTargets.singleDigitPercent}%/${digitWidthTargets.twoDigitPercent}% ${formatDigitWidthScopeLabel(digitWidthTargets.scope)} -> target ${digitWidthTargets.singleDigitCount}/${digitWidthTargets.twoDigitCount} rejects=${stats.digitWidth}`
+    );
+  }
+  if (latestNeighbourSupport.enabled) {
+    const acceptedCandidateCount = Math.max(1, candidates.length);
+    const hits = candidates.reduce((sum, candidate) => {
+      return sum + [...candidate.main, ...candidate.supp].filter((number) => latestNeighbourSupportSet.has(number)).length;
+    }, 0);
+    traceSetter(
+      `[TRACE] ${LATEST_NEIGHBOUR_SUPPORT_TRACE_TAG} results: eligible=${latestNeighbourSupport.targetNumbers.length} rejects=${stats.latestNeighbourSupport} accepted-hits=${hits} (${(hits / acceptedCandidateCount).toFixed(2)} per accepted candidate)`
     );
   }
   if (activeMainDigitBoosts.length > 0) {

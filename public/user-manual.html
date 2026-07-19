@@ -183,6 +183,8 @@
     <a href="#getting-started">Getting Started</a>
     <a href="#loading-history">Loading Draw History</a>
     <a href="#wfmqyh-window">WFMQYH Window</a>
+    <a href="#history-scopes">History Scopes</a>
+    <a href="#survival-analysis">Survival Analysis</a>
     <a href="#number-trends-table">Number Trends Table</a>
     <a href="#trend-ratio-diagnostics">Trend Ratio Diagnostics</a>
     <a href="#smart-history-review">Smart History Review</a>
@@ -213,13 +215,14 @@
     <a href="#influences">Generation Influences</a>
     <a href="#mian">MiAN (Must Include from Acceptance Needs)</a>
     <a href="#repeat-bias">Monthly Repeat Bias</a>
-    <a href="#last-draw-match">Max Matches to Last Draw</a>
+    <a href="#last-draw-match">Last Draw Match Controls</a>
     <a href="#ovr-gen">Over-generation Pool</a>
 
     <a class="section" href="#monthly-summary">Monthly Draws Summary</a>
     <a href="#acceptance-needs">Acceptance Needs</a>
     <a href="#ideal-draw">Ideal Draw Row</a>
     <a href="#stage-idm">Stage IDM</a>
+    <a href="#monthly-bucket-transition-lab">Monthly Bucket Transition Lab</a>
     <a href="#needed-row">Needed Row</a>
     <a href="#constructive-fill">Constructive Fill</a>
     <a href="#ending-digit-sequences">Ending Digit Sequence Analyzer</a>
@@ -234,6 +237,7 @@
     <a href="#next-hot-blocks">Next Hot Blocks</a>
     <a href="#tattslotto-ticket-grid-replay">Tattslotto Ticket Grid Replay</a>
     <a href="#dga-drought-break">Drought-break Shortlist</a>
+    <a href="#mlnd-exclusion-risk">Most Likely NOT Drawn</a>
     <a href="#dga-columns">Column Structure</a>
     <a href="#dga-next">The Next Column</a>
     <a href="#dga-simulate-strip">Simulate Next Strip</a>
@@ -306,6 +310,42 @@
 
   <div class="note">
     <strong>Why Month is 13 draws:</strong> although some calendar months contain 12 or 14 draw dates, 13-draw months are the most common practical monthly shape in the loaded Windfall history. The Month shortcut therefore uses 13 draws as the standard month-like evidence window. Panels that perform calendar-month analysis, such as Monthly Draws Summary and Stage IDM, still calculate the actual expected draw count for the working month where that matters.
+  </div>
+
+  <h3 id="history-scopes">History Scopes</h3>
+  <p>Windfall now separates history scopes so diagnostics do not quietly mix short tactical windows with long-run baseline evidence.</p>
+  <ul>
+    <li><strong>Current WFMQYH window</strong> means the active selected draw window. Tactical panels and generation-weight views use this when the user is intentionally asking, “what does the current selected window say?”</li>
+    <li><strong>Real all history</strong> means the loaded real draw history after simulated or fallback rows have been excluded.</li>
+    <li><strong>Windfall baseline history</strong> means real all history with the opening partial month removed when that first month is incomplete. This is used for baseline and validation-style panels such as Survival Analyzer, Temperature Transition Diagnostics, Most Likely NOT Drawn, and MLND Backtest Validation.</li>
+  </ul>
+  <div class="note">
+    <strong>Truthfulness note:</strong> Monte Carlo remains a current-window weighting tool. It is not an all-history calibration panel, and its label shows the WFMQYH scope it is using.
+  </div>
+
+  <h3 id="survival-analysis">Survival Analysis</h3>
+  <p><strong>Survival Analysis</strong> estimates number-level drought return behaviour using a discrete-time drought hazard model with Bayesian shrinkage. In the main app it uses <strong>Windfall baseline history</strong>, not the active WFMQYH window, so its baseline is not distorted by very small tactical windows.</p>
+
+  <h4>Monthly Transition Context columns</h4>
+  <p>The Survival table also shows observe-only monthly movement context from the <a href="#monthly-bucket-transition-lab">Monthly Bucket Transition Lab</a>. These columns help compare survival drought evidence with the current monthly bucket state, but they do <strong>not</strong> change Survival ranking, probabilities, selections, or generation weights.</p>
+
+  <table>
+    <thead>
+      <tr><th>Column</th><th>Meaning</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>Month bucket</strong></td><td>The number's current monthly frequency bucket, such as <strong>Undrawn</strong>, <strong>1x</strong>, or <strong>2x</strong>, for the active planning month state.</td></tr>
+      <tr><td><strong>Stage move</strong></td><td>The smoothed empirical draw-hit rate for numbers that were in that same bucket before the same planning draw stage. The value in brackets is <code>hits / trials</code>.</td></tr>
+      <tr><td><strong>Move support</strong></td><td>How that bucket's smoothed movement rate compares with the planning-stage average. <strong>Above</strong> means supportive context, <strong>Below</strong> means weaker context, <strong>Neutral</strong> means near average, and <strong>Thin</strong> means the sample is too small to lean on.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="tip">
+    <strong>How to use it:</strong> a high survival row is more interesting when its Monthly Transition Context is also <strong>Above</strong> or at least not <strong>Below</strong>. If Survival likes a number but Move support is Below or Thin, treat that as a reason to inspect further, not as an automatic rejection.
+  </div>
+
+  <div class="warn-box">
+    <strong>Honesty note:</strong> Monthly Transition Context is evidence context, not a calibrated probability. It is deliberately observe-only until walk-forward testing shows whether it improves Survival ranking.
   </div>
 
   <h3 id="number-trends-table">Number Trends Table</h3>
@@ -482,22 +522,47 @@
 
   <p>The <strong>Generated Candidates</strong> panel is the main working area. After clicking <strong>Generate</strong>, it displays a table of candidate number sets with a rich set of analytical scores.</p>
 
+  <h3 id="generated-survivor-selection">Final survivor selection</h3>
+  <p>When <strong>Overgen ×</strong> creates a larger accepted pool than the requested <strong>Count</strong>, Windfall must choose which accepted rows survive into the visible table. Active ranking terms can include OGA, month-end carry-over, Scoring Diagnostics influence, odd/even quota selection, and the optional <strong>SelHits</strong> / <strong>RecentHits</strong> switches in <strong>Recency &amp; Latest Draw Rules</strong>. SelHits and RecentHits default <strong>OFF</strong>; their numeric weights only matter after their switches are turned on. The <strong>Trace</strong> panel records the active survivor-selection signals for each run.</p>
+  <div class="note">
+    <strong>Truthfulness note:</strong> if no survivor-ranking signals are active, Windfall preserves the generated order instead of silently using selected-number or latest-draw overlap as hidden tie-breakers.
+  </div>
+
+  <h3 id="generated-copy-candidates">Copy candidates for Paste-Weighted input</h3>
+  <p>Use <strong>Copy candidates</strong> to copy the current generated-candidate table rows as comma-separated lines, ready to paste into the <strong>Paste-Weighted Candidate Generator</strong>. The copy action uses the current sort/filter view and copies the six <strong>Main</strong> numbers only, one candidate per line.</p>
+  <div class="note">
+    <strong>Why mains only:</strong> Paste-Weighted Candidate Generator is a six-main-number weighting tool. Supplementary numbers are intentionally omitted so pasted rows remain clean six-number inputs.
+  </div>
+
+  <h3 id="generated-stop-partial">Stop and show partial</h3>
+  <p>While the main generator is running, Windfall shows a <strong>Stop and show partial</strong> button beside <strong>Generate</strong>. Use it when high <strong>Attempts ×</strong> or <strong>Overgen ×</strong> settings make generation take longer than intended.</p>
+  <ul>
+    <li>The button stops the active generation worker.</li>
+    <li>If any candidates have already been accepted, Windfall displays the latest accepted partial set through the normal candidate table, scoring, filters, and Trace output.</li>
+    <li>If no candidates have been accepted yet, generation stops cleanly and Trace records that no partial candidates were available.</li>
+  </ul>
+  <div class="note">
+    <strong>Truthfulness note:</strong> partial output is simply the accepted candidates available at the moment generation was stopped. It is not a completed full run and may contain fewer rows than the requested Count.
+  </div>
+
   <h3 id="pnua-rw45">PNUaRW45 / RwR45 Random Coverage Mode</h3>
   <p><strong>PNUaRW45</strong> is a special random coverage mode in the main <strong>Generated Candidates</strong> panel. The toggle is labelled <strong>RwR45</strong>.</p>
   <ul>
     <li><strong>When OFF</strong> — the normal candidate generator is used and the <strong>Count</strong> input controls how many candidates are requested.</li>
     <li><strong>When ON</strong> — the normal Count value is ignored and the app creates exactly <strong>7 candidates</strong>.</li>
     <li>The generator shuffles numbers <code>1–45</code> uniformly at random.</li>
-    <li>The first <strong>42 numbers</strong> are split into seven non-overlapping six-number main sets, so main numbers are globally without replacement across the 7 candidates.</li>
-    <li>The remaining <strong>3 numbers</strong> become the supplementary pool. Each candidate receives 2 random supplementary numbers from that 3-number pool.</li>
+    <li>Hard exclusions are removed before random fill. Forced inclusions are seeded into every candidate, matching the normal generator’s forced-number contract.</li>
+    <li>When no hard constraints are active, the first <strong>42 numbers</strong> are split into seven non-overlapping six-number main sets, so main numbers are globally without replacement across the 7 candidates.</li>
+    <li>When forced inclusions or exclusions are active, global-without-replacement applies to the remaining non-forced main filler numbers where possible. If the active constraints make the original strict partition impossible, Windfall uses a row-safe random fallback that still avoids duplicates inside each candidate and still respects exclusions.</li>
+    <li>With no hard constraints, the remaining <strong>3 numbers</strong> become the supplementary pool. Under constraints, the preferred supplementary pool is the unused eligible remainder, with row-safe fallback if needed.</li>
   </ul>
 
   <div class="note">
-    <strong>Truthfulness note:</strong> PNUaRW45 is random coverage, not a prediction, score, or evidence-weighted strategy. Because the rule promises a strict 45-number random partition, normal generation filters such as Count, forced inclusions, exclusions, odd/even quotas, MiAN, and scoring influence are bypassed while RwR45 is ON.
+    <strong>Truthfulness note:</strong> PNUaRW45 is random coverage, not a prediction, score, or evidence-weighted strategy. While RwR45 is ON, Count, odd/even quotas, scoring influence, and most evidence filters are bypassed. Hard forced inclusions and hard exclusions, including MiAN hard exclusions where active, are honored before the random fill.
   </div>
 
   <div class="tip">
-    The 3 leftover numbers cannot fill all 14 supplementary positions globally without reuse. Windfall therefore keeps the <strong>main numbers</strong> strictly global-without-replacement and reuses the 3-number supplementary pool row by row.
+    The 3 leftover numbers cannot fill all 14 supplementary positions globally without reuse. In unconstrained RwR45, Windfall therefore keeps the <strong>main numbers</strong> strictly global-without-replacement and reuses the 3-number supplementary pool row by row.
   </div>
 
   <!-- ───────────────────────────────────────── -->
@@ -647,8 +712,8 @@
       <tr><td><strong>#</strong></td><td>Row number in the current sort order.</td></tr>
       <tr><td><strong>Main (6)</strong></td><td>The six main numbers in the candidate set.</td></tr>
       <tr><td><strong>Supp (2)</strong></td><td>The two supplementary numbers.</td></tr>
-      <tr><td><strong>M/S</strong></td><td>Dots showing how many of the Manual Prize Check numbers match this candidate's mains (red) and supps (green).</td></tr>
-      <tr><td><strong>Prize</strong></td><td>Prize division achieved if the Manual Prize Check numbers are treated as the winning draw. Only meaningful when 8 numbers are selected in Manual Prize Check.</td></tr>
+      <tr><td><strong>M/S</strong></td><td>Prize-hit dots from the full 8-number candidate row. Red dots count checked-draw main hits. Green dots count checked-draw supplementary hits. This is a containment/eligibility diagnostic, so numbers in the candidate's Supp (2) cells still count as part of the candidate row.</td></tr>
+      <tr><td><strong>Prize</strong></td><td>Best prize division achieved by the full 8-number candidate row if the Manual Prize Check numbers are treated as the winning draw. Only meaningful when 8 numbers are selected in Manual Prize Check. Div6 is treated inclusively: 1 or 2 main hits plus both supplementaries still qualifies as Div6.</td></tr>
       <tr><td><strong>Odd:Even</strong></td><td>Ratio of odd to even numbers across all 8 numbers.</td></tr>
       <tr><td><strong>Comp%</strong></td><td>Composite score from the OGA algorithm, expressed as a percentage. Higher = stronger composite alignment.</td></tr>
       <tr><td><strong>OGA Raw</strong></td><td>Raw OGA (Octagonal Grid Analysis) score.</td></tr>
@@ -856,7 +921,7 @@
   <p>Within the Filter panel, each field also has ▲▼ mini sort buttons.</p>
 
   <div class="tip">
-    <strong>Default sort:</strong> Prize (descending) when 8 Manual Prize Check numbers are selected. When fewer than 8 are selected, the sort reverts to whatever was active before 8 numbers were chosen (stored in browser storage).
+    <strong>Default sort:</strong> generated order. Rows initially appear in the exact order produced by the generation engine. Click <strong>Prize</strong>, <strong>Recommended</strong>, or another column when you want a diagnostic sort; use <strong>Generated order</strong> to return to source order.
   </div>
 
   <!-- ───────────────────────────────────────── -->
@@ -916,14 +981,20 @@
   <!-- ───────────────────────────────────────── -->
   <h3 id="manual-sim">Manual Prize Check</h3>
 
-  <p>The <strong>Manual Prize Check</strong> grid (below the candidates table) is a local prize-worthiness scratchpad. It lets you select up to 8 numbers — the first 6 become mains, the last 2 become supplementaries. It is not part of the DGA/app simulation flow and candidate-row Simulate buttons do not overwrite it. Once 8 numbers are selected:</p>
+  <p>The <strong>Manual Prize Check</strong> grid (below the candidates table) is a local prize-worthiness scratchpad. It lets you select up to 8 numbers — the first 6 become winning mains, the last 2 become winning supplementaries. It is not part of the DGA/app simulation flow and candidate-row Simulate buttons do not overwrite it. Once 8 numbers are selected:</p>
   <ul>
     <li>The <strong>Prize</strong> column populates for all candidates.</li>
     <li>A <strong>before/after bucket comparison table</strong> appears above the grid, showing the current month's bucket distribution, what it would become after this draw, the robust Monthly Draws Summary target, and the delta still needed.</li>
-    <li>Sort automatically switches to <strong>Prize ↓</strong> so prize-qualifying candidates surface immediately.</li>
+    <li>The generated order stays intact until you deliberately sort a column. Click <strong>Prize</strong> when you want prize-qualifying candidates grouped at the top.</li>
   </ul>
 
-  <p>When you deselect a number (dropping below 8), the app restores the sort and filter state that was active before you reached 8 selections.</p>
+  <p>Prize checks evaluate the full 8-number candidate row as a containment/eligibility set against the checked draw. If a checked-draw main or supplementary number appears anywhere in the candidate's <strong>Main (6)</strong> or <strong>Supp (2)</strong> cells, it contributes to the prize-hit count. The first six Manual Prize Check values still define the checked draw's winning mains, and the last two define the checked draw's supplementaries.</p>
+
+  <p><strong>Use User Selected:</strong> this checkbox is a speed shortcut beside Manual Prize Check. When it is ON, Manual Prize Check mirrors the normalized <strong>User Selected</strong> strip and copies up to 8 numbers. When it is OFF, Manual Prize Check behaves independently and can be edited directly.</p>
+
+  <div class="note">
+    <strong>Ordering note:</strong> synced Manual Prize Check values use Windfall's normalized User Selected order. The first 6 synced values are treated as mains and the next 2 as supplementaries. If you need exact control over which values are mains or supps, turn <strong>Use User Selected</strong> OFF and select Manual Prize Check numbers directly.
+  </div>
 
   <!-- ───────────────────────────────────────── -->
   <h3 id="simulate-button">Simulate Button</h3>
@@ -943,27 +1014,47 @@
   <!-- ───────────────────────────────────────── -->
   <h3 id="influences">Generation Influences</h3>
 
-  <p>Located in the <strong>Candidate Generation Influences</strong> panel. These settings control which candidates are accepted into the pool:</p>
+  <p>Located in the <strong>Candidate Generation Influences</strong> panel. These settings control which candidates are accepted into the pool. Hard filters default to <strong>OFF</strong>; turn them on deliberately when you want candidates rejected by that rule.</p>
 
   <table>
     <thead><tr><th>Setting</th><th>Description</th></tr></thead>
     <tbody>
-      <tr><td>Odd/Even Ratio</td><td>Restrict accepted candidates to specific odd:even ratios.</td></tr>
+      <tr><td>Odd/Even Ratio</td><td>Restrict accepted candidates to specific odd:even ratios. Use <strong>Select all observed</strong> to quickly select every odd/even ratio currently visible from the active WFMQYH window; this changes the selected ratio set only and does not override Tricky Rule while it is on.</td></tr>
       <tr><td>Lambda (λ)</td><td>OGA score lower-bound filter — rejects candidates below a percentile threshold.</td></tr>
-      <tr><td>HC3 / SDE1</td><td>Hard constraints that exclude numbers appearing in recent draws.</td></tr>
+      <tr><td>HC3 / SDE1</td><td>Default-off hard constraints that exclude numbers appearing in recent draws when enabled.</td></tr>
       <tr><td>Entropy</td><td>Rejects candidates whose numbers are too clustered (low Shannon entropy).</td></tr>
       <tr><td>Hamming Distance</td><td>Rejects candidates too similar to already-accepted candidates.</td></tr>
       <tr><td>Jaccard Similarity</td><td>Similar to Hamming but uses set intersection ratio.</td></tr>
+      <tr><td>Rdy component hard filters</td><td>Optional default-off lower-bound filters for IDM, Conv impact, and the Rdy-normalised OGA component. Each threshold defaults to 0%, so the controls are visible but non-restrictive until enabled and raised. IDM is descriptive bucket alignment; Conv uses absolute pool-normalised impact; OGA component is similarity used inside Rdy, not raw OGA percentile.</td></tr>
       <tr><td>Must include ÷5</td><td>Requires at least one number divisible by 5.</td></tr>
       <tr><td>Ending-digit boosts</td><td>Lets each ending-digit bucket use separate <strong>1-digit</strong> and <strong>2-digit</strong> boosts, so for example bucket <code>1</code> can weight <code>1</code> differently from <code>11, 21, 31, 41</code> across both main and supplementary picks.</td></tr>
       <tr><td>Single-digit / two-digit share</td><td>Strictly enforces how many numbers must be 1-digit (1–9) versus 2-digit (10–45), with linked percentage selectors and a mains-only or main+supp counting scope.</td></tr>
       <tr><td>MiAN</td><td>Must include minimum counts from each Acceptance needs bucket. See <a href="#mian">MiAN</a>.</td></tr>
       <tr><td>Monthly Repeat Bias</td><td>Boosts numbers drawn exactly once this month. See <a href="#repeat-bias">Repeat Bias</a>.</td></tr>
       <tr><td>Month-end carry-over bias</td><td>Uses the month-end carry-over study as a live weighting input for both generation and candidate ranking during the early part of a planning month.</td></tr>
-      <tr><td>Max Matches to Last Draw</td><td>Rejects candidates that share too many numbers with the most recent draw. See <a href="#last-draw-match">Last Draw Match</a>.</td></tr>
+      <tr><td>Last Draw Match Controls</td><td>Controls strict minimum/maximum overlap with the most recent draw, plus a separate soft last-draw match bias. See <a href="#last-draw-match">Last Draw Match Controls</a>.</td></tr>
+      <tr><td>Latest ±1 Support (LD±1)</td><td>Experimental default-off rule that builds the <code>+1</code>/<code>-1</code> neighbours of the latest draw, screens them for exclusions, excessive recent streaks, and monthly terminal-family drought risk, then requires each generated candidate to include at least one eligible target.</td></tr>
       <tr><td>Latest Draw ±1/±2 Constraint Builder</td><td>Default-off selector that lets you choose exact <code>-2</code>, <code>-1</code>, <code>+1</code>, or <code>+2</code> target numbers from the latest draw. Selected targets are passed into generation as required forced numbers.</td></tr>
     </tbody>
   </table>
+
+  <h4>Latest ±1 Support (LD±1)</h4>
+  <p>This control lives in <strong>Candidate Generation Influences → Composition &amp; Recency</strong>. It is separate from the manual <strong>Latest Draw ±1/±2 Constraint Builder</strong>. The manual builder forces exact selected numbers. LD±1 computes its own eligible <code>+1</code>/<code>-1</code> target set from the latest real WFMQYH draw and requires every generated candidate to contain at least one of those eligible targets.</p>
+
+  <p>When LD±1 is ON, Windfall:</p>
+  <ul>
+    <li>takes the latest draw's main and supplementary numbers and creates valid <code>source - 1</code> and <code>source + 1</code> targets inside <code>1–45</code>;</li>
+    <li>removes targets already selected as hard exclusions;</li>
+    <li>disqualifies targets that have appeared in more than seven consecutive draws inside the recent 10-draw streak check;</li>
+    <li>uses current monthly bucket state, when available, to disqualify drought-heavy targets whose terminal digit still has two or more companion numbers in the undrawn bucket, except when the next draw is treated as the last draw of that month;</li>
+    <li>coordinates 0-ending and 5-ending targets with the existing ending-digit controls rather than silently overriding those controls.</li>
+  </ul>
+
+  <p>Eligible LD±1 targets receive a modest construction boost and then become a hard minimum-one filter. If no eligible targets remain, Windfall skips the hard filter and records the reason in Trace rather than rejecting every candidate.</p>
+
+  <div class="note">
+    <strong>Truthfulness note:</strong> LD±1 is an experimental support rule, not a calibrated probability or proof that a nearby number will draw next. Use the Trace output to inspect which numbers were eligible, which were disqualified, and how many candidates were rejected by the rule.
+  </div>
 
   <h4>Latest Draw ±1/±2 Constraint Builder</h4>
   <p>This control lives in <strong>Candidate Generation Influences → Composition &amp; Recency</strong>. It shows the most recent draw in the active WFMQYH window and offers each valid nearby target: <code>source - 2</code>, <code>source - 1</code>, <code>source + 1</code>, and <code>source + 2</code>.</p>
@@ -1109,10 +1200,23 @@
   </div>
 
   <!-- ───────────────────────────────────────── -->
-  <h3 id="last-draw-match">Maximum Matches to Last Draw</h3>
+  <h3 id="last-draw-match">Last Draw Match Controls</h3>
 
-  <p>Rejects any candidate that shares more than a specified number of numbers with the most recent draw. Use this to avoid generating candidates that closely mirror the last result.</p>
-  <p>Toggle the constraint ON/OFF with the checkbox, then set the threshold (1–8) in the dropdown.</p>
+  <p>These controls live together in <strong>Candidate Generation Influences → Composition &amp; Recency</strong>. They all refer to the <strong>single most recent real draw</strong> in the active WFMQYH window, but they do not all behave the same way.</p>
+
+  <ul>
+    <li><strong>Minimum matches to last draw</strong> is a strict lower-bound filter. If it is set to <code>2</code>, every accepted candidate must contain at least two numbers from the latest draw.</li>
+    <li><strong>Maximum matches to last draw</strong> is a strict upper-bound filter only when its checkbox is ON. If it is set to <code>3</code>, candidates with four or more latest-draw numbers are rejected.</li>
+    <li><strong>Last-draw match bias</strong> is not a strict filter. It is a soft weighting strength from <code>0</code> to <code>5</code>. <code>0</code> is off; <code>5</code> is the strongest setting.</li>
+  </ul>
+
+  <p>The bias changes direction depending on the minimum setting. If <strong>Minimum matches to last draw</strong> is <code>0</code>, a positive bias penalises latest-draw numbers during weighted sampling. If the minimum is greater than <code>0</code>, the bias favours candidates with stronger latest-draw overlap after they have already passed the strict minimum.</p>
+
+  <div class="note">
+    <strong>Truthfulness note:</strong> <strong>Last-draw match bias</strong> does not mean "only choose numbers from the last draw." The strict include/exclude behaviour comes from the minimum and maximum match controls.
+  </div>
+
+  <p><strong>Look back over newest draws</strong> is separate from the single last-draw controls. It builds a wider pool from the newest W draws inside the active WFMQYH history. Its default value follows the <strong>latest observed month's completed draw count</strong>, not the total WFMQYH size. If the active WFMQYH window is smaller than that month count, Windfall caps the effective W to the available active draws.</p>
 
   <!-- ═══════════════════════════════════════════ -->
   <h2 id="monthly-summary">Monthly Draws Summary Panel</h2>
@@ -1195,6 +1299,82 @@
 
   <div class="warn-box">
     <strong>Thin evidence warning:</strong> if only a small number of comparable months exist, treat the Stage IDM target as exploratory. The panel will show a warning rather than pretending the evidence is stronger than it is.
+  </div>
+
+  <!-- ───────────────────────────────────────── -->
+  <h3 id="monthly-bucket-transition-lab">Monthly Bucket Transition Lab</h3>
+
+  <p>The <strong>Monthly Bucket Transition Lab</strong> is an observe-only research panel for studying how numbers move through monthly buckets: <strong>Undrawn → 1x → 2x → 3x → 4x → 5x → 6x → 7x → 8x+</strong>.</p>
+
+  <div class="note">
+    <strong>Baseline scope:</strong> the lab uses real draw history and removes the opening partial month from transition baselines. In the bundled history this means <strong>2024-05</strong> stays visible elsewhere, but is excluded from this lab's learned baseline because it is not a complete month. The default number scope is <strong>mains + supplementaries</strong>.
+  </div>
+
+  <p>Unlike Stage IDM, which compares a candidate to a stage-conditioned target shape, the Transition Lab works from before-draw states. For each historical draw it records every number's bucket before the draw, whether that number was drawn in that draw, and what bucket it moved into afterward. That lets the app measure transition behaviour such as:</p>
+
+  <ul>
+    <li>how often an <strong>Undrawn</strong> number breaks into <strong>1x</strong> at each draw stage,</li>
+    <li>how quickly numbers reach upper buckets such as <strong>3x</strong>, <strong>4x</strong>, <strong>6x</strong>, or <strong>8x+</strong>,</li>
+    <li>whether 13-draw and 14-draw months finish with different bucket shapes,</li>
+    <li>whether prior hot/cold status changes the next-draw hit rate inside the same monthly bucket.</li>
+  </ul>
+
+  <h4>How to read the lab</h4>
+  <p>Read this panel as a <strong>movement diary</strong>, not as a prediction panel. It is designed to show how numbers have historically moved from one monthly bucket state to another.</p>
+
+  <ol>
+    <li><strong>Start with Evidence Length.</strong> <strong>Auto</strong> usually means the lab is comparing against same-length months, such as 13-draw months. <strong>All lengths</strong> pools every baseline month. For monthly-bucket behaviour, Auto is usually the cleaner first read.</li>
+    <li><strong>Read Current-Stage Transition Expectation next.</strong> This is the most immediately useful table. Focus on <strong>Count now</strong>, <strong>Trials</strong>, <strong>Smoothed rate</strong>, and <strong>Expected next hits</strong>. For example, if Undrawn has 18 numbers now and Expected next hits is 3.1, the lab is saying that historically about three next-draw numbers might reasonably come from currently undrawn numbers at this stage.</li>
+    <li><strong>Use Undrawn Survival / Break Curve for carry-forward behaviour.</strong> Look for where the median undrawn count falls sharply. If it tends to drop between D6 and D9, that supports the observation that undrawn carry-over often breaks around the middle to later-middle part of the month.</li>
+    <li><strong>Use Upper-Bucket First Reach Timing for rarity checks.</strong> This table helps answer questions such as whether 4x by D6 is early, whether 6x+ mostly appears in longer months, and what bucket levels are normal by the current stage.</li>
+    <li><strong>Use Month-Length Final Shape Comparison for 13d versus 14d questions.</strong> This table uses completed months only and is the safest place to inspect whether longer months finish with fewer undrawn numbers or more upper-bucket numbers.</li>
+    <li><strong>Use Prior Heat x Monthly Bucket Relationship last.</strong> This checks whether hot/cold status adds information inside a monthly bucket. If Hot / Undrawn has a higher smoothed rate than Cold / Undrawn, heat may add useful context. If the rates are similar, heat is probably not adding much for that bucket movement.</li>
+  </ol>
+
+  <div class="tip">
+    <strong>Rule of thumb:</strong> trust <strong>Smoothed rate</strong> over raw rate, rows with more <strong>Trials</strong> over thin rows, same month-length evidence over pooled evidence, and repeated patterns across multiple tables over one interesting-looking row.
+  </div>
+
+  <div class="note">
+    <strong>Coherent story example:</strong> if Current-Stage Expectation says Undrawn has high expected next hits, the Undrawn Survival curve shows this stage usually breaks several undrawn numbers, and Upper-Bucket Timing shows the current upper-bucket shape is not already overextended, the lab is giving a stronger, more internally consistent signal.
+  </div>
+
+  <h4>Current-Stage Transition Expectation</h4>
+  <p>This table looks at the next planning draw stage and asks: "given the current bucket counts, how often have numbers in each bucket been drawn at this same stage?"</p>
+  <table>
+    <thead>
+      <tr><th>Column</th><th>Meaning</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>Count now</strong></td><td>How many numbers are currently in that monthly bucket.</td></tr>
+      <tr><td><strong>Trials</strong></td><td>Historical number-stage observations where a number was in that bucket before the matching draw stage.</td></tr>
+      <tr><td><strong>Hits</strong></td><td>How many of those observations were drawn in the next draw.</td></tr>
+      <tr><td><strong>Raw rate</strong></td><td><code>Hits / Trials</code>. It is shown for transparency but can be noisy when trials are small.</td></tr>
+      <tr><td><strong>Smoothed rate</strong></td><td>A Bayesian-style shrinkage estimate that pulls thin stage evidence toward the full-history bucket rate.</td></tr>
+      <tr><td><strong>Expected next hits</strong></td><td><code>Count now × Smoothed rate</code>. This is an expected count, not a forced candidate target.</td></tr>
+    </tbody>
+  </table>
+
+  <h4>Undrawn Survival / Break Curve</h4>
+  <p>This table focuses only on numbers that were still <strong>Undrawn</strong> before each draw stage.</p>
+  <ul>
+    <li><strong>At risk</strong> means numbers that were still undrawn immediately before that draw.</li>
+    <li><strong>Broke</strong> means those numbers appeared in that draw and moved into <strong>1x</strong>.</li>
+    <li><strong>Survival est.</strong> is the compounded smoothed estimate of remaining undrawn through that stage.</li>
+    <li><strong>Median undrawn after</strong> and <strong>IQR after</strong> show the typical number of undrawn numbers remaining after the draw.</li>
+  </ul>
+
+  <h4>Upper-Bucket First Reach Timing</h4>
+  <p>This table measures when a month first reaches higher buckets. It is useful for testing observations like "how unusual is 4x by draw 6?" or "do 6x+ buckets mostly appear in longer months?"</p>
+
+  <h4>Month-Length Final Shape Comparison</h4>
+  <p>This table uses <strong>completed months only</strong> and compares the final median bucket composition by month length. It is the safest place to inspect repeated differences between 13-draw and 14-draw months.</p>
+
+  <h4>Prior Heat × Monthly Bucket Relationship</h4>
+  <p>This table checks whether the DGA/heatmap concept has measurable relationship with monthly bucket movement. Prior heat is calculated without lookahead from each number's cumulative historical count before the draw being measured, then grouped into cold, middle, hot, or flat tiers.</p>
+
+  <div class="warn-box">
+    <strong>Honesty note:</strong> the Transition Lab is closer to a learned transition model than Stage IDM, but it is still observe-only. It should not be treated as predictive until walk-forward validation shows that its transition evidence improves candidate quality against simple baselines.
   </div>
 
   <!-- ───────────────────────────────────────── -->
@@ -1401,6 +1581,7 @@
   </ul>
 
   <h4>Breakdown table column definitions</h4>
+  <p>Every breakdown-table column header is sortable. Click once to sort by that column’s default useful direction; click the same header again to reverse it. Sorting changes only the table display order. It does not change hot/cold scores or candidate generation unless you also use the include/exclude row-selection controls.</p>
   <ul>
     <li><strong>#</strong> — the overall <strong>hot rank</strong>. A lower number means the number currently looks hotter by the panel’s combined scoring model.</li>
     <li><strong>Num</strong> — the lottery number itself.</li>
@@ -1415,6 +1596,7 @@
     <li><strong>Weighted rate</strong> — the number’s whole-history hit rate after applying recency weighting, so newer draws count more than older draws.</li>
     <li><strong>Weighted rank</strong> — the number’s rank when sorted by weighted rate. Lower rank means stronger recency-weighted hotness.</li>
     <li><strong>Hot score</strong> — the combined score used to produce the overall hot/cold ordering. It blends recent-vs-prior change with recency-weighted lift, so higher positive values are hotter and lower negative values are colder.</li>
+    <li><strong>Generation</strong> — whether the number is currently selected for forced inclusion, forced exclusion, locked by User Exclusions, or not selected from this table.</li>
   </ul>
 
   <p>If you want the quickest reading: numbers near the top usually combine a strong <strong>Recent rank</strong>, a positive <strong>Recent Δ</strong>, and a strong <strong>Weighted rank</strong>. Numbers near the bottom usually show the opposite pattern.</p>
@@ -1472,11 +1654,22 @@
 
   <p>The <strong>DGA (Draw-Grid Analysis)</strong> grid provides a visual heat-map of number frequencies across the draw history. Each row represents one number (1–45) and each column represents one draw. The WFMQYH (Windfall Monthly Quarterly Yearly History) window is shown at full opacity; draws outside this window are shown at 35% opacity to provide context without visual dominance.</p>
 
+  <p><strong>Sticky WFMQYH lens:</strong> when the active WFMQYH window is a practical size, the current WFMQYH draw columns stay fixed on the right side of the DGA grid while older context columns scroll underneath. This mirrors the Monthly bucket state grid behaviour and lets you keep the active window visible while scanning older history. It is a visual aid only: it does not change draw data, DGA calculations, scoring, generation, simulation, diamonds, or highlights.</p>
+
+  <p><strong>Monthly bucket state grid opacity:</strong> the <strong>Grid opacity</strong> slider inside the Monthly bucket state grid changes only that lower grid's colored bucket cell fill opacity. It does not affect the DGA heatmap above, and it does not change bucket calculations, generation, scoring, or simulation. Labels, borders, and simulation strip controls remain readable.</p>
+
   <p>Clicking any column header focuses that column (all other columns dim to 30% opacity). Click the same header again, or click any other column, to change or clear the focus.</p>
 
   <h3 id="next-hot-blocks">Next Hot Blocks</h3>
 
   <p><strong>Next Hot Blocks</strong> groups the 45-number pool into contiguous blocks, then shows recent block heat and drift over the active WFMQYH history. It is descriptive evidence only. Excluding a block is a deliberate hard exclusion action, so the panel now checks the app-wide number conflict ledger before allowing that action.</p>
+
+  <h4>Last-column dots</h4>
+  <ul>
+    <li><strong>Red dot:</strong> the latest draw in the active history had at least one <strong>main</strong> number inside that block.</li>
+    <li><strong>Green dot:</strong> the latest draw in the active history had at least one <strong>supplementary</strong> number inside that block.</li>
+    <li>If a block contains both latest-draw mains and latest-draw supplementaries, both dots can appear. These dots are latest-draw markers only; they are not calibrated probabilities or guarantees.</li>
+  </ul>
 
   <h4>Conflict ledger behaviour</h4>
   <ul>
@@ -1641,6 +1834,20 @@
 	    <strong>Truthfulness note:</strong> this shortlist is an empirical diagnostic, not a guarantee and not a calibrated main-number prediction. Strict rank is a disciplined drought-severity ranking; empirical rate is supporting evidence, not a promise that the number is "due."
 	  </div>
 
+  <h3 id="mlnd-exclusion-risk">Most Likely NOT Drawn / Exclusion Risk Ledger</h3>
+
+  <p><strong>Most Likely NOT Drawn</strong> is now an observe-only <strong>Exclusion Risk Ledger</strong>. It ranks the 45 numbers by estimated draw risk and shows which numbers look least risky to exclude at the selected risk budget. It does not force candidate-generation exclusions.</p>
+
+  <p><strong>Windfall All History definition:</strong> MLND ignores WFMQYH and uses real all-history evidence after excluding the opening partial month <strong>2024-05</strong>. The draw history still displays that month, but Windfall excludes it from baseline-style calculations because it contains only part of the first historical month.</p>
+
+  <p>The default scope is <strong>mains + supps</strong>, because the statement “37 numbers will not be drawn” refers to the eight numbers that appear across the full draw result. Mains-only mode is available for diagnosis, but it answers a different question.</p>
+
+  <p><strong>Risk budget</strong> controls how many numbers the ledger proposes as low-risk exclusions. A 37-number exclusion budget leaves exactly eight allowed numbers, so it is mathematically equivalent to proposing an eight-number draw universe. Smaller budgets are less aggressive and usually carry lower false-exclusion risk.</p>
+
+  <p><strong>Random baseline:</strong> walk-forward validation trains only on draws before the test draw, then compares MLND’s false exclusions against a random exclusion set of the same size. For example, random 37-of-45 exclusions against an eight-ball result are expected to wrongly exclude <code>37 × 8 ÷ 45 = 6.58</code> drawn numbers. MLND only deserves trust when it beats that random baseline out of sample.</p>
+
+  <p><strong>Important:</strong> MLND is evidence and calibration, not clairvoyance. A number listed as low-risk can still appear in the next draw.</p>
+
   <h3 id="dga-columns">Column Structure</h3>
 
   <p>The grid contains exactly <strong>N + 1 columns</strong>, where <em>N</em> is the number of draws currently loaded in Draw History Manager:</p>
@@ -1713,6 +1920,31 @@
     <strong>Purpose:</strong> the journal is for learning whether your own observations are improving over time. It is deliberately separate from generation so the saved record stays honest.
   </div>
 
+  <h4>New Prediction draft button</h4>
+  <p>The panel is closed by default. Use the <strong>New Prediction</strong> button in the panel heading to open it and start a draft from the current app setup.</p>
+
+  <p>Windfall copies values into the form only where they fit the journal's scoring fields. For example, a single selected odd/even ratio can prefill <strong>Odd/even ratio</strong>; User Selected and forced/boosted inclusion numbers can prefill <strong>Numbers</strong>; and active Acceptance Needs counts can prefill <strong>Target draw bucket-origin mix</strong> when the counts fit inside the 8-ball next-draw limit.</p>
+
+  <p>The draft also writes a context note listing important setup values such as WFMQYH, SDE1, HC3, selected ratios, user-selected numbers, forced inclusion sources, forced exclusions, scoring influence, and selected-number boost state. Review the draft before saving. The button is a time-saver, not an automatic prediction.</p>
+
+  <h4>How to fill in a journal entry</h4>
+  <p>For a new user, the most important rule is simple: fill in only the prediction fields you genuinely want to test. The form is intentionally flexible. You do not need to complete every field, and a notes-only entry is valid if the observation is qualitative.</p>
+
+  <ol>
+    <li><strong>Check the anchor latest draw.</strong> This is the latest real draw currently loaded. The entry is saved as a prediction made after that draw.</li>
+    <li><strong>Choose the target window.</strong> Use <strong>Next draw</strong> for a single immediate prediction, <strong>Next 3 draws</strong> for a short sequence idea, or <strong>Rest of current month</strong> for a month-stage hypothesis.</li>
+    <li><strong>Add the clearest prediction first.</strong> Examples: Odd/even ratio <code>2:6</code>, Numbers <code>7, 14, 22, 31</code>, Terminal digits <code>1, 4, 9</code>, Confidence <code>65</code>.</li>
+    <li><strong>Use target draw bucket-origin mix when your prediction is about where the drawn balls will come from.</strong> Example for Next draw: Undrawn <code>3</code>, 1x <code>4</code>, 2x <code>1</code> means you expect 3 of the 8 drawn balls to come from numbers currently undrawn this month, 4 from numbers currently drawn once, and 1 from numbers currently drawn twice. Do not enter the whole monthly bucket state here.</li>
+    <li><strong>Use shape checks for broad composition ideas.</strong> Example: Single-digit <code>1</code>, Double-digit <code>7</code>, Sum min <code>150</code>, Sum max <code>210</code>.</li>
+    <li><strong>Use recorded diagnostics for specific pattern ideas.</strong> Example: U/D/F ratio <code>3/2/3</code>, Repeat count <code>1</code>, ±1/±2 count <code>2</code>, Drought count <code>1</code>, Carry-over count <code>0</code>.</li>
+    <li><strong>Add notes while the reasoning is fresh.</strong> Example: "Testing whether SDE1 plus HC3 looks stronger on D3 after a low-repeat previous draw."</li>
+    <li><strong>Save before the target draw arrives.</strong> Once the relevant real draw appears in history, the entry locks so it cannot be rewritten after the result is known.</li>
+  </ol>
+
+  <div class="tip">
+    <strong>Helpful habit:</strong> saving at least one prediction entry per draw gives the app creators a clean audit trail. Saving more than one entry is even better when each entry tests a different idea, such as ratio, candidate numbers, monthly buckets, carry-over, or ±1/±2 behaviour. Over time, this record can help refine Windfall's algorithms and improve its possible winning-entry logic without relying on memory or hindsight.
+  </div>
+
   <h4>How entries are anchored and locked</h4>
   <ul>
     <li>When you save an entry, it is anchored to the latest real draw currently loaded in history.</li>
@@ -1728,6 +1960,13 @@
 
   <div class="warn-box">
     <strong>Important:</strong> the saved setup snapshot is provenance. It does not change candidate generation, does not alter scoring, and does not make the prediction more or less true by itself.
+  </div>
+
+  <h4>Email to author</h4>
+  <p>The <strong>Email to author</strong> button prepares a mail-client draft containing the saved journal JSON. It does not send anything automatically; review the email before sending. If the journal is too large for a reliable email body, Windfall tries to copy the JSON to the clipboard and, if needed, downloads <code>windfall-prediction-journal.json</code> as a fallback.</p>
+
+  <div class="note">
+    <strong>Stage 2 note:</strong> this is an author handoff helper, not yet an automated sync or analysis pipeline. What the exported data is used for belongs to the next design stage.
   </div>
 
   <h3 id="research-diary">Research Diary &amp; Draw Reminders</h3>
@@ -1765,7 +2004,7 @@
   </table>
 
   <h4>Entry checker</h4>
-  <p>Before saving, the journal checks for impossible quantities. For example, a next-draw odd/even ratio must total 8, a next-draw number shortlist cannot contain more than 8 unique numbers, terminal digit selections cannot exceed what the target window can draw, and count fields such as bucket mix, repeat count, drought count, carry-over count, and confidence must stay inside their possible ranges. Invalid entries are blocked and shown as a visible error list.</p>
+  <p>Before saving, the journal checks for impossible quantities. For example, a next-draw odd/even ratio must total 8, a next-draw number shortlist cannot contain more than 8 unique numbers, terminal digit selections cannot exceed what the target window can draw, and count fields such as target draw bucket-origin mix, repeat count, drought count, carry-over count, and confidence must stay inside their possible ranges. Invalid entries are blocked and shown as a visible error list.</p>
 
   <h4>Fields you can record</h4>
   <table>
@@ -1775,7 +2014,7 @@
     <tbody>
       <tr><td><strong>Odd/even ratio</strong></td><td>A mains + supps ratio such as <code>2:6</code>.</td><td>Scored as exact hit or miss against the target draw window.</td></tr>
       <tr><td><strong>Numbers</strong></td><td>Exact numbers or a shortlist. Punctuation in pasted text is accepted.</td><td>Scores how many listed numbers appeared in the target draw window.</td></tr>
-      <tr><td><strong>Monthly bucket mix</strong></td><td>Counts for Undrawn, 1x, 2x, through 8x+.</td><td>Scores against the bucket each target number belonged to before that draw happened.</td></tr>
+      <tr><td><strong>Target draw bucket-origin mix</strong></td><td>Counts of target draw balls expected to originate from Undrawn, 1x, 2x, through 8x+ buckets. This is not the full monthly bucket state at entry time.</td><td>Scores against the bucket each target number belonged to immediately before that target draw happened.</td></tr>
       <tr><td><strong>Single/double digit</strong></td><td>Counts of 1-9 versus 10-45.</td><td>Scored by absolute count match.</td></tr>
       <tr><td><strong>Sum range</strong></td><td>A minimum and/or maximum total.</td><td>Scores whether the target draw total falls inside the saved range.</td></tr>
       <tr><td><strong>Terminal digits</strong></td><td>Ending digits to watch. Entering <code>12</code> is treated as terminal digit <code>2</code>.</td><td>Scores how many listed terminal digits appeared.</td></tr>

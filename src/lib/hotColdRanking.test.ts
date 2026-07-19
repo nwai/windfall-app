@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import React from "react";
+import React, { act } from "react";
+import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import type { Draw } from "../types";
@@ -11,6 +12,12 @@ import {
 } from "./hotColdRanking";
 
 const draw = (date: string, main: number[], supp: number[] = []): Draw => ({ date, main, supp });
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+const firstBreakdownNumber = (container: HTMLElement): string | null => (
+  container.querySelector("tbody tr td:nth-child(2)")?.textContent?.trim() ?? null
+);
 
 describe("analyzeHotColdRanking", () => {
   const history: Draw[] = [
@@ -125,6 +132,45 @@ describe("analyzeHotColdRanking", () => {
     expect(html).toContain("User exclusions active: 1");
     expect(html).toContain("User Excluded");
     expect(html).toContain("Clear it in WFMQYH User Exclusions");
+  });
+
+  it("lets every hot/cold breakdown column expose a sortable header and toggles number order", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(React.createElement(HotColdRankingPanel, { history }));
+    });
+
+    const sortableHeaders = Array.from(container.querySelectorAll("thead button[aria-label^='Sort by ']"));
+    expect(sortableHeaders).toHaveLength(14);
+    expect(sortableHeaders.map((button) => button.textContent)).toEqual(expect.arrayContaining([
+      expect.stringContaining("Num"),
+      expect.stringContaining("Type"),
+      expect.stringContaining("Status"),
+      expect.stringContaining("Recent Δ"),
+      expect.stringContaining("Hot score"),
+      expect.stringContaining("Generation"),
+    ]));
+
+    const numberHeader = container.querySelector<HTMLButtonElement>("thead button[aria-label='Sort by Num']");
+    expect(numberHeader).not.toBeNull();
+
+    await act(async () => {
+      numberHeader?.click();
+    });
+    expect(firstBreakdownNumber(container)).toBe("1");
+
+    await act(async () => {
+      numberHeader?.click();
+    });
+    expect(firstBreakdownNumber(container)).toBe("45");
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
   });
 
   it("resolves WFMQYH shortcut choices to draw counts", () => {

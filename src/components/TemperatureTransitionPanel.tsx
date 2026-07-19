@@ -13,6 +13,7 @@ import { filterRealDrawHistory } from "../lib/realDrawHistory";
 
 export interface TemperatureTransitionPanelProps {
   history: Draw[];
+  historyScopeLabel?: string;
 
   // Keep in lockstep with TemperatureHeatmap props:
   alpha?: number;
@@ -46,6 +47,7 @@ function latestTempsFromCategories(
 
 export const TemperatureTransitionPanel: React.FC<TemperatureTransitionPanelProps> = ({
   history,
+  historyScopeLabel,
 
   alpha = 0.25,
   metric = "hybrid",
@@ -201,7 +203,7 @@ export const TemperatureTransitionPanel: React.FC<TemperatureTransitionPanelProp
 
   const HeaderStats = () => (
     <span style={{ marginLeft: "auto", fontSize: 13, color: "#555" }}>
-      Walk-forward over {realHistory.history.length} real draws: acc {fmtPct(backtest.meanAccuracy)}, prec {fmtPct(backtest.meanPrecision)}, rec {fmtPct(backtest.meanRecall)}, F1 {fmtPct(backtest.meanF1)}
+      Walk-forward over {realHistory.history.length} scoped draws: acc {fmtPct(backtest.meanAccuracy)}, prec {fmtPct(backtest.meanPrecision)}, rec {fmtPct(backtest.meanRecall)}, F1 {fmtPct(backtest.meanF1)}
     </span>
   );
 
@@ -214,6 +216,11 @@ export const TemperatureTransitionPanel: React.FC<TemperatureTransitionPanelProp
         <div style={{ fontSize: 12, color: "#475569" }}>
           Empirical transition evidence only; not a calibrated next-draw probability.
         </div>
+        {historyScopeLabel && (
+          <div style={{ fontSize: 12, color: "#64748b", marginTop: 3 }}>
+            Scope: {historyScopeLabel}.
+          </div>
+        )}
       </div>
       <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
         <label>

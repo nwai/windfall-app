@@ -93,6 +93,152 @@ describe("GeneratedCandidatesPanel", () => {
     expect(document.body.textContent).toContain("exactly 7");
   });
 
+  it("shows a stop-and-partial button only while generation is running", () => {
+    const idleHtml = renderToStaticMarkup(
+      React.createElement(GeneratedCandidatesPanel, buildProps({
+        isGenerating: false,
+        onStopGenerate: vi.fn(),
+      })),
+    );
+    const runningHtml = renderToStaticMarkup(
+      React.createElement(GeneratedCandidatesPanel, buildProps({
+        isGenerating: true,
+        onStopGenerate: vi.fn(),
+      })),
+    );
+
+    expect(idleHtml).not.toContain("Stop and show partial");
+    expect(runningHtml).toContain("Stop and show partial");
+    expect(runningHtml).toContain("Stop generating and show accepted candidates so far");
+  });
+
+  it("copies generated candidate mains as paste-weighted comma-separated rows", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    const originalClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    try {
+      await act(async () => {
+        root.render(React.createElement(GeneratedCandidatesPanel, buildProps({
+          candidates: [buildCandidate(0), buildCandidate(1)],
+        })));
+      });
+
+      const copyButton = container.querySelector(
+        'button[aria-label="Copy generated candidate mains as comma-separated rows for the Paste-Weighted Candidate Generator"]',
+      ) as HTMLButtonElement | null;
+      expect(copyButton).not.toBeNull();
+
+      await act(async () => {
+        copyButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        await Promise.resolve();
+      });
+
+      expect(writeText).toHaveBeenCalledWith("1,2,3,4,5,6\n9,10,11,12,13,14");
+      expect(container.textContent).toContain("Copied 2 candidate main rows");
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+      if (originalClipboard) {
+        Object.defineProperty(navigator, "clipboard", originalClipboard);
+      } else {
+        delete (navigator as Navigator & { clipboard?: unknown }).clipboard;
+      }
+    }
+  });
+
+  it("leaves Manual Prize Check independent from User Selected numbers while sync is off", async () => {
+    const setManualSimSelected = vi.fn();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    try {
+      await act(async () => {
+        root.render(React.createElement(GeneratedCandidatesPanel, buildProps({
+          userSelectedNumbers: [1, 2, 3, 4, 5, 6, 7, 8],
+          manualSimSelected: [20, 21, 22],
+          setManualSimSelected,
+        })));
+      });
+
+      await act(async () => {
+        root.render(React.createElement(GeneratedCandidatesPanel, buildProps({
+          userSelectedNumbers: [9, 10, 11, 12, 13, 14, 15, 16],
+          manualSimSelected: [20, 21, 22],
+          setManualSimSelected,
+        })));
+      });
+
+      expect(setManualSimSelected).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
+  it("can sync Manual Prize Check from normalized User Selected numbers when enabled", async () => {
+    const setManualSimSelected = vi.fn();
+    const onManualSimulationChanged = vi.fn();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    try {
+      await act(async () => {
+        root.render(React.createElement(GeneratedCandidatesPanel, buildProps({
+          userSelectedNumbers: [12, 1, 5, 2, 9, 10, 11, 8, 13],
+          manualSimSelected: [30],
+          setManualSimSelected,
+          onManualSimulationChanged,
+        })));
+      });
+
+      const syncToggle = container.querySelector(
+        'input[aria-label="Sync Manual Prize Check with User Selected numbers"]',
+      ) as HTMLInputElement | null;
+      expect(syncToggle).not.toBeNull();
+
+      await act(async () => {
+        syncToggle?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+
+      expect(setManualSimSelected).toHaveBeenLastCalledWith([1, 2, 5, 8, 9, 10, 11, 12]);
+      expect(onManualSimulationChanged).toHaveBeenLastCalledWith([1, 2, 5, 8, 9, 10, 11, 12]);
+      expect(container.textContent).toContain("Using normalized User Selected order");
+
+      setManualSimSelected.mockClear();
+      onManualSimulationChanged.mockClear();
+
+      await act(async () => {
+        root.render(React.createElement(GeneratedCandidatesPanel, buildProps({
+          userSelectedNumbers: [6, 7, 8, 9, 10, 11, 12, 13],
+          manualSimSelected: [1, 2, 5, 8, 9, 10, 11, 12],
+          setManualSimSelected,
+          onManualSimulationChanged,
+        })));
+      });
+
+      expect(setManualSimSelected).toHaveBeenLastCalledWith([6, 7, 8, 9, 10, 11, 12, 13]);
+      expect(onManualSimulationChanged).toHaveBeenLastCalledWith([6, 7, 8, 9, 10, 11, 12, 13]);
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
   it("renders the compact generated-candidate table with only decision-useful visible diagnostics", () => {
     const html = renderToStaticMarkup(
       React.createElement(GeneratedCandidatesPanel, buildProps({
@@ -149,6 +295,74 @@ describe("GeneratedCandidatesPanel", () => {
     expect(html).not.toContain('title="Convergence:');
     expect(html).not.toContain('title="Ideal Draw Match:');
     expect(html).not.toContain('title="Readiness score:');
+  });
+
+  it("defaults to generated order and only applies prize ordering when Prize sort is selected", async () => {
+    const candidates: CandidateSet[] = [
+      { main: [31, 32, 33, 34, 35, 36], supp: [37, 38] },
+      { main: [1, 2, 3, 4, 5, 6], supp: [7, 8] },
+    ];
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    const firstMainCellCompact = () => (
+      container.querySelector("tbody tr td:nth-child(2)")?.textContent ?? ""
+    ).replace(/\s+/g, "");
+    const prizeHeader = () => Array.from(container.querySelectorAll("th"))
+      .find((th) => th.textContent?.includes("Prize"));
+
+    try {
+      await act(async () => {
+        root.render(React.createElement(GeneratedCandidatesPanel, buildProps({
+          candidates,
+          manualSimSelected: [1, 2, 3, 4, 5, 6, 7, 8],
+        })));
+      });
+
+      expect(container.textContent).toContain("generated order");
+      expect(firstMainCellCompact()).toBe("313233343536");
+
+      await act(async () => {
+        prizeHeader()?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+
+      expect(firstMainCellCompact()).toBe("123456");
+
+      await act(async () => {
+        root.render(React.createElement(GeneratedCandidatesPanel, buildProps({
+          candidates,
+          manualSimSelected: [31, 32, 33, 34, 35, 36, 37, 38],
+        })));
+      });
+
+      expect(firstMainCellCompact()).toBe("313233343536");
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
+  it("uses the full 8-number candidate row for both Prize labels and Manual M/S dots", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(GeneratedCandidatesPanel, buildProps({
+        candidates: [
+          { main: [10, 11, 12, 13, 14, 20], supp: [1, 2] },
+          { main: [10, 11, 12, 13, 30, 31], supp: [14, 40] },
+          { main: [10, 11, 20, 21, 31, 32], supp: [1, 2] },
+        ],
+        manualSimSelected: [10, 11, 12, 13, 14, 15, 20, 21],
+      })),
+    );
+    const document = new DOMParser().parseFromString(html, "text/html");
+
+    expect(document.body.textContent).toContain("Div2");
+    expect(document.body.textContent).toContain("Div3");
+    expect(document.body.textContent).toContain("Div6");
+    expect(html).toContain("Manual main hits from candidate row");
+    expect(html).toContain("Manual supp hits from candidate row");
   });
 
   it("keeps generated-candidate column headers sticky inside the scrolling table", () => {

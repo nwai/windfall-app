@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import type { Draw } from "../types";
 import {
+  buildPredictionJournalDraftFromSetup,
   buildPredictionJournalEntry,
   canEditPredictionJournalEntry,
   clearPredictionJournalEntries,
@@ -193,6 +194,51 @@ describe("predictionJournal", () => {
         "Drought-break forced: 1",
       ]),
     });
+  });
+
+  it("builds a new prediction draft from the current app setup", () => {
+    const draft = buildPredictionJournalDraftFromSetup({
+      windowEnabled: true,
+      windowMode: "Custom",
+      customDrawCount: 13,
+      selectedRatios: ["5:3"],
+      useTrickyRule: false,
+      knobs: { enableSDE1: true, enableHC3: false },
+      userSelectedNumbers: [1, 2, 3],
+      trendSelectedNumbers: [10],
+      previousNeighbourConstraintNumbers: [12, 14],
+      hotColdForcedNumbers: [20],
+      droughtBreakSelectedNumbers: [31],
+      selectedCarryOverBoostNumbers: [33, 34],
+      excludedNumbers: [44],
+      hotColdExcludedNumbers: [45],
+      monthlyConstructiveEnabled: true,
+      acceptanceNeedsEnabled: true,
+      acceptanceNeedsCounts: {
+        undrawn: 2,
+        times1: 3,
+        times2: 0,
+        times3: 1,
+        times4: 0,
+        times5: 0,
+        times6: 0,
+        times7: 0,
+        times8: 0,
+      },
+      scoringGenerationInfluence: "normal",
+      selectedBoostEnabled: true,
+      selectedBoostFactor: 4,
+    } as any);
+
+    expect(draft.targetKind).toBe("nextDraw");
+    expect(draft.inputs.oddEvenRatio).toBe("5:3");
+    expect(draft.inputs.numbers).toEqual([1, 2, 3, 10, 12, 14, 20, 31]);
+    expect(draft.inputs.monthlyBuckets).toEqual({ undrawn: 2, times1: 3, times3: 1 });
+    expect(draft.inputs.notes).toContain("New prediction draft created from the current app setup.");
+    expect(draft.inputs.notes).toContain("Additional selected/forced numbers kept in this note only: 33, 34.");
+    expect(draft.inputs.notes).toContain("SDE1: ON.");
+    expect(draft.inputs.notes).toContain("HC3: OFF.");
+    expect(draft.inputs.notes).toContain("Forced exclusions: user 44; hot/cold 45.");
   });
 
   it("distinguishes Monthly Draws Summary construction from the extra MiAN post-filter", () => {

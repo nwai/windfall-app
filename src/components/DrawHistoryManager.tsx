@@ -29,6 +29,7 @@ import {
   type DrawHistoryValidationOptions,
 } from "../lib/drawHistoryValidation";
 import { showToast } from "../lib/toastBus";
+import { MONTH_LABELS_EXCLUDED_FROM_HISTORY_BASELINES } from "../lib/monthlyAverageScope";
 
 type Props = {
   onDrawsUpdated?: (rows: DrawRow[], summaryMessage?: string) => void;
@@ -374,6 +375,11 @@ export default function DrawHistoryManager({
           <div style={{ fontSize: 16, fontWeight: 750, color: "#111827" }}>Draw history source</div>
           <div style={subtleTextStyle}>
             {lastFileName ? `CSV target: ${lastFileName}` : "No CSV write target selected."}
+          </div>
+          <div style={{ ...subtleTextStyle, marginTop: 3 }}>
+            Windfall All History baselines exclude the opening partial month
+            {" "}
+            ({MONTH_LABELS_EXCLUDED_FROM_HISTORY_BASELINES.join(", ")}).
           </div>
         </div>
         <div style={buttonRowStyle}>

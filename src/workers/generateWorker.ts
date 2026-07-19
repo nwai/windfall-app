@@ -5,6 +5,7 @@
  * Message protocol:
  *   Main → Worker:  { type: "generate", id: string, args: SerializedArgs }
  *   Worker → Main:  { type: "trace", id: string, msg: string }
+ *   Worker → Main:  { type: "partial", id: string, result: GenerateCandidatesResult }
  *   Worker → Main:  { type: "result", id: string, result: GenerateCandidatesResult }
  *   Worker → Main:  { type: "error", id: string, error: string }
  */
@@ -12,6 +13,7 @@
 import { generateCandidates } from "../generateCandidates";
 import type { GenerateCandidateRatioOption, GenerateCandidatesResult } from "../generateCandidates";
 import type { ScoringGenerationProfile } from "../lib/scoringGenerationInfluence";
+import type { LatestNeighbourSupportOptions } from "../lib/latestNeighbourSupport";
 
 /** Monthly bucket options with arrays instead of Sets (for structured clone) */
 interface SerializedMonthlyBucketOptions {
@@ -98,6 +100,8 @@ export interface GenerateWorkerArgs {
   monthEndCarryOverWeights?: Record<number, number>;
   /** Serializable Scoring Diagnostics evidence profile for generation weighting. */
   scoringGenerationProfile?: ScoringGenerationProfile;
+  /** Default-off experimental latest-draw +/-1 support rule. */
+  latestNeighbourSupportOptions?: LatestNeighbourSupportOptions;
 }
 
 function deserializeMonthlyBuckets(
@@ -160,6 +164,9 @@ ctx.addEventListener("message", (e: MessageEvent) => {
     const traceSetter = (msg: string) => {
       ctx.postMessage({ type: "trace", id, msg });
     };
+    const progressSetter = (result: GenerateCandidatesResult) => {
+      ctx.postMessage({ type: "partial", id, result });
+    };
 
     const result: GenerateCandidatesResult = generateCandidates(
       args.num,
@@ -207,7 +214,9 @@ ctx.addEventListener("message", (e: MessageEvent) => {
       args.monthlyRepeatBiasWeights,
       args.mainDecadeBiases,
       args.monthEndCarryOverWeights,
-      args.scoringGenerationProfile
+      args.scoringGenerationProfile,
+      progressSetter,
+      args.latestNeighbourSupportOptions
     );
 
     ctx.postMessage({ type: "result", id, result });

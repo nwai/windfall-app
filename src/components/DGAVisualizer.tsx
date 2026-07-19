@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { DiamondShape } from '../types/Diamond';
 import { isCellInShape } from '../lib/diamondShapes';
 import type { Diamond as DGADiamond } from '../dga';
@@ -110,6 +110,8 @@ const DEFAULT_DIAMOND_FILL = 'rgba(255,0,180,0.30)';
 const DEFAULT_DIAMOND_EDGE = 'rgba(255,0,180,0.85)';
 const HATCH_WIDTH = 2;
 const HATCH_GAP = 4;
+const MAX_STICKY_WFMQYH_COLUMNS = 60;
+const NEXT_COLUMN_WIDTH = 36;
 
 function getHeatmapColor(count: number, min: number, max: number) {
   if (max === min) return '#fff';
@@ -955,6 +957,30 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
   const railCellWidth = Math.max(28, tableCellSize + 6);
   const gridLineShadow = (color = '#eee', width = 1) => `inset 0 0 0 ${width}px ${color}`;
   const mergeBoxShadows = (...shadows: Array<string | undefined>) => shadows.filter(Boolean).join(', ');
+  const scrollShellRef = useRef<HTMLDivElement | null>(null);
+  const lastAutoScrollSignatureRef = useRef<string>('');
+  const clampedWfmqyhStart = Math.max(0, Math.min(wfmqyhStart, baseCols));
+  const activeWfmqyhColumnCount = Math.max(0, baseCols - clampedWfmqyhStart);
+  const stickyWfmqyhLensEnabled =
+    clampedWfmqyhStart > 0 &&
+    activeWfmqyhColumnCount > 0 &&
+    activeWfmqyhColumnCount <= MAX_STICKY_WFMQYH_COLUMNS;
+  const isStickyWfmqyhColumn = (cIdx: number): boolean =>
+    stickyWfmqyhLensEnabled && cIdx >= clampedWfmqyhStart && cIdx < baseCols;
+  const stickyRightForWfmqyhColumn = (cIdx: number): number => {
+    const columnsToRight = Math.max(0, baseCols - 1 - cIdx);
+    return (includeNextCol ? NEXT_COLUMN_WIDTH : 0) + columnsToRight * tableCellSize;
+  };
+
+  useEffect(() => {
+    if (!stickyWfmqyhLensEnabled) return;
+    const scrollShell = scrollShellRef.current;
+    if (!scrollShell) return;
+    const signature = `${baseCols}:${clampedWfmqyhStart}:${tableCellSize}:${includeNextCol ? 1 : 0}`;
+    if (lastAutoScrollSignatureRef.current === signature) return;
+    lastAutoScrollSignatureRef.current = signature;
+    scrollShell.scrollLeft = Math.max(0, clampedWfmqyhStart * tableCellSize - railCellWidth);
+  }, [baseCols, clampedWfmqyhStart, includeNextCol, railCellWidth, stickyWfmqyhLensEnabled, tableCellSize]);
 
   /* ------------------------------- Rendering ------------------------------ */
 
@@ -1610,12 +1636,15 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
   );
 
   const renderGrid = () => (
-    <div style={{ overflowX: 'auto', border: 0, boxShadow: gridLineShadow('#ccc'), background: '#fff' }}>
+    <div ref={scrollShellRef} style={{ overflowX: 'auto', border: 0, boxShadow: gridLineShadow('#ccc'), background: '#fff' }}>
       <table key={tableKey} style={{ borderCollapse: 'collapse', fontSize: 13 }}>
         <thead>
           <tr>
             <th
               style={{
+                position: 'sticky',
+                left: 0,
+                zIndex: 8,
                 background: '#f9f9f9',
                 minWidth: railCellWidth,
                 width: railCellWidth,
@@ -1630,20 +1659,28 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
             {drawLabels.map((label, cIdx) => (
               <th
                 key={cIdx}
-                style={{
-                  minWidth: tableCellSize,
-                  width: tableCellSize,
-                  height: tableCellSize,
-                  lineHeight: tableCellLineHeight,
-                  textAlign: 'center',
-                  background: wfmqyhStart > 0 && cIdx < wfmqyhStart ? '#f5f5f5' : '#f9f9f9',
-                  opacity: getColOpacity(cIdx),
-                  cursor: 'pointer',
-                  padding: 0,
-                  boxSizing: 'border-box',
-                  border: 0,
-                  boxShadow: gridLineShadow(),
-                }}
+                style={(() => {
+                  const isSticky = isStickyWfmqyhColumn(cIdx);
+                  return {
+                    position: isSticky ? 'sticky' : undefined,
+                    right: isSticky ? stickyRightForWfmqyhColumn(cIdx) : undefined,
+                    zIndex: isSticky ? 6 : undefined,
+                    minWidth: tableCellSize,
+                    width: tableCellSize,
+                    height: tableCellSize,
+                    lineHeight: tableCellLineHeight,
+                    textAlign: 'center',
+                    background: isSticky
+                      ? 'rgba(249,249,249,0.82)'
+                      : wfmqyhStart > 0 && cIdx < wfmqyhStart ? '#f5f5f5' : '#f9f9f9',
+                    opacity: getColOpacity(cIdx),
+                    cursor: 'pointer',
+                    padding: 0,
+                    boxSizing: 'border-box',
+                    border: 0,
+                    boxShadow: gridLineShadow(isSticky ? '#bcd7ff' : '#eee'),
+                  } satisfies React.CSSProperties;
+                })()}
                 onClick={() => onColumnClick?.(cIdx)}
               >
                 {label}
@@ -1652,12 +1689,15 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
             {includeNextCol && (
               <th
                 style={{
-                  width: 36,
-                  minWidth: 36,
+                  position: stickyWfmqyhLensEnabled ? 'sticky' : undefined,
+                  right: stickyWfmqyhLensEnabled ? 0 : undefined,
+                  zIndex: stickyWfmqyhLensEnabled ? 7 : undefined,
+                  width: NEXT_COLUMN_WIDTH,
+                  minWidth: NEXT_COLUMN_WIDTH,
                   height: tableCellSize,
                   lineHeight: tableCellLineHeight,
                   textAlign: 'center',
-                  background: '#f0f7ff',
+                  background: stickyWfmqyhLensEnabled ? 'rgba(240,247,255,0.86)' : '#f0f7ff',
                   opacity: getColOpacity(drawLabels.length),
                   cursor: 'pointer',
                   padding: 0,
@@ -1762,6 +1802,7 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
           }
           const isPred = predictions && predictions.includes(rIdx + 1) && cIdx === (grid[0]?.length || 1) - 1;
           if (isPred) cellType = cellType ? `${cellType}, Prediction` : 'Prediction';
+          const isSticky = isStickyWfmqyhColumn(cIdx);
 
           let cellTitle = `Number: ${numberLabels[rIdx]}, Draw: ${drawLabels[cIdx]}`;
           if (cellType) cellTitle += `\nType: ${cellType}`;
@@ -1810,7 +1851,9 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
                 textAlign: 'center',
                 verticalAlign: 'middle',
                 border: 0,
-                position: 'relative',
+                position: isSticky ? 'sticky' : 'relative',
+                right: isSticky ? stickyRightForWfmqyhColumn(cIdx) : undefined,
+                zIndex: isSticky ? 4 : undefined,
                 background,
                 backgroundImage: bgImage,
                 backgroundSize: '6px 6px',
@@ -1853,11 +1896,13 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
               const baseHeat = getHeatmapColor(numberCounts[rIdx], minCount, maxCount);
               let borderColor = '#eee';
               const style: React.CSSProperties = {
-                minWidth: 36,
+                position: stickyWfmqyhLensEnabled ? 'sticky' : 'relative',
+                right: stickyWfmqyhLensEnabled ? 0 : undefined,
+                zIndex: stickyWfmqyhLensEnabled ? 5 : undefined,
+                minWidth: NEXT_COLUMN_WIDTH,
                 height: tableCellSize,
                 lineHeight: tableCellLineHeight,
                 textAlign: 'center',
-                position: 'relative',
                 cursor: 'pointer',
                 background: baseHeat,
                 border: 0,

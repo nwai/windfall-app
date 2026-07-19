@@ -131,7 +131,7 @@ afterEach(async () => {
 });
 
 describe("DGAMonthlyBucketStateGrid", () => {
-  it("groups scheduled draw-slot subcolumns under each month with D1-D13 x-axis labels", async () => {
+  it("groups reversed scheduled draw-slot subcolumns under each month with readable y-axis labels", async () => {
     const rendered = await mountGrid();
     await expandGrid();
 
@@ -146,22 +146,69 @@ describe("DGAMonthlyBucketStateGrid", () => {
     const topAxis = rendered.querySelector("[aria-label='Current month draw-slot x-axis for 2026-06']");
     expect(topAxis).toBeTruthy();
     expect(topAxis?.textContent ?? "").toContain("X-axis");
-    expect(topAxis?.textContent ?? "").toContain("D1");
-    expect(topAxis?.textContent ?? "").toContain("D13");
+    expect(topAxis?.textContent ?? "").not.toContain("D1");
+    expect(topAxis?.textContent ?? "").not.toContain("D13");
+    expect(topAxis?.textContent ?? "").toContain("1");
+    expect(topAxis?.textContent ?? "").toContain("13");
+    const topAxisSlotLabels = Array.from(topAxis?.querySelectorAll("span[title]") ?? []).map((label) =>
+      label.textContent?.trim(),
+    );
+    expect(topAxisSlotLabels.slice(0, 13)).toEqual(
+      Array.from({ length: 13 }, (_, index) => String(13 - index)),
+    );
 
     const drawHeaders = Array.from(rendered.querySelectorAll("thead tr:nth-child(2) th"));
     expect(drawHeaders).toHaveLength(52);
     expect(drawHeaders.map((header) => header.textContent?.trim()).slice(0, 13)).toEqual(
-      Array.from({ length: 13 }, (_, index) => `D${index + 1}`),
+      Array.from({ length: 13 }, (_, index) => String(13 - index)),
     );
-    expect(drawHeaders[1]?.getAttribute("title")).toContain("simulated");
-    expect(drawHeaders[12]?.getAttribute("title")).toContain("no recorded draw state");
+    const firstDrawHeaderStyle = (drawHeaders[0] as HTMLElement | undefined)?.style;
+    expect(firstDrawHeaderStyle?.textAlign).toBe("center");
+    expect(firstDrawHeaderStyle?.borderLeft).toBe("1px solid rgb(209, 213, 219)");
+    expect(firstDrawHeaderStyle?.borderRight).toBe("1px solid rgb(209, 213, 219)");
+    expect(drawHeaders[0]?.getAttribute("title")).toContain("D13");
+    expect(drawHeaders[0]?.getAttribute("title")).toContain("no recorded draw state");
+    expect(drawHeaders[11]?.getAttribute("title")).toContain("simulated");
+    expect(drawHeaders[12]?.getAttribute("title")).toContain("2026-06-01");
 
     const futureSlotCell = Array.from(rendered.querySelectorAll("tbody td")).find((cell) =>
       cell.getAttribute("title")?.includes("21 · 2026-06 · D13"),
     );
     expect(futureSlotCell?.getAttribute("title")).toContain("no recorded draw state");
-  });
+    expect((futureSlotCell as HTMLElement | undefined)?.style.borderLeft).toBe("1px solid rgb(209, 213, 219)");
+    expect((futureSlotCell as HTMLElement | undefined)?.style.borderRight).toBe("1px solid rgb(209, 213, 219)");
+
+    const yAxisLabel = Array.from(rendered.querySelectorAll("tbody td")).find((cell) =>
+      cell.getAttribute("title")?.startsWith("21 · current strip bucket"),
+    ) as HTMLElement | undefined;
+    expect(yAxisLabel?.style.background).toBe("rgb(255, 255, 255)");
+    expect(yAxisLabel?.style.color).toBe("rgb(15, 23, 42)");
+  }, 15000);
+
+  it("honors user-selected bucket opacity on populated cells without dimming row labels", async () => {
+    const rendered = await mountGrid({ cellOpacity: 0.55 });
+    await expandGrid();
+
+    expect(rendered.textContent).toContain("Grid opacity: 55%");
+    const opacitySlider = Array.from(rendered.querySelectorAll("input[type='range']")).find((input) =>
+      input.closest("label")?.textContent?.includes("Grid opacity"),
+    ) as HTMLInputElement | undefined;
+    expect(opacitySlider?.min).toBe("0.25");
+    expect(opacitySlider?.max).toBe("1");
+    expect(opacitySlider?.value).toBe("0.55");
+
+    const populatedCell = Array.from(rendered.querySelectorAll("tbody td")).find((cell) =>
+      cell.getAttribute("title")?.includes("21 · 2026-06 · Sim D2"),
+    ) as HTMLElement | undefined;
+    expect(populatedCell).toBeTruthy();
+    expect(populatedCell?.style.opacity).toBe("0.55");
+
+    const yAxisLabel = Array.from(rendered.querySelectorAll("tbody td")).find((cell) =>
+      cell.getAttribute("title")?.startsWith("21 · current strip bucket"),
+    ) as HTMLElement | undefined;
+    expect(yAxisLabel?.style.opacity).toBe("1");
+    expect(yAxisLabel?.style.color).toBe("rgb(15, 23, 42)");
+  }, 15000);
 
   it("shows whole-column bucket totals on hover and exposes linked hover copy", async () => {
     const hoverSpy = vi.fn();
@@ -196,5 +243,5 @@ describe("DGAMonthlyBucketStateGrid", () => {
     });
 
     expect(hoverSpy).toHaveBeenCalledWith(17);
-  });
+  }, 15000);
 });

@@ -39,6 +39,37 @@ const mountVisualizer = async (): Promise<HTMLDivElement> => {
   return container;
 };
 
+const mountVisualizerWithStickyWindow = async (): Promise<HTMLDivElement> => {
+  container = document.createElement("div");
+  document.body.appendChild(container);
+  root = createRoot(container);
+
+  await act(async () => {
+    root?.render(
+      React.createElement(DGAVisualizer, {
+        grid: [
+          [0, 0, 1, 0, 0],
+          [0, 0, 0, 2, 0],
+        ],
+        diamonds: [],
+        predictions: [],
+        drawLabels: ["1", "2", "3", "4"],
+        numberLabels: ["1", "2"],
+        numberCounts: [1, 1],
+        minCount: 0,
+        maxCount: 2,
+        highlights: [],
+        setHighlights: vi.fn(),
+        controlsPosition: "below",
+        cellSize: 23,
+        wfmqyhStart: 2,
+      }),
+    );
+  });
+
+  return container;
+};
+
 afterEach(async () => {
   await act(async () => {
     root?.unmount();
@@ -69,5 +100,26 @@ describe("DGAVisualizer row sizing", () => {
     expect(firstGridCell?.style.height).toBe("23px");
     expect(firstGridCell?.style.border).toBe("0px");
     expect(firstGridCell?.style.boxShadow).toContain("inset 0 0 0 1px");
+  });
+
+  it("keeps the active WFMQYH draw columns as a sticky translucent lens", async () => {
+    const rendered = await mountVisualizerWithStickyWindow();
+    const firstBodyRowCells = rendered.querySelectorAll("tbody tr:first-child td");
+    const oldContextCell = firstBodyRowCells[1] as HTMLTableCellElement | undefined;
+    const firstActiveCell = firstBodyRowCells[3] as HTMLTableCellElement | undefined;
+    const secondActiveCell = firstBodyRowCells[4] as HTMLTableCellElement | undefined;
+    const nextCell = firstBodyRowCells[5] as HTMLTableCellElement | undefined;
+
+    expect(oldContextCell).toBeTruthy();
+    expect(firstActiveCell).toBeTruthy();
+    expect(secondActiveCell).toBeTruthy();
+    expect(nextCell).toBeTruthy();
+    expect(oldContextCell?.style.position).toBe("relative");
+    expect(firstActiveCell?.style.position).toBe("sticky");
+    expect(firstActiveCell?.style.right).toBe("59px");
+    expect(secondActiveCell?.style.position).toBe("sticky");
+    expect(secondActiveCell?.style.right).toBe("36px");
+    expect(nextCell?.style.position).toBe("sticky");
+    expect(nextCell?.style.right).toBe("0px");
   });
 });

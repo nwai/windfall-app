@@ -21,6 +21,35 @@ interface NextHotBlocksPanelProps {
   onClearAutoExclusions?: () => void; // notify parent to drop derived exclusions
 }
 
+const NHB_LAST_COL_WIDTH = 40;
+const NHB_HEAT_BLOCK_COL_WIDTH = 80;
+const NHB_DRIFT_BLOCK_COL_WIDTH = 120;
+const NHB_DRIFT_GRID_GAP = 2;
+const NHB_STICKY_EDGE_SHADOW = '4px 0 8px rgba(15, 23, 42, 0.08)';
+const NHB_LAST_COLUMN_SHADOW = '2px 0 0 #fff, inset -1px 0 0 #e5e7eb';
+
+function stickyNHBCell(left: number, zIndex = 2): React.CSSProperties {
+  return {
+    position: 'sticky',
+    left,
+    zIndex,
+    background: '#fff',
+    boxSizing: 'border-box',
+  };
+}
+
+function stickyNHBHeaderCell(left: number): React.CSSProperties {
+  return {
+    ...stickyNHBCell(left, 3),
+    background: '#f8fafc',
+  };
+}
+
+function combineShadows(...shadows: Array<string | undefined>): string | undefined {
+  const active = shadows.filter(Boolean);
+  return active.length ? active.join(', ') : undefined;
+}
+
 function buildBlocks(blockSize: number): Block[] {
   const blocks: Block[] = [];
   for (let start = 1; start <= 45; start += blockSize) {
@@ -400,10 +429,32 @@ export const NextHotBlocksPanel: React.FC<NextHotBlocksPanelProps> = ({
       {viewMode === 'heatmap' ? (
         <div style={{ marginTop: 10, overflowX: 'auto' }}>
           <div style={{ fontSize: 11, color: '#666', marginBottom: 4 }}>Grid: block rows × draws (newest on the right)</div>
-          <div style={{ display: 'grid', gridTemplateColumns: `40px 80px repeat(${drawsUsed}, 16px)` }}>
+          <div style={{ display: 'grid', gridTemplateColumns: `${NHB_LAST_COL_WIDTH}px ${NHB_HEAT_BLOCK_COL_WIDTH}px repeat(${drawsUsed}, 16px)` }}>
             {/* header row */}
-            <div style={{ fontSize: 11, color: '#666', padding: 4, textAlign: 'center' }}>Last</div>
-            <div style={{ fontSize: 11, color: '#666', padding: 4 }}>Block</div>
+            <div
+              style={{
+                ...stickyNHBHeaderCell(0),
+                background: '#fff',
+                boxShadow: NHB_LAST_COLUMN_SHADOW,
+                fontSize: 11,
+                color: '#666',
+                padding: 4,
+                textAlign: 'center',
+              }}
+            >
+              Last
+            </div>
+            <div
+              style={{
+                ...stickyNHBHeaderCell(NHB_LAST_COL_WIDTH),
+                fontSize: 11,
+                color: '#666',
+                padding: 4,
+                boxShadow: NHB_STICKY_EDGE_SHADOW,
+              }}
+            >
+              Block
+            </div>
             {Array.from({ length: drawsUsed }, (_, i) => (
               <div key={i} style={{ fontSize: 10, color: '#aaa', textAlign: 'center' }}>
                 {history.length - drawsUsed + i + 1}
@@ -412,11 +463,35 @@ export const NextHotBlocksPanel: React.FC<NextHotBlocksPanelProps> = ({
             {/* rows */}
             {blocks.map((b, bi) => (
               <React.Fragment key={b.label}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3, padding: 4 }}>
+                <div
+                  style={{
+                    ...stickyNHBCell(0),
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 3,
+                    padding: 4,
+                    background: '#fff',
+                    boxShadow: NHB_LAST_COLUMN_SHADOW,
+                  }}
+                >
                   {latestMarkers.mainSet.has(bi) && <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#ef4444', display: 'inline-block' }} />}
                   {latestMarkers.suppSet.has(bi) && <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#16a34a', display: 'inline-block' }} />}
                 </div>
-                <div style={{ fontSize: 12, padding: 4, borderRight: '1px solid #eee', boxShadow: simBlocks.has(bi) ? 'inset 0 0 0 2px #ef4444' : undefined }}>{b.label}</div>
+                <div
+                  style={{
+                    ...stickyNHBCell(NHB_LAST_COL_WIDTH),
+                    fontSize: 12,
+                    padding: 4,
+                    borderRight: '1px solid #eee',
+                    boxShadow: combineShadows(
+                      simBlocks.has(bi) ? 'inset 0 0 0 2px #ef4444' : undefined,
+                      NHB_STICKY_EDGE_SHADOW
+                    ),
+                  }}
+                >
+                  {b.label}
+                </div>
                 {Array.from({ length: drawsUsed }, (_, ci) => {
                   const val = heatMatrix[bi][ci] ?? 0;
                   const hits = hitsMatrix[bi][ci] ?? 0;
@@ -454,14 +529,36 @@ export const NextHotBlocksPanel: React.FC<NextHotBlocksPanelProps> = ({
           <div style={{ fontSize: 11, color: '#666', marginBottom: 4 }}>
             Drift view: block lanes × draws (newest on the right). Color = percentile per draw; dot = top-k for that draw.
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: `40px 120px repeat(${drawsUsed}, 10px) 80px 40px`, gap: 2, alignItems: 'center', minWidth: '760px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: `${NHB_LAST_COL_WIDTH}px ${NHB_DRIFT_BLOCK_COL_WIDTH}px repeat(${drawsUsed}, 10px) 80px 40px`, gap: NHB_DRIFT_GRID_GAP, alignItems: 'center', minWidth: '760px' }}>
              {blocks.map((b, bi) => (
                <React.Fragment key={b.label}>
-                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3 }}>
+                 <div
+                   style={{
+                     ...stickyNHBCell(0),
+                     display: 'flex',
+                     alignItems: 'center',
+                     justifyContent: 'center',
+                     gap: 3,
+                     background: '#fff',
+                     boxShadow: NHB_LAST_COLUMN_SHADOW,
+                   }}
+                 >
                    {latestMarkers.mainSet.has(bi) && <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#ef4444', display: 'inline-block' }} />}
                    {latestMarkers.suppSet.has(bi) && <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#16a34a', display: 'inline-block' }} />}
                  </div>
-                 <div style={{ fontSize: 12, boxShadow: simBlocks.has(bi) ? 'inset 0 0 0 2px #ef4444' : undefined, paddingLeft: 2 }}>{b.label}</div>
+                 <div
+                   style={{
+                     ...stickyNHBCell(NHB_LAST_COL_WIDTH + NHB_DRIFT_GRID_GAP),
+                     fontSize: 12,
+                     boxShadow: combineShadows(
+                       simBlocks.has(bi) ? 'inset 0 0 0 2px #ef4444' : undefined,
+                       NHB_STICKY_EDGE_SHADOW
+                     ),
+                     paddingLeft: 2,
+                   }}
+                 >
+                   {b.label}
+                 </div>
                  {Array.from({ length: drawsUsed }, (_, ci) => {
                    const pct = percentileMatrix[bi][ci] || 0;
                    const isTop = pct >= 1 - (topKCount - 1) / Math.max(1, blocks.length - 1);

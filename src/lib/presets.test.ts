@@ -53,10 +53,13 @@ describe("normalizeAppPresetSnapshot", () => {
     expect(normalized.acceptanceNeedsCounts).toEqual(DEFAULT_PRESET_ACCEPTANCE_NEEDS_COUNTS);
     expect(normalized.maxLastDrawMatchesEnabled).toBe(false);
     expect(normalized.maxLastDrawMatchesValue).toBe(3);
+    expect(normalized.latestNeighbourSupportEnabled).toBe(false);
     expect(normalized.numCandidates).toBe(8);
     expect(normalized.batchSize).toBe(200);
     expect(normalized.batchSessionRuns).toBe(10);
     expect(normalized.octagonalTop).toBe(9);
+    expect(normalized.rankingWeights.selHitsEnabled).toBe(false);
+    expect(normalized.rankingWeights.recentHitsEnabled).toBe(false);
     expect(normalized.monthlyConstructiveEnabled).toBe(false);
     expect(normalized.mrbEnabled).toBe(false);
     expect(normalized.mrbIncludeSupp).toBe(true);

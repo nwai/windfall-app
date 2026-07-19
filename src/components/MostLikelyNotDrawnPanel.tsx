@@ -1,615 +1,349 @@
-import React, { useMemo, useState, useEffect } from 'react';
-import type { Draw } from '../types';
-import { runLeaveOneOutBacktest } from '../lib/backtest';
+import React, { useMemo, useState } from "react";
+
+import type { Draw } from "../types";
+import {
+  buildMlndRiskAnalysis,
+  type MlndDrawScope,
+  type MlndRiskRow,
+} from "../lib/mlndExclusionRisk";
 
 interface MostLikelyNotDrawnPanelProps {
-  history: Draw[]; // filtered history (WFMQY)
-  allHistory?: Draw[]; // optional full history for baseline comparison
+  history: Draw[];
+  allHistory?: Draw[];
   title?: string;
 }
 
-// Build per-draw mains-only not-drawn list (drawn = mains only)
-function buildNotDrawnMains(history: Draw[]): { date: string; drawn: number[]; notDrawn: number[] }[] {
-  return history.map(d => {
-    const drawn = [...d.main];
-    const notDrawn: number[] = [];
-    for (let n = 1; n <= 45; n++) if (!drawn.includes(n)) notDrawn.push(n);
-    return { date: d.date || 'unknown', drawn, notDrawn };
-  });
-}
+const BUDGET_OPTIONS = [12, 18, 24, 30, 37] as const;
+
+const panelStyle: React.CSSProperties = {
+  background: "#f8fafc",
+  border: "1px solid #dbe3ef",
+  borderRadius: 8,
+  padding: 12,
+};
+
+const cardGridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+  gap: 8,
+};
+
+const cardStyle: React.CSSProperties = {
+  background: "#ffffff",
+  border: "1px solid #e2e8f0",
+  borderRadius: 8,
+  padding: "10px 12px",
+};
+
+const subtleTextStyle: React.CSSProperties = {
+  color: "#64748b",
+  fontSize: 12,
+  lineHeight: 1.45,
+};
+
+const numberPillStyle = (tone: "safe" | "watch" | "neutral" = "neutral"): React.CSSProperties => {
+  const palette = {
+    safe: { background: "#ecfdf5", border: "#bbf7d0", color: "#14532d" },
+    watch: { background: "#fff1f2", border: "#fecdd3", color: "#9f1239" },
+    neutral: { background: "#eff6ff", border: "#bfdbfe", color: "#0f3a74" },
+  }[tone];
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 34,
+    height: 30,
+    padding: "0 9px",
+    borderRadius: 999,
+    border: `1px solid ${palette.border}`,
+    background: palette.background,
+    color: palette.color,
+    fontWeight: 800,
+    fontVariantNumeric: "tabular-nums",
+  };
+};
+
+const formatNumber = (value: number, digits = 2): string => (
+  Number.isFinite(value) ? value.toFixed(digits) : "0.00"
+);
+
+const formatPercent = (value: number, digits = 1): string => (
+  `${formatNumber(value * 100, digits)}%`
+);
+
+const scopeLabel = (scope: MlndDrawScope): string => (
+  scope === "mains" ? "Mains only (6 balls)" : "Mains + supps (8 balls)"
+);
+
+const riskTone = (row: MlndRiskRow): React.CSSProperties => {
+  if (row.liftVsBaseline < 0.85) return { color: "#166534", fontWeight: 800 };
+  if (row.liftVsBaseline > 1.15) return { color: "#be123c", fontWeight: 800 };
+  return { color: "#334155", fontWeight: 750 };
+};
 
 export const MostLikelyNotDrawnPanel: React.FC<MostLikelyNotDrawnPanelProps> = ({
   history,
   allHistory,
-  title = 'Most Likely NOT Drawn (Mains Only)',
 }) => {
-  const [activeTab, setActiveTab] = useState<'models' | 'frequency' | 'prediction'>('models');
-  const [selectedModel, setSelectedModel] = useState<string>(''); // "" = auto
-  const [userSelectedModel, setUserSelectedModel] = useState<boolean>(false);
-  const [sensitivity, setSensitivity] = useState<number>(0.5); // 0..1
-  const [baselineMode, setBaselineMode] = useState<'window' | 'all'>('window');
- 
-  const [minLookback, setMinLookback] = useState<number>(7);
+  const [scope, setScope] = useState<MlndDrawScope>("mainAndSupp");
+  const [budget, setBudget] = useState<number>(37);
+  const [minTrainingDraws, setMinTrainingDraws] = useState<number>(60);
+  const [showRows, setShowRows] = useState<number>(45);
 
-  // Per-predictor lookbacks (user-adjustable)
-  const [lbEmpirical, setLbEmpirical] = useState<number>(12);         // for empiricalDrawnTopK
-  const [lbHot, setLbHot] = useState<number>(18);                     // for hotRotation
-  const [lbStreak, setLbStreak] = useState<number>(24);               // for streakBased
-  const [lbCompRecentDraw, setLbCompRecentDraw] = useState<number>(10); // composite recent draws
-  const [lbCompNotDraw, setLbCompNotDraw] = useState<number>(30);       // composite recent not-drawn
-
-  const analysis = useMemo(() => {
-    const historyChrono = history.slice();
-    const draws = buildNotDrawnMains(historyChrono);
-    const totalDraws = draws.length;
-
-    const notDrawnFreq: Record<number, number> = Object.fromEntries(Array.from({ length: 45 }, (_, i) => [i + 1, 0]));
-    for (const d of draws) for (const n of d.notDrawn) notDrawnFreq[n]++;
-
-    const recent = draws;
-    const recentNotDrawnFreq: Record<number, number> = Object.fromEntries(Array.from({ length: 45 }, (_, i) => [i + 1, 0]));
-    for (const d of recent) for (const n of d.notDrawn) recentNotDrawnFreq[n]++;
-
-    const currentStreak: Record<number, number> = Object.fromEntries(Array.from({ length: 45 }, (_, i) => [i + 1, 0]));
-    for (const d of draws) {
-      const drawnSet = new Set(d.drawn);
-      for (let n = 1; n <= 45; n++) {
-        if (!drawnSet.has(n)) currentStreak[n]++;
-        else currentStreak[n] = 0;
-      }
-    }
-
-    const overdueNumbers = Object.entries(notDrawnFreq)
-      .map(([num, freq]) => ({
-        num: Number(num),
-        freq: Number(freq),
-        currentStreak: currentStreak[Number(num)] || 0,
-      }))
-      .sort((a, b) => b.freq - a.freq || a.num - b.num);
-
-    const coldNumbers = Object.entries(recentNotDrawnFreq)
-      .map(([num, freq]) => ({ num: Number(num), freq: Number(freq) }))
-      .sort((a, b) => b.freq - a.freq || a.num - b.num)
-      .slice(0, 45);
-
-    const recentDrawnFreq: Record<number, number> = Object.fromEntries(Array.from({ length: 45 }, (_, i) => [i + 1, 0]));
-    for (const d of recent) for (const n of d.drawn) recentDrawnFreq[n]++;
-    const hotNumbers = Object.entries(recentDrawnFreq)
-      .map(([num, freq]) => ({ num: Number(num), freq: Number(freq) }))
-      .filter((x) => x.freq > 0)
-      .sort((a, b) => b.freq - a.freq || a.num - b.num);
-
-    // Helper: sensitivity-adjusted decay
-    const makeK = (base: number) =>
-      Math.max(2, Math.round(base * (1.4 - sensitivity * 1.1)));
-
-    // Predictors must return NOT-DRAWN sets (size up to ~45)
-    const predictors: Record<string, (training: { date: string; drawn: number[]; notDrawn: number[] }[]) => Set<number>> = {
-      historicalUndrawnFreq: (training) => {
-        const weights = Array(46).fill(0);
-        const k = makeK(Math.max(3, Math.round(training.length / Math.max(1, 6 * (1 - sensitivity)))));
-        for (let idx = 0; idx < training.length; idx++) {
-          const d = training[idx];
-          const age = training.length - 1 - idx;
-          const w = Math.exp(-age / k);
-          for (const num of d.notDrawn) weights[num] += w;
-        }
-        const ordered = Array.from({ length: 45 }, (_, i) => i + 1).sort((a, b) => weights[b] - weights[a] || a - b);
-        return new Set(ordered.slice(0, 45));
-      },
-
-      // Uses lbEmpirical for recency windowing; still returns NOT-drawn complement
-      empiricalDrawnTopK: (training) => {
-        const weights = Array(46).fill(0);
-        const window = Math.max(minLookback, training.length);
-        const slice = training.slice(-window);
-        const k = makeK(Math.max(3, Math.round(window / Math.max(1, 8 * (1 - sensitivity)))));
-        for (let idx = 0; idx < slice.length; idx++) {
-          const d = slice[idx];
-          const age = slice.length - 1 - idx;
-          const w = Math.exp(-age / k);
-          for (const m of d.drawn) weights[m] += w;
-        }
-        const drawnOrdered = Array.from({ length: 45 }, (_, i) => i + 1).sort((a, b) => weights[b] - weights[a] || a - b);
-        const topDrawn = new Set(drawnOrdered.slice(0, 6)); // expected mains = 6
-        const notDrawnList: number[] = [];
-        for (let i = 1; i <= 45; i++) if (!topDrawn.has(i)) notDrawnList.push(i);
-        return new Set(notDrawnList.slice(0, 45));
-      },
-
-      empiricalMainsOnly: (training) => {
-        const weights = Array(46).fill(0);
-        const window = Math.max(minLookback, Math.min(training.length, training.length));
-        const k = makeK(Math.max(3, Math.round(window / Math.max(1, 8 * (1 - sensitivity)))));
-        const slice = training.slice(-window);
-        for (let idx = 0; idx < slice.length; idx++) {
-          const d = slice[idx];
-          const w = Math.exp(-(slice.length - 1 - idx) / k);
-          for (const n of d.notDrawn) weights[n] += w;
-        }
-        const ordered = Array.from({ length: 45 }, (_, i) => i + 1)
-          .sort((a, b) => weights[b] - weights[a] || a - b);
-        return new Set(ordered.slice(0, 45));
-      },
-
-      // Uses lbHot as its lookback
-      hotRotation: (training) => {
-        const dynLookback = Math.max(minLookback, Math.min(lbHot, training.length));
-        const recentDraws = training.slice(-dynLookback);
-        const notDrawnW = Array(46).fill(0);
-        const k2 = makeK(Math.max(2, Math.round(dynLookback / Math.max(1, 4 * (1 - sensitivity)))));
-        for (let idx = 0; idx < recentDraws.length; idx++) {
-          const w = Math.exp(-(recentDraws.length - 1 - idx) / k2);
-          for (const n of recentDraws[idx].notDrawn) notDrawnW[n] += w;
-        }
-        const ordered = Array.from({ length: 45 }, (_, i) => i + 1).sort((a, b) => notDrawnW[b] - notDrawnW[a] || a - b);
-        return new Set(ordered.slice(0, 45));
-      },
-
-      // Uses lbStreak as lookback
-      streakBased: (training) => {
-        const lookback = Math.max(minLookback, Math.min(lbStreak, training.length));
-        const recent = training.slice(-lookback);
-        const streaks = Array(46).fill(0);
-        for (const d of recent) {
-          const drawnSet = new Set(d.drawn);
-          for (let n = 1; n <= 45; n++) {
-            if (!drawnSet.has(n)) streaks[n]++;
-            else streaks[n] = 0;
-          }
-        }
-        const ordered = Array.from({ length: 45 }, (_, i) => i + 1).sort((a, b) => streaks[b] - streaks[a] || a - b);
-        return new Set(ordered.slice(0, 45));
-      },
-
-      // New composite predictor with adjustable lookbacks
-      weightedComposite: (training) => {
-          const rd   = Math.max(minLookback, Math.min(lbCompRecentDraw, training.length));
-          const rnot = Math.max(minLookback, Math.min(lbCompNotDraw,  training.length));
-          const recentDraws    = training.slice(-rd);
-          const recentNotDraws = training.slice(-rnot);
-
-        const scores = Array(46).fill(0);
-
-        // Recent drawn frequency (penalize)
-        const drawnFreq = Array(46).fill(0);
-        recentDraws.forEach(d => d.drawn.forEach(n => drawnFreq[n]++));
-        drawnFreq.forEach((f, n) => { scores[n] += f * 3; });
-
-        // Recent not-drawn frequency (reward)
-        const notDrawnFreq = Array(46).fill(0);
-        recentNotDraws.forEach(d => d.notDrawn.forEach(n => notDrawnFreq[n]++));
-        notDrawnFreq.forEach((f, n) => { scores[n] += f * 2; });
-
-        // All-time not-drawn (mild reward)
-        const allTimeNotDrawn = Array(46).fill(0);
-        training.forEach(d => d.notDrawn.forEach(n => allTimeNotDrawn[n]++));
-        allTimeNotDrawn.forEach((f, n) => { scores[n] += f * 0.5; });
-
-        const ordered = Array.from({ length: 45 }, (_, i) => i + 1).sort((a, b) => scores[b] - scores[a] || a - b);
-        return new Set(ordered.slice(0, 45));
-      },
-    };
-
-    const backtestHistory = baselineMode === 'window' ? historyChrono : (allHistory?.slice() || historyChrono);
-
-    const randomTrials = 200;
-    const bootstrapIters = 300;
-    const seed = 42;
-
-    const backtestResults: Record<string, any> = {};
-
-    for (const modelName of Object.keys(predictors)) {
-      try {
-        const predictorFn = (trainWindow: Draw[]) => {
-          const mapped = trainWindow.map((d) => ({
-            date: d.date || '',
-            drawn: [...d.main],
-            notDrawn: (() => {
-              const a: number[] = [];
-              for (let i = 1; i <= 45; i++) if (!d.main.includes(i)) a.push(i);
-              return a;
-            })(),
-          }));
-          return predictors[modelName](mapped);
-        };
-        const res = runLeaveOneOutBacktest(backtestHistory, predictorFn, randomTrials, bootstrapIters, seed);
-        const avgCorrect = 45 - res.meanExcluded;
-        const avgAccuracy = res.drawsEvaluated ? (avgCorrect / 45) * 100 : 0;
-        backtestResults[modelName] = { res, avgCorrect, avgAccuracy, totalTests: res.drawsEvaluated };
-      } catch (e) {
-        backtestResults[modelName] = { error: String(e) };
-      }
-    }
-
-    const rankedModels = Object.entries(backtestResults)
-      .map(([name, data]) => ({ name, ...data }))
-      .sort((a: any, b: any) => (b.res?.deltaMean ?? 0) - (a.res?.deltaMean ?? 0));
-
-    const bestModel = rankedModels.length ? rankedModels[0].name : '';
-
-    let nextPrediction: number[] = [];
-    const modelToUse = selectedModel || bestModel;
-    if (modelToUse) {
-      try {
-          // In the forward-prediction block
-          const trainHistory = historyChrono.length > 1
-            ? historyChrono.slice(0, historyChrono.length - 1)
-            : historyChrono;
-
-          const mappedTrain = trainHistory.map((d) => ({
-            date: d.date || '',
-            drawn: [...d.main],
-            notDrawn: (() => {
-              const a: number[] = [];
-              for (let i = 1; i <= 45; i++) if (!d.main.includes(i)) a.push(i);
-              return a;
-            })(),
-          }));
-          // predictorInput becomes mappedTrain (or the single-draw fallback as you have)
-        const predictorInput = mappedTrain.length
-          ? mappedTrain
-          : historyChrono.length
-          ? [
-              {
-                date: historyChrono[0].date || '',
-                drawn: [...historyChrono[0].main],
-                notDrawn: (() => {
-                  const a: number[] = [];
-                  for (let i = 1; i <= 45; i++) if (!historyChrono[0].main.includes(i)) a.push(i);
-                  return a;
-                })(),
-              },
-            ]
-          : [];
-        const set = predictors[modelToUse](predictorInput as any) as Set<number>;
-        nextPrediction = Array.from(set).filter((x) => typeof x === 'number') as number[];
-        nextPrediction.sort((a, b) => a - b);
-        if (nextPrediction.length > 45) nextPrediction = nextPrediction.slice(0, 45);
-      } catch (e) {
-        nextPrediction = [];
-      }
-    }
-
-    const predictedDrawn: number[] = [];
-    for (let i = 1; i <= 45; i++) if (!nextPrediction.includes(i)) predictedDrawn.push(i);
-
-    const overdueWithPct = overdueNumbers.map((o) => ({
-      ...o,
-      percentage: totalDraws ? Number(((o.freq / totalDraws) * 100).toFixed(1)) : 0,
-    }));
-
-    return {
-      draws,
-      overdueNumbers: overdueWithPct,
-      coldNumbers,
-      hotNumbers,
-      predictedNotDrawn: nextPrediction,
-      predictedDrawn,
-      notDrawnFreq,
-      totalDraws,
-      recentLen: recent.length,
-      backtestResults,
-      rankedModels,
-      bestModel,
-    };
-  }, [
-    history,
-    allHistory,
-    sensitivity,
-    baselineMode,
-    selectedModel,
-    lbEmpirical,
-    lbHot,
-    lbStreak,
-    lbCompRecentDraw,
-    lbCompNotDraw,
-    minLookback,
-  ]);
-
-  // Auto-follow best model unless user explicitly chose one
-  useEffect(() => {
-    if (!userSelectedModel && analysis.bestModel && selectedModel !== analysis.bestModel) {
-      setSelectedModel(analysis.bestModel);
-    }
-  }, [analysis.bestModel, userSelectedModel, selectedModel]);
-  
-  useEffect(() => {
-    if (!userSelectedModel) setSelectedModel('');
-  }, [minLookback, baselineMode, sensitivity, lbEmpirical, lbHot, lbStreak, lbCompRecentDraw, lbCompNotDraw]);
-
-  const frequencyData = useMemo(
-    () =>
-      analysis.overdueNumbers.map((item) => ({
-        number: item.num,
-        frequency: item.freq,
-        percentage: analysis.totalDraws ? Number(((item.freq / analysis.totalDraws) * 100).toFixed(1)) : 0,
-      })),
-    [analysis.overdueNumbers, analysis.totalDraws]
+  const sourceHistory = allHistory?.length ? allHistory : history;
+  const analysis = useMemo(
+    () => buildMlndRiskAnalysis(sourceHistory, {
+      scope,
+      budget,
+      minTrainingDraws,
+      bootstrapIters: 300,
+    }),
+    [sourceHistory, scope, budget, minTrainingDraws],
   );
 
+  const randomExpectedText = `${formatNumber(analysis.backtest.randomMeanFalseExcluded, 2)} drawn ball${Math.abs(analysis.backtest.randomMeanFalseExcluded - 1) < 0.01 ? "" : "s"}`;
+  const modelExpectedText = `${formatNumber(analysis.backtest.meanFalseExcluded, 2)} drawn ball${Math.abs(analysis.backtest.meanFalseExcluded - 1) < 0.01 ? "" : "s"}`;
+  const deltaTone = analysis.backtest.deltaVsRandom > 0 ? "#166534" : analysis.backtest.deltaVsRandom < 0 ? "#be123c" : "#334155";
+  const excludedMonthsText = analysis.historyScope.excludedMonthLabels.length
+    ? analysis.historyScope.excludedMonthLabels.join(", ")
+    : "none";
+  const visibleRows = analysis.rows.slice(0, showRows);
+
   return (
-  
-    <div style={{ background: '#f8fafc', padding: 12, border: '1px solid #eee', borderRadius: 6 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        <span style={{ fontSize: 12, color: '#666' }}>
-          Window: {analysis.totalDraws} draws • Recent (WFMQY): {analysis.recentLen}
-        </span>
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
-        <label style={{ fontSize: 12 }}>
-            Draw history (min lookback):
-            <input
-              type="number"
-              min={6}
-              max={120}
-              value={minLookback}
-              onChange={(e) => setMinLookback(Number(e.target.value))}
-              style={{ marginLeft: 8, width: 70 }}
-              title="Minimum draws to consider in model lookbacks"
-            />
-          </label>
-          <label style={{ fontSize: 12 }}>
-            Baseline:
-            <select value={baselineMode} onChange={(e) => setBaselineMode(e.target.value as any)} style={{ marginLeft: 8 }}>
-              <option value="window">Use WFMQY window</option>
-              <option value="all">Use all history</option>
-            </select>
-          </label>
-          <label style={{ fontSize: 12 }} title="Sensitivity: higher = more reactive to recent draws">
-            Sensitivity:
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.05}
-              value={sensitivity}
-              onChange={(e) => setSensitivity(Number(e.target.value))}
-              style={{ marginLeft: 8 }}
-            />
-            <span style={{ marginLeft: 6, fontSize: 12 }}>{(sensitivity * 100).toFixed(0)}%</span>
-          </label>
-        </div>
-      </div>
-
-      <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-        <button
-          type="button"
-          onClick={() => setActiveTab('models')}
-          style={{
-            padding: '6px 10px',
-            borderRadius: 4,
-            border: '1px solid #ddd',
-            background: activeTab === 'models' ? '#2563eb' : '#fff',
-            color: activeTab === 'models' ? '#fff' : '#333',
-          }}
-        >
-          Models
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab('frequency')}
-          style={{
-            padding: '6px 10px',
-            borderRadius: 4,
-            border: '1px solid #ddd',
-            background: activeTab === 'frequency' ? '#2563eb' : '#fff',
-            color: activeTab === 'frequency' ? '#fff' : '#333',
-          }}
-        >
-          Frequency
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab('prediction')}
-          style={{
-            padding: '6px 10px',
-            borderRadius: 4,
-            border: '1px solid #ddd',
-            background: activeTab === 'prediction' ? '#2563eb' : '#fff',
-            color: activeTab === 'prediction' ? '#fff' : '#333',
-          }}
-        >
-          Predictions
-        </button>
-        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, marginLeft: 8 }}>
-          <input
-            type="checkbox"
-            checked={!userSelectedModel}
-            onChange={(e) => {
-              if (e.target.checked) {
-                setSelectedModel(''); // auto
-                setUserSelectedModel(false);
-              } else {
-                setUserSelectedModel(true);
-              }
-            }}
-          />
-          Auto-follow best model
-        </label>
-      </div>
-
-      {activeTab === 'models' && (
-        <div style={{ marginTop: 8 }}>
-          <div style={{ background: '#fff', border: '1px solid #eee', borderRadius: 6, padding: 10 }}>
-            <div style={{ fontWeight: 600, marginBottom: 6 }}>Model Backtest Results</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
-              {analysis.rankedModels.map((model) => (
-                <div key={model.name} style={{ background: '#f9fafb', borderRadius: 6, padding: 10 }}>
-                  <div style={{ fontWeight: 700, fontSize: 14 }}>{model.name}</div>
-                  <div style={{ fontSize: 12, color: '#666', marginBottom: 4 }}>Avg. Accuracy: {model.avgAccuracy.toFixed(1)}%</div>
-                  <div style={{ fontSize: 12, color: '#666', marginBottom: 4 }}>Total Tests: {model.totalTests}</div>
-                  <div style={{ fontSize: 12, color: '#666' }}>
-                    {model.res?.error ? (
-                      <span style={{ color: 'red' }}>Error: {model.res.error}</span>
-                    ) : (
-                      <>
-                        <div>Mean Excluded: {model.res.meanExcluded.toFixed(1)}</div>
-                        <div>Delta Mean: {model.res.deltaMean.toFixed(1)}</div>
-                      </>
-                    )}
-                  </div>
-                </div>
-              ))}
+    <div style={panelStyle}>
+      <div style={{ display: "grid", gap: 10 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
+          <div style={{ minWidth: 260, flex: "1 1 420px" }}>
+            <div style={{ color: "#0f172a", fontWeight: 850, fontSize: 16 }}>Exclusion Risk Ledger</div>
+            <div style={{ ...subtleTextStyle, marginTop: 3 }}>
+              Observe-only ranking of numbers that look least risky to exclude from the next 45-number pool. This does not force generator exclusions.
             </div>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end" }}>
+            <label style={{ display: "grid", gap: 3, fontSize: 12, color: "#334155" }}>
+              Scope
+              <select
+                value={scope}
+                onChange={(event) => setScope(event.target.value as MlndDrawScope)}
+                style={{ minHeight: 32, borderRadius: 6, border: "1px solid #cbd5e1", padding: "4px 8px" }}
+              >
+                <option value="mainAndSupp">Mains + supps</option>
+                <option value="mains">Mains only</option>
+              </select>
+            </label>
+            <label style={{ display: "grid", gap: 3, fontSize: 12, color: "#334155" }}>
+              Min training
+              <input
+                type="number"
+                min={20}
+                max={180}
+                value={minTrainingDraws}
+                onChange={(event) => setMinTrainingDraws(Math.max(20, Math.min(180, Number(event.target.value) || 60)))}
+                style={{ width: 82, minHeight: 32, borderRadius: 6, border: "1px solid #cbd5e1", padding: "4px 8px" }}
+              />
+            </label>
+          </div>
+        </div>
 
-            <div style={{ marginTop: 12, fontWeight: 600 }}>Model Selection</div>
-            <div style={{ display: 'flex', gap: 12, marginTop: 6, flexWrap: 'wrap' }}>
-              <div style={{ flex: 1, minWidth: 240 }}>
-                <div style={{ fontWeight: 500, marginBottom: 4 }}>Model</div>
-                <select
-                  value={selectedModel}
-                  onChange={(e) => {
-                    setSelectedModel(e.target.value);
-                    setUserSelectedModel(e.target.value !== '');
+        <div style={cardGridStyle}>
+          <div style={cardStyle}>
+            <div style={subtleTextStyle}>Evidence history</div>
+            <div style={{ marginTop: 4, fontWeight: 850, color: "#0f172a" }}>
+              {analysis.historyScope.usedDrawCount} draws
+            </div>
+            <div style={{ ...subtleTextStyle, marginTop: 3 }}>
+              {analysis.historyScope.firstDate ?? "none"} to {analysis.historyScope.lastDate ?? "none"}
+            </div>
+          </div>
+          <div style={cardStyle}>
+            <div style={subtleTextStyle}>Windfall All History definition</div>
+            <div style={{ marginTop: 4, fontWeight: 850, color: "#0f172a" }}>
+              Opening partial month excluded
+            </div>
+            <div style={{ ...subtleTextStyle, marginTop: 3 }}>
+              Excluded baseline month: {excludedMonthsText}. WFMQYH is ignored here.
+            </div>
+          </div>
+          <div style={cardStyle}>
+            <div style={subtleTextStyle}>Validation verdict</div>
+            <div style={{ marginTop: 4, fontWeight: 850, color: deltaTone }}>
+              {analysis.backtest.verdict}
+            </div>
+            <div style={{ ...subtleTextStyle, marginTop: 3 }}>
+              Walk-forward tests: {analysis.backtest.drawsEvaluated}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ ...cardStyle, display: "grid", gap: 8 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+            <div>
+              <div style={{ fontWeight: 850, color: "#0f172a" }}>Risk budget</div>
+              <div style={subtleTextStyle}>
+                Choose how many numbers to exclude. Higher budgets are more aggressive and carry more false-exclusion risk.
+              </div>
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {BUDGET_OPTIONS.map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => setBudget(option)}
+                  aria-pressed={budget === option}
+                  style={{
+                    minHeight: 32,
+                    padding: "5px 10px",
+                    borderRadius: 999,
+                    border: budget === option ? "1px solid #0f3a74" : "1px solid #cbd5e1",
+                    background: budget === option ? "#0f3a74" : "#ffffff",
+                    color: budget === option ? "#ffffff" : "#334155",
+                    fontWeight: 800,
+                    cursor: "pointer",
                   }}
-                  style={{ width: '100%', padding: 6 }}
                 >
-                  <option value="">Auto (best-ranked)</option>
-                  {analysis.rankedModels && analysis.rankedModels.length > 0
-                    ? analysis.rankedModels.map((m: any) => (
-                        <option key={m.name} value={m.name}>
-                          {m.name}
-                        </option>
-                      ))
-                    : ['historicalUndrawnFreq', 'empiricalDrawnTopK', 'empiricalMainsOnly', 'hotRotation', 'streakBased', 'weightedComposite'].map((name) => (
-                        <option key={name} value={name}>
-                          {name}
-                        </option>
-                      ))}
-                </select>
+                  {option}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
+            <div style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: 10, background: "#f8fafc" }}>
+              <div style={subtleTextStyle}>Model false exclusions</div>
+              <div style={{ marginTop: 4, fontSize: 20, fontWeight: 900, color: "#0f172a" }}>{modelExpectedText}</div>
+            </div>
+            <div style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: 10, background: "#f8fafc" }}>
+              <div style={subtleTextStyle}>Random baseline</div>
+              <div style={{ marginTop: 4, fontSize: 20, fontWeight: 900, color: "#0f172a" }}>{randomExpectedText}</div>
+            </div>
+            <div style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: 10, background: "#f8fafc" }}>
+              <div style={subtleTextStyle}>Delta vs random</div>
+              <div style={{ marginTop: 4, fontSize: 20, fontWeight: 900, color: deltaTone }}>
+                {analysis.backtest.deltaVsRandom >= 0 ? "+" : ""}{formatNumber(analysis.backtest.deltaVsRandom, 2)}
               </div>
-
-              {/* Lookback sliders per predictor */}
-              <div style={{ flex: 1, minWidth: 220 }}>
-                <div style={{ fontWeight: 500, marginBottom: 4 }}>Empirical drawn lookback</div>
-                <input
-                  type="range"
-                  min={3}
-                  max={45}
-                  step={1}
-                  value={lbEmpirical}
-                  onChange={(e) => setLbEmpirical(Number(e.target.value))}
-                  style={{ width: '100%' }}
-                />
-                <div style={{ fontSize: 12, color: '#666' }}>{lbEmpirical} draws</div>
+              <div style={subtleTextStyle}>
+                95% bootstrap CI: {analysis.backtest.bootstrapCI ? `${formatNumber(analysis.backtest.bootstrapCI[0], 2)} to ${formatNumber(analysis.backtest.bootstrapCI[1], 2)}` : "n/a"}
               </div>
-
-              <div style={{ flex: 1, minWidth: 220 }}>
-                <div style={{ fontWeight: 500, marginBottom: 4 }}>Hot rotation lookback</div>
-                <input
-                  type="range"
-                  min={6}
-                  max={60}
-                  step={1}
-                  value={lbHot}
-                  onChange={(e) => setLbHot(Number(e.target.value))}
-                  style={{ width: '100%' }}
-                />
-                <div style={{ fontSize: 12, color: '#666' }}>{lbHot} draws</div>
+            </div>
+            <div style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: 10, background: "#f8fafc" }}>
+              <div style={subtleTextStyle}>Zero-error exclusion draws</div>
+              <div style={{ marginTop: 4, fontSize: 20, fontWeight: 900, color: "#0f172a" }}>
+                {formatPercent(analysis.backtest.zeroFalseExclusionRate)}
               </div>
-
-              <div style={{ flex: 1, minWidth: 220 }}>
-                <div style={{ fontWeight: 500, marginBottom: 4 }}>Streak-based lookback</div>
-                <input
-                  type="range"
-                  min={6}
-                  max={90}
-                  step={1}
-                  value={lbStreak}
-                  onChange={(e) => setLbStreak(Number(e.target.value))}
-                  style={{ width: '100%' }}
-                />
-                <div style={{ fontSize: 12, color: '#666' }}>{lbStreak} draws</div>
-              </div>
-
-              <div style={{ flex: 1, minWidth: 220 }}>
-                <div style={{ fontWeight: 500, marginBottom: 4 }}>Composite recent-drawn lookback</div>
-                <input
-                  type="range"
-                  min={5}
-                  max={30}
-                  step={1}
-                  value={lbCompRecentDraw}
-                  onChange={(e) => setLbCompRecentDraw(Number(e.target.value))}
-                  style={{ width: '100%' }}
-                />
-                <div style={{ fontSize: 12, color: '#666' }}>{lbCompRecentDraw} draws</div>
-              </div>
-
-              <div style={{ flex: 1, minWidth: 220 }}>
-                <div style={{ fontWeight: 500, marginBottom: 4 }}>Composite recent not-drawn lookback</div>
-                <input
-                  type="range"
-                  min={10}
-                  max={120}
-                  step={1}
-                  value={lbCompNotDraw}
-                  onChange={(e) => setLbCompNotDraw(Number(e.target.value))}
-                  style={{ width: '100%' }}
-                />
-                <div style={{ fontSize: 12, color: '#666' }}>{lbCompNotDraw} draws</div>
-              </div>
+              <div style={subtleTextStyle}>p-value: {analysis.backtest.pValue === null ? "n/a" : formatNumber(analysis.backtest.pValue, 3)}</div>
             </div>
           </div>
         </div>
-      )}
 
-      {activeTab === 'frequency' && (
-        <div style={{ marginTop: 8 }}>
-          <div style={{ background: '#fff', border: '1px solid #eee', borderRadius: 6, padding: 10 }}>
-            <div style={{ fontWeight: 600, marginBottom: 6 }}>Historical Non-Appearance Frequency</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(9, 1fr)', gap: 6 }}>
-              {frequencyData.map((row) => (
-                <div key={row.number} style={{ background: '#f9fafb', borderRadius: 6, padding: 8, textAlign: 'center' }}>
-                  <div style={{ fontWeight: 700 }}>{row.number}</div>
-                  <div style={{ fontSize: 12 }}>freq: {row.frequency}</div>
-                  <div style={{ fontSize: 12, color: '#555' }}>{row.percentage}%</div>
-                </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 10 }}>
+          <div style={cardStyle}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+              <div style={{ fontWeight: 850, color: "#14532d" }}>Lowest-risk exclusions ({analysis.excludedNumbers.length})</div>
+              <div style={subtleTextStyle}>Ranked least risky first</div>
+            </div>
+            <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 8 }}>
+              {analysis.excludedNumbers.map((number) => (
+                <span key={`exclude-${number}`} style={numberPillStyle("safe")}>{number}</span>
+              ))}
+            </div>
+          </div>
+
+          <div style={cardStyle}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+              <div style={{ fontWeight: 850, color: "#9f1239" }}>Allowed / watch list ({analysis.allowedNumbers.length})</div>
+              <div style={subtleTextStyle}>Complement of the exclusions</div>
+            </div>
+            <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 8 }}>
+              {analysis.allowedNumbers.map((number) => (
+                <span key={`allow-${number}`} style={numberPillStyle(analysis.watchNumbers.includes(number) ? "watch" : "neutral")}>{number}</span>
               ))}
             </div>
           </div>
         </div>
-      )}
 
-      {activeTab === 'prediction' && (
-        <div style={{ marginTop: 8 }}>
-          <div style={{ background: '#fff', border: '1px solid #eee', borderRadius: 6, padding: 10 }}>
-            <div style={{ fontWeight: 600, marginBottom: 6 }}>Predicted next 45 not-drawn mains (mains-only)</div>
-            <div style={{ background: '#fff7ed', border: '1px solid #fde68a', borderRadius: 6, padding: 10 }}>
-              <div style={{ fontWeight: 600, marginBottom: 6 }}>Not drawn (45):</div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(10, 1fr)', gap: 6 }}>
-                {analysis.predictedNotDrawn.map((n) => (
-                  <div key={n} style={{ background: '#fde68a', borderRadius: 6, padding: 8, textAlign: 'center', fontWeight: 700 }}>
-                    {n}
-                  </div>
-                ))}
+        <div style={cardStyle}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+            <div>
+              <div style={{ fontWeight: 850, color: "#0f172a" }}>Number-level exclusion evidence</div>
+              <div style={subtleTextStyle}>
+                Rows are sorted by lowest estimated draw risk first. Lower risk means safer to exclude, not guaranteed absent.
               </div>
             </div>
-            <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: 6, padding: 10, marginTop: 10 }}>
-              <div style={{ fontWeight: 600, marginBottom: 6 }}>Predicted to be drawn (6 mains):</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {analysis.predictedDrawn.map((n) => (
-                  <div key={n} style={{ background: '#a7f3d0', borderRadius: 6, padding: '6px 10px', textAlign: 'center', fontWeight: 700 }}>
-                    {n}
-                  </div>
-                ))}
-              </div>
-            </div>
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "#334155" }}>
+              Rows
+              <select
+                value={showRows}
+                onChange={(event) => setShowRows(Number(event.target.value))}
+                style={{ minHeight: 32, borderRadius: 6, border: "1px solid #cbd5e1", padding: "4px 8px" }}
+              >
+                <option value={15}>15</option>
+                <option value={30}>30</option>
+                <option value={45}>45</option>
+              </select>
+            </label>
           </div>
-          <div
-            style={{
-              background: '#fee2e2',
-              border: '1px solid #fecaca',
-              borderRadius: 6,
-              padding: 10,
-              marginTop: 10,
-              fontSize: 12,
-            }}
-          >
-            <b>Important:</b> Lottery draws are random; these are historical patterns only.
+
+          <div style={{ overflowX: "auto", marginTop: 10 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 980 }}>
+              <thead>
+                <tr style={{ background: "#f8fafc", color: "#475569" }}>
+                  <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #e2e8f0" }}>#</th>
+                  <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid #e2e8f0" }}>Risk</th>
+                  <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid #e2e8f0" }}>Vs base</th>
+                  <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid #e2e8f0" }}>Score</th>
+                  <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #e2e8f0" }}>Current gap</th>
+                  <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid #e2e8f0" }}>13</th>
+                  <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid #e2e8f0" }}>26</th>
+                  <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid #e2e8f0" }}>52</th>
+                  <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid #e2e8f0" }}>Full</th>
+                  <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid #e2e8f0" }}>Hazard</th>
+                  <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #e2e8f0" }}>Reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleRows.map((row, index) => {
+                  const inExcludedSet = analysis.excludedNumbers.includes(row.number);
+                  const inWatchSet = analysis.watchNumbers.includes(row.number);
+                  return (
+                    <tr key={row.number} style={{ background: inExcludedSet ? "#f8fffb" : inWatchSet ? "#fff7f8" : "#ffffff" }}>
+                      <td style={{ padding: 8, borderBottom: "1px solid #edf2f7" }}>
+                        <span style={numberPillStyle(inExcludedSet ? "safe" : inWatchSet ? "watch" : "neutral")}>{row.number}</span>
+                      </td>
+                      <td style={{ padding: 8, borderBottom: "1px solid #edf2f7", textAlign: "right", ...riskTone(row) }}>{formatNumber(row.riskPercent, 2)}%</td>
+                      <td style={{ padding: 8, borderBottom: "1px solid #edf2f7", textAlign: "right" }}>{formatNumber(row.liftVsBaseline, 2)}x</td>
+                      <td style={{ padding: 8, borderBottom: "1px solid #edf2f7", textAlign: "right" }}>{formatNumber(row.exclusionScore, 1)}</td>
+                      <td style={{ padding: 8, borderBottom: "1px solid #edf2f7" }}>{row.currentGapLabel}</td>
+                      <td style={{ padding: 8, borderBottom: "1px solid #edf2f7", textAlign: "right" }}>{row.recent13Hits}</td>
+                      <td style={{ padding: 8, borderBottom: "1px solid #edf2f7", textAlign: "right" }}>{row.recent26Hits}</td>
+                      <td style={{ padding: 8, borderBottom: "1px solid #edf2f7", textAlign: "right" }}>{row.recent52Hits}</td>
+                      <td style={{ padding: 8, borderBottom: "1px solid #edf2f7", textAlign: "right" }}>{row.fullHits}</td>
+                      <td style={{ padding: 8, borderBottom: "1px solid #edf2f7", textAlign: "right" }}>
+                        {formatNumber(row.hazardRiskPercent, 1)}% ({row.hazardHits}/{row.hazardTrials})
+                      </td>
+                      <td style={{ padding: 8, borderBottom: "1px solid #edf2f7", color: "#475569" }}>
+                        {index + 1}. {row.reason}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </div>
-      )}
+
+        <div
+          style={{
+            border: "1px solid #fde68a",
+            borderRadius: 8,
+            background: "#fffbeb",
+            padding: 10,
+            color: "#713f12",
+            fontSize: 12,
+            lineHeight: 1.45,
+          }}
+        >
+          <b>Truthfulness note:</b> Excluding {budget} numbers leaves {45 - budget} allowed numbers, so a 37-number exclusion list is mathematically equivalent to proposing an 8-number draw universe. Treat this as calibrated exclusion-risk evidence, not as a promise that the listed numbers cannot appear.
+        </div>
+      </div>
     </div>
   );
 };

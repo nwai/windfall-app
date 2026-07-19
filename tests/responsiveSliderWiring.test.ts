@@ -21,7 +21,8 @@ describe("responsive slider wiring", () => {
     const engineBlock = app.slice(engineStart, engineEnd);
 
     expect(engineBlock).toContain("onCommit={setLambda}");
-    expect(hardFiltersBlock.match(/<HigSlider/g)).toHaveLength(6);
+    expect(hardFiltersBlock.match(/<HigSlider/g)).toHaveLength(7);
+    expect(hardFiltersBlock).toContain("READINESS_HARD_FILTER_KEYS.map");
     expect(hardFiltersBlock).not.toContain('type="range"');
   });
 });

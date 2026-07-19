@@ -307,8 +307,71 @@ describe("PredictionJournalPanel", () => {
 
     expect(container.textContent).toContain("Odd/even ratio must total 8");
     expect(container.textContent).toContain("Numbers can include at most 8 unique numbers");
-    expect(container.textContent).toContain("Monthly bucket mix cannot total more than 8");
+    expect(container.textContent).toContain("Target draw bucket-origin mix cannot total more than 8");
     expect(container.textContent).toContain("No journal entries yet");
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it("prefills a new prediction draft from a setup snapshot request", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(React.createElement(PredictionJournalPanel, {
+        history: [
+          draw("6/22/26", [2, 4, 6, 8, 10, 12], [14, 16]),
+          draw("6/24/26", [1, 3, 5, 7, 9, 11], [13, 15]),
+        ],
+        newPredictionDraft: {
+          id: 1,
+          setupSnapshot: {
+            windowEnabled: true,
+            windowMode: "Custom",
+            customDrawCount: 13,
+            selectedRatios: ["5:3"],
+            useTrickyRule: false,
+            knobs: { enableSDE1: true, enableHC3: true },
+            userSelectedNumbers: [1, 2, 3],
+            trendSelectedNumbers: [10],
+            previousNeighbourConstraintNumbers: [12],
+            hotColdForcedNumbers: [20],
+            droughtBreakSelectedNumbers: [],
+            selectedCarryOverBoostNumbers: [],
+            excludedNumbers: [44],
+            hotColdExcludedNumbers: [],
+            monthlyConstructiveEnabled: true,
+            acceptanceNeedsEnabled: true,
+            acceptanceNeedsCounts: {
+              undrawn: 2,
+              times1: 3,
+              times2: 0,
+              times3: 1,
+              times4: 0,
+              times5: 0,
+              times6: 0,
+              times7: 0,
+              times8: 0,
+            },
+          } as any,
+        },
+      }));
+    });
+
+    const oddEvenInput = container.querySelector("input[placeholder='2:6']") as HTMLInputElement;
+    const numbersTextArea = container.querySelector("textarea[placeholder='12, 14, 22, 27']") as HTMLTextAreaElement;
+    const notesTextArea = container.querySelector("textarea[placeholder='Why this looked plausible before the draw...']") as HTMLTextAreaElement;
+
+    expect(oddEvenInput.value).toBe("5:3");
+    expect(numbersTextArea.value).toBe("1, 2, 3, 10, 12, 20");
+    expect(notesTextArea.value).toContain("New prediction draft created from the current app setup.");
+    expect(notesTextArea.value).toContain("SDE1: ON.");
+    expect(notesTextArea.value).toContain("HC3: ON.");
+    expect(container.textContent).toContain("New prediction draft created from current setup");
 
     await act(async () => {
       root.unmount();
