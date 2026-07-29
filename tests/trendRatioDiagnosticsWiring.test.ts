@@ -11,6 +11,8 @@ describe("Trend Ratio Diagnostics wiring", () => {
     expect(manual).toContain('id="trend-ratio-diagnostics"');
     expect(manual).toContain("Up / Down / Flat");
     expect(manual).toContain("mains + supplementary numbers");
+    expect(manual).toContain("finite-population reference");
+    expect(manual).toContain("sampled without replacement");
     expect(manual).toContain("diagnostic, not a calibrated probability");
     expect(manual).toContain("Add button");
   });

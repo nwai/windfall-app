@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from "react";
-import type { Draw } from "../../types";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import type { Draw, KeptGeneratedCandidateRow } from "../../types";
 import { buildAdaptiveShapeEvidence } from "../../lib/adaptiveCandidateShapes";
 import {
   bucketLabelForTimes,
@@ -15,12 +15,19 @@ import {
   reconcileStageIdmTargetCounts,
   type PasteWeightedGenerationResult,
   type PasteWeightedCandidateConstraintMode,
+  type PastedCandidateRow,
 } from "../../lib/pasteWeightedCandidates";
+import { normalizeUserSelectedNumbers } from "../../lib/userSelectedNumbers";
+import { formatUserExclusionReminder, normalizeUserExclusionLocks } from "../../lib/userExclusionLocks";
 
 interface PasteWeightedCandidatesPanelProps {
   onSimulateCandidate?: (numbers: number[]) => void;
   onGeneratedCandidatesChange?: (candidates: PasteWeightedGenerationResult["candidates"]) => void;
+  forcedNumbers?: number[];
+  excludedNumbers?: number[];
+  onToggleForcedNumber?: (number: number) => void;
   activeSimulatedKey?: string | null;
+  keptGeneratedRows?: readonly KeptGeneratedCandidateRow[];
   initialPasteText?: string;
   initialCandidateCount?: number;
   fullHistory?: Draw[];
@@ -33,6 +40,17 @@ interface PasteWeightedCandidatesPanelProps {
 
 const candidateCountOptions = Array.from({ length: 27 }, (_, index) => index + 4);
 const stageBucketCountOptions = Array.from({ length: 7 }, (_, index) => index);
+const lotteryNumbers = Array.from({ length: 45 }, (_, index) => index + 1);
+
+const appendTextRows = (current: string, rows: readonly string[]): string => {
+  const existing = current.trim();
+  return [existing, ...rows].filter(Boolean).join("\n");
+};
+
+const formatKeptPasteWeightedRow = (row: KeptGeneratedCandidateRow): string | null => {
+  const main = row.main.filter((number) => Number.isInteger(number) && number >= 1 && number <= 45);
+  return main.length === 6 ? main.join(",") : null;
+};
 
 const headingStyle: React.CSSProperties = {
   display: "flex",
@@ -73,6 +91,21 @@ const numberChipStyle = (prominence: number): React.CSSProperties => ({
   color: "#172554",
   fontSize: 12,
   fontWeight: 700,
+});
+
+const missingNumberButtonStyle = (
+  active: boolean,
+  disabled: boolean,
+): React.CSSProperties => ({
+  minHeight: 34,
+  minWidth: 38,
+  borderRadius: 6,
+  border: active ? "1px solid #111827" : disabled ? "1px solid #d7dee8" : "1px solid #cbd5e1",
+  background: active ? "#111827" : disabled ? "#f1f5f9" : "#fff",
+  color: active ? "#fff" : disabled ? "#94a3b8" : "#0f172a",
+  fontWeight: 800,
+  fontSize: 12,
+  cursor: disabled ? "not-allowed" : "pointer",
 });
 
 const tableStyle: React.CSSProperties = {
@@ -118,6 +151,60 @@ const compactBucketLabel = (times: number): string => (
   times <= 0 ? "0x" : bucketLabelForTimes(times)
 );
 
+const rowIssueListStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 6,
+  maxHeight: 180,
+  overflowY: "auto",
+  paddingRight: 2,
+};
+
+const pastedRowIssueStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 5,
+  padding: "8px 10px",
+  borderRadius: 6,
+  border: "1px solid #f59e0b",
+  borderLeft: "4px solid #d97706",
+  background: "#fff7ed",
+  color: "#78350f",
+};
+
+const pastedRowIssueMetaStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 8,
+  flexWrap: "wrap",
+  fontSize: 11,
+  fontWeight: 800,
+  textTransform: "uppercase",
+  letterSpacing: 0,
+};
+
+const pastedRowRawStyle: React.CSSProperties = {
+  fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+  fontSize: 12,
+  lineHeight: 1.35,
+  whiteSpace: "pre-wrap",
+  wordBreak: "break-word",
+  color: "#111827",
+};
+
+const describePastedRowIssues = (row: PastedCandidateRow): string[] => {
+  const issues: string[] = [];
+  if (row.numbers.length !== 6) {
+    issues.push(`${row.numbers.length} unique valid number${row.numbers.length === 1 ? "" : "s"}; expected exactly 6`);
+  }
+  if (row.duplicateNumbers.length > 0) {
+    issues.push(`duplicate value${row.duplicateNumbers.length === 1 ? "" : "s"} counted once: ${row.duplicateNumbers.join(", ")}`);
+  }
+  if (row.outOfRangeNumbers.length > 0) {
+    issues.push(`ignored out-of-range value${row.outOfRangeNumbers.length === 1 ? "" : "s"}: ${row.outOfRangeNumbers.join(", ")}`);
+  }
+  return issues.length > 0 ? issues : ["Review this row before relying on it."];
+};
+
 const formatStageIdmCounts = (counts: readonly number[]): string => (
   counts
     .map((count, times) => `${compactBucketLabel(times)} ${count}`)
@@ -136,7 +223,11 @@ const formatAcceptanceNeedsCounts = (counts: readonly number[]): string => {
 export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanelProps> = ({
   onSimulateCandidate,
   onGeneratedCandidatesChange,
+  forcedNumbers = [],
+  excludedNumbers = [],
+  onToggleForcedNumber,
   activeSimulatedKey = null,
+  keptGeneratedRows = [],
   initialPasteText = "",
   initialCandidateCount = 12,
   fullHistory = [],
@@ -146,6 +237,7 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
   monthlyBucketSets = null,
   monthlyAcceptanceNeeds = null,
 }) => {
+  const consumedKeptRowIdsRef = useRef<Set<string>>(new Set());
   const [pasteText, setPasteText] = useState(initialPasteText);
   const [candidateCount, setCandidateCount] = useState(initialCandidateCount);
   const [ending5Mode, setEnding5Mode] = useState<PasteWeightedCandidateConstraintMode>("any");
@@ -160,6 +252,28 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
   const [result, setResult] = useState<PasteWeightedGenerationResult | null>(null);
 
   const parsed = useMemo(() => parsePastedCandidateNumbers(pasteText), [pasteText]);
+  const countedNumberSet = useMemo(
+    () => new Set(parsed.counts.map((item) => item.number)),
+    [parsed.counts],
+  );
+  const missingNumbers = useMemo(
+    () => lotteryNumbers.filter((number) => !countedNumberSet.has(number)),
+    [countedNumberSet],
+  );
+  const pasteForcedNumbers = useMemo(
+    () => normalizeUserSelectedNumbers(forcedNumbers),
+    [forcedNumbers],
+  );
+  const pasteForcedSet = useMemo(() => new Set(pasteForcedNumbers), [pasteForcedNumbers]);
+  const excludedNumberList = useMemo(
+    () => normalizeUserExclusionLocks(excludedNumbers),
+    [excludedNumbers],
+  );
+  const excludedNumberSet = useMemo(() => new Set(excludedNumberList), [excludedNumberList]);
+  const userExclusionReminder = useMemo(
+    () => formatUserExclusionReminder(excludedNumberList),
+    [excludedNumberList],
+  );
   const adaptiveShapeEvidence = useMemo(() => (
     fullHistory.length > 0
       ? buildAdaptiveShapeEvidence({ fullHistory, activeHistory, shrinkTargetSize: 50 })
@@ -200,6 +314,20 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
     && !needsStageIdmSixMains
     && !needsMonthlyAcceptanceNeedsState
     && !needsMonthlyAcceptanceNeedsPossible;
+
+  useEffect(() => {
+    const newRows = keptGeneratedRows
+      .filter((row) => !consumedKeptRowIdsRef.current.has(row.id))
+      .map((row) => ({ id: row.id, text: formatKeptPasteWeightedRow(row) }))
+      .filter((row): row is { id: string; text: string } => row.text !== null);
+
+    if (newRows.length === 0) return;
+
+    newRows.forEach((row) => consumedKeptRowIdsRef.current.add(row.id));
+    setPasteText((current) => appendTextRows(current, newRows.map((row) => row.text)));
+    setResult(null);
+    onGeneratedCandidatesChange?.([]);
+  }, [keptGeneratedRows, onGeneratedCandidatesChange]);
 
   const clearResult = () => {
     setResult(null);
@@ -373,12 +501,44 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
           <div style={{ fontWeight: 800 }}>{parsed.totalCountedNumbers}</div>
         </div>
         <div className="windfall-status-chip">
+          <div style={mutedStyle}>Missing numbers</div>
+          <div style={{ fontWeight: 800 }}>{missingNumbers.length}</div>
+        </div>
+        <div className="windfall-status-chip">
           <div style={mutedStyle}>Invalid values</div>
           <div style={{ fontWeight: 800, color: parsed.invalidTokens.length ? "#b91c1c" : "#166534" }}>
             {parsed.invalidTokens.length}
           </div>
         </div>
       </div>
+
+      {rowsWithIssues.length > 0 && (
+        <div style={{ ...mutedStyle, color: "#92400e", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 6, padding: 8, display: "grid", gap: 8 }}>
+          <div>
+            {rowsWithIssues.length === 1 ? "1 row needs attention." : `${rowsWithIssues.length} rows need attention.`} Duplicate values are counted once per row; rows with fewer or more than six valid numbers are still used for weighting but marked as imperfect input.
+          </div>
+          <div style={{ fontWeight: 800, fontSize: 12, color: "#78350f" }}>Rows needing review</div>
+          <div style={rowIssueListStyle} aria-label="Pasted rows needing attention">
+            {rowsWithIssues.map((row) => (
+              <div
+                key={`${row.lineNumber}-${row.raw}`}
+                data-testid="paste-weighted-row-issue"
+                style={pastedRowIssueStyle}
+                title={`Line ${row.lineNumber}: ${describePastedRowIssues(row).join("; ")}`}
+              >
+                <div style={pastedRowIssueMetaStyle}>
+                  <span>Line {row.lineNumber}</span>
+                  <span>{row.numbers.length}/6 unique valid</span>
+                </div>
+                <div style={pastedRowRawStyle}>{row.raw}</div>
+                <div style={{ fontSize: 11, lineHeight: 1.35 }}>
+                  {describePastedRowIssues(row).join(" · ")}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {countsForDisplay.length > 0 && (
         <div style={{ display: "grid", gap: 6 }}>
@@ -398,9 +558,79 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
         </div>
       )}
 
-      {rowsWithIssues.length > 0 && (
-        <div style={{ ...mutedStyle, color: "#92400e", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 6, padding: 8 }}>
-          {rowsWithIssues.length} row{rowsWithIssues.length === 1 ? "" : "s"} need attention. Duplicate values are counted once per row; rows with fewer or more than six valid numbers are still used for weighting but marked as imperfect input.
+      {parsed.totalCountedNumbers > 0 && (
+        <div style={{ display: "grid", gap: 8, borderTop: "1px solid #e2e8f0", paddingTop: 10 }}>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 13 }}>
+              Missing from pasted rows ({missingNumbers.length})
+            </div>
+            <div style={mutedStyle}>
+              These are valid 1-45 numbers that do not appear in the pasted rows. Click one to add or remove it as a Paste-Weighted hard forced inclusion for candidate generation; this does not change the pasted count ranking.
+            </div>
+            {userExclusionReminder && (
+              <div style={{ ...mutedStyle, color: "#475569", marginTop: 4 }}>
+                {userExclusionReminder}. Excluded numbers are unavailable here until the exclusion is cleared.
+              </div>
+            )}
+          </div>
+          {missingNumbers.length > 0 ? (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {missingNumbers.map((number) => {
+                const active = pasteForcedSet.has(number);
+                const excluded = excludedNumberSet.has(number);
+                const disabled = !active && (!onToggleForcedNumber || excluded);
+                return (
+                  <button
+                    key={number}
+                    type="button"
+                    aria-label={
+                      excluded && !active
+                        ? `Number ${number} is excluded and cannot be forced from Paste-Weighted missing numbers`
+                        : active
+                          ? `Remove Paste-Weighted forced inclusion ${number}`
+                          : `Add Paste-Weighted forced inclusion ${number}`
+                    }
+                    aria-pressed={active}
+                    disabled={disabled}
+                    onClick={() => onToggleForcedNumber?.(number)}
+                    title={
+                      excluded && !active
+                        ? `Clear the active exclusion before selecting ${number}.`
+                        : active
+                          ? `Remove ${number} from Paste-Weighted forced inclusions.`
+                          : `Force ${number} into generated candidates.`
+                    }
+                    style={missingNumberButtonStyle(active, disabled)}
+                  >
+                    {number}
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div style={mutedStyle}>Every number from 1 to 45 appears at least once in the pasted rows.</div>
+          )}
+          {pasteForcedNumbers.length > 0 && (
+            <div style={{ ...mutedStyle, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 6, padding: 8 }}>
+              Active Paste-Weighted forced inclusions: {pasteForcedNumbers.map((number) => (
+                <button
+                  key={number}
+                  type="button"
+                  onClick={() => onToggleForcedNumber?.(number)}
+                  disabled={!onToggleForcedNumber}
+                  style={{
+                    ...missingNumberButtonStyle(true, !onToggleForcedNumber),
+                    minHeight: 28,
+                    minWidth: 32,
+                    marginLeft: 5,
+                  }}
+                  aria-label={`Remove Paste-Weighted forced inclusion ${number}`}
+                >
+                  {number}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -691,7 +921,7 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
           onClick={handleClear}
           className="windfall-secondary-button"
         >
-          Clear
+          Clear pasted rows
         </button>
         {!canGenerate && (
           <span style={mutedStyle}>

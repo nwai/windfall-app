@@ -22,6 +22,14 @@ describe("RwR45 Generated Candidates wiring", () => {
     expect(rwr45Block).toContain("excludedNumbers: rwr45ExcludedNumbers");
   });
 
+  it("passes Monthly Draws Summary Acceptance Needs counts into RwR45 only when Use counts is on", () => {
+    const rwr45Block = appSource.match(/if \(rwr45Enabled\) \{[\s\S]*?return;\s*\}/)?.[0] ?? "";
+
+    expect(rwr45Block).toContain("monthlyAcceptanceNeeds: monthlyConstructiveEnabled && monthlyConstraintPayload");
+    expect(rwr45Block).toContain("constraints: monthlyConstraintPayload.constraints");
+    expect(rwr45Block).toContain("buckets: monthlyConstraintPayload.buckets");
+  });
+
   it("passes the RwR45 toggle state into GeneratedCandidatesPanel", () => {
     const panelBlock = appSource.match(/<GeneratedCandidatesPanel[\s\S]*?\/>/)?.[0] ?? "";
 

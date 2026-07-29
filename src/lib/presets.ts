@@ -122,6 +122,21 @@ export interface AppPresetSnapshot {
   hotColdForcedNumbers?: number[];
   hotColdExcludedNumbers?: number[];
   droughtBreakSelectedNumbers?: number[];
+  pasteWeightedForcedNumbers?: number[];
+  // Derived prediction-provenance evidence captured only when requested.
+  // These describe what generation saw at snapshot time; they are not restored as controls.
+  autoExcludedFromSelection?: number[];
+  mainConstraintAutoExcludedNumbers?: number[];
+  effectiveExcludedNumbers?: number[];
+  generationForcedNumbers?: number[];
+  generationExcludedNumbers?: number[];
+  allExcludedNumbers?: number[];
+  sde1Exclusions?: number[];
+  hc3Exclusions?: number[];
+  droughtBreakStrictShortlistNumbers?: number[];
+  droughtBreakEmpiricalHazardNumbers?: number[];
+  droughtBreakShortlistTop?: number;
+  droughtBreakStrictThreshold?: number;
 
   // Trend settings
   trendLookback: number;
@@ -262,6 +277,7 @@ export interface AppPresetSnapshot {
   selectedCarryOverBoostMode?: "normal" | "strong" | "nearForced";
   // Readiness (Rdy) score weights
   rdyWeights?: { idm: number; conv: number; oga: number };
+  rdyWeightOffState?: Partial<Record<"idm" | "conv" | "oga", boolean>>;
   readinessHardFilters?: Partial<Record<"idm" | "conv" | "oga", { enabled?: boolean; thresholdPercent?: number }>>;
 
   // Parameter search and probability overlay
@@ -396,6 +412,7 @@ export function normalizeAppPresetSnapshot(snapshot: AppPresetSnapshot): AppPres
     hotColdForcedNumbers: normalizeWeightedTargetNumbers(snapshot.hotColdForcedNumbers),
     hotColdExcludedNumbers: normalizeWeightedTargetNumbers(snapshot.hotColdExcludedNumbers),
     droughtBreakSelectedNumbers: normalizeWeightedTargetNumbers(snapshot.droughtBreakSelectedNumbers).slice(0, 3),
+    pasteWeightedForcedNumbers: normalizeWeightedTargetNumbers(snapshot.pasteWeightedForcedNumbers),
     previousNeighbourConstraintNumbers: normalizeWeightedTargetNumbers(snapshot.previousNeighbourConstraintNumbers).slice(0, 8),
     latestNeighbourSupportEnabled: !!snapshot.latestNeighbourSupportEnabled,
     maxLastDrawMatchesEnabled: !!snapshot.maxLastDrawMatchesEnabled,

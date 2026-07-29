@@ -380,12 +380,12 @@
   <h4>Scope and timing</h4>
   <ul>
     <li>The ratio uses <strong>mains + supplementary numbers</strong>, so every valid ratio totals 8.</li>
-    <li>For each historical draw, the app classifies trend state using only values available before that draw. This protects the diagnostic from lookahead leakage.</li>
+    <li>For each historical draw, the app classifies trend state using only values available before that draw. The trend scale also uses only the history available at that point, which protects the diagnostic from lookahead leakage.</li>
     <li>The table includes all 45 possible U/D/F ratios, even when a ratio has zero observed historical occurrences in the active WFMQYH window.</li>
   </ul>
 
   <h4>What z means</h4>
-  <p>The <strong>z</strong> column compares the observed count for each ratio with a neutral multinomial reference built from the observed Up, Down, and Flat rates. A larger absolute z value means that ratio appeared more or less often than the neutral reference would expect.</p>
+  <p>The <strong>z</strong> column compares the observed count for each ratio with a neutral finite-population reference. For each eligible historical draw, the app first counts how many of the 45 numbers were Up, Down, or Flat before that draw, then asks how often an 8-number draw sampled without replacement from that classified pool would produce each ratio. A larger absolute z value means that ratio appeared more or less often than this neutral reference would expect.</p>
 
   <div class="note">
     <strong>Truthfulness note:</strong> z is a diagnostic, not a calibrated probability. It is useful for spotting unusual historical structure, but it does not guarantee that a ratio is due or likely in the next draw.
@@ -534,6 +534,30 @@
     <strong>Why mains only:</strong> Paste-Weighted Candidate Generator is a six-main-number weighting tool. Supplementary numbers are intentionally omitted so pasted rows remain clean six-number inputs.
   </div>
 
+  <h3 id="generated-keep-candidate">Keep candidate rows</h3>
+  <p>Each generated row has a <strong>Keep</strong> button beside <strong>Simulate</strong>. Pressing <strong>Keep</strong> appends a copy of that candidate to both <strong>Portfolio Compression / 12-Game Distiller</strong> and <strong>Paste-Weighted Candidate Generator</strong>.</p>
+  <ul>
+    <li><strong>Portfolio Compression</strong> receives the full generated row: six mains plus supplementary numbers when they exist.</li>
+    <li><strong>Paste-Weighted Candidate Generator</strong> receives the six mains only, because that panel is a mains-only weighting tool.</li>
+    <li>Existing pasted or kept rows are preserved. Rows are only removed when the matching panel's <strong>Clear pasted rows</strong> button is pressed.</li>
+  </ul>
+  <div class="note">
+    <strong>Trace note:</strong> the Keep action records which generated row was kept, but it does not change candidate scoring or rerun generation.
+  </div>
+
+  <h3 id="generated-generation-session">Generation session</h3>
+  <p>The <strong>Start session</strong>, <strong>End session</strong>, <strong>Clear session</strong>, and <strong>Export session</strong> controls let you build a local ledger of generated rows across multiple Generate runs.</p>
+  <ul>
+    <li><strong>Start session</strong> turns capture on. While active, displayed generated candidates are stored locally.</li>
+    <li>Session uniqueness is based on the six <strong>Main</strong> numbers only. A row with the same mains but different supplementary numbers is still treated as a duplicate.</li>
+    <li><strong>End session</strong> stops future captures but keeps the stored rows available.</li>
+    <li><strong>Clear session</strong> removes the stored session rows without exporting them.</li>
+    <li><strong>Export session</strong> appends the stored rows to the existing shared receiver: Portfolio Compression receives mains plus supps, and Paste-Weighted Candidate Generator receives mains only. Export then clears the session storage. It does not change whether capture is active.</li>
+  </ul>
+  <div class="note">
+    <strong>Truthfulness note:</strong> session capture does not create better candidates by itself. It prevents repeated main-six rows while active and gives you a clean way to move the accumulated rows into compression panels for inspection.
+  </div>
+
   <h3 id="generated-stop-partial">Stop and show partial</h3>
   <p>While the main generator is running, Windfall shows a <strong>Stop and show partial</strong> button beside <strong>Generate</strong>. Use it when high <strong>Attempts ×</strong> or <strong>Overgen ×</strong> settings make generation take longer than intended.</p>
   <ul>
@@ -552,13 +576,14 @@
     <li><strong>When ON</strong> — the normal Count value is ignored and the app creates exactly <strong>7 candidates</strong>.</li>
     <li>The generator shuffles numbers <code>1–45</code> uniformly at random.</li>
     <li>Hard exclusions are removed before random fill. Forced inclusions are seeded into every candidate, matching the normal generator’s forced-number contract.</li>
+    <li>If <strong>Use counts when constructing candidates</strong> is ON in Monthly Draws Summary, PNUaRW45 checks every 8-number row against those Acceptance Needs bucket minimums.</li>
     <li>When no hard constraints are active, the first <strong>42 numbers</strong> are split into seven non-overlapping six-number main sets, so main numbers are globally without replacement across the 7 candidates.</li>
-    <li>When forced inclusions or exclusions are active, global-without-replacement applies to the remaining non-forced main filler numbers where possible. If the active constraints make the original strict partition impossible, Windfall uses a row-safe random fallback that still avoids duplicates inside each candidate and still respects exclusions.</li>
+    <li>When forced inclusions, exclusions, or Acceptance Needs counts are active, global-without-replacement applies to the remaining non-forced main filler numbers where possible. If the active constraints make the original strict partition impossible, Windfall uses a row-safe random fallback that still avoids duplicates inside each candidate and still respects exclusions and the active bucket minimums.</li>
     <li>With no hard constraints, the remaining <strong>3 numbers</strong> become the supplementary pool. Under constraints, the preferred supplementary pool is the unused eligible remainder, with row-safe fallback if needed.</li>
   </ul>
 
   <div class="note">
-    <strong>Truthfulness note:</strong> PNUaRW45 is random coverage, not a prediction, score, or evidence-weighted strategy. While RwR45 is ON, Count, odd/even quotas, scoring influence, and most evidence filters are bypassed. Hard forced inclusions and hard exclusions, including MiAN hard exclusions where active, are honored before the random fill.
+    <strong>Truthfulness note:</strong> PNUaRW45 is random coverage, not a prediction, score, or evidence-weighted strategy. While RwR45 is ON, Count, odd/even quotas, scoring influence, and most evidence filters are bypassed. Hard forced inclusions, hard exclusions, MiAN hard exclusions where active, and Monthly Draws Summary Acceptance Needs counts when Use counts is ON are honored before display.
   </div>
 
   <div class="tip">
@@ -569,6 +594,19 @@
   <h3 id="paste-weighted-generator">Paste-Weighted Candidate Generator</h3>
 
   <p>The <strong>Paste-Weighted Candidate Generator</strong> lets you paste any number of six-number rows, counts how often each number appears, and then generates mains-only candidates weighted toward the most common pasted numbers.</p>
+
+  <p>Rows kept from <strong>Generated Candidates</strong> are appended here as six-main-number rows. They stay in the pasted input until <strong>Clear pasted rows</strong> is pressed.</p>
+
+  <p>If pasted input contains duplicate numbers, out-of-range values, or rows with fewer or more than six unique valid numbers, Windfall shows a <strong>Rows needing review</strong> list beneath the warning. Each affected source line is highlighted with its line number and reason. The row is still used for weighting where valid numbers exist, but it is marked as imperfect input so malformed rows cannot pass silently.</p>
+
+  <h4>Missing numbers and Paste-Weighted forced inclusions</h4>
+  <p>After rows are pasted, the panel shows how many valid numbers from <code>1–45</code> did <strong>not</strong> appear in the pasted rows. The <strong>Missing from pasted rows</strong> strip lists those numbers individually.</p>
+
+  <p>Clicking a missing number adds it as a <strong>Paste-Weighted hard forced inclusion</strong> for candidate generation. Click it again, or click it in the active Paste-Weighted forced list, to remove it. These forced inclusions do not change the pasted count ranking or the paste score; they are a separate user decision layered on top of the pasted evidence.</p>
+
+  <div class="note">
+    <strong>Conflict note:</strong> numbers blocked by active exclusions are disabled in this strip. Clear the exclusion first if you want to force that number.
+  </div>
 
   <h4>Adaptive shape</h4>
   <p><strong>Adaptive shape</strong> is a history-aware profile for the six main numbers. It does not score individual numbers. Instead, it describes the candidate's structure by splitting the six mains into:</p>
@@ -628,6 +666,8 @@
   <p><strong>Rows counted</strong> is every pasted or loaded row containing at least one valid number. <strong>Valid game rows</strong> is stricter: rows must contain exactly 6 or 8 unique in-range numbers. Rows needing review are still counted, but the panel flags them so malformed input cannot pass silently.</p>
 
   <p><strong>Load current generated candidates</strong> loads generated rows from the main and paste-weighted generators. Supplementary numbers are included when the source provides them; paste-weighted rows are usually mains only.</p>
+
+  <p><strong>Keep</strong> buttons in the generated-candidate table append individual generated rows here without replacing the existing portfolio input. Use <strong>Clear pasted rows</strong> when you want to empty the pasted and kept rows.</p>
 
   <p>Optional evidence columns are observe-only and labelled by scope. For example, hot/cold uses mains + supps, while adjacent combos and window shape are mains-only diagnostics. These columns do not change the top-six core.</p>
 
@@ -700,6 +740,10 @@
   <div class="warn-box">
     <strong>Honesty note:</strong> use the backtest to decide whether structural-state evidence deserves attention. Do not use it to force belief in the pasted portfolio core or final six.
   </div>
+
+  <h3 id="generation-user-selected-colors">User Selected Number Bucket Colors</h3>
+  <p>The <strong>User Selected Numbers</strong> panel and the compact user-selected strip inside <strong>Generated Candidates</strong> use monthly bucket colors when current bucket data is available. Selected or forced numbers use the stronger bucket color; unselected numbers use a softer tint so the 1–45 strip remains readable.</p>
+  <p>These colors show the number's current monthly bucket only: <strong>Undrawn</strong>, <strong>1x</strong>, <strong>2x</strong>, through <strong>8x+</strong>. They are context labels, not calibrated probabilities or claims that a number is more likely to draw.</p>
 
   <!-- ───────────────────────────────────────── -->
   <h3 id="columns">Column Reference</h3>
@@ -1204,11 +1248,17 @@
 
   <p>These controls live together in <strong>Candidate Generation Influences → Composition &amp; Recency</strong>. They all refer to the <strong>single most recent real draw</strong> in the active WFMQYH window, but they do not all behave the same way.</p>
 
+  <p><strong>WFMQYH is not the same thing as latest-draw overlap.</strong> WFMQYH chooses the draw-history evidence universe the app can learn from. For example, setting WFMQYH to the latest <code>9</code> draws means many evidence panels and generation weights use those latest nine real draws as their active history. It does <em>not</em> by itself force generated candidates to contain numbers from those nine draws.</p>
+
   <ul>
     <li><strong>Minimum matches to last draw</strong> is a strict lower-bound filter. If it is set to <code>2</code>, every accepted candidate must contain at least two numbers from the latest draw.</li>
     <li><strong>Maximum matches to last draw</strong> is a strict upper-bound filter only when its checkbox is ON. If it is set to <code>3</code>, candidates with four or more latest-draw numbers are rejected.</li>
     <li><strong>Last-draw match bias</strong> is not a strict filter. It is a soft weighting strength from <code>0</code> to <code>5</code>. <code>0</code> is off; <code>5</code> is the strongest setting.</li>
   </ul>
+
+  <div class="tip">
+    <strong>Common zero-setting example:</strong> if <strong>Minimum matches to last draw</strong> is <code>0</code> and <strong>Maximum matches to last draw</strong> is <strong>Off</strong>, the hard latest-draw overlap filters are off. Candidates may contain <code>0</code>, <code>1</code>, <code>2</code>, or more numbers from the immediate previous draw. This does not mean "reject every candidate that contains a latest-draw number."
+  </div>
 
   <p>The bias changes direction depending on the minimum setting. If <strong>Minimum matches to last draw</strong> is <code>0</code>, a positive bias penalises latest-draw numbers during weighted sampling. If the minimum is greater than <code>0</code>, the bias favours candidates with stronger latest-draw overlap after they have already passed the strict minimum.</p>
 
@@ -1217,6 +1267,18 @@
   </div>
 
   <p><strong>Look back over newest draws</strong> is separate from the single last-draw controls. It builds a wider pool from the newest W draws inside the active WFMQYH history. Its default value follows the <strong>latest observed month's completed draw count</strong>, not the total WFMQYH size. If the active WFMQYH window is smaller than that month count, Windfall caps the effective W to the available active draws.</p>
+
+  <p>The control shows the count of <strong>unique numbers</strong> found in that newest-draw pool. The <strong>Minimum candidate numbers from that pool</strong> field is capped at the usable maximum: the smaller of that unique count and the candidate's eight total number slots.</p>
+
+  <p>Example: with WFMQYH set to the latest <code>9</code> draws, <strong>Look back over newest draws</strong> set to <code>9</code>, and <strong>Minimum candidate numbers from that pool</strong> set to <code>6</code>, Windfall builds one union pool from every number seen in those nine active draws and accepts only candidates containing at least six numbers from that pool. That is different from <strong>Minimum matches to last draw</strong>, which checks only the immediate previous draw.</p>
+
+  <ul>
+    <li><strong>At least, not exactly:</strong> a minimum of <code>5</code> means accepted candidates must contain <code>5</code> or more numbers from the union pool.</li>
+    <li><strong>Full candidate scope:</strong> the check counts all <code>8</code> candidate numbers: <code>6</code> mains plus <code>2</code> supplementary numbers.</li>
+    <li><strong>Appeared once is enough:</strong> a number only needs to have appeared at least once in the newest W active draws to be part of the union pool.</li>
+    <li><strong>Active-window cap:</strong> if WFMQYH currently contains fewer draws than the lookback value, Windfall uses only the available active WFMQYH draws.</li>
+    <li><strong>Constraint conflicts still matter:</strong> if exclusions, forced numbers, odd/even quotas, bucket rules, or other filters make the requested minimum impossible, generation may struggle or return fewer candidates. Any accepted candidate should still satisfy the active minimum-from-pool rule.</li>
+  </ul>
 
   <!-- ═══════════════════════════════════════════ -->
   <h2 id="monthly-summary">Monthly Draws Summary Panel</h2>
@@ -1883,6 +1945,7 @@
     <li>Check any number to place it into the Next column as a simulated main number (up to 6 main; numbers 7–8 become supplementary).</li>
     <li>A maximum of 8 numbers can be selected. A warning banner appears when the limit is reached.</li>
     <li>The simulated numbers are sorted ascending; the first 6 become main numbers (<span style="color:#c62828;">⬢</span>) and the remaining 1–2 become supplementary (<span style="color:#2e7d32;">◯</span>).</li>
+    <li>Hover over a strip number to see that number's <strong>Scoring System Diagnostics → Numbers</strong> rank and score using mains + supps. Lower rank means stronger diagnostic support in that table. It is not a calibrated probability or guarantee.</li>
     <li>Press <strong>Clear</strong> (appears below the list when numbers are selected) to remove all simulated selections at once.</li>
     <li>Deselecting all numbers cancels the simulation and the Next column reverts to showing diamond predictions only.</li>
   </ul>
@@ -1893,6 +1956,14 @@
 
   <!-- ═══════════════════════════════════════════ -->
   <h2 id="scoring-reference">Scoring Reference</h2>
+
+  <h3 id="scoring-system-diagnostics">Scoring System Diagnostics</h3>
+
+  <p><strong>Scoring System Diagnostics</strong> compares structural base scores, full real-history evidence, and WFMQYH-window evidence for ratios, numbers, terminal digits, terminal digit sets, straight runs, and rank drift. These rows are diagnostic support measures, not calibrated next-draw probabilities.</p>
+
+  <p><strong>Panel WFMQYH real draws</strong> is a local preview control. Leave it blank to use the global WFMQYH window. Enter a number such as <code>13</code>, <code>50</code>, or <code>100</code> to recalculate this panel using the latest N real draws only. This does not change the global WFMQYH panel, saved presets, candidate generation, generation trace, or Scoring Diagnostics influence used by the generator.</p>
+
+  <p>Use <strong>Use global</strong> to clear the preview and return the panel to the app-wide WFMQYH state. The status strip shows both <strong>Panel WFMQYH real draws</strong> and <strong>Global WFMQYH real draws</strong> so you can tell when the panel is previewing a different count.</p>
 
   <h3 id="score-summary">Score Summary Table</h3>
 
@@ -1925,13 +1996,32 @@
 
   <p>Windfall copies values into the form only where they fit the journal's scoring fields. For example, a single selected odd/even ratio can prefill <strong>Odd/even ratio</strong>; User Selected and forced/boosted inclusion numbers can prefill <strong>Numbers</strong>; and active Acceptance Needs counts can prefill <strong>Target draw bucket-origin mix</strong> when the counts fit inside the 8-ball next-draw limit.</p>
 
-  <p>The draft also writes a context note listing important setup values such as WFMQYH, SDE1, HC3, selected ratios, user-selected numbers, forced inclusion sources, forced exclusions, scoring influence, and selected-number boost state. Review the draft before saving. The button is a time-saver, not an automatic prediction.</p>
+  <p>When copied numbers are available, the draft also runs the same number-derived autofill used by the <strong>Numbers</strong> field. That can prefill <strong>Terminal digits</strong>, blank bucket-origin fields, <strong>Shape checks</strong>, and <strong>Recorded diagnostics</strong> such as U/D/F ratio, latest-draw repeat count, ±1/±2 count, strict drought count, and carry-over count. Explicit setup values already copied into the draft are preserved rather than overwritten.</p>
+
+  <p>The draft also writes a context note listing important setup values such as WFMQYH, selected ratios, user-selected numbers, forced inclusion sources, forced exclusions, scoring influence, and selected-number boost state. When SDE1, HC3, auto-unselected numbers, main-bucket auto-exclusions, Hot/Cold exclusions, or user exclusions are active, the note records the actual numbers excluded at the moment the draft was created. It also records the effective generation forced-number list and effective generation exclusion list so later review can see the setup that candidates were generated under. Review the draft before saving. The button is a time-saver, not an automatic prediction.</p>
+
+  <p>Saved journal entries also include a structured provenance block separate from the free-text notes. This block is designed for later analysis and export. It stores selected prediction numbers, inclusion sources, exclusion sources, effective forced numbers, effective excluded numbers, and a drought-break shortlist check.</p>
+
+  <p>The drought-break check compares the saved <strong>Numbers</strong> field with the current <strong>Drought-break shortlist (mains + supps)</strong> evidence captured in the setup snapshot. It records whether any or all saved numbers came from the shortlist, and separates matches into <strong>Strict drought 6+</strong>, <strong>Empirical hazard</strong>, both, or outside the current shortlist. This is provenance and classification only; it is not a claim that those numbers are due or guaranteed.</p>
+
+  <h4>Reviewed by user marker</h4>
+  <p>The prominent <strong>Review status</strong> radio buttons let you save whether a journal entry is still <strong>Not reviewed</strong> or has been <strong>Reviewed by user</strong>. Leave drafted entries as Not reviewed until you have checked the copied setup values and reasoning. Mark Reviewed by user only when you are willing for later analysis to treat the prediction as intentional evidence.</p>
+  <p>If you press <strong>Save prediction</strong> while the entry is still <strong>Not reviewed</strong>, Windfall saves the entry and shows a temporary alert reminding you what that flag means.</p>
+
+  <div class="note">
+    <strong>Why it matters:</strong> future analysis can choose to include only Reviewed by user predictions, or compare reviewed and not-reviewed entries separately. This prevents auto-filled drafts from being mistaken for predictions you consciously endorsed.
+  </div>
 
   <h4>How to fill in a journal entry</h4>
   <p>For a new user, the most important rule is simple: fill in only the prediction fields you genuinely want to test. The form is intentionally flexible. You do not need to complete every field, and a notes-only entry is valid if the observation is qualitative.</p>
 
+  <p>When you type or paste values into <strong>Numbers</strong>, Windfall auto-fills derived fields from those listed numbers: terminal digits, odd/even ratio when the listed count matches the target window, current bucket-origin counts, single/double digit counts, exact sum range when the listed count matches the target window, U/D/F ratio, latest-draw repeat count, ±1/±2 neighbour count, strict 6+ drought count, and active month-end carry-over count. These are convenience calculations from the listed numbers and current real-history state; they are not separate predictions.</p>
+
+  <p>If you manually edit an auto-filled field, Windfall leaves that manual value alone on later number edits unless you clear the field. This lets you use the autofill as a starting point without losing your own judgement.</p>
+
   <ol>
     <li><strong>Check the anchor latest draw.</strong> This is the latest real draw currently loaded. The entry is saved as a prediction made after that draw.</li>
+    <li><strong>Choose the review status.</strong> Use <strong>Not reviewed</strong> for a draft or quick capture. Use <strong>Reviewed by user</strong> after you have checked that the entry reflects your actual prediction.</li>
     <li><strong>Choose the target window.</strong> Use <strong>Next draw</strong> for a single immediate prediction, <strong>Next 3 draws</strong> for a short sequence idea, or <strong>Rest of current month</strong> for a month-stage hypothesis.</li>
     <li><strong>Add the clearest prediction first.</strong> Examples: Odd/even ratio <code>2:6</code>, Numbers <code>7, 14, 22, 31</code>, Terminal digits <code>1, 4, 9</code>, Confidence <code>65</code>.</li>
     <li><strong>Use target draw bucket-origin mix when your prediction is about where the drawn balls will come from.</strong> Example for Next draw: Undrawn <code>3</code>, 1x <code>4</code>, 2x <code>1</code> means you expect 3 of the 8 drawn balls to come from numbers currently undrawn this month, 4 from numbers currently drawn once, and 1 from numbers currently drawn twice. Do not enter the whole monthly bucket state here.</li>
@@ -1952,6 +2042,7 @@
     <li>You can edit or delete the entry while no target draw has arrived yet.</li>
     <li>If you edit an entry before it locks, the setup snapshot is refreshed to the app state at the time of the latest save.</li>
     <li>Once the first target draw appears in history, the entry locks and can no longer be edited. This prevents after-the-fact changes.</li>
+    <li>Locked or scored entries can be <strong>Archived</strong> to clear them from the active list without deleting their audit record. Use <strong>Show archived</strong> to review or restore older archived predictions.</li>
     <li>The panel uses real draw history for scoring, not the active WFMQYH filter. WFMQYH can help you form a prediction, but validation must use the actual next draw stream.</li>
   </ul>
 

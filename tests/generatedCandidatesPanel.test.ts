@@ -75,6 +75,30 @@ describe("GeneratedCandidatesPanel", () => {
     expect(strip?.querySelector('[aria-label="Toggle user selected number 4"]')?.getAttribute("aria-pressed")).toBe("false");
   });
 
+  it("colors compact user-selected strip numbers by monthly bucket", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(GeneratedCandidatesPanel, buildProps({
+        userSelectedNumbers: [3, 12],
+        monthlyBuckets: monthlyBucketSets({
+          undrawn: [3],
+          times5: [12],
+          times2: [4],
+        }),
+      })),
+    );
+    const document = new DOMParser().parseFromString(html, "text/html");
+    const selectedUndrawn = document.querySelector('[aria-label="Toggle user selected number 3"]');
+    const selectedTimes5 = document.querySelector('[aria-label="Toggle user selected number 12"]');
+    const unselectedTimes2 = document.querySelector('[aria-label="Toggle user selected number 4"]');
+
+    expect(selectedUndrawn?.getAttribute("style")).toContain("background:#64748b");
+    expect(selectedUndrawn?.getAttribute("title")).toContain("Monthly bucket: Undrawn");
+    expect(selectedTimes5?.getAttribute("style")).toContain("background:#ea580c");
+    expect(selectedTimes5?.getAttribute("title")).toContain("Monthly bucket: 5x");
+    expect(unselectedTimes2?.getAttribute("style")).toContain("background:#f0fdf4");
+    expect(unselectedTimes2?.getAttribute("title")).toContain("Monthly bucket: 2x");
+  });
+
   it("renders RwR45 as an explicit mode that disables the normal Count input when active", () => {
     const html = renderToStaticMarkup(
       React.createElement(GeneratedCandidatesPanel, buildProps({
@@ -110,6 +134,57 @@ describe("GeneratedCandidatesPanel", () => {
     expect(idleHtml).not.toContain("Stop and show partial");
     expect(runningHtml).toContain("Stop and show partial");
     expect(runningHtml).toContain("Stop generating and show accepted candidates so far");
+  });
+
+  it("renders generation session controls and dispatches session actions", async () => {
+    const onStartGenerationSession = vi.fn();
+    const onEndGenerationSession = vi.fn();
+    const onClearGenerationSession = vi.fn();
+    const onExportGenerationSession = vi.fn();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    try {
+      await act(async () => {
+        root.render(React.createElement(GeneratedCandidatesPanel, buildProps({
+          generationSessionActive: false,
+          generationSessionCount: 3,
+          onStartGenerationSession,
+          onEndGenerationSession,
+          onClearGenerationSession,
+          onExportGenerationSession,
+        })));
+      });
+
+      expect(container.textContent).toContain("Session off · 3 stored");
+
+      const startButton = container.querySelector('button[aria-label="Start generation session"]') as HTMLButtonElement | null;
+      const endButton = container.querySelector('button[aria-label="End generation session"]') as HTMLButtonElement | null;
+      const clearButton = container.querySelector('button[aria-label="Clear generation session"]') as HTMLButtonElement | null;
+      const exportButton = container.querySelector('button[aria-label="Export generation session to Portfolio Compression and Paste-Weighted Candidate Generator"]') as HTMLButtonElement | null;
+
+      expect(startButton?.disabled).toBe(false);
+      expect(endButton?.disabled).toBe(true);
+      expect(clearButton?.disabled).toBe(false);
+      expect(exportButton?.disabled).toBe(false);
+
+      await act(async () => {
+        startButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        clearButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        exportButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+
+      expect(onStartGenerationSession).toHaveBeenCalledTimes(1);
+      expect(onClearGenerationSession).toHaveBeenCalledTimes(1);
+      expect(onExportGenerationSession).toHaveBeenCalledTimes(1);
+      expect(onEndGenerationSession).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
   });
 
   it("copies generated candidate mains as paste-weighted comma-separated rows", async () => {
@@ -152,6 +227,40 @@ describe("GeneratedCandidatesPanel", () => {
       } else {
         delete (navigator as Navigator & { clipboard?: unknown }).clipboard;
       }
+    }
+  });
+
+  it("keeps a generated candidate row for downstream portfolio and paste-weighted panels", async () => {
+    const keptRows: number[] = [];
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    try {
+      await act(async () => {
+        root.render(React.createElement(GeneratedCandidatesPanel, buildProps({
+          candidates: [buildCandidate(0)],
+          onKeepCandidate: (index) => keptRows.push(index),
+        })));
+      });
+
+      const keepButton = container.querySelector(
+        'button[aria-label="Keep generated candidate 1 in Portfolio Compression and Paste-Weighted rows"]',
+      ) as HTMLButtonElement | null;
+      expect(keepButton).not.toBeNull();
+
+      await act(async () => {
+        keepButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+
+      expect(keptRows).toEqual([0]);
+      expect(container.textContent).toContain("Kept candidate #1");
+      expect(container.textContent).toContain("Kept");
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
     }
   });
 

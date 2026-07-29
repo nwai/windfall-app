@@ -331,10 +331,22 @@ export const SurvivalAnalyzer: React.FC<SurvivalAnalyzerProps> = ({
   const gpwfWeights = useMemo(() => buildGPWFNumberWeights(analysisHistory), [analysisHistory]);
   const hc3Weights = useMemo(() => buildHC3PenaltyWeights(analysisHistory), [analysisHistory]);
   const sde1Weights = useMemo(() => buildSDE1PenaltyWeights(analysisHistory), [analysisHistory]);
+  const customTrendSplit = useMemo(() => {
+    if (!useCustomTrendWindow || analysisHistory.length === 0) {
+      return { mostRecentDraws: 0, recentSlice: 0, beforeSlice: 0 };
+    }
+    const mostRecentDraws = Math.max(1, Math.min(trendTo, analysisHistory.length));
+    const recentSlice = Math.max(0, Math.min(trendFrom, mostRecentDraws - 1));
+    return {
+      mostRecentDraws,
+      recentSlice,
+      beforeSlice: Math.max(0, mostRecentDraws - recentSlice),
+    };
+  }, [analysisHistory.length, trendFrom, trendTo, useCustomTrendWindow]);
   const customTrendWeights = useMemo((): Record<number, number> | undefined => {
     if (!useCustomTrendWindow || analysisHistory.length === 0) return undefined;
-    const to = Math.max(1, Math.min(trendTo, analysisHistory.length));
-    const from = Math.max(0, Math.min(trendFrom, to - 1));
+    const to = customTrendSplit.mostRecentDraws;
+    const from = customTrendSplit.recentSlice;
     const wider = analysisHistory.slice(-to);
     const recent = analysisHistory.slice(-from || undefined);
     const count = (draws: Draw[], number: number): number =>
@@ -347,7 +359,7 @@ export const SurvivalAnalyzer: React.FC<SurvivalAnalyzerProps> = ({
       weights[number] = trendMode === "ratio" ? (olderHits + 1) / (recentHits + 1) : Math.max(0, olderHits - recentHits + 1);
     }
     return weights;
-  }, [analysisHistory, trendFrom, trendMode, trendTo, useCustomTrendWindow]);
+  }, [analysisHistory, customTrendSplit.mostRecentDraws, customTrendSplit.recentSlice, trendMode, useCustomTrendWindow]);
 
   const patternBiasWeights = useMemo(
     () => buildPatternBiasWeights(analysisHistory, patternsSelected, patternSumTolerance),
@@ -596,20 +608,23 @@ export const SurvivalAnalyzer: React.FC<SurvivalAnalyzerProps> = ({
       </div>
 
       <details style={cardStyle}>
-        <summary style={{ cursor: "pointer", fontWeight: 800, color: "#172033" }}>Custom Trend Window</summary>
+        <summary style={{ cursor: "pointer", fontWeight: 800, color: "#172033" }}>Custom Trend Split</summary>
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 10 }}>
           <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
             <input type="checkbox" checked={useCustomTrendWindow} onChange={(event) => setUseCustomTrendWindow(event.target.checked)} />
-            Use custom trend
+            Use this trend split
           </label>
-          <label>Older <input type="number" min={1} max={history.length} value={trendFrom} onChange={(event) => setTrendFrom(Math.max(1, Number(event.target.value) || 1))} style={{ width: 66, marginLeft: 4 }} /></label>
-          <label>Window <input type="number" min={2} max={history.length} value={trendTo} onChange={(event) => setTrendTo(Math.max(2, Number(event.target.value) || 2))} style={{ width: 66, marginLeft: 4 }} /></label>
+          <label>Recent slice <input type="number" min={1} max={history.length} value={trendFrom} onChange={(event) => setTrendFrom(Math.max(1, Number(event.target.value) || 1))} style={{ width: 66, marginLeft: 4 }} /></label>
+          <label>Most recent draws <input type="number" min={2} max={history.length} value={trendTo} onChange={(event) => setTrendTo(Math.max(2, Number(event.target.value) || 2))} style={{ width: 66, marginLeft: 4 }} /></label>
           <select value={trendMode} onChange={(event) => setTrendMode(event.target.value as TrendMode)}>
             <option value="diff">Diff</option>
             <option value="ratio">Ratio</option>
           </select>
           <button type="button" onClick={() => setPresetWindow(3, 11, "diff")}>3 to 11</button>
           <button type="button" onClick={() => setPresetWindow(6, 18, "ratio")}>6 to 18</button>
+        </div>
+        <div style={{ ...mutedStyle, marginTop: 8, lineHeight: 1.45 }}>
+          Use the most recent {customTrendSplit.mostRecentDraws} draws, compare the latest {customTrendSplit.recentSlice} against the {customTrendSplit.beforeSlice} before them.
         </div>
       </details>
 

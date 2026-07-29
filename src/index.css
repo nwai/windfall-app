@@ -1319,6 +1319,73 @@ tbody tr:hover {
   padding: 13px;
 }
 
+.windfall-prediction-journal-top-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  align-items: stretch;
+}
+
+.windfall-prediction-journal-balanced-box {
+  min-height: 108px;
+}
+
+.windfall-prediction-journal-legend-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.windfall-prediction-journal-anchor-numbers {
+  margin-top: 4px;
+  color: #334155;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.windfall-prediction-journal-text-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.82fr) minmax(340px, 1.28fr);
+  gap: 10px;
+  align-items: stretch;
+}
+
+.windfall-prediction-journal-text-stack {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.windfall-prediction-journal-text-box {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+}
+
+.windfall-prediction-journal-text-box textarea {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.windfall-prediction-journal-notes-field {
+  min-width: 0;
+}
+
+.windfall-prediction-journal-notes-field textarea {
+  min-height: 188px;
+  resize: vertical;
+}
+
+@media (max-width: 760px) {
+  .windfall-prediction-journal-text-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .windfall-generator-panel {
   border-color: rgba(209, 154, 36, 0.38);
   border-left: 4px solid var(--wf-generator-rule);

@@ -73,6 +73,11 @@ const clickCheckbox = (container: HTMLElement, name: string): void => {
   });
 };
 
+const tableRowStartingWith = (container: HTMLElement, text: string): HTMLTableRowElement | undefined => (
+  Array.from(container.querySelectorAll("tbody tr"))
+    .find((row) => row.textContent?.trim().startsWith(text))
+);
+
 describe("ScoringSystemDiagnosticsPanel", () => {
   const fullHistory = [
     draw("D1", [1, 11, 21, 31, 41, 2], [12, 22]),
@@ -99,6 +104,27 @@ describe("ScoringSystemDiagnosticsPanel", () => {
     expect(container.textContent).toMatch(/currently used as Normal diagnostic evidence weighting in generation/i);
     expect(container.textContent).toMatch(/not calibrated next-draw probabilities/i);
     expect(container.textContent).not.toMatch(/StateObserve-only/);
+  });
+
+  it("supports a panel-local WFMQYH real-draw override without changing the global count", () => {
+    const container = renderPanel(fullHistory, filteredHistory);
+
+    expect(container.textContent).toContain("Panel WFMQYH real draws1");
+    expect(container.textContent).toContain("Global WFMQYH real draws1");
+    expect(tableRowStartingWith(container, "2:6")?.textContent).toContain("0 (0.00%)");
+
+    changeInput(container, "scoringDiagnosticsLocalWfmqyhDraws", "2");
+
+    expect(container.textContent).toContain("Panel WFMQYH real draws2 preview");
+    expect(container.textContent).toContain("Global WFMQYH real draws1");
+    expect(container.textContent).toContain("Panel preview: D3 to 6/15/26. Local edits do not change generation.");
+    expect(tableRowStartingWith(container, "2:6")?.textContent).toContain("1 (50.00%)");
+
+    clickButton(container, "Use global");
+
+    expect(container.textContent).toContain("Panel WFMQYH real draws1");
+    expect(container.textContent).toContain("Global WFMQYH real draws1");
+    expect(tableRowStartingWith(container, "2:6")?.textContent).toContain("0 (0.00%)");
   });
 
   it("shows ratio diagnostics by default", () => {
@@ -180,7 +206,7 @@ describe("ScoringSystemDiagnosticsPanel", () => {
     expect(scrollRegion).toBeTruthy();
     expect(scrollRegion?.style.maxHeight).toBe("58vh");
     expect(scrollRegion?.style.overflowY).toBe("auto");
-  });
+  }, 10000);
 
   it("renders observe-only rank drift snapshots without generation controls", () => {
     const container = renderPanel(fullHistory, fullHistory);

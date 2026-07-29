@@ -65,6 +65,13 @@ export type CandidateSet = {
   scoreEvidenceTrace?: string[];
 };
 
+export interface KeptGeneratedCandidateRow {
+  id: string;
+  sourceIndex: number;
+  main: number[];
+  supp: number[];
+}
+
 
 export type Knobs = {
   enableSDE1: boolean;

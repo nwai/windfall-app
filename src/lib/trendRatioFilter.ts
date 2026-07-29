@@ -1,5 +1,11 @@
 import type { TrendRatioStat } from "./computeHistoricalTrendRatios";
 
+/**
+ * @deprecated The live app uses TrendRatioHistoryPanel plus
+ * computeHistoricalTrendRatios directly. This model is retained for legacy
+ * tests/snapshots only and should not be wired back into generation without a
+ * fresh truthfulness review.
+ */
 export interface ParsedTrendRatio {
   tag: string;
   up: number;

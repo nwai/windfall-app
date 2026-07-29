@@ -12,7 +12,7 @@ describe("Prediction Journal app wiring", () => {
     expect(app).toContain('panelId="prediction-journal"');
     expect(app.indexOf('id="workflow-validation"')).toBeLessThan(app.indexOf('panelId="prediction-journal"'));
     expect(app.indexOf('panelId="prediction-journal"')).toBeLessThan(app.indexOf('panelId="backtest-validation"'));
-    expect(app).toContain("getSetupSnapshot={() => buildSnapshot({ includePanelFavorites: true })}");
+    expect(app).toContain("getSetupSnapshot={() => buildSnapshot({ includePanelFavorites: true, includeDerivedPredictionEvidence: true })}");
   });
 
   it("registers the journal as a favoriteable Validation panel", () => {
@@ -30,5 +30,19 @@ describe("Prediction Journal app wiring", () => {
     expect(snapshotBlock).toContain("monthlyConstructiveEnabled");
     expect(snapshotBlock).toContain("acceptanceNeedsEnabled");
     expect(snapshotBlock).toContain("acceptanceNeedsCounts");
+  });
+
+  it("captures derived generation inclusions and exclusions for new prediction provenance", () => {
+    const app = readProjectFile("src/App.tsx");
+    const snapshotBlock = app.slice(app.indexOf("function buildSnapshot"), app.indexOf("function applySnapshot"));
+
+    expect(snapshotBlock).toContain("includeDerivedPredictionEvidence");
+    expect(snapshotBlock).toContain("snapshot.generationForcedNumbers");
+    expect(snapshotBlock).toContain("snapshot.generationExcludedNumbers");
+    expect(snapshotBlock).toContain("snapshot.allExcludedNumbers");
+    expect(snapshotBlock).toContain("snapshot.sde1Exclusions");
+    expect(snapshotBlock).toContain("snapshot.hc3Exclusions");
+    expect(snapshotBlock).toContain("snapshot.droughtBreakStrictShortlistNumbers");
+    expect(snapshotBlock).toContain("snapshot.droughtBreakEmpiricalHazardNumbers");
   });
 });

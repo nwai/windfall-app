@@ -135,6 +135,11 @@ const fmtNum = (value: number | null | undefined, digits = 1): string => (
   value === null || value === undefined || !Number.isFinite(value) ? "n/a" : value.toFixed(digits)
 );
 
+export const formatWholeAwareNumber = (value: number | null | undefined, digits = 1): string => {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "n/a";
+  return Number.isInteger(value) ? String(value) : value.toFixed(digits);
+};
+
 const formatLength = (length: MonthlyTransitionLengthFilter): string => (
   length === "all" ? "All lengths" : `${length}d months`
 );
@@ -211,7 +216,7 @@ const CurrentExpectationTable: React.FC<{ rows: MonthlyBucketExpectationRow[] }>
             <td style={{ ...tdStyle, textAlign: "right" }}>{row.hits}</td>
             <td style={{ ...tdStyle, textAlign: "right" }}>{fmtPct(row.rawRate)}</td>
             <td style={{ ...tdStyle, textAlign: "right", fontWeight: 800 }}>{fmtPct(row.smoothedRate)}</td>
-            <td style={{ ...tdStyle, textAlign: "right", fontWeight: 900 }}>{fmtNum(row.expectedHits)}</td>
+            <td style={{ ...tdStyle, textAlign: "right", fontWeight: 900 }}>{formatWholeAwareNumber(row.expectedHits)}</td>
           </tr>
         ))}
       </tbody>
@@ -245,9 +250,9 @@ const UndrawnSurvivalTable: React.FC<{ rows: MonthlyUndrawnSurvivalRow[] }> = ({
             <td style={{ ...tdStyle, textAlign: "right" }}>{fmtPct(row.rawBreakRate)}</td>
             <td style={{ ...tdStyle, textAlign: "right", fontWeight: 800 }}>{fmtPct(row.smoothedBreakRate)}</td>
             <td style={{ ...tdStyle, textAlign: "right" }}>{fmtPct(row.estimatedSurvivalRate)}</td>
-            <td style={{ ...tdStyle, textAlign: "right", fontWeight: 800 }}>{fmtNum(row.medianUndrawnAfter)}</td>
+            <td style={{ ...tdStyle, textAlign: "right", fontWeight: 800 }}>{formatWholeAwareNumber(row.medianUndrawnAfter)}</td>
             <td style={{ ...tdStyle, textAlign: "right" }}>
-              {fmtNum(row.q1UndrawnAfter)} - {fmtNum(row.q3UndrawnAfter)}
+              {formatWholeAwareNumber(row.q1UndrawnAfter)} - {formatWholeAwareNumber(row.q3UndrawnAfter)}
             </td>
           </tr>
         ))}
@@ -282,14 +287,14 @@ const FirstReachTable: React.FC<{ rows: MonthlyBucketFirstReachRow[] }> = ({ row
               {row.reachedByPlanningStage}/{row.monthsEligible} ({fmtPct(row.reachedByPlanningStageRate)})
             </td>
             <td style={{ ...tdStyle, textAlign: "right", fontWeight: 800 }}>
-              {row.earliestDrawMedian === null ? "n/a" : `D${fmtNum(row.earliestDrawMedian)}`}
+              {row.earliestDrawMedian === null ? "n/a" : `D${formatWholeAwareNumber(row.earliestDrawMedian)}`}
             </td>
             <td style={{ ...tdStyle, textAlign: "right" }}>
               {row.earliestDrawQ1 === null || row.earliestDrawQ3 === null
                 ? "n/a"
-                : `D${fmtNum(row.earliestDrawQ1)} - D${fmtNum(row.earliestDrawQ3)}`}
+                : `D${formatWholeAwareNumber(row.earliestDrawQ1)} - D${formatWholeAwareNumber(row.earliestDrawQ3)}`}
             </td>
-            <td style={{ ...tdStyle, textAlign: "right" }}>{fmtNum(row.monthEndMedianCount)}</td>
+            <td style={{ ...tdStyle, textAlign: "right" }}>{formatWholeAwareNumber(row.monthEndMedianCount)}</td>
           </tr>
         ))}
       </tbody>
@@ -320,13 +325,13 @@ const MonthLengthComparisonTable: React.FC<{ rows: MonthlyLengthComparisonRow[] 
             <td style={{ ...tdStyle, fontWeight: 900 }}>{row.monthLength} draws</td>
             <td style={{ ...tdStyle, textAlign: "right" }}>{row.months}</td>
             <td style={{ ...tdStyle, textAlign: "right" }}>{row.completeMonths}</td>
-            <td style={{ ...tdStyle, textAlign: "right" }}>{fmtNum(row.medianUndrawnEnd)}</td>
-            <td style={{ ...tdStyle, textAlign: "right" }}>{fmtNum(row.median1xEnd)}</td>
-            <td style={{ ...tdStyle, textAlign: "right" }}>{fmtNum(row.median2xEnd)}</td>
-            <td style={{ ...tdStyle, textAlign: "right" }}>{fmtNum(row.median3xEnd)}</td>
-            <td style={{ ...tdStyle, textAlign: "right" }}>{fmtNum(row.median4xEnd)}</td>
-            <td style={{ ...tdStyle, textAlign: "right" }}>{fmtNum(row.median5xEnd)}</td>
-            <td style={{ ...tdStyle, textAlign: "right", fontWeight: 800 }}>{fmtNum(row.median6PlusEnd)}</td>
+            <td style={{ ...tdStyle, textAlign: "right" }}>{formatWholeAwareNumber(row.medianUndrawnEnd)}</td>
+            <td style={{ ...tdStyle, textAlign: "right" }}>{formatWholeAwareNumber(row.median1xEnd)}</td>
+            <td style={{ ...tdStyle, textAlign: "right" }}>{formatWholeAwareNumber(row.median2xEnd)}</td>
+            <td style={{ ...tdStyle, textAlign: "right" }}>{formatWholeAwareNumber(row.median3xEnd)}</td>
+            <td style={{ ...tdStyle, textAlign: "right" }}>{formatWholeAwareNumber(row.median4xEnd)}</td>
+            <td style={{ ...tdStyle, textAlign: "right" }}>{formatWholeAwareNumber(row.median5xEnd)}</td>
+            <td style={{ ...tdStyle, textAlign: "right", fontWeight: 800 }}>{formatWholeAwareNumber(row.median6PlusEnd)}</td>
           </tr>
         ))}
       </tbody>

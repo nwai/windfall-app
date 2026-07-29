@@ -129,6 +129,61 @@ describe("PortfolioCompressionPanel", () => {
     container.remove();
   });
 
+  it("appends kept generated candidates as portfolio rows until Clear pasted rows is pressed", async () => {
+    const keptRows = [{
+      id: "keep-portfolio-1",
+      sourceIndex: 2,
+      main: [1, 2, 3, 4, 5, 6],
+      supp: [7, 8],
+    }];
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(React.createElement(PortfolioCompressionPanel, {
+        initialPasteText: "10,11,12,13,14,15",
+      }));
+    });
+
+    await act(async () => {
+      root.render(React.createElement(PortfolioCompressionPanel, {
+        initialPasteText: "10,11,12,13,14,15",
+        keptGeneratedRows: keptRows,
+      }));
+    });
+
+    const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
+    expect(textarea.value).toBe("10,11,12,13,14,15\n1,2,3,4,5,6,7,8");
+    expect(container.textContent).toContain("Kept Generated #3");
+    expect(container.textContent).toContain("1,2,3,4,5,6,7,8");
+
+    await act(async () => {
+      root.render(React.createElement(PortfolioCompressionPanel, {
+        initialPasteText: "10,11,12,13,14,15",
+        keptGeneratedRows: [...keptRows],
+      }));
+    });
+
+    expect(textarea.value).toBe("10,11,12,13,14,15\n1,2,3,4,5,6,7,8");
+
+    const clearButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent === "Clear pasted rows");
+    expect(clearButton).toBeDefined();
+
+    await act(async () => {
+      clearButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(textarea.value).toBe("");
+    expect(container.textContent).not.toContain("Kept Generated #3");
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
   it("copies the top-six core and core plus alternates as plain text", async () => {
     const copiedText: string[] = [];
     const container = document.createElement("div");

@@ -185,8 +185,8 @@ describe("DGAMonthlyBucketStateGrid", () => {
     expect(yAxisLabel?.style.color).toBe("rgb(15, 23, 42)");
   }, 15000);
 
-  it("honors user-selected bucket opacity on populated cells without dimming row labels", async () => {
-    const rendered = await mountGrid({ cellOpacity: 0.55 });
+  it("honors bucket opacity and selected ticks without dimming non-selected rows", async () => {
+    const rendered = await mountGrid({ cellOpacity: 0.55, selectedNumbers: [21] });
     await expandGrid();
 
     expect(rendered.textContent).toContain("Grid opacity: 55%");
@@ -202,12 +202,28 @@ describe("DGAMonthlyBucketStateGrid", () => {
     ) as HTMLElement | undefined;
     expect(populatedCell).toBeTruthy();
     expect(populatedCell?.style.opacity).toBe("0.55");
+    expect(populatedCell?.getAttribute("title")).toContain("selected in DGA strip");
 
     const yAxisLabel = Array.from(rendered.querySelectorAll("tbody td")).find((cell) =>
       cell.getAttribute("title")?.startsWith("21 · current strip bucket"),
     ) as HTMLElement | undefined;
     expect(yAxisLabel?.style.opacity).toBe("1");
     expect(yAxisLabel?.style.color).toBe("rgb(15, 23, 42)");
+    expect(yAxisLabel?.textContent).toContain("✓");
+
+    const nonSelectedPopulatedCell = Array.from(rendered.querySelectorAll("tbody td")).find((cell) =>
+      cell.getAttribute("title")?.includes("22 · 2026-06 · Sim D2"),
+    ) as HTMLElement | undefined;
+    expect(nonSelectedPopulatedCell).toBeTruthy();
+    expect(nonSelectedPopulatedCell?.style.opacity).toBe("0.55");
+    expect(nonSelectedPopulatedCell?.getAttribute("title")).not.toContain("dimmed");
+
+    const nonSelectedRowLabel = Array.from(rendered.querySelectorAll("tbody td")).find((cell) =>
+      cell.getAttribute("title")?.startsWith("22 · current strip bucket"),
+    ) as HTMLElement | undefined;
+    expect(nonSelectedRowLabel?.style.opacity).toBe("1");
+    expect(nonSelectedRowLabel?.textContent).not.toContain("✓");
+    expect(nonSelectedRowLabel?.getAttribute("title")).not.toContain("dimmed");
   }, 15000);
 
   it("shows whole-column bucket totals on hover and exposes linked hover copy", async () => {

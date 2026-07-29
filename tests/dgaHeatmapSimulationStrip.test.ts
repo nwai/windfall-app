@@ -22,13 +22,29 @@ describe("DGA heatmap simulation strip wiring", () => {
     expect(heatmapBlock).toContain("simulation strip");
     expect(heatmapBlock).toContain("<DGASimulateStrip");
     expect(heatmapBlock).toContain("selectedNumbers={dgaStripSelectedNumbers}");
+    expect(heatmapBlock).toContain("scoringNumberDiagnostics={dgaScoringNumberDiagnostics}");
     expect(heatmapBlock).toContain("onChange={handleDgaStripChange}");
     expect(heatmapBlock).not.toContain("<UserExclusionsStrip");
     expect(gridBlock).toContain("selectedNumbers={dgaStripSelectedNumbers}");
+    expect(gridBlock).toContain("scoringNumberDiagnostics={dgaScoringNumberDiagnostics}");
     expect(gridBlock).toContain("onChange={handleDgaStripChange}");
     expect(monthlyBucketBlock).toContain("selectedNumbers={dgaStripSelectedNumbers}");
     expect(handlerBlock).toContain("setUserSelectedNumbers(sorted);");
     expect(handlerBlock).toContain("const simulationNumbers = sorted.slice(0, 8);");
+  });
+
+  it("exposes Scoring System Numbers diagnostic ranks through hover and accessibility text", () => {
+    const appSource = readAppSource();
+    const rankMapStart = appSource.indexOf("const dgaScoringNumberDiagnostics = useMemo");
+    const stripStart = appSource.indexOf("const DGASimulateStrip: React.FC<DGASimulateStripProps>");
+    const stripBlock = appSource.slice(stripStart, appSource.indexOf("};\n\n// UserExclusionsStrip", stripStart));
+
+    expect(rankMapStart).toBeGreaterThanOrEqual(0);
+    expect(appSource.slice(rankMapStart, appSource.indexOf("const drawHistoryProvenance", rankMapStart))).toContain("scoringGenerationProfile.numberScores");
+    expect(stripBlock).toContain("Numbers diagnostic rank #");
+    expect(stripBlock).toContain("diagnostic support, not probability");
+    expect(stripBlock).not.toContain("#{diagnostic.rank}");
+    expect(stripBlock).toContain("Numbers diagnostic rank ${diagnostic.rank} of 45");
   });
 
   it("can mirror DGA strip selections into the latest draw ±1/±2 constraint builder", () => {

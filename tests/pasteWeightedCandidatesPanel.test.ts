@@ -74,6 +74,114 @@ describe("PasteWeightedCandidatesPanel", () => {
     expect(html).toContain("0:6");
   });
 
+  it("highlights pasted rows that need attention with line number and reason", () => {
+    const html = renderToStaticMarkup(React.createElement(PasteWeightedCandidatesPanel, {
+      initialPasteText: [
+        "1,1,2,3,4,5,6",
+        "7,8,9,10,11,12",
+      ].join("\n"),
+    }));
+    const document = new DOMParser().parseFromString(html, "text/html");
+    const issueRows = document.querySelectorAll("[data-testid='paste-weighted-row-issue']");
+
+    expect(html).toContain("1 row needs attention.");
+    expect(html).toContain("Rows needing review");
+    expect(issueRows).toHaveLength(1);
+    expect(issueRows[0].textContent).toContain("Line 1");
+    expect(issueRows[0].textContent).toContain("1,1,2,3,4,5,6");
+    expect(issueRows[0].textContent).toContain("duplicate value counted once: 1");
+  });
+
+  it("appends kept generated candidates to pasted rows until Clear pasted rows is pressed", async () => {
+    const keptRows = [{
+      id: "keep-1",
+      sourceIndex: 0,
+      main: [1, 2, 3, 4, 5, 6],
+      supp: [7, 8],
+    }];
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(React.createElement(PasteWeightedCandidatesPanel, {
+        initialPasteText: "10,11,12,13,14,15",
+      }));
+    });
+
+    await act(async () => {
+      root.render(React.createElement(PasteWeightedCandidatesPanel, {
+        initialPasteText: "10,11,12,13,14,15",
+        keptGeneratedRows: keptRows,
+      }));
+    });
+
+    const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
+    expect(textarea.value).toBe("10,11,12,13,14,15\n1,2,3,4,5,6");
+
+    await act(async () => {
+      root.render(React.createElement(PasteWeightedCandidatesPanel, {
+        initialPasteText: "10,11,12,13,14,15",
+        keptGeneratedRows: [...keptRows],
+      }));
+    });
+
+    expect(textarea.value).toBe("10,11,12,13,14,15\n1,2,3,4,5,6");
+
+    const clearButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent === "Clear pasted rows");
+    expect(clearButton).toBeDefined();
+
+    await act(async () => {
+      clearButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(textarea.value).toBe("");
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it("shows numbers missing from pasted rows and lets them be selected as Paste-Weighted forced inclusions", async () => {
+    const toggledNumbers: number[] = [];
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(React.createElement(PasteWeightedCandidatesPanel, {
+        initialPasteText: "1,2,3,4,5,6",
+        forcedNumbers: [8],
+        excludedNumbers: [7],
+        onToggleForcedNumber: (number) => toggledNumbers.push(number),
+      }));
+    });
+
+    expect(container.textContent).toContain("Missing numbers");
+    expect(container.textContent).toContain("Missing from pasted rows (39)");
+    expect(container.textContent).toContain("Active Paste-Weighted forced inclusions:");
+
+    const excludedButton = container.querySelector("button[aria-label='Number 7 is excluded and cannot be forced from Paste-Weighted missing numbers']") as HTMLButtonElement | null;
+    const activeButton = container.querySelector("button[aria-label='Remove Paste-Weighted forced inclusion 8']") as HTMLButtonElement | null;
+    const addButton = container.querySelector("button[aria-label='Add Paste-Weighted forced inclusion 9']") as HTMLButtonElement | null;
+    expect(excludedButton?.disabled).toBe(true);
+    expect(activeButton?.getAttribute("aria-pressed")).toBe("true");
+    expect(addButton?.disabled).toBe(false);
+
+    await act(async () => {
+      addButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(toggledNumbers).toEqual([9]);
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
   it("renders adaptive WFMQYH evidence with latest-50 shrink target", () => {
     const fullHistory = [
       ...Array.from({ length: 30 }, () => draw([1, 10, 12, 14, 16, 18])),
@@ -196,7 +304,7 @@ describe("PasteWeightedCandidatesPanel", () => {
     expect(generatedCounts.at(-1)).toBeGreaterThan(0);
 
     const clearButton = Array.from(container.querySelectorAll("button"))
-      .find((button) => button.textContent === "Clear");
+      .find((button) => button.textContent === "Clear pasted rows");
     expect(clearButton).toBeDefined();
     await act(async () => {
       clearButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));

@@ -174,7 +174,7 @@ export const TemperatureTransitionPanel: React.FC<TemperatureTransitionPanelProp
   const fmtPct = (x: number) => (x * 100).toFixed(1) + "%";
   const safeDate = (idx: number) => realHistory.history[idx]?.date ?? "(unknown)";
 
-  // Auto window (beta): sweep and suggest best window by meanF1
+  // Auto-fit window: sweep and suggest best diagnostic window by meanF1.
   async function onAutoWindow() {
     try {
       setAutoBusy(true);
@@ -317,15 +317,18 @@ export const TemperatureTransitionPanel: React.FC<TemperatureTransitionPanelProp
           />
         </label>
 
-        {/* Auto window (beta) */}
-        <button onClick={onAutoWindow} disabled={autoBusy} title="Sweep candidate window sizes and choose best by mean F1">
-          {autoBusy ? "Auto window..." : "Auto window (beta)"}
+        {/* Auto-fit window */}
+        <button onClick={onAutoWindow} disabled={autoBusy} title="Sweep candidate window sizes with walk-forward backtest and choose the highest mean F1">
+          {autoBusy ? "Auto-fitting..." : "Auto-fit window (backtest)"}
         </button>
         {autoSuggestion && (
           <span style={{ fontSize: 12, color: "#444" }}>
             Suggested: {autoSuggestion.window} (best {autoSuggestion.metric} {fmtPct(autoSuggestion.value)})
           </span>
         )}
+        <span style={{ fontSize: 12, color: "#64748b" }}>
+          Auto-fit changes this diagnostic shortlist only; it does not change User Selected Numbers or force candidate generation.
+        </span>
 
         <HeaderStats />
       </div>
@@ -342,7 +345,7 @@ export const TemperatureTransitionPanel: React.FC<TemperatureTransitionPanelProp
               <th style={{ textAlign: "left", padding: "4px 8px" }}>#</th>
               <th style={{ textAlign: "left", padding: "4px 8px" }}>Curr Temp</th>
               <th style={{ textAlign: "right", padding: "4px 8px" }}>Empirical hit rate</th>
-              <th style={{ textAlign: "center", padding: "4px 8px" }}>Selected</th>
+              <th style={{ textAlign: "center", padding: "4px 8px" }}>Diagnostic shortlist</th>
             </tr>
           </thead>
           <tbody>
@@ -383,7 +386,7 @@ export const TemperatureTransitionPanel: React.FC<TemperatureTransitionPanelProp
       </div>
 
       <div style={{ fontSize: 12, color: "#666", marginTop: 10 }}>
-        Mode tips: Threshold controls the cut-off empirical hit rate for marking a number as selected by the diagnostic. Top-K selects the K highest empirical hit-rate numbers.
+        Mode tips: Threshold controls the cut-off empirical hit rate for adding a number to this diagnostic shortlist. Top-K adds the K highest empirical hit-rate numbers. These are descriptive evidence markers, not calibrated next-draw probabilities.
       </div>
     </section>
   );

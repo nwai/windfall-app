@@ -116,6 +116,8 @@ interface CandidateGenerationInfluencesPanelProps {
   minFromRecentUnionM: number;
   setMinFromRecentUnionM: (value: number) => void;
   maxRepeatWindow: number;
+  repeatUnionUniqueCount?: number;
+  repeatUnionCandidateMax?: number;
   sumFilter: SumFilterConfig;
   setSumFilter: Setter<SumFilterConfig>;
   enableOGAForecastBias: boolean;
@@ -281,6 +283,8 @@ const WeightInput: React.FC<{ value: number; onChange: (value: number) => void; 
 );
 
 export const CandidateGenerationInfluencesPanel: React.FC<CandidateGenerationInfluencesPanelProps> = (props) => {
+  const repeatUnionCandidateMax = props.repeatUnionCandidateMax ?? 8;
+  const repeatUnionUniqueCount = props.repeatUnionUniqueCount ?? null;
   const sum = useMemo(() => normalizeSumFilter(props.sumFilter), [props.sumFilter]);
   const readiness = useMemo(() => normalizeReadinessWeights(props.rdyWeights), [props.rdyWeights]);
   const acceptance = useMemo(() => summarizeAcceptanceNeeds(props.effectiveMianCounts), [props.effectiveMianCounts]);
@@ -593,8 +597,14 @@ export const CandidateGenerationInfluencesPanel: React.FC<CandidateGenerationInf
             </label>
             <label style={labelStyle}>
               Minimum Candidate Numbers From That Pool
-              <input type="number" min={0} max={8} value={props.minFromRecentUnionM} onChange={(event) => props.setMinFromRecentUnionM(clampInt(Number(event.target.value), 0, 8))} style={inputStyle} />
+              <input type="number" min={0} max={repeatUnionCandidateMax} value={props.minFromRecentUnionM} onChange={(event) => props.setMinFromRecentUnionM(clampInt(Number(event.target.value), 0, repeatUnionCandidateMax))} style={inputStyle} />
+              <span style={{ marginLeft: 4, color: "#991b1b", fontSize: 11, fontWeight: 800 }}>max {repeatUnionCandidateMax}</span>
             </label>
+            {repeatUnionUniqueCount !== null && (
+              <div style={{ color: "#475569", fontSize: 11, lineHeight: 1.45 }}>
+                Unique numbers in newest-draw pool: <strong>{repeatUnionUniqueCount}</strong>. Usable range: <strong>0-{repeatUnionCandidateMax}</strong>.
+              </div>
+            )}
           </div>
 
           <div style={{ display: "grid", gap: 8 }}>

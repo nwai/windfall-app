@@ -1,6 +1,11 @@
 import React, { useMemo } from "react";
 import type { TrendRatioFilterModel } from "../lib/trendRatioFilter";
 
+/**
+ * @deprecated Retained for older internal diagnostics. The active app panel is
+ * TrendRatioHistoryPanel, which exposes all 45 U/D/F ratios and wires selected
+ * ratios into candidate generation.
+ */
 interface TrendClassCounts {
   up: number;
   down: number;

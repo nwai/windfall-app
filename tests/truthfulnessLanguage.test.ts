@@ -65,7 +65,11 @@ describe("truthfulness wording guards", () => {
     expect(temperatureSource).not.toContain(">P(V | Temp)<");
     expect(temperatureSource).toContain("Empirical hit rate");
     expect(temperatureSource).not.toContain("marking a number as a predicted hit");
-    expect(temperatureSource).toContain("marking a number as selected by the diagnostic");
+    expect(temperatureSource).not.toContain("Auto window (beta)");
+    expect(temperatureSource).toContain("Auto-fit window (backtest)");
+    expect(temperatureSource).toContain("Diagnostic shortlist");
+    expect(temperatureSource).toContain("does not change User Selected Numbers or force candidate generation");
+    expect(temperatureSource).toContain("descriptive evidence markers, not calibrated next-draw probabilities");
 
     const ttpSurface = `${ttpDocs}\n${zpaDocs}\n${zoneDemo}\n${implementationSummary}`;
     expect(ttpSurface).not.toContain("Temperature Transition Predictions");

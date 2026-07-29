@@ -45,20 +45,42 @@ export const ScoringSystemDiagnosticsPanel: React.FC<ScoringSystemDiagnosticsPan
   generationInfluence = "off",
 }) => {
   const [scope, setScope] = useState<ScoringDiagnosticsScope>("mains-plus-supps");
+  const [localWfmqyhDrawCountInput, setLocalWfmqyhDrawCountInput] = useState("");
   const [activeTab, setActiveTab] = useState<TabKey>("ratios");
   const [digitSetLength, setDigitSetLength] = useState<string>("all");
   const [observedOnly, setObservedOnly] = useState(true);
   const [topN, setTopN] = useState(50);
 
+  const localWfmqyhDrawCount = useMemo(() => {
+    const trimmed = localWfmqyhDrawCountInput.trim();
+    if (!trimmed) return null;
+    const parsed = Number(trimmed);
+    if (!Number.isFinite(parsed)) return null;
+    return Math.max(1, Math.min(realHistory.length, Math.round(parsed)));
+  }, [localWfmqyhDrawCountInput, realHistory.length]);
+  const hasLocalWfmqyhOverride = localWfmqyhDrawCount !== null;
+  const panelFilteredHistory = useMemo(
+    () => (
+      localWfmqyhDrawCount === null
+        ? realFilteredHistory
+        : realHistory.slice(-localWfmqyhDrawCount)
+    ),
+    [localWfmqyhDrawCount, realFilteredHistory, realHistory],
+  );
+  const panelWindowRangeLabel = useMemo(
+    () => formatDrawRangeLabel(panelFilteredHistory),
+    [panelFilteredHistory],
+  );
+
   const analysis = useMemo(
-    () => analyzeScoringSystemDiagnostics(realHistory, realFilteredHistory, { scope }),
-    [realHistory, realFilteredHistory, scope],
+    () => analyzeScoringSystemDiagnostics(realHistory, panelFilteredHistory, { scope }),
+    [realHistory, panelFilteredHistory, scope],
   );
 
   if (analysis.provenance.fullValidDraws === 0 && analysis.provenance.filteredValidDraws === 0) {
     return (
       <section style={panelStyle} aria-label="Scoring System Diagnostics">
-        <Header generationInfluence={generationInfluence} />
+        <Header generationInfluence={generationInfluence} hasLocalWfmqyhOverride={hasLocalWfmqyhOverride} />
         <div style={emptyStyle}>No valid real draw history available for scoring diagnostics.</div>
       </section>
     );
@@ -66,9 +88,23 @@ export const ScoringSystemDiagnosticsPanel: React.FC<ScoringSystemDiagnosticsPan
 
   return (
     <section style={panelStyle} aria-label="Scoring System Diagnostics">
-      <Header generationInfluence={generationInfluence} />
-      <Controls scope={scope} onScopeChange={setScope} />
-      <StatusStrip analysis={analysis} generationInfluence={generationInfluence} />
+      <Header generationInfluence={generationInfluence} hasLocalWfmqyhOverride={hasLocalWfmqyhOverride} />
+      <Controls
+        scope={scope}
+        onScopeChange={setScope}
+        localWfmqyhDrawCountInput={localWfmqyhDrawCountInput}
+        onLocalWfmqyhDrawCountInputChange={setLocalWfmqyhDrawCountInput}
+        maxLocalWfmqyhDraws={realHistory.length}
+        hasLocalWfmqyhOverride={hasLocalWfmqyhOverride}
+        onResetLocalWfmqyh={() => setLocalWfmqyhDrawCountInput("")}
+        panelWindowRangeLabel={panelWindowRangeLabel}
+      />
+      <StatusStrip
+        analysis={analysis}
+        generationInfluence={generationInfluence}
+        globalFilteredDraws={realFilteredHistory.length}
+        hasLocalWfmqyhOverride={hasLocalWfmqyhOverride}
+      />
       <TabBar activeTab={activeTab} onTabChange={setActiveTab} />
       <ActiveTabContent
         analysis={analysis}
@@ -90,7 +126,18 @@ const formatGenerationInfluenceLabel = (influence: ScoringGenerationInfluence): 
   influence === "off" ? "Off" : `${influence.slice(0, 1).toUpperCase()}${influence.slice(1)}`
 );
 
-const Header: React.FC<{ generationInfluence: ScoringGenerationInfluence }> = ({ generationInfluence }) => {
+const formatDrawRangeLabel = (draws: Draw[]): string => {
+  if (draws.length === 0) return "No panel WFMQYH draws";
+  const first = draws[0]?.date || "unknown";
+  const latest = draws[draws.length - 1]?.date || "unknown";
+  if (first === latest) return first;
+  return `${first} to ${latest}`;
+};
+
+const Header: React.FC<{
+  generationInfluence: ScoringGenerationInfluence;
+  hasLocalWfmqyhOverride: boolean;
+}> = ({ generationInfluence, hasLocalWfmqyhOverride }) => {
   const influenceLabel = formatGenerationInfluenceLabel(generationInfluence);
   const influenceActive = generationInfluence !== "off";
 
@@ -99,13 +146,15 @@ const Header: React.FC<{ generationInfluence: ScoringGenerationInfluence }> = ({
     <div>
       <h3 style={titleStyle}>Scoring System Diagnostics</h3>
       <p style={subtitleStyle}>
-        {influenceActive
+        {influenceActive && hasLocalWfmqyhOverride
+          ? `Generation uses ${influenceLabel} diagnostic evidence from the global setup; this panel's local WFMQYH edit is an observe-only preview.`
+          : influenceActive
           ? `Currently used as ${influenceLabel} diagnostic evidence weighting in generation; these are not calibrated next-draw probabilities.`
           : "Observe-only structural and history-derived scores. This panel does not change candidate generation."}
       </p>
     </div>
     <InfoHelp label="How Scoring System Diagnostics works">
-      Scores are diagnostic support measures. Base scores come from structure or exact combinations; full-history and WFMQYH scores come from observed real draw counts. They are not calibrated next-draw probabilities. If Scoring diagnostics influence is enabled, this panel's scores can be used as transparent generation weighting evidence.
+      Scores are diagnostic support measures. Base scores come from structure or exact combinations; full-history and WFMQYH scores come from observed real draw counts. They are not calibrated next-draw probabilities. The local WFMQYH draw-count field changes this panel's displayed counts only; generation continues to use the global app setup.
     </InfoHelp>
   </div>
   );
@@ -114,7 +163,22 @@ const Header: React.FC<{ generationInfluence: ScoringGenerationInfluence }> = ({
 const Controls: React.FC<{
   scope: ScoringDiagnosticsScope;
   onScopeChange: (scope: ScoringDiagnosticsScope) => void;
-}> = ({ scope, onScopeChange }) => (
+  localWfmqyhDrawCountInput: string;
+  onLocalWfmqyhDrawCountInputChange: (value: string) => void;
+  maxLocalWfmqyhDraws: number;
+  hasLocalWfmqyhOverride: boolean;
+  onResetLocalWfmqyh: () => void;
+  panelWindowRangeLabel: string;
+}> = ({
+  scope,
+  onScopeChange,
+  localWfmqyhDrawCountInput,
+  onLocalWfmqyhDrawCountInputChange,
+  maxLocalWfmqyhDraws,
+  hasLocalWfmqyhOverride,
+  onResetLocalWfmqyh,
+  panelWindowRangeLabel,
+}) => (
   <div style={controlsStyle}>
     <HigField label="Scope" help="Mains + supps uses the eight-number blueprint. Mains only recomputes the six-number baseline.">
       <select
@@ -127,20 +191,48 @@ const Controls: React.FC<{
         <option value="mains">Mains only (6)</option>
       </select>
     </HigField>
+    <HigField label="Panel WFMQYH real draws" help="Local preview only. Leave blank to use the global WFMQYH window; enter N to recalculate this panel from the latest N real draws.">
+      <input
+        name="scoringDiagnosticsLocalWfmqyhDraws"
+        type="number"
+        min={1}
+        max={Math.max(1, maxLocalWfmqyhDraws)}
+        step={1}
+        value={localWfmqyhDrawCountInput}
+        onChange={(event) => onLocalWfmqyhDrawCountInputChange(event.target.value)}
+        placeholder="Global"
+        aria-label="Panel-local WFMQYH real draw count"
+        style={inputStyle}
+      />
+    </HigField>
+    <button
+      type="button"
+      onClick={onResetLocalWfmqyh}
+      disabled={!hasLocalWfmqyhOverride}
+      style={hasLocalWfmqyhOverride ? localResetButtonStyle : disabledLocalResetButtonStyle}
+    >
+      Use global
+    </button>
+    <div style={localWindowNoteStyle}>
+      {hasLocalWfmqyhOverride ? "Panel preview" : "Global WFMQYH"}: {panelWindowRangeLabel}. Local edits do not change generation.
+    </div>
   </div>
 );
 
 const StatusStrip: React.FC<{
   analysis: ScoringSystemDiagnosticsResult;
   generationInfluence: ScoringGenerationInfluence;
-}> = ({ analysis, generationInfluence }) => {
+  globalFilteredDraws: number;
+  hasLocalWfmqyhOverride: boolean;
+}> = ({ analysis, generationInfluence, globalFilteredDraws, hasLocalWfmqyhOverride }) => {
   const provenance = analysis.provenance;
   const influenceLabel = formatGenerationInfluenceLabel(generationInfluence);
   return (
     <div style={statusStripStyle}>
       <Metric label="Scope" value={provenance.scope === "mains-plus-supps" ? "Mains + supps (8)" : "Mains only (6)"} />
       <Metric label="Full real draws" value={String(provenance.fullValidDraws)} />
-      <Metric label="WFMQYH real draws" value={String(provenance.filteredValidDraws)} />
+      <Metric label="Panel WFMQYH real draws" value={`${provenance.filteredValidDraws}${hasLocalWfmqyhOverride ? " preview" : ""}`} />
+      <Metric label="Global WFMQYH real draws" value={String(globalFilteredDraws)} />
       <Metric label="Skipped rows" value={String(provenance.fullSkippedDraws + provenance.filteredSkippedDraws)} />
       <Metric label="State" value={generationInfluence === "off" ? "Observe-only" : `Influence: ${influenceLabel}`} />
     </div>
@@ -828,6 +920,34 @@ const inputStyle: React.CSSProperties = {
   padding: "4px 9px",
   background: "#fff",
   font: "inherit",
+};
+
+const localResetButtonStyle: React.CSSProperties = {
+  minHeight: 34,
+  border: "1px solid #111827",
+  borderRadius: 8,
+  padding: "5px 12px",
+  background: "#fff",
+  color: "#111827",
+  fontWeight: 800,
+  cursor: "pointer",
+};
+
+const disabledLocalResetButtonStyle: React.CSSProperties = {
+  ...localResetButtonStyle,
+  border: "1px solid #d1d5db",
+  color: "#9ca3af",
+  cursor: "not-allowed",
+};
+
+const localWindowNoteStyle: React.CSSProperties = {
+  minHeight: 34,
+  display: "flex",
+  alignItems: "center",
+  maxWidth: 520,
+  color: "#4b5563",
+  fontSize: 12,
+  lineHeight: 1.35,
 };
 
 const emptyStyle: React.CSSProperties = {

@@ -26,7 +26,9 @@ import {
 } from "../../lib/userExclusionLocks";
 import {
   computeIdealMonthlyDraw,
+  monthlyBucketDisplayForNumber,
   type MonthlyBucketSets,
+  type MonthlyBucketNumberDisplay,
   type MonthlyIdealDrawState,
   type StageIdealDrawState,
 } from "../../lib/monthlyDrawSummary";
@@ -90,6 +92,12 @@ export interface GeneratedCandidatesPanelProps {
   setNumCandidates: (n: number) => void;
   rwr45Enabled?: boolean;
   setRwr45Enabled?: (enabled: boolean) => void;
+  generationSessionActive?: boolean;
+  generationSessionCount?: number;
+  onStartGenerationSession?: () => void;
+  onEndGenerationSession?: () => void;
+  onClearGenerationSession?: () => void;
+  onExportGenerationSession?: () => void;
   forcedNumbers?: number[];
   excludedNumbers?: number[];
   userSelectedNumbers: number[];
@@ -97,6 +105,7 @@ export interface GeneratedCandidatesPanelProps {
 
   onSelectCandidate: (idx: number) => void;
   onSimulateCandidate?: (idx: number) => void;
+  onKeepCandidate?: (idx: number) => void;
   selectedCandidateIdx: number;
 
   mostRecentDraw: Draw | null;
@@ -192,10 +201,17 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
   setNumCandidates,
   rwr45Enabled = false,
   setRwr45Enabled,
+  generationSessionActive = false,
+  generationSessionCount = 0,
+  onStartGenerationSession,
+  onEndGenerationSession,
+  onClearGenerationSession,
+  onExportGenerationSession,
   userSelectedNumbers,
   setUserSelectedNumbers,
   onSelectCandidate,
   onSimulateCandidate,
+  onKeepCandidate,
   selectedCandidateIdx,
   mostRecentDraw,
   manualSimSelected,
@@ -234,7 +250,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
   onAttemptMultiplierChange,
   overgenFactor = 50,
   onOvergenFactorChange,
-  rdyWeights = { idm: 0.70, conv: 0.10, oga: 0.20 },
+  rdyWeights = { idm: 0, conv: 0, oga: 0 },
   enableOGA = true,
   ratioOptions = [],
 }) => {
@@ -248,6 +264,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
     const [exCapped, setExCapped] = useState<boolean>(false);
      const [pressedButton, setPressedButton] = useState<string | null>(null);
      const [copyPasteStatus, setCopyPasteStatus] = useState<string>("");
+     const [lastKeptCandidateIdx, setLastKeptCandidateIdx] = useState<number | null>(null);
      const copyPasteStatusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const userExcludedNumbers = useMemo(
       () => normalizeUserExclusionLocks(excludedNumbers),
@@ -807,8 +824,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
   }, [stageIdealDrawComp, stageNumberToBucket]);
 
   /** Readiness (Rdy) score: weighted composite of IDM, Conv, and OGA.
-   *  When OGA is disabled, its weight is redistributed to IDM and Conv
-   *  proportionally so the score remains meaningful. */
+   *  All-zero weights are neutral by design; they do not fall back to legacy defaults. */
   const readinessScores = useMemo((): (number | null)[] => {
     // Magnitude-based Conv normalisation: |Conv| / maxAbs — direction does not
     // predict winners (empirically verified), so positive and negative Conv
@@ -1954,6 +1970,13 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
        }
      }, [filteredCandidates, isFilteringActive, showCopyPasteStatus, sortedCandidates]);
 
+     const handleKeepCandidate = useCallback((idx: number) => {
+       if (!onKeepCandidate) return;
+       onKeepCandidate(idx);
+       setLastKeptCandidateIdx(idx);
+       showCopyPasteStatus(`Kept candidate #${idx + 1} in Portfolio Compression and Paste-Weighted rows.`);
+     }, [onKeepCandidate, showCopyPasteStatus]);
+
      return (
      <section style={panel}>
        <header style={hdr}>
@@ -1997,7 +2020,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
              />
              RwR45
              <InfoHelp label="RwR45 random coverage help">
-               PNUaRW45 is a random coverage mode. When On, Generate ignores Count and creates exactly 7 rows. Forced inclusions are seeded first and hard exclusions are removed before random fill. With no constraints, it assigns 42 globally unique main numbers and uses the 3 leftover numbers as the supplementary pool.
+               PNUaRW45 is a random coverage mode. When On, Generate ignores Count and creates exactly 7 rows. Forced inclusions are seeded first and hard exclusions are removed before random fill. If Monthly Draws Summary Use counts is on, each row is checked against those Acceptance Needs bucket minimums. With no constraints, it assigns 42 globally unique main numbers and uses the 3 leftover numbers as the supplementary pool.
              </InfoHelp>
            </label>
          )}
@@ -2017,6 +2040,69 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
              >
                Stop and show partial
              </HigButton>
+           )}
+           {(onStartGenerationSession || onEndGenerationSession || onClearGenerationSession || onExportGenerationSession) && (
+             <div
+               aria-label="Generation session controls"
+               style={{
+                 display: "inline-flex",
+                 alignItems: "center",
+                 gap: 6,
+                 flexWrap: "wrap",
+                 padding: "4px 6px",
+                 border: "1px solid rgba(15,23,42,0.12)",
+                 borderRadius: 8,
+                 background: generationSessionActive ? "rgba(220,38,38,0.07)" : "rgba(255,255,255,0.74)",
+               }}
+             >
+               <span
+                 role="status"
+                 style={{
+                   fontSize: 12,
+                   color: generationSessionActive ? "#991b1b" : "#475569",
+                   fontWeight: 800,
+                   fontVariantNumeric: "tabular-nums",
+                 }}
+               >
+                 {generationSessionActive ? "Session active" : "Session off"} · {generationSessionCount} stored
+               </span>
+               <HigButton
+                 variant={generationSessionActive ? "primary" : "secondary"}
+                 disabled={generationSessionActive || isGenerating || !onStartGenerationSession}
+                 onClick={onStartGenerationSession}
+                 aria-label="Start generation session"
+               >
+                 {generationSessionActive ? "Session active" : "Start session"}
+               </HigButton>
+               <HigButton
+                 variant="secondary"
+                 disabled={!generationSessionActive || isGenerating || !onEndGenerationSession}
+                 onClick={onEndGenerationSession}
+                 aria-label="End generation session"
+               >
+                 End session
+               </HigButton>
+               <HigButton
+                 variant="quiet"
+                 disabled={generationSessionCount === 0 || isGenerating || !onClearGenerationSession}
+                 onClick={onClearGenerationSession}
+                 aria-label="Clear generation session"
+               >
+                 Clear session
+               </HigButton>
+               <HigButton
+                 variant="secondary"
+                 disabled={generationSessionCount === 0 || isGenerating || !onExportGenerationSession}
+                 onClick={onExportGenerationSession}
+                 aria-label="Export generation session to Portfolio Compression and Paste-Weighted Candidate Generator"
+                 title="Exports stored session rows through the existing shared receiver. Portfolio receives mains plus supps; Paste-Weighted receives mains only."
+               >
+                 Export session
+               </HigButton>
+               <InfoHelp label="Generation session help">
+                 While active, displayed generated candidates are stored locally and candidates with the same six main numbers as an existing session row are rejected. Export sends stored rows to Portfolio Compression as mains plus supps and to Paste-Weighted as six-main rows, then clears the session storage. Export does not change whether capture is active.
+               </InfoHelp>
+             </div>
            )}
            <HigButton
              variant="quiet"
@@ -2130,6 +2216,8 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
            {userSelectedNumberOptions.map((number) => {
              const isSelected = selSet.has(number);
              const isForced = forcedSet.has(number);
+             const bucketDisplay = monthlyBucketDisplayForNumber(monthlyBuckets, number);
+             const bucketTitle = bucketDisplay ? ` Monthly bucket: ${bucketDisplay.label}.` : "";
              return (
                <button
                  key={number}
@@ -2137,12 +2225,12 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                  aria-pressed={isSelected}
                  aria-label={`Toggle user selected number ${number}`}
                  onClick={() => toggleUserSelection(number)}
-                 style={userSelectionNumberButton(isSelected, isForced)}
+                 style={userSelectionNumberButton(isSelected, isForced, bucketDisplay)}
                  title={isForced
-                   ? `${number} is currently carry-over boosted; click to toggle user selection.`
+                   ? `${number} is currently carry-over boosted.${bucketTitle} Click to toggle user selection.`
                    : isSelected
-                     ? `Remove ${number} from user selected numbers`
-                     : `Add ${number} to user selected numbers`}
+                     ? `Remove ${number} from user selected numbers.${bucketTitle}`
+                     : `Add ${number} to user selected numbers.${bucketTitle}`}
                >
                  {number}
                </button>
@@ -2849,22 +2937,44 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                     >
                       {stageIdmScore !== null ? (isBestStageIdm ? `Top ${(stageIdmScore * 100).toFixed(1)}%` : `${(stageIdmScore * 100).toFixed(1)}%`) : "—"}
                     </td>
-                     <td style={tdCenter}>
-                     <button
-                       type="button"
-                       onClick={(e) => {
-                         e.stopPropagation();
-                         onSimulateCandidate?.(i);
-                       }}
-                        style={{
-                          ...simBtn,
-                          background: isActiveSim ? "#1976d2" : simBtn.background as string,
-                          color: isActiveSim ? "#fff" : simBtn.color as string,
-                          border: isActiveSim ? "1px solid #1976d2" : simBtn.border as string,
-                        }}
-                      >
-                        {isActiveSim ? "Simulated" : "Simulate"}
-                      </button>
+                     <td style={actionTd}>
+                      <div style={actionButtonGroup}>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onSimulateCandidate?.(i);
+                          }}
+                          style={{
+                            ...simBtn,
+                            background: isActiveSim ? "#1976d2" : simBtn.background as string,
+                            color: isActiveSim ? "#fff" : simBtn.color as string,
+                            border: isActiveSim ? "1px solid #1976d2" : simBtn.border as string,
+                          }}
+                        >
+                          {isActiveSim ? "Simulated" : "Simulate"}
+                        </button>
+                        {onKeepCandidate && (
+                          <button
+                            type="button"
+                            aria-label={`Keep generated candidate ${i + 1} in Portfolio Compression and Paste-Weighted rows`}
+                            title="Append this generated row to Portfolio Compression and Paste-Weighted Candidate Generator. Existing rows are preserved until Clear is pressed."
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleKeepCandidate(i);
+                            }}
+                            style={{
+                              ...simBtn,
+                              border: lastKeptCandidateIdx === i ? "1px solid #166534" : "1px solid #bbf7d0",
+                              background: lastKeptCandidateIdx === i ? "#dcfce7" : "#f0fdf4",
+                              color: "#166534",
+                              fontWeight: 800,
+                            }}
+                          >
+                            {lastKeptCandidateIdx === i ? "Kept" : "Keep"}
+                          </button>
+                        )}
+                      </div>
                     </td>
                  </tr>
                  </React.Fragment>
@@ -3822,24 +3932,55 @@ const userSelectionNumberGrid: React.CSSProperties = {
   flex: "1 1 320px",
   minWidth: 0,
 };
-const userSelectionNumberButton = (selected: boolean, forced: boolean): React.CSSProperties => ({
-  width: 26,
-  height: 24,
-  padding: 0,
-  borderRadius: 4,
-  border: selected
-    ? "1px solid #111827"
-    : forced
-      ? "1px solid #b45309"
-      : "1px solid #d1d5db",
-  background: selected ? "#111827" : forced ? "#fffbeb" : "#fff",
-  color: selected ? "#fff" : forced ? "#92400e" : "#111827",
-  fontSize: 11,
-  fontWeight: selected || forced ? 800 : 600,
-  fontVariantNumeric: "tabular-nums",
-  cursor: "pointer",
-  lineHeight: 1,
-});
+const userSelectionNumberButton = (
+  selected: boolean,
+  forced: boolean,
+  bucketDisplay: MonthlyBucketNumberDisplay | null,
+): React.CSSProperties => {
+  const hasBucket = bucketDisplay !== null;
+  const active = selected || forced;
+  return {
+    width: 26,
+    height: 24,
+    padding: 0,
+    borderRadius: 4,
+    border: active && hasBucket
+      ? `1px solid ${bucketDisplay.color}`
+      : selected
+        ? "1px solid #111827"
+        : forced
+          ? "1px solid #b45309"
+          : hasBucket
+            ? `1px solid ${bucketDisplay.color}`
+            : "1px solid #d1d5db",
+    background: active && hasBucket
+      ? bucketDisplay.color
+      : selected
+        ? "#111827"
+        : forced
+          ? "#fffbeb"
+          : bucketDisplay?.softColor ?? "#fff",
+    color: active && hasBucket
+      ? bucketDisplay.textColor
+      : selected
+        ? "#fff"
+        : forced
+          ? "#92400e"
+          : hasBucket
+            ? "#0f172a"
+            : "#111827",
+    boxShadow: selected
+      ? `inset 0 0 0 1px ${bucketDisplay?.textColor === "#111827" ? "rgba(17,24,39,0.35)" : "rgba(255,255,255,0.58)"}`
+      : forced
+        ? "inset 0 0 0 1px rgba(180,83,9,0.28)"
+        : "none",
+    fontSize: 11,
+    fontWeight: active ? 800 : 600,
+    fontVariantNumeric: "tabular-nums",
+    cursor: "pointer",
+    lineHeight: 1,
+  };
+};
 const userSelectionClearButton = (disabled: boolean): React.CSSProperties => ({
   padding: "5px 8px",
   borderRadius: 4,
@@ -3879,6 +4020,14 @@ const mainTh: React.CSSProperties = { ...th, width: 170, whiteSpace: "nowrap" };
 const mainTd: React.CSSProperties = { ...td, width: 170, minWidth: 170, whiteSpace: "nowrap" };
 const suppTd: React.CSSProperties = { ...td, whiteSpace: "nowrap" };
 const manualTd: React.CSSProperties = { ...tdCenter, fontWeight: 600 };
+const actionTd: React.CSSProperties = { ...tdCenter, minWidth: 118 };
+const actionButtonGroup: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 5,
+  flexWrap: "nowrap",
+};
 const simBtn: React.CSSProperties = {
    padding: "4px 8px",
    borderRadius: 4,

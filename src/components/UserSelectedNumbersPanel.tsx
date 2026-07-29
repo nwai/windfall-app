@@ -12,6 +12,11 @@ import {
   normalizeUserExclusionLocks,
   removeUserExcludedNumbers,
 } from "../lib/userExclusionLocks";
+import {
+  monthlyBucketDisplayForNumber,
+  type MonthlyBucketNumberDisplay,
+  type MonthlyBucketSets,
+} from "../lib/monthlyDrawSummary";
 
 const NUMBER_OPTIONS = Array.from({ length: MAX_USER_SELECTED_NUMBER }, (_, index) => index + 1);
 
@@ -28,6 +33,7 @@ interface UserSelectedNumbersPanelProps {
   externalSelectedNumbers?: number[];
   externalSelectedLabel?: string;
   excludedNumbers?: number[];
+  monthlyBuckets?: MonthlyBucketSets | null;
 }
 
 export const UserSelectedNumbersPanel: React.FC<UserSelectedNumbersPanelProps> = ({
@@ -43,6 +49,7 @@ export const UserSelectedNumbersPanel: React.FC<UserSelectedNumbersPanelProps> =
   externalSelectedNumbers = [],
   externalSelectedLabel = "external forced selections",
   excludedNumbers = [],
+  monthlyBuckets = null,
 }) => {
   const hasLoadedPersistedSelection = React.useRef(false);
   const pendingPersistedSelection = React.useRef<number[] | null>(null);
@@ -199,6 +206,8 @@ export const UserSelectedNumbersPanel: React.FC<UserSelectedNumbersPanelProps> =
           const userExcluded = userExcludedSet.has(number);
           const pressed = !userExcluded && (active || locked);
           const disabled = locked || userExcluded;
+          const bucketDisplay = monthlyBucketDisplayForNumber(monthlyBuckets, number);
+          const bucketTitle = bucketDisplay ? ` Monthly bucket: ${bucketDisplay.label}.` : "";
           const ariaLabel = userExcluded
             ? `Number ${number} is excluded by User Exclusions`
             : locked
@@ -207,12 +216,12 @@ export const UserSelectedNumbersPanel: React.FC<UserSelectedNumbersPanelProps> =
               ? `Remove user selected number ${number}`
               : `Add user selected number ${number}`;
           const title = userExcluded
-            ? `Clear it in WFMQYH User Exclusions before selecting ${number}.`
+            ? `Clear it in WFMQYH User Exclusions before selecting ${number}.${bucketTitle}`
             : locked
-              ? `Selected in ${externalSelectedLabel}; deselect it there to release it.`
+              ? `Selected in ${externalSelectedLabel}; deselect it there to release it.${bucketTitle}`
               : active
-                ? `Remove ${number}`
-                : `Add ${number}`;
+                ? `Remove ${number}.${bucketTitle}`
+                : `Add ${number}.${bucketTitle}`;
           return (
             <button
               key={number}
@@ -220,7 +229,7 @@ export const UserSelectedNumbersPanel: React.FC<UserSelectedNumbersPanelProps> =
               aria-label={ariaLabel}
               onClick={() => handleToggle(number)}
               disabled={disabled}
-              style={userExcluded ? userExcludedNumberButton : numberButton(pressed, locked)}
+              style={userExcluded ? userExcludedNumberButton : numberButton(pressed, locked, bucketDisplay)}
               aria-pressed={pressed}
               title={title}
               data-user-excluded={userExcluded ? "true" : undefined}
@@ -373,19 +382,48 @@ const secondaryButton = (disabled: boolean): React.CSSProperties => ({
   lineHeight: 1.2,
 });
 
-const numberButton = (active: boolean, locked = false): React.CSSProperties => ({
-  width: 38,
-  height: 32,
-  border: `1px solid ${locked ? "#15803d" : active ? "#2563eb" : "#cbd5e1"}`,
-  borderRadius: 6,
-  background: locked ? "#dcfce7" : active ? "#2563eb" : "#fff",
-  boxShadow: active && !locked ? "inset 0 0 0 1px #2563eb" : "none",
-  color: locked ? "#14532d" : active ? "#fff" : "#0f172a",
-  cursor: locked ? "not-allowed" : "pointer",
-  fontSize: 12,
-  fontWeight: active ? 700 : 500,
-  lineHeight: 1,
-});
+const numberButton = (
+  active: boolean,
+  locked = false,
+  bucketDisplay: MonthlyBucketNumberDisplay | null = null,
+): React.CSSProperties => {
+  const hasBucket = bucketDisplay !== null;
+  return {
+    width: 38,
+    height: 32,
+    border: active && hasBucket
+      ? `1px solid ${bucketDisplay.color}`
+      : locked
+        ? "1px solid #15803d"
+        : active
+          ? "1px solid #2563eb"
+          : hasBucket
+            ? `1px solid ${bucketDisplay.color}`
+            : "1px solid #cbd5e1",
+    borderRadius: 6,
+    background: active && hasBucket
+      ? bucketDisplay.color
+      : locked
+        ? "#dcfce7"
+        : active
+          ? "#2563eb"
+          : bucketDisplay?.softColor ?? "#fff",
+    boxShadow: active
+      ? `inset 0 0 0 1px ${bucketDisplay?.textColor === "#111827" ? "rgba(17,24,39,0.35)" : "rgba(255,255,255,0.58)"}`
+      : "none",
+    color: active && hasBucket
+      ? bucketDisplay.textColor
+      : locked
+        ? "#14532d"
+        : active
+          ? "#fff"
+          : "#0f172a",
+    cursor: locked ? "not-allowed" : "pointer",
+    fontSize: 12,
+    fontWeight: active ? 700 : 500,
+    lineHeight: 1,
+  };
+};
 
 const userExcludedNumberButton: React.CSSProperties = {
   width: 38,

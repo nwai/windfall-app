@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { generateRwR45Candidates } from "./rwr45Candidates";
+import type { MonthlyBucketSets, MonthlyFrequencyConstraints } from "./monthlyDrawSummary";
 
 const seededRandom = (seed: number): (() => number) => {
   let state = seed >>> 0;
@@ -9,6 +10,35 @@ const seededRandom = (seed: number): (() => number) => {
     return state / 0x100000000;
   };
 };
+
+const bucketSets = (entries: Partial<Record<keyof MonthlyBucketSets, number[]>>): MonthlyBucketSets => ({
+  undrawn: new Set(entries.undrawn ?? []),
+  times1: new Set(entries.times1 ?? []),
+  times2: new Set(entries.times2 ?? []),
+  times3: new Set(entries.times3 ?? []),
+  times4: new Set(entries.times4 ?? []),
+  times5: new Set(entries.times5 ?? []),
+  times6: new Set(entries.times6 ?? []),
+  times7: new Set(entries.times7 ?? []),
+  times8: new Set(entries.times8 ?? []),
+});
+
+const constraints = (partial: Partial<MonthlyFrequencyConstraints>): MonthlyFrequencyConstraints => ({
+  undrawn: 0,
+  times1: 0,
+  times2: 0,
+  times3: 0,
+  times4: 0,
+  times5: 0,
+  times6: 0,
+  times7: 0,
+  times8: 0,
+  ...partial,
+});
+
+const countFromSet = (numbers: number[], set: Set<number>): number => (
+  numbers.filter((number) => set.has(number)).length
+);
 
 describe("generateRwR45Candidates", () => {
   it("creates exactly seven full candidates with globally unique mains", () => {
@@ -100,5 +130,48 @@ describe("generateRwR45Candidates", () => {
       expect(nums.some((number) => excludedSet.has(number))).toBe(false);
     }
     expect(result.traceLines.join("\n")).toContain("row-safe fallback");
+  });
+
+  it("honors monthly Acceptance Needs minimum counts when supplied", () => {
+    const buckets = bucketSets({
+      undrawn: [1, 2, 3, 4, 5, 6],
+      times1: [7, 8, 9, 10, 11, 12],
+      times2: Array.from({ length: 33 }, (_, index) => index + 13),
+    });
+    const result = generateRwR45Candidates(seededRandom(20260725), {
+      monthlyAcceptanceNeeds: {
+        constraints: constraints({ undrawn: 2, times1: 1 }),
+        buckets,
+      },
+    });
+
+    expect(result.candidates).toHaveLength(7);
+    for (const candidate of result.candidates) {
+      const numbers = [...candidate.main, ...candidate.supp];
+      expect(numbers).toHaveLength(8);
+      expect(new Set(numbers).size).toBe(8);
+      expect(countFromSet(numbers, buckets.undrawn)).toBeGreaterThanOrEqual(2);
+      expect(countFromSet(numbers, buckets.times1)).toBeGreaterThanOrEqual(1);
+    }
+    expect(result.traceLines.join("\n")).toContain("monthly Acceptance Needs honored");
+    expect(result.traceLines.join("\n")).toContain("0x≥2 · 1x≥1");
+  });
+
+  it("blocks impossible monthly Acceptance Needs instead of returning false rows", () => {
+    const buckets = bucketSets({
+      undrawn: [1, 2, 3, 4, 5],
+      times1: [6, 7, 8, 9, 10],
+      times2: Array.from({ length: 35 }, (_, index) => index + 11),
+    });
+    const result = generateRwR45Candidates(seededRandom(20260726), {
+      monthlyAcceptanceNeeds: {
+        constraints: constraints({ undrawn: 5, times1: 4 }),
+        buckets,
+      },
+    });
+
+    expect(result.candidates).toEqual([]);
+    expect(result.traceLines.join("\n")).toContain("monthly Acceptance Needs blocked");
+    expect(result.traceLines.join("\n")).toContain("requested 9 bucket-required numbers per row");
   });
 });

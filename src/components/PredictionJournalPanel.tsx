@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import { HigButton, HigField, InfoHelp } from "./shared/HigControls";
 import type { Draw } from "../types";
 import type { AppPresetSnapshot } from "../lib/presets";
+import { buildMonthEndCarryOverWeighting } from "../lib/monthEndCarryOver";
 import {
   buildPredictionJournalDraftFromSetup,
   buildPredictionJournalEntry,
@@ -15,11 +16,16 @@ import {
   type PredictionBucketKey,
   type PredictionJournalEntry,
   type PredictionJournalInputs,
+  type PredictionJournalProvenance,
+  type PredictionJournalReviewStatus,
   type PredictionJournalStatus,
   type PredictionScoreResult,
   type PredictionTargetKind,
 } from "../lib/predictionJournal";
 import { computeResearchDiaryNextDrawContext } from "../lib/researchDiary";
+import { computeTrendMap } from "../lib/trend";
+import { buildTrendValueSeries } from "../lib/trendValueSeries";
+import { buildPreviousNeighbourConstraintRows } from "../lib/previousNeighbourTargets";
 
 export interface PredictionJournalPanelProps {
   history: Draw[];
@@ -60,6 +66,45 @@ const emptyBuckets = (): BucketTextState => ({
   times8: "",
 });
 
+interface PredictionJournalAutoFillSnapshot {
+  oddEvenRatio: string;
+  terminalDigitsText: string;
+  bucketText: BucketTextState;
+  singleText: string;
+  doubleText: string;
+  sumMinText: string;
+  sumMaxText: string;
+  trendRatio: string;
+  previousRepeatCount: string;
+  previousNeighbourHitCount: string;
+  droughtBreakCount: string;
+  carryOverCount: string;
+}
+
+interface PredictionJournalAutoFillContext {
+  bucketKeys: Map<number, PredictionBucketKey>;
+  trendMap: Map<number, "UP" | "DOWN" | "FLAT">;
+  latestDrawNumberSet: Set<number>;
+  previousNeighbourTargetSet: Set<number>;
+  strictDroughtSet: Set<number>;
+  carryOverSet: Set<number>;
+}
+
+const emptyAutoFillSnapshot = (): PredictionJournalAutoFillSnapshot => ({
+  oddEvenRatio: "",
+  terminalDigitsText: "",
+  bucketText: emptyBuckets(),
+  singleText: "",
+  doubleText: "",
+  sumMinText: "",
+  sumMaxText: "",
+  trendRatio: "",
+  previousRepeatCount: "",
+  previousNeighbourHitCount: "",
+  droughtBreakCount: "",
+  carryOverCount: "",
+});
+
 const targetLabels: Record<PredictionTargetKind, string> = {
   nextDraw: "Next draw",
   next3Draws: "Next 3 draws",
@@ -73,6 +118,15 @@ const statusLabels = {
   void: "Void",
 } as const;
 
+const reviewStatusLabels: Record<PredictionJournalReviewStatus, string> = {
+  notReviewed: "Not reviewed",
+  reviewedByUser: "Reviewed by user",
+};
+
+const normalizeReviewStatus = (value: PredictionJournalEntry["reviewStatus"]): PredictionJournalReviewStatus => (
+  value === "reviewedByUser" ? "reviewedByUser" : "notReviewed"
+);
+
 const statusPillStyle = (status: PredictionJournalStatus): React.CSSProperties => ({
   borderRadius: 999,
   padding: "2px 8px",
@@ -81,6 +135,143 @@ const statusPillStyle = (status: PredictionJournalStatus): React.CSSProperties =
   background: status === "scored" ? "#e8f5e9" : status === "pending" ? "#eef6ff" : "#fff4e5",
   color: status === "scored" ? "#1b5e20" : status === "pending" ? "#155a8a" : "#8a4b00",
 });
+
+const reviewPillStyle = (status: PredictionJournalReviewStatus): React.CSSProperties => ({
+  border: `1px solid ${status === "reviewedByUser" ? "#93c5fd" : "#dbe3ec"}`,
+  borderRadius: 999,
+  padding: "2px 8px",
+  fontSize: 12,
+  fontWeight: 800,
+  background: status === "reviewedByUser" ? "#eff6ff" : "#f8fafc",
+  color: status === "reviewedByUser" ? "#1d4ed8" : "#526477",
+});
+
+const archivedPillStyle: React.CSSProperties = {
+  border: "1px solid #e5e7eb",
+  borderRadius: 999,
+  padding: "2px 8px",
+  fontSize: 12,
+  fontWeight: 800,
+  background: "#f3f4f6",
+  color: "#4b5563",
+};
+
+type JournalLegendTone = "standard" | "soft" | "emphasis";
+
+const journalLegendPalette: Record<JournalLegendTone, { background: string; border: string; color: string; borderWidth: number }> = {
+  standard: { background: "#fff", border: "#dbe3ec", color: "#334155", borderWidth: 1 },
+  soft: { background: "#f8fbff", border: "#d6e4f0", color: "#0f172a", borderWidth: 1 },
+  emphasis: { background: "#eff6ff", border: "#93c5fd", color: "#1d4ed8", borderWidth: 2 },
+};
+
+const JournalLegendBox: React.FC<{
+  title: string;
+  children: React.ReactNode;
+  className?: string;
+  help?: React.ReactNode;
+  tone?: JournalLegendTone;
+  style?: React.CSSProperties;
+}> = ({ title, children, className, help, tone = "standard", style }) => {
+  const palette = journalLegendPalette[tone];
+  return (
+    <fieldset
+      aria-label={title}
+      className={className}
+      style={{
+        margin: 0,
+        minWidth: 0,
+        border: `${palette.borderWidth}px solid ${palette.border}`,
+        borderRadius: 8,
+        background: palette.background,
+        padding: "12px 10px 10px",
+        color: "#334155",
+        ...style,
+      }}
+    >
+      <legend style={{ padding: "0 5px", color: palette.color, fontSize: 12, fontWeight: 900, lineHeight: "16px" }}>
+        <span className="windfall-prediction-journal-legend-content">
+          <span>{title}</span>
+          {help ? <InfoHelp label={`${title} help`}>{help}</InfoHelp> : null}
+        </span>
+      </legend>
+      {children}
+    </fieldset>
+  );
+};
+
+const formatJournalNumbers = (numbers: number[] | undefined): string => (
+  numbers?.length ? numbers.join(", ") : "none"
+);
+
+const provenanceChipStyle = (tone: "neutral" | "good" | "warn" = "neutral"): React.CSSProperties => {
+  const palette = {
+    neutral: { border: "#dbe3ec", bg: "#fff", fg: "#475569" },
+    good: { border: "#bbf7d0", bg: "#f0fdf4", fg: "#166534" },
+    warn: { border: "#fed7aa", bg: "#fff7ed", fg: "#9a3412" },
+  }[tone];
+  return {
+    border: `1px solid ${palette.border}`,
+    borderRadius: 999,
+    padding: "2px 8px",
+    background: palette.bg,
+    color: palette.fg,
+    fontSize: 12,
+    fontWeight: 800,
+  };
+};
+
+const renderStructuredProvenance = (provenance: PredictionJournalProvenance) => {
+  const drought = provenance.droughtBreakShortlist;
+  return (
+    <section
+      data-testid="prediction-structured-provenance"
+      aria-label="Structured prediction provenance"
+      style={{ marginTop: 10, border: "1px solid #e2e8f0", borderRadius: 8, padding: 10, background: "#fff" }}
+    >
+      <div style={{ fontSize: 12, fontWeight: 850, color: "#334155", marginBottom: 8 }}>Structured provenance</div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+        <span style={provenanceChipStyle()}>Numbers {formatJournalNumbers(provenance.selectedNumbers)}</span>
+        <span style={provenanceChipStyle(provenance.inclusionSources.effectiveGenerationForced.length ? "good" : "neutral")}>
+          Forced {formatJournalNumbers(provenance.inclusionSources.effectiveGenerationForced)}
+        </span>
+        <span style={provenanceChipStyle(provenance.exclusionSources.effectiveGeneration.length ? "warn" : "neutral")}>
+          Excluded {formatJournalNumbers(provenance.exclusionSources.effectiveGeneration)}
+        </span>
+      </div>
+      <div style={{ borderTop: "1px solid #edf2f7", paddingTop: 8 }}>
+        <div style={{ fontSize: 12, fontWeight: 850, color: "#334155", marginBottom: 5 }}>
+          Drought-break shortlist check
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          <span style={provenanceChipStyle(drought.anySelectedFromShortlist ? "good" : "neutral")}>
+            Any shortlist {drought.anySelectedFromShortlist ? "yes" : "no"}
+          </span>
+          <span style={provenanceChipStyle(drought.allSelectedFromShortlist ? "good" : "neutral")}>
+            All from shortlist {drought.allSelectedFromShortlist ? "yes" : "no"}
+          </span>
+          <span style={provenanceChipStyle(drought.selectedStrictDroughtNumbers.length ? "good" : "neutral")}>
+            Strict drought {drought.strictThreshold}+ {formatJournalNumbers(drought.selectedStrictDroughtNumbers)}
+          </span>
+          <span style={provenanceChipStyle(drought.selectedEmpiricalHazardNumbers.length ? "good" : "neutral")}>
+            Empirical hazard {formatJournalNumbers(drought.selectedEmpiricalHazardNumbers)}
+          </span>
+          <span style={provenanceChipStyle(drought.selectedOutsideShortlistNumbers.length ? "warn" : "neutral")}>
+            Outside shortlist {formatJournalNumbers(drought.selectedOutsideShortlistNumbers)}
+          </span>
+        </div>
+        {drought.classifications.length ? (
+          <div style={{ marginTop: 7, fontSize: 12, color: "#64748b", lineHeight: 1.45 }}>
+            {drought.classifications.map((item) => `${item.number}: ${item.label}`).join(" · ")}
+          </div>
+        ) : (
+          <div style={{ marginTop: 7, fontSize: 12, color: "#64748b" }}>
+            No prediction numbers were saved for this drought-break check.
+          </div>
+        )}
+      </div>
+    </section>
+  );
+};
 
 const scoreResultPillStyle = (result: PredictionScoreResult): React.CSSProperties => {
   const palette: Record<PredictionScoreResult, { background: string; color: string; border: string }> = {
@@ -244,10 +435,180 @@ const validateNonNegativeIntegerText = (label: string, value: string): string | 
 };
 
 const normalizeTerminalDigit = (number: number): number => (number <= 9 ? number : number % 10);
+const countOddEven = (numbers: number[]): { odd: number; even: number } => numbers.reduce((acc, number) => {
+  if (number % 2 === 0) acc.even += 1;
+  else acc.odd += 1;
+  return acc;
+}, { odd: 0, even: 0 });
+const bucketKeyForCount = (count: number): PredictionBucketKey => {
+  if (count <= 0) return "undrawn";
+  if (count >= 8) return "times8";
+  return `times${count}` as PredictionBucketKey;
+};
 const maxUniqueDrawSum = (drawCount: number): number => 332 * drawCount;
 const minUniqueDrawSum = (drawCount: number): number => 36 * drawCount;
+const STRICT_DROUGHT_BREAK_DRAWS = 6;
 const PREDICTION_JOURNAL_AUTHOR_EMAIL = "";
 const MAILTO_BODY_JSON_LIMIT = 6500;
+const UNREVIEWED_SAVE_ALERT = "Mark reviewed only after you have checked the draft. Future scoring can use this flag to include or ignore entries.";
+
+const uniqueValidLotteryNumbers = (value: string): number[] => {
+  const seen = new Set<number>();
+  for (const number of splitSignedNumbers(value)) {
+    if (!Number.isInteger(number) || number < 1 || number > 45) continue;
+    seen.add(number);
+  }
+  return [...seen].sort((left, right) => left - right);
+};
+
+const orderedRealDraws = (history: Draw[]): Draw[] => history
+  .map((draw, index) => ({ draw, index, time: parsePredictionJournalDate(draw.date) }))
+  .filter((row): row is { draw: Draw; index: number; time: number } => !row.draw.isSimulated && row.time !== null)
+  .sort((left, right) => (left.time - right.time) || (left.index - right.index))
+  .map((row) => row.draw);
+
+const drawNumberSet = (draw: Draw | null | undefined): Set<number> => new Set(
+  [
+    ...(draw?.main ?? []),
+    ...(draw?.supp ?? []),
+  ].filter((number) => Number.isInteger(number) && number >= 1 && number <= 45),
+);
+
+const monthKeyForDraw = (draw: Draw): string | null => {
+  const time = parsePredictionJournalDate(draw.date);
+  if (time === null) return null;
+  const date = new Date(time);
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+};
+
+const currentMonthlyBucketKeyByNumber = (history: Draw[], targetDate: string): Map<number, PredictionBucketKey> => {
+  const ordered = orderedRealDraws(history);
+  const latest = ordered[ordered.length - 1];
+  const targetTime = parsePredictionJournalDate(targetDate);
+  const targetMonth = targetTime === null
+    ? latest ? monthKeyForDraw(latest) : null
+    : (() => {
+        const date = new Date(targetTime);
+        return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+      })();
+  const counts = new Map<number, number>();
+
+  if (targetMonth) {
+    for (const draw of ordered) {
+      const drawTime = parsePredictionJournalDate(draw.date);
+      if (targetTime !== null && drawTime !== null && drawTime >= targetTime) continue;
+      if (monthKeyForDraw(draw) !== targetMonth) continue;
+      for (const number of drawNumberSet(draw)) {
+        counts.set(number, (counts.get(number) ?? 0) + 1);
+      }
+    }
+  }
+
+  const out = new Map<number, PredictionBucketKey>();
+  for (let number = 1; number <= 45; number += 1) {
+    out.set(number, bucketKeyForCount(counts.get(number) ?? 0));
+  }
+  return out;
+};
+
+const currentDroughtLength = (history: Draw[], number: number): number => {
+  const ordered = orderedRealDraws(history);
+  let drought = 0;
+  for (let index = ordered.length - 1; index >= 0; index -= 1) {
+    if (drawNumberSet(ordered[index]).has(number)) return drought;
+    drought += 1;
+  }
+  return ordered.length;
+};
+
+const dateFromJournalDate = (value: string): Date | undefined => {
+  const parsed = Date.parse(value);
+  if (Number.isFinite(parsed)) return new Date(parsed);
+  const time = parsePredictionJournalDate(value);
+  return time === null ? undefined : new Date(time);
+};
+
+const buildPredictionJournalAutoFillContext = (
+  history: Draw[],
+  nextDrawDate: string,
+): PredictionJournalAutoFillContext => {
+  const ordered = orderedRealDraws(history);
+  const latest = ordered[ordered.length - 1] ?? null;
+  const trendMap = computeTrendMap(buildTrendValueSeries(ordered), { lookback: 4, threshold: 0.02 });
+  const previousNeighbourTargetSet = new Set(
+    buildPreviousNeighbourConstraintRows(latest, "mains-plus-supps")
+      .flatMap((row) => row.targets),
+  );
+  const strictDroughtSet = new Set<number>();
+  for (let number = 1; number <= 45; number += 1) {
+    if (currentDroughtLength(history, number) >= STRICT_DROUGHT_BREAK_DRAWS) {
+      strictDroughtSet.add(number);
+    }
+  }
+  const carryOverReferenceDate = dateFromJournalDate(nextDrawDate);
+  const carryOver = buildMonthEndCarryOverWeighting(history, {
+    includeSupp: true,
+    referenceDate: carryOverReferenceDate,
+  });
+
+  return {
+    bucketKeys: currentMonthlyBucketKeyByNumber(history, nextDrawDate),
+    trendMap,
+    latestDrawNumberSet: drawNumberSet(latest),
+    previousNeighbourTargetSet,
+    strictDroughtSet,
+    carryOverSet: new Set(carryOver.activeNumbers),
+  };
+};
+
+const derivePredictionJournalAutoFill = (
+  numbersText: string,
+  targetKind: PredictionTargetKind,
+  context: PredictionJournalAutoFillContext,
+): PredictionJournalAutoFillSnapshot => {
+  const numbers = uniqueValidLotteryNumbers(numbersText);
+  const snapshot = emptyAutoFillSnapshot();
+  if (numbers.length === 0) return snapshot;
+
+  const numberLimit = targetNumberLimit(targetKind);
+  const shouldFillWholeTargetFields = numberLimit === null || numbers.length === numberLimit;
+  const oddEven = countOddEven(numbers);
+  const sum = numbers.reduce((total, number) => total + number, 0);
+
+  snapshot.terminalDigitsText = [...new Set(numbers.map(normalizeTerminalDigit))]
+    .sort((left, right) => left - right)
+    .join(", ");
+  snapshot.oddEvenRatio = shouldFillWholeTargetFields ? `${oddEven.odd}:${oddEven.even}` : "";
+  snapshot.singleText = String(numbers.filter((number) => number >= 1 && number <= 9).length);
+  snapshot.doubleText = String(numbers.filter((number) => number >= 10 && number <= 45).length);
+  snapshot.sumMinText = shouldFillWholeTargetFields ? String(sum) : "";
+  snapshot.sumMaxText = shouldFillWholeTargetFields ? String(sum) : "";
+
+  const bucketCounts = emptyBuckets();
+  for (const number of numbers) {
+    const key = context.bucketKeys.get(number) ?? "undrawn";
+    bucketCounts[key] = String((integerOrUndefined(bucketCounts[key]) ?? 0) + 1);
+  }
+  snapshot.bucketText = bucketCounts;
+
+  let up = 0;
+  let down = 0;
+  let flat = 0;
+  for (const number of numbers) {
+    const trend = context.trendMap.get(number) ?? "FLAT";
+    if (trend === "UP") up += 1;
+    else if (trend === "DOWN") down += 1;
+    else flat += 1;
+  }
+  snapshot.trendRatio = `${up}/${down}/${flat}`;
+
+  snapshot.previousRepeatCount = String(numbers.filter((number) => context.latestDrawNumberSet.has(number)).length);
+  snapshot.previousNeighbourHitCount = String(numbers.filter((number) => context.previousNeighbourTargetSet.has(number)).length);
+  snapshot.droughtBreakCount = String(numbers.filter((number) => context.strictDroughtSet.has(number)).length);
+  snapshot.carryOverCount = String(numbers.filter((number) => context.carryOverSet.has(number)).length);
+
+  return snapshot;
+};
 
 export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
   history,
@@ -275,10 +636,14 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
   const [droughtBreakCount, setDroughtBreakCount] = useState("");
   const [carryOverCount, setCarryOverCount] = useState("");
   const [confidence, setConfidence] = useState("");
+  const [reviewStatus, setReviewStatus] = useState<PredictionJournalReviewStatus>("notReviewed");
   const [notes, setNotes] = useState("");
   const [message, setMessage] = useState("");
+  const [showUnreviewedSaveAlert, setShowUnreviewedSaveAlert] = useState(false);
   const [showValidationErrors, setShowValidationErrors] = useState(false);
   const [expandedEntryId, setExpandedEntryId] = useState<string | null>(null);
+  const [showArchivedEntries, setShowArchivedEntries] = useState(false);
+  const lastNumbersAutoFillRef = useRef<PredictionJournalAutoFillSnapshot>(emptyAutoFillSnapshot());
 
   const hasControlledInitialEntries = initialEntries !== undefined;
   const latestDraw = useMemo(() => latestRealDraw(history), [history]);
@@ -286,14 +651,76 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
     () => computeResearchDiaryNextDrawContext(history, { now: now() }),
     [history, now],
   );
+  const autoFillContext = useMemo(
+    () => buildPredictionJournalAutoFillContext(history, nextDrawContext.nextDrawDate),
+    [history, nextDrawContext.nextDrawDate],
+  );
   const scoredEntries = useMemo(
     () => entries.map((entry) => scorePredictionJournalEntry(entry, history)),
     [entries, history],
+  );
+  const archivedEntryCount = useMemo(
+    () => scoredEntries.filter((entry) => entry.archivedAt).length,
+    [scoredEntries],
+  );
+  const visibleScoredEntries = useMemo(
+    () => showArchivedEntries ? scoredEntries : scoredEntries.filter((entry) => !entry.archivedAt),
+    [scoredEntries, showArchivedEntries],
   );
   const editingEntry = useMemo(
     () => entries.find((entry) => entry.id === editingId) ?? null,
     [editingId, entries],
   );
+
+  const canApplyAutoFillValue = (current: string, previousAutoFill: string): boolean => (
+    current.trim() === "" || current === previousAutoFill
+  );
+
+  const applyNumbersAutoFill = (nextNumbersText: string, nextTargetKind = targetKind) => {
+    const previousAutoFill = lastNumbersAutoFillRef.current;
+    const nextAutoFill = derivePredictionJournalAutoFill(nextNumbersText, nextTargetKind, autoFillContext);
+
+    setOddEvenRatio((current) => canApplyAutoFillValue(current, previousAutoFill.oddEvenRatio) ? nextAutoFill.oddEvenRatio : current);
+    setTerminalDigitsText((current) => canApplyAutoFillValue(current, previousAutoFill.terminalDigitsText) ? nextAutoFill.terminalDigitsText : current);
+    setBucketText((current) => {
+      const next = { ...current };
+      for (const field of BUCKET_FIELDS) {
+        if (canApplyAutoFillValue(current[field.key], previousAutoFill.bucketText[field.key])) {
+          next[field.key] = nextAutoFill.bucketText[field.key];
+        }
+      }
+      return next;
+    });
+    setSingleText((current) => canApplyAutoFillValue(current, previousAutoFill.singleText) ? nextAutoFill.singleText : current);
+    setDoubleText((current) => canApplyAutoFillValue(current, previousAutoFill.doubleText) ? nextAutoFill.doubleText : current);
+    setSumMinText((current) => canApplyAutoFillValue(current, previousAutoFill.sumMinText) ? nextAutoFill.sumMinText : current);
+    setSumMaxText((current) => canApplyAutoFillValue(current, previousAutoFill.sumMaxText) ? nextAutoFill.sumMaxText : current);
+    setTrendRatio((current) => canApplyAutoFillValue(current, previousAutoFill.trendRatio) ? nextAutoFill.trendRatio : current);
+    setPreviousRepeatCount((current) => canApplyAutoFillValue(current, previousAutoFill.previousRepeatCount) ? nextAutoFill.previousRepeatCount : current);
+    setPreviousNeighbourHitCount((current) => canApplyAutoFillValue(current, previousAutoFill.previousNeighbourHitCount) ? nextAutoFill.previousNeighbourHitCount : current);
+    setDroughtBreakCount((current) => canApplyAutoFillValue(current, previousAutoFill.droughtBreakCount) ? nextAutoFill.droughtBreakCount : current);
+    setCarryOverCount((current) => canApplyAutoFillValue(current, previousAutoFill.carryOverCount) ? nextAutoFill.carryOverCount : current);
+
+    lastNumbersAutoFillRef.current = nextAutoFill;
+  };
+
+  const handleNumbersTextChange = (value: string) => {
+    setShowUnreviewedSaveAlert(false);
+    setNumbersText(value);
+    applyNumbersAutoFill(value);
+  };
+
+  const handleTargetKindChange = (value: string) => {
+    setShowUnreviewedSaveAlert(false);
+    const nextTargetKind = targetKindFromValue(value);
+    setTargetKind(nextTargetKind);
+    if (numbersText.trim()) applyNumbersAutoFill(numbersText, nextTargetKind);
+  };
+
+  const handleReviewStatusChange = (value: PredictionJournalReviewStatus) => {
+    setReviewStatus(value);
+    setShowUnreviewedSaveAlert(false);
+  };
 
   useEffect(() => {
     if (hasControlledInitialEntries) return;
@@ -470,6 +897,7 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
   ]);
 
   const fillFormFromInputs = (inputs: PredictionJournalInputs) => {
+    lastNumbersAutoFillRef.current = emptyAutoFillSnapshot();
     setOddEvenRatio(inputs.oddEvenRatio ?? "");
     setNumbersText(numberText(inputs.numbers));
     setTerminalDigitsText(numberText(inputs.terminalDigits));
@@ -497,6 +925,8 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
     setEditingId(null);
     setTargetKind("nextDraw");
     fillFormFromInputs({});
+    setReviewStatus("notReviewed");
+    setShowUnreviewedSaveAlert(false);
     setShowValidationErrors(false);
   };
 
@@ -504,6 +934,8 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
     const inputs = entry.inputs;
     setEditingId(entry.id);
     setTargetKind(entry.targetKind);
+    setReviewStatus(normalizeReviewStatus(entry.reviewStatus));
+    setShowUnreviewedSaveAlert(false);
     fillFormFromInputs(inputs);
     setMessage(`Editing prediction anchored to ${entry.anchorLatestDrawDate}.`);
   };
@@ -513,7 +945,12 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
     const draft = buildPredictionJournalDraftFromSetup(newPredictionDraft.setupSnapshot ?? getSetupSnapshot?.());
     setEditingId(null);
     setTargetKind(draft.targetKind);
+    setReviewStatus("notReviewed");
+    setShowUnreviewedSaveAlert(false);
     fillFormFromInputs(draft.inputs);
+    if (draft.inputs.numbers?.length) {
+      applyNumbersAutoFill(numberText(draft.inputs.numbers), draft.targetKind);
+    }
     setShowValidationErrors(false);
     setExpandedEntryId(null);
     setMessage(`New prediction draft created from current setup (${draft.sourceSummary.length} context lines). Review before saving.`);
@@ -544,6 +981,7 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
       targetKind,
       inputs: formInputs,
       setupSnapshot: getSetupSnapshot?.() ?? editingEntry?.setupSnapshot,
+      reviewStatus,
       now: now(),
     });
 
@@ -551,7 +989,9 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
       const withoutExisting = prev.filter((entry) => entry.id !== nextEntry.id);
       return [nextEntry, ...withoutExisting];
     });
+    const savedAsUnreviewed = reviewStatus === "notReviewed";
     resetForm();
+    setShowUnreviewedSaveAlert(savedAsUnreviewed);
     setMessage(editingEntry ? "Prediction updated." : "Prediction saved.");
   };
 
@@ -564,6 +1004,23 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
     if (editingId === entry.id) resetForm();
     if (expandedEntryId === entry.id) setExpandedEntryId(null);
     setMessage("Pending prediction removed.");
+  };
+
+  const handleArchiveToggle = (entry: PredictionJournalEntry, archive: boolean) => {
+    const timestamp = now();
+    setEntries((prev) => prev.map((item) => (
+      item.id === entry.id
+        ? {
+            ...item,
+            archivedAt: archive ? timestamp : undefined,
+            updatedAt: timestamp,
+          }
+        : item
+    )));
+    if (archive && !showArchivedEntries && expandedEntryId === entry.id) {
+      setExpandedEntryId(null);
+    }
+    setMessage(archive ? "Prediction archived. It is hidden from the active list but still kept for audit/export." : "Prediction restored to the active journal.");
   };
 
   const downloadJournalJson = () => {
@@ -625,19 +1082,7 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
         </InfoHelp>
       </div>
 
-      <div
-        style={{
-          marginTop: 12,
-          border: "1px solid #d6e4f0",
-          borderRadius: 8,
-          background: "#f8fbff",
-          padding: 12,
-          color: "#334155",
-        }}
-      >
-        <div style={{ fontSize: 13, fontWeight: 900, color: "#0f172a", marginBottom: 6 }}>
-          New user guide
-        </div>
+      <JournalLegendBox title="New user guide" tone="soft" style={{ marginTop: 12 }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10, fontSize: 12, lineHeight: 1.45 }}>
           <div>
             <strong>Fill only what you are testing.</strong> For example, enter <code>2:6</code> in Odd/even ratio, <code>7, 14, 22, 31</code> in Numbers, or <code>1, 4, 9</code> in Terminal digits.
@@ -648,27 +1093,54 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
           <div>
             <strong>Save before the draw.</strong> At least one prediction entry per draw is useful; more entries are better when they test different ideas. Over time, this gives the app creators clean evidence for adjusting and improving the app's possible winning-entry logic.
           </div>
-        </div>
-      </div>
-
-      <div
-        style={{
-          marginTop: 14,
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-          gap: 10,
-          alignItems: "start",
-        }}
-      >
-        <div style={{ padding: 10, border: "1px solid #dbe3ec", borderRadius: 8, background: "#f8fafc" }}>
-          <div style={{ fontSize: 12, color: "#657385" }}>Anchor latest draw</div>
-          <div style={{ fontSize: 20, fontWeight: 800, color: "#1f2937" }}>{latestDraw?.date ?? "No real draw loaded"}</div>
-          <div style={{ fontSize: 12, color: "#657385" }}>
-            {latestDraw ? [...latestDraw.main, ...latestDraw.supp].join(", ") : "Load real draw history before saving."}
+          <div>
+            <strong>Review before saving.</strong> Leave drafts as Not reviewed until you have checked the copied setup values. Mark Reviewed by user when you are willing for later analysis to treat the entry as intentional evidence.
           </div>
         </div>
+      </JournalLegendBox>
+
+      <div
+        className="windfall-prediction-journal-top-grid"
+        style={{
+          marginTop: 14,
+        }}
+      >
+        <JournalLegendBox title="Anchor latest draw" tone="emphasis" className="windfall-prediction-journal-balanced-box">
+          <div style={{ fontSize: 20, fontWeight: 800, color: "#1f2937" }}>{latestDraw?.date ?? "No real draw loaded"}</div>
+          <div className="windfall-prediction-journal-anchor-numbers">
+            {latestDraw ? [...latestDraw.main, ...latestDraw.supp].join(", ") : "Load real draw history before saving."}
+          </div>
+        </JournalLegendBox>
+        <JournalLegendBox title="Review status" tone="emphasis" className="windfall-prediction-journal-balanced-box" style={{ paddingBottom: 9 }}>
+          <div style={{ display: "grid", gap: 7 }}>
+            {(["notReviewed", "reviewedByUser"] as const).map((value) => (
+              <label
+                key={value}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  minHeight: 32,
+                  color: "#26313d",
+                  fontSize: 13,
+                  fontWeight: 800,
+                  cursor: "pointer",
+                }}
+              >
+                <input
+                  type="radio"
+                  name="prediction-review-status"
+                  value={value}
+                  checked={reviewStatus === value}
+                  onChange={() => handleReviewStatusChange(value)}
+                />
+                {reviewStatusLabels[value]}
+              </label>
+            ))}
+          </div>
+        </JournalLegendBox>
         <HigField label="Target window">
-          <select value={targetKind} onChange={(event) => setTargetKind(targetKindFromValue(event.target.value))}>
+          <select value={targetKind} onChange={(event) => handleTargetKindChange(event.target.value)}>
             <option value="nextDraw">Next draw</option>
             <option value="next3Draws">Next 3 draws</option>
             <option value="restOfMonth">Rest of current month</option>
@@ -686,42 +1158,56 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
       </div>
 
       <div
+        className="windfall-prediction-journal-text-grid"
         style={{
           marginTop: 12,
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-          gap: 10,
         }}
       >
-        <HigField label="Numbers" help="Optional. Paste exact numbers or a shortlist; punctuation is fine.">
+        <div className="windfall-prediction-journal-text-stack">
+          <JournalLegendBox
+            title="Numbers"
+            className="windfall-prediction-journal-text-box"
+            help="Optional. Paste exact numbers or a shortlist; punctuation is fine. Editing this field auto-fills derived diagnostics while preserving fields you have manually changed."
+          >
+            <textarea
+              aria-label="Numbers"
+              value={numbersText}
+              onChange={(event) => handleNumbersTextChange(event.target.value)}
+              rows={3}
+              placeholder="12, 14, 22, 27"
+            />
+          </JournalLegendBox>
+          <JournalLegendBox
+            title="Terminal digits"
+            className="windfall-prediction-journal-text-box"
+            help="Optional. 12 is accepted as terminal digit 2."
+          >
+            <textarea
+              aria-label="Terminal digits"
+              value={terminalDigitsText}
+              onChange={(event) => setTerminalDigitsText(event.target.value)}
+              rows={3}
+              placeholder="1, 4, 9"
+            />
+          </JournalLegendBox>
+        </div>
+        <JournalLegendBox
+          title="Notes"
+          className="windfall-prediction-journal-text-box windfall-prediction-journal-notes-field"
+          help="Optional. Record your reasoning while it is fresh."
+        >
           <textarea
-            value={numbersText}
-            onChange={(event) => setNumbersText(event.target.value)}
-            rows={3}
-            placeholder="12, 14, 22, 27"
-          />
-        </HigField>
-        <HigField label="Terminal digits" help="Optional. 12 is accepted as terminal digit 2.">
-          <textarea
-            value={terminalDigitsText}
-            onChange={(event) => setTerminalDigitsText(event.target.value)}
-            rows={3}
-            placeholder="1, 4, 9"
-          />
-        </HigField>
-        <HigField label="Notes" help="Optional. Record your reasoning while it is fresh.">
-          <textarea
+            aria-label="Notes"
             value={notes}
             onChange={(event) => setNotes(event.target.value)}
-            rows={3}
+            rows={8}
             placeholder="Why this looked plausible before the draw..."
           />
-        </HigField>
+        </JournalLegendBox>
       </div>
 
       <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
-        <div style={{ border: "1px solid #e1e7ef", borderRadius: 8, padding: 10 }}>
-          <div style={{ fontWeight: 800, marginBottom: 8 }}>Target draw bucket-origin mix</div>
+        <JournalLegendBox title="Target draw bucket-origin mix">
           <div style={{ fontSize: 12, color: "#657385", marginBottom: 8 }}>
             Counts of drawn balls expected to originate from each current-month bucket, not the full bucket state at entry time.
           </div>
@@ -738,9 +1224,8 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
               </label>
             ))}
           </div>
-        </div>
-        <div style={{ border: "1px solid #e1e7ef", borderRadius: 8, padding: 10 }}>
-          <div style={{ fontWeight: 800, marginBottom: 8 }}>Shape checks</div>
+        </JournalLegendBox>
+        <JournalLegendBox title="Shape checks">
           <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(90px, 1fr))", gap: 8 }}>
             <HigField label="Single-digit">
               <input value={singleText} onChange={(event) => setSingleText(event.target.value)} inputMode="numeric" />
@@ -755,9 +1240,8 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
               <input value={sumMaxText} onChange={(event) => setSumMaxText(event.target.value)} inputMode="numeric" />
             </HigField>
           </div>
-        </div>
-        <div style={{ border: "1px solid #e1e7ef", borderRadius: 8, padding: 10 }}>
-          <div style={{ fontWeight: 800, marginBottom: 8 }}>Recorded diagnostics</div>
+        </JournalLegendBox>
+        <JournalLegendBox title="Recorded diagnostics">
           <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(100px, 1fr))", gap: 8 }}>
             <HigField label="U/D/F ratio">
               <input value={trendRatio} onChange={(event) => setTrendRatio(event.target.value)} placeholder="3/2/3" />
@@ -775,7 +1259,7 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
               <input value={carryOverCount} onChange={(event) => setCarryOverCount(event.target.value)} inputMode="numeric" />
             </HigField>
           </div>
-        </div>
+        </JournalLegendBox>
       </div>
 
       <div style={{ marginTop: 12, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -786,6 +1270,24 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
         <HigButton variant="secondary" onClick={() => void handleEmailToAuthor()} disabled={entries.length === 0}>Email to author</HigButton>
         {message ? <span role="status" style={{ fontSize: 12, color: "#51606f" }}>{message}</span> : null}
       </div>
+
+      {showUnreviewedSaveAlert ? (
+        <div
+          role="alert"
+          style={{
+            marginTop: 10,
+            border: "1px solid #fed7aa",
+            borderRadius: 8,
+            background: "#fff7ed",
+            color: "#9a3412",
+            padding: 10,
+            fontSize: 12,
+            fontWeight: 750,
+          }}
+        >
+          {UNREVIEWED_SAVE_ALERT}
+        </div>
+      ) : null}
 
       {showValidationErrors && validationErrors.length > 0 ? (
         <div
@@ -808,20 +1310,30 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
       ) : null}
 
       <div style={{ marginTop: 16 }}>
-        <h4 style={{ margin: "0 0 8px", fontSize: 15 }}>Journal entries</h4>
-        {scoredEntries.length === 0 ? (
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+          <h4 style={{ margin: 0, fontSize: 15 }}>Journal entries</h4>
+          {archivedEntryCount > 0 ? (
+            <HigButton size="compact" variant="quiet" onClick={() => setShowArchivedEntries((current) => !current)}>
+              {showArchivedEntries ? "Hide archived" : `Show archived (${archivedEntryCount})`}
+            </HigButton>
+          ) : null}
+        </div>
+        {visibleScoredEntries.length === 0 ? (
           <div style={{ padding: 14, border: "1px dashed #cbd5e1", borderRadius: 8, color: "#657385" }}>
-            No journal entries yet.
+            {entries.length === 0
+              ? "No journal entries yet."
+              : "No active journal entries. Show archived entries to review older cleared predictions."}
           </div>
         ) : (
           <div style={{ display: "grid", gap: 8, maxHeight: "min(560px, 62vh)", overflowY: "auto", paddingRight: 2 }}>
-            {scoredEntries.map((entry) => {
+            {visibleScoredEntries.map((entry) => {
                 const isExpanded = expandedEntryId === entry.id;
                 const detailId = `prediction-journal-entry-${domSafeId(entry.id)}`;
                 const inputSummary = summarizePredictionInputs(entry);
                 const scoreSummary = summarizeScoreResults(entry);
                 const targetDrawDate = summarizeTargetDrawDate(entry);
                 const immediateNextDrawScore = scoreImmediateNextDraw(entry);
+                const normalizedReviewStatus = normalizeReviewStatus(entry.reviewStatus);
                 return (
                   <article key={entry.id} style={{ border: "1px solid #dbe3ec", borderRadius: 8, background: "#fff", overflow: "hidden" }}>
                     <button
@@ -851,6 +1363,8 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
                           <span style={{ fontWeight: 800 }}>{targetLabels[entry.targetKind]}</span>
                           {targetDrawDate ? <span style={{ color: "#475569", fontSize: 12, fontWeight: 800 }}>{targetDrawDate}</span> : null}
                           <span style={statusPillStyle(entry.status)}>{statusLabels[entry.status]}</span>
+                          <span style={reviewPillStyle(normalizedReviewStatus)}>{reviewStatusLabels[normalizedReviewStatus]}</span>
+                          {entry.archivedAt ? <span style={archivedPillStyle}>Archived</span> : null}
                           <span style={{ color: "#657385", fontSize: 12 }}>
                             Anchored after {entry.anchorLatestDrawDate} · revision {entry.revision}
                           </span>
@@ -867,15 +1381,27 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
                       <div id={detailId} style={{ borderTop: "1px solid #e2e8f0", padding: 12 }}>
                         <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
                           <div style={{ fontSize: 12, color: "#657385" }}>
-                            Anchored after {entry.anchorLatestDrawDate} · revision {entry.revision} · {entry.canEdit ? "Editable until first target draw appears" : "Locked after target draw arrived"}
+                            Anchored after {entry.anchorLatestDrawDate} · revision {entry.revision} · {reviewStatusLabels[normalizedReviewStatus]}
+                            {entry.reviewedAt ? ` ${new Date(entry.reviewedAt).toLocaleString()}` : ""}
+                            {" · "}
+                            {entry.canEdit ? "Editable until first target draw appears" : "Locked after target draw arrived"}
+                            {entry.archivedAt ? ` · Archived ${new Date(entry.archivedAt).toLocaleString()}` : ""}
                           </div>
                           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                            {entry.canEdit ? (
+                            {entry.archivedAt ? (
+                              <HigButton size="compact" variant="secondary" onClick={() => handleArchiveToggle(entry, false)}>
+                                Restore
+                              </HigButton>
+                            ) : entry.canEdit ? (
                               <>
                                 <HigButton size="compact" variant="secondary" onClick={() => fillFormFromEntry(entry)}>Edit prediction</HigButton>
                                 <HigButton size="compact" variant="danger" onClick={() => handleDelete(entry)}>Delete</HigButton>
                               </>
-                            ) : null}
+                            ) : (
+                              <HigButton size="compact" variant="secondary" onClick={() => handleArchiveToggle(entry, true)}>
+                                Archive
+                              </HigButton>
+                            )}
                           </div>
                         </div>
                         {entry.inputs.notes ? (
@@ -910,6 +1436,7 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
                             </div>
                           </div>
                         ) : null}
+                        {entry.provenance ? renderStructuredProvenance(entry.provenance) : null}
                         {entry.reason ? <div style={{ marginTop: 8, color: "#8a4b00", fontSize: 12 }}>{entry.reason}</div> : null}
                         {immediateNextDrawScore ? (
                           <section

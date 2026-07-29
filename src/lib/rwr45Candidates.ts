@@ -1,4 +1,9 @@
 import type { CandidateSet } from "../types";
+import type {
+  MonthlyBucketKey,
+  MonthlyBucketSets,
+  MonthlyFrequencyConstraints,
+} from "./monthlyDrawSummary";
 
 export const RWR45_CANDIDATE_COUNT = 7;
 export const RWR45_MAIN_COUNT = 6;
@@ -14,9 +19,52 @@ export interface RwR45GenerationResult {
 export interface RwR45GenerationOptions {
   forcedNumbers?: readonly number[];
   excludedNumbers?: readonly number[];
+  monthlyAcceptanceNeeds?: {
+    constraints: MonthlyFrequencyConstraints;
+    buckets: MonthlyBucketSets;
+  };
 }
 
 type RandomSource = () => number;
+type CandidateSection = "main" | "supp";
+
+const MONTHLY_BUCKET_KEYS: MonthlyBucketKey[] = [
+  "undrawn",
+  "times1",
+  "times2",
+  "times3",
+  "times4",
+  "times5",
+  "times6",
+  "times7",
+  "times8",
+];
+
+const MONTHLY_BUCKET_LABELS: Record<MonthlyBucketKey, string> = {
+  undrawn: "0x",
+  times1: "1x",
+  times2: "2x",
+  times3: "3x",
+  times4: "4x",
+  times5: "5x",
+  times6: "6x",
+  times7: "7x",
+  times8: "8x+",
+};
+
+type MonthlyCounts = Record<MonthlyBucketKey, number>;
+
+interface MonthlyRepairResult {
+  candidate: CandidateSet;
+  repaired: boolean;
+}
+
+interface ReplacementTarget {
+  section: CandidateSection;
+  index: number;
+  number: number;
+  surplus: number;
+}
 
 const ascendingNumbers = (values: readonly number[]): number[] => (
   [...values].sort((a, b) => a - b)
@@ -62,6 +110,217 @@ const formatNumbers = (values: readonly number[]): string => (
   values.length ? `[${ascendingNumbers(values).join(", ")}]` : "[]"
 );
 
+const zeroMonthlyCounts = (): MonthlyCounts => ({
+  undrawn: 0,
+  times1: 0,
+  times2: 0,
+  times3: 0,
+  times4: 0,
+  times5: 0,
+  times6: 0,
+  times7: 0,
+  times8: 0,
+});
+
+const normalizeMonthlyConstraints = (
+  constraints: MonthlyFrequencyConstraints,
+): MonthlyFrequencyConstraints => {
+  const normalized = zeroMonthlyCounts();
+  for (const key of MONTHLY_BUCKET_KEYS) {
+    const raw = constraints[key];
+    normalized[key] = Number.isFinite(raw) ? Math.max(0, Math.min(8, Math.trunc(raw))) : 0;
+  }
+  return normalized;
+};
+
+const totalMonthlyConstraints = (constraints: MonthlyFrequencyConstraints): number => (
+  MONTHLY_BUCKET_KEYS.reduce((sum, key) => sum + constraints[key], 0)
+);
+
+const hasMonthlyConstraints = (constraints: MonthlyFrequencyConstraints): boolean => (
+  totalMonthlyConstraints(constraints) > 0
+);
+
+const formatMonthlyConstraints = (constraints: MonthlyFrequencyConstraints): string => (
+  MONTHLY_BUCKET_KEYS
+    .filter((key) => constraints[key] > 0)
+    .map((key) => `${MONTHLY_BUCKET_LABELS[key]}≥${constraints[key]}`)
+    .join(" · ") || "none"
+);
+
+const monthlyBucketForNumber = (
+  number: number,
+  buckets: MonthlyBucketSets,
+): MonthlyBucketKey | null => (
+  MONTHLY_BUCKET_KEYS.find((key) => buckets[key].has(number)) ?? null
+);
+
+const countMonthlyBuckets = (
+  numbers: readonly number[],
+  buckets: MonthlyBucketSets,
+): MonthlyCounts => {
+  const counts = zeroMonthlyCounts();
+  for (const number of numbers) {
+    const bucket = monthlyBucketForNumber(number, buckets);
+    if (bucket) counts[bucket] += 1;
+  }
+  return counts;
+};
+
+const countsMeetMonthlyConstraints = (
+  counts: MonthlyCounts,
+  constraints: MonthlyFrequencyConstraints,
+): boolean => (
+  MONTHLY_BUCKET_KEYS.every((key) => counts[key] >= constraints[key])
+);
+
+const decrementMainUse = (mainUseCounts: Map<number, number>, number: number): void => {
+  const next = (mainUseCounts.get(number) ?? 0) - 1;
+  if (next <= 0) mainUseCounts.delete(number);
+  else mainUseCounts.set(number, next);
+};
+
+const incrementMainUse = (mainUseCounts: Map<number, number>, number: number): void => {
+  mainUseCounts.set(number, (mainUseCounts.get(number) ?? 0) + 1);
+};
+
+const monthlyAcceptanceBlockReason = (
+  eligibleNumbers: readonly number[],
+  forcedNumbers: readonly number[],
+  monthlyAcceptanceNeeds: NonNullable<RwR45GenerationOptions["monthlyAcceptanceNeeds"]>,
+): string | null => {
+  const constraints = normalizeMonthlyConstraints(monthlyAcceptanceNeeds.constraints);
+  const totalRequired = totalMonthlyConstraints(constraints);
+  if (totalRequired > RWR45_MAIN_COUNT + RWR45_SUPP_COUNT) {
+    return `requested ${totalRequired} bucket-required numbers per row, but each PNUaRW45 row has only 8 numbers`;
+  }
+
+  for (const key of MONTHLY_BUCKET_KEYS) {
+    if (constraints[key] <= 0) continue;
+    const eligibleInBucket = eligibleNumbers.filter((number) => monthlyAcceptanceNeeds.buckets[key].has(number));
+    if (eligibleInBucket.length < constraints[key]) {
+      return `${MONTHLY_BUCKET_LABELS[key]} requires ${constraints[key]} per row, but only ${eligibleInBucket.length} eligible numbers remain in that bucket`;
+    }
+  }
+
+  if (forcedNumbers.length >= RWR45_MAIN_COUNT + RWR45_SUPP_COUNT) {
+    const forcedCounts = countMonthlyBuckets(forcedNumbers, monthlyAcceptanceNeeds.buckets);
+    if (!countsMeetMonthlyConstraints(forcedCounts, constraints)) {
+      return "all 8 row slots are already occupied by forced inclusions that do not meet the selected bucket counts";
+    }
+  }
+
+  return null;
+};
+
+const buildMainUseCounts = (candidates: readonly CandidateSet[]): Map<number, number> => {
+  const counts = new Map<number, number>();
+  for (const candidate of candidates) {
+    for (const number of candidate.main) incrementMainUse(counts, number);
+  }
+  return counts;
+};
+
+const replacementTargets = (
+  main: readonly number[],
+  supp: readonly number[],
+  counts: MonthlyCounts,
+  constraints: MonthlyFrequencyConstraints,
+  buckets: MonthlyBucketSets,
+  forcedSet: ReadonlySet<number>,
+): ReplacementTarget[] => {
+  const entries: ReplacementTarget[] = [];
+  const addTargets = (section: CandidateSection, values: readonly number[]) => {
+    values.forEach((number, index) => {
+      if (forcedSet.has(number)) return;
+      const bucket = monthlyBucketForNumber(number, buckets);
+      const surplus = bucket ? counts[bucket] - constraints[bucket] : 1;
+      if (surplus <= 0) return;
+      entries.push({ section, index, number, surplus });
+    });
+  };
+
+  addTargets("supp", supp);
+  addTargets("main", main);
+  return entries.sort((left, right) => {
+    if (left.section !== right.section) return left.section === "supp" ? -1 : 1;
+    return right.surplus - left.surplus || left.number - right.number;
+  });
+};
+
+const repairCandidateForMonthlyAcceptanceNeeds = (
+  candidate: CandidateSet,
+  rng: RandomSource,
+  context: {
+    eligibleNumbers: readonly number[];
+    forcedSet: ReadonlySet<number>;
+    mainUseCounts: Map<number, number>;
+    monthlyAcceptanceNeeds: NonNullable<RwR45GenerationOptions["monthlyAcceptanceNeeds"]>;
+  },
+): MonthlyRepairResult | null => {
+  const constraints = normalizeMonthlyConstraints(context.monthlyAcceptanceNeeds.constraints);
+  let main = [...candidate.main];
+  let supp = [...candidate.supp];
+  let repaired = false;
+
+  for (let attempt = 0; attempt < RWR45_MAIN_COUNT + RWR45_SUPP_COUNT + 1; attempt += 1) {
+    const rowNumbers = [...main, ...supp];
+    const counts = countMonthlyBuckets(rowNumbers, context.monthlyAcceptanceNeeds.buckets);
+    if (countsMeetMonthlyConstraints(counts, constraints)) {
+      return {
+        candidate: {
+          ...candidate,
+          main: ascendingNumbers(main),
+          supp: ascendingNumbers(supp),
+          trace: [
+            ...(candidate.trace ?? []),
+            repaired
+              ? "PNUaRW45 monthly Acceptance Needs repair: row-safe swaps were used so this row meets the selected bucket minimums."
+              : "PNUaRW45 monthly Acceptance Needs check: this row already met the selected bucket minimums.",
+          ],
+        },
+        repaired,
+      };
+    }
+
+    const missingBucket = MONTHLY_BUCKET_KEYS.find((key) => counts[key] < constraints[key]);
+    if (!missingBucket) return null;
+
+    const rowSet = new Set(rowNumbers);
+    const basePool = context.eligibleNumbers.filter((number) => (
+      context.monthlyAcceptanceNeeds.buckets[missingBucket].has(number) && !rowSet.has(number)
+    ));
+    if (!basePool.length) return null;
+
+    const targets = replacementTargets(
+      main,
+      supp,
+      counts,
+      constraints,
+      context.monthlyAcceptanceNeeds.buckets,
+      context.forcedSet,
+    );
+    if (!targets.length) return null;
+
+    const target = targets[0];
+    if (target.section === "main") {
+      const preferred = basePool.filter((number) => (context.mainUseCounts.get(number) ?? 0) === 0);
+      const replacement = chooseFromPool(preferred.length ? preferred : basePool, 1, rng)[0];
+      if (!replacement) return null;
+      decrementMainUse(context.mainUseCounts, target.number);
+      incrementMainUse(context.mainUseCounts, replacement);
+      main[target.index] = replacement;
+    } else {
+      const replacement = chooseFromPool(basePool, 1, rng)[0];
+      if (!replacement) return null;
+      supp[target.index] = replacement;
+    }
+    repaired = true;
+  }
+
+  return null;
+};
+
 export function generateRwR45Candidates(
   rng: RandomSource = Math.random,
   options: RwR45GenerationOptions = {},
@@ -78,6 +337,12 @@ export function generateRwR45Candidates(
   const forcedSupp = forcedNumbers.slice(RWR45_MAIN_COUNT, RWR45_MAIN_COUNT + RWR45_SUPP_COUNT);
   const eligibleNumbers = Array.from({ length: RWR45_POOL_SIZE }, (_, index) => index + 1)
     .filter((number) => !excludedSet.has(number));
+  const monthlyAcceptanceNeeds = options.monthlyAcceptanceNeeds
+    ? {
+      ...options.monthlyAcceptanceNeeds,
+      constraints: normalizeMonthlyConstraints(options.monthlyAcceptanceNeeds.constraints),
+    }
+    : undefined;
 
   if (eligibleNumbers.length < RWR45_MAIN_COUNT + RWR45_SUPP_COUNT) {
     return {
@@ -88,6 +353,21 @@ export function generateRwR45Candidates(
         `[TRACE] PNUaRW45 blocked: only ${eligibleNumbers.length} eligible numbers remain after exclusions; 8 are required for each candidate.`,
       ],
     };
+  }
+
+  if (monthlyAcceptanceNeeds && hasMonthlyConstraints(monthlyAcceptanceNeeds.constraints)) {
+    const blockReason = monthlyAcceptanceBlockReason(eligibleNumbers, forcedNumbers, monthlyAcceptanceNeeds);
+    if (blockReason) {
+      return {
+        candidates: [],
+        supplementaryPool: [],
+        traceLines: [
+          "[TRACE] RwR45 / PNUaRW45 active: Count ignored; no candidates generated.",
+          `[TRACE] PNUaRW45 monthly Acceptance Needs blocked: ${blockReason}.`,
+          `[TRACE] PNUaRW45 monthly Acceptance Needs requested: ${formatMonthlyConstraints(monthlyAcceptanceNeeds.constraints)}.`,
+        ],
+      };
+    }
   }
 
   const mainFillSlotsPerCandidate = RWR45_MAIN_COUNT - forcedMain.length;
@@ -101,7 +381,7 @@ export function generateRwR45Candidates(
   let globalMainFillCursor = 0;
   let usedRowSafeFallback = globalMainFillPool.length < totalMainFillSlots;
 
-  const candidates = Array.from({ length: RWR45_CANDIDATE_COUNT }, (_, index): CandidateSet => {
+  let candidates = Array.from({ length: RWR45_CANDIDATE_COUNT }, (): CandidateSet => {
     const main: number[] = [...forcedMain];
     const supp: number[] = [...forcedSupp];
     const mainFillNeeded = RWR45_MAIN_COUNT - main.length;
@@ -143,6 +423,34 @@ export function generateRwR45Candidates(
     };
   });
 
+  let monthlyAcceptanceRepairCount = 0;
+  if (monthlyAcceptanceNeeds && hasMonthlyConstraints(monthlyAcceptanceNeeds.constraints)) {
+    const mainUseCounts = buildMainUseCounts(candidates);
+    const repairedCandidates: CandidateSet[] = [];
+    for (const candidate of candidates) {
+      const repaired = repairCandidateForMonthlyAcceptanceNeeds(candidate, rng, {
+        eligibleNumbers,
+        forcedSet,
+        mainUseCounts,
+        monthlyAcceptanceNeeds,
+      });
+      if (!repaired) {
+        return {
+          candidates: [],
+          supplementaryPool: [],
+          traceLines: [
+            "[TRACE] RwR45 / PNUaRW45 active: Count ignored; no candidates generated.",
+            `[TRACE] PNUaRW45 monthly Acceptance Needs blocked: row-safe repair could not satisfy ${formatMonthlyConstraints(monthlyAcceptanceNeeds.constraints)} without breaking forced inclusions/exclusions or row uniqueness.`,
+          ],
+        };
+      }
+      if (repaired.repaired) monthlyAcceptanceRepairCount += 1;
+      repairedCandidates.push(repaired.candidate);
+    }
+    candidates = repairedCandidates;
+    if (monthlyAcceptanceRepairCount > 0) usedRowSafeFallback = true;
+  }
+
   const traceLines = [
     "[TRACE] RwR45 / PNUaRW45 active: Count ignored; generated exactly 7 candidates.",
   ];
@@ -162,6 +470,16 @@ export function generateRwR45Candidates(
       `[TRACE] PNUaRW45 ignored forced inclusions beyond the 8-number candidate capacity: ${formatNumbers(forcedOverflow)}.`,
     );
   }
+  if (monthlyAcceptanceNeeds && hasMonthlyConstraints(monthlyAcceptanceNeeds.constraints)) {
+    traceLines.push(
+      `[TRACE] PNUaRW45 monthly Acceptance Needs honored: ${formatMonthlyConstraints(monthlyAcceptanceNeeds.constraints)} checked against all 8 numbers in every row.`,
+    );
+    if (monthlyAcceptanceRepairCount > 0) {
+      traceLines.push(
+        `[TRACE] PNUaRW45 monthly Acceptance Needs repair: ${monthlyAcceptanceRepairCount} row${monthlyAcceptanceRepairCount === 1 ? "" : "s"} needed row-safe swaps, so strict global main coverage may be reduced where the bucket minimums required it.`,
+      );
+    }
+  }
 
   const partitionDescription = forcedNumbers.length > 0 || excludedNumbers.length > 0
     ? `[TRACE] PNUaRW45 forced-aware partition: ${globalMainFillPool.length} globally unique non-forced main filler numbers across 7 rows; forced mains repeat in each row${forcedMain.length ? ` ${formatNumbers(forcedMain)}` : ""}; preferred supplementary pool ${formatNumbers(supplementaryPool)}.`
@@ -175,14 +493,16 @@ export function generateRwR45Candidates(
   }
 
   traceLines.push(
-    forcedNumbers.length > 0 || excludedNumbers.length > 0
-      ? "[TRACE] PNUaRW45 honesty note: this is still random coverage, not evidence weighting or a predictive score; active hard inclusions/exclusions are honored before random fill."
+    forcedNumbers.length > 0 || excludedNumbers.length > 0 || (monthlyAcceptanceNeeds && hasMonthlyConstraints(monthlyAcceptanceNeeds.constraints))
+      ? "[TRACE] PNUaRW45 honesty note: this is still random coverage, not evidence weighting or a predictive score; active hard inclusions/exclusions and checked Acceptance Needs counts are honored before display."
       : "[TRACE] PNUaRW45 honesty note: this is uniform random coverage, not evidence weighting or a predictive score; normal evidence filters are bypassed while the toggle is ON.",
   );
 
   return {
     candidates,
-    supplementaryPool,
+    supplementaryPool: monthlyAcceptanceNeeds && hasMonthlyConstraints(monthlyAcceptanceNeeds.constraints)
+      ? ascendingNumbers(Array.from(new Set(candidates.flatMap((candidate) => candidate.supp))))
+      : supplementaryPool,
     traceLines,
   };
 }

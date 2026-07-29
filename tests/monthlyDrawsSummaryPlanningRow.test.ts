@@ -108,7 +108,7 @@ describe("MonthlyDrawsSummaryPanel planning month rollover", () => {
     });
 
     for (let number = 1; number <= 8; number += 1) {
-      const button = container.querySelector(`button[aria-label="Select ${number}"]`) as HTMLButtonElement | null;
+      const button = container.querySelector(`button[aria-label="Select ${number}, 1x bucket"]`) as HTMLButtonElement | null;
       expect(button, `Select ${number} button`).toBeTruthy();
       await act(async () => {
         button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -167,6 +167,64 @@ describe("MonthlyDrawsSummaryPanel planning month rollover", () => {
     ]);
     expect(container.textContent).toContain("Showing 2 of 3 months");
     expect(container.textContent).not.toContain("2026-02");
+  });
+
+  it("renders the undrawn-in-month count as a centered outlined badge", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-05T12:00:00"));
+    const history = [
+      draw("2026-07-01", [1, 2, 3, 4, 5, 6], [7, 8]),
+    ];
+
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(React.createElement(MonthlyDrawsSummaryPanel, { history }));
+    });
+
+    const badge = container.querySelector('span[aria-label="37 numbers undrawn in month"]') as HTMLSpanElement | null;
+    expect(badge).toBeTruthy();
+    expect(badge?.style.display).toBe("inline-flex");
+    expect(badge?.style.borderWidth).toBe("2px");
+    expect(badge?.style.borderStyle).toBe("solid");
+    expect(badge?.style.borderRadius).toBe("999px");
+    expect((badge?.closest("td") as HTMLTableCellElement | null)?.style.textAlign).toBe("center");
+  });
+
+  it("colours Acceptance Needs number pills by monthly bucket", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-05T12:00:00"));
+    const history = [
+      draw("2026-07-01", [1, 2, 3, 4, 5, 6], [7, 8]),
+    ];
+
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(React.createElement(MonthlyDrawsSummaryPanel, { history }));
+    });
+
+    const timesOneButton = container.querySelector('button[aria-label="Select 1, 1x bucket"]') as HTMLButtonElement | null;
+    const undrawnButton = container.querySelector('button[aria-label="Select 9, Undrawn bucket"]') as HTMLButtonElement | null;
+    expect(timesOneButton).toBeTruthy();
+    expect(undrawnButton).toBeTruthy();
+
+    expect(timesOneButton?.getAttribute("data-monthly-bucket-times")).toBe("1");
+    expect(undrawnButton?.getAttribute("data-monthly-bucket-times")).toBe("0");
+    expect(timesOneButton?.style.background).not.toBe("");
+    expect(timesOneButton?.style.background).not.toBe("#fff");
+    expect(timesOneButton?.style.borderStyle).toBe("solid");
+
+    await act(async () => {
+      timesOneButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(timesOneButton?.getAttribute("aria-pressed")).toBe("true");
+    expect(timesOneButton?.style.borderWidth).toBe("2px");
   });
 
   it("keeps the current active month visible when filtering baseline month rows", async () => {

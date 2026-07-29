@@ -313,6 +313,7 @@ export function summarizeResearchDiarySetup(snapshot: AppPresetSnapshot | null |
     [setup.hotColdForcedNumbers, "Hot/cold forced"],
     [setup.hotColdExcludedNumbers, "Hot/cold excluded"],
     [setup.droughtBreakSelectedNumbers, "Drought-break forced"],
+    [setup.pasteWeightedForcedNumbers, "Paste-weighted forced"],
     [setup.selectedCarryOverBoostNumbers, "Carry-over boosted"],
   ];
   for (const [value, label] of selectionCounts) {

@@ -18,6 +18,7 @@ export type PredictionBucketKey =
 
 export type PredictionScoreResult = "hit" | "partial" | "miss" | "recorded";
 export type PredictionJournalStatus = "pending" | "locked" | "scored" | "void";
+export type PredictionJournalReviewStatus = "notReviewed" | "reviewedByUser";
 
 export interface PredictionBucketCounts extends Partial<Record<PredictionBucketKey, number>> {}
 
@@ -47,6 +48,62 @@ export interface PredictionJournalSetupSummary {
   selections: string[];
 }
 
+export type PredictionJournalDroughtBreakCategory =
+  | "strict-drought"
+  | "empirical-hazard"
+  | "strict-and-empirical"
+  | "outside-shortlist";
+
+export interface PredictionJournalDroughtBreakNumberEvidence {
+  number: number;
+  category: PredictionJournalDroughtBreakCategory;
+  label: string;
+  strictDrought: boolean;
+  empiricalHazard: boolean;
+}
+
+export interface PredictionJournalDroughtBreakProvenance {
+  scope: "mains+supps";
+  strictThreshold: number;
+  shortlistTop: number;
+  strictDroughtShortlistNumbers: number[];
+  empiricalHazardShortlistNumbers: number[];
+  selectedNumbers: number[];
+  selectedAnyShortlistNumbers: number[];
+  selectedOutsideShortlistNumbers: number[];
+  selectedStrictDroughtNumbers: number[];
+  selectedEmpiricalHazardNumbers: number[];
+  selectedBothNumbers: number[];
+  anySelectedFromShortlist: boolean;
+  allSelectedFromShortlist: boolean;
+  classifications: PredictionJournalDroughtBreakNumberEvidence[];
+}
+
+export interface PredictionJournalProvenance {
+  version: 1;
+  selectedNumbers: number[];
+  inclusionSources: {
+    userSelected: number[];
+    trend: number[];
+    latestNeighbourTargets: number[];
+    hotCold: number[];
+    droughtBreakForced: number[];
+    pasteWeightedMissing: number[];
+    carryOverBoosted: number[];
+    effectiveGenerationForced: number[];
+  };
+  exclusionSources: {
+    user: number[];
+    hotCold: number[];
+    autoUnselected: number[];
+    mainBucketAuto: number[];
+    sde1: number[];
+    hc3: number[];
+    effectiveGeneration: number[];
+  };
+  droughtBreakShortlist: PredictionJournalDroughtBreakProvenance;
+}
+
 export interface PredictionJournalEntry {
   id: string;
   createdAt: string;
@@ -55,9 +112,13 @@ export interface PredictionJournalEntry {
   anchorLatestDrawDate: string;
   anchorDrawFingerprint: string;
   targetKind: PredictionTargetKind;
+  reviewStatus?: PredictionJournalReviewStatus;
+  reviewedAt?: string;
+  archivedAt?: string;
   inputs: PredictionJournalInputs;
   setupSnapshot?: AppPresetSnapshot;
   setupSummary?: PredictionJournalSetupSummary;
+  provenance?: PredictionJournalProvenance;
 }
 
 export interface BuildPredictionJournalEntryOptions {
@@ -67,6 +128,7 @@ export interface BuildPredictionJournalEntryOptions {
   targetKind: PredictionTargetKind;
   inputs: PredictionJournalInputs;
   setupSnapshot?: AppPresetSnapshot | null;
+  reviewStatus?: PredictionJournalReviewStatus;
   previousEntry?: PredictionJournalEntry;
 }
 
@@ -214,6 +276,10 @@ const normalizeRange = (input: unknown): { min?: number; max?: number } | undefi
   return { min, max };
 };
 
+const normalizeReviewStatus = (value: unknown): PredictionJournalReviewStatus => (
+  value === "reviewedByUser" ? "reviewedByUser" : "notReviewed"
+);
+
 const cloneSetupSnapshot = (snapshot: AppPresetSnapshot | null | undefined): AppPresetSnapshot | undefined => {
   if (!snapshot) return undefined;
   try {
@@ -281,6 +347,136 @@ const uniqueDraftNumbers = (...lists: Array<number[] | undefined>): number[] => 
   return output;
 };
 
+const setupNumberList = (setup: Partial<AppPresetSnapshot> & Record<string, any>, key: string): number[] => (
+  normalizeNumberList(setup[key], 1, 45) ?? []
+);
+
+const buildDroughtBreakLabel = (category: PredictionJournalDroughtBreakCategory, threshold: number): string => {
+  if (category === "strict-and-empirical") return `Strict drought ${threshold}+ and empirical hazard`;
+  if (category === "strict-drought") return `Strict drought ${threshold}+`;
+  if (category === "empirical-hazard") return "Empirical hazard";
+  return "Outside current drought-break shortlist";
+};
+
+export function buildPredictionJournalProvenance(
+  inputs: PredictionJournalInputs,
+  snapshot: AppPresetSnapshot | null | undefined,
+): PredictionJournalProvenance {
+  const setup = (snapshot ?? {}) as Partial<AppPresetSnapshot> & Record<string, any>;
+  const selectedNumbers = normalizeNumberList(inputs.numbers, 1, 45) ?? [];
+  const userSelected = setupNumberList(setup, "userSelectedNumbers");
+  const trend = setupNumberList(setup, "trendSelectedNumbers");
+  const latestNeighbourTargets = setupNumberList(setup, "previousNeighbourConstraintNumbers");
+  const hotCold = setupNumberList(setup, "hotColdForcedNumbers");
+  const droughtBreakForced = setupNumberList(setup, "droughtBreakSelectedNumbers");
+  const pasteWeightedMissing = setupNumberList(setup, "pasteWeightedForcedNumbers");
+  const carryOverBoosted = setupNumberList(setup, "selectedCarryOverBoostNumbers");
+  const effectiveGenerationForced = setupNumberList(setup, "generationForcedNumbers");
+  const userExcluded = setupNumberList(setup, "excludedNumbers");
+  const hotColdExcluded = setupNumberList(setup, "hotColdExcludedNumbers");
+  const autoUnselected = setupNumberList(setup, "autoExcludedFromSelection");
+  const mainBucketAuto = setupNumberList(setup, "mainConstraintAutoExcludedNumbers");
+  const sde1 = setupNumberList(setup, "sde1Exclusions");
+  const hc3 = setupNumberList(setup, "hc3Exclusions");
+  const effectiveGenerationExcluded = setupNumberList(setup, "allExcludedNumbers").length
+    ? setupNumberList(setup, "allExcludedNumbers")
+    : uniqueDraftNumbers(
+      setupNumberList(setup, "generationExcludedNumbers"),
+      sde1,
+      hc3,
+    );
+  const strictThresholdRaw = Number(setup.droughtBreakStrictThreshold ?? 6);
+  const strictThreshold = Number.isFinite(strictThresholdRaw) && strictThresholdRaw > 0
+    ? Math.round(strictThresholdRaw)
+    : 6;
+  const shortlistTopRaw = Number(setup.droughtBreakShortlistTop ?? 8);
+  const shortlistTop = Number.isFinite(shortlistTopRaw) && shortlistTopRaw > 0
+    ? Math.round(shortlistTopRaw)
+    : 8;
+  const strictDroughtShortlistNumbers = setupNumberList(setup, "droughtBreakStrictShortlistNumbers");
+  const empiricalHazardShortlistNumbers = setupNumberList(setup, "droughtBreakEmpiricalHazardNumbers");
+  const strictSet = new Set(strictDroughtShortlistNumbers);
+  const empiricalSet = new Set(empiricalHazardShortlistNumbers);
+
+  const classifications = selectedNumbers.map((number) => {
+    const strictDrought = strictSet.has(number);
+    const empiricalHazard = empiricalSet.has(number);
+    const category: PredictionJournalDroughtBreakCategory = strictDrought && empiricalHazard
+      ? "strict-and-empirical"
+      : strictDrought
+        ? "strict-drought"
+        : empiricalHazard
+          ? "empirical-hazard"
+          : "outside-shortlist";
+    return {
+      number,
+      category,
+      label: buildDroughtBreakLabel(category, strictThreshold),
+      strictDrought,
+      empiricalHazard,
+    };
+  });
+
+  const selectedStrictDroughtNumbers = selectedNumbers.filter((number) => strictSet.has(number));
+  const selectedEmpiricalHazardNumbers = selectedNumbers.filter((number) => empiricalSet.has(number));
+  const selectedBothNumbers = selectedNumbers.filter((number) => strictSet.has(number) && empiricalSet.has(number));
+  const selectedAnyShortlistNumbers = selectedNumbers.filter((number) => strictSet.has(number) || empiricalSet.has(number));
+  const selectedOutsideShortlistNumbers = selectedNumbers.filter((number) => !strictSet.has(number) && !empiricalSet.has(number));
+
+  return {
+    version: 1,
+    selectedNumbers,
+    inclusionSources: {
+      userSelected,
+      trend,
+      latestNeighbourTargets,
+      hotCold,
+      droughtBreakForced,
+      pasteWeightedMissing,
+      carryOverBoosted,
+      effectiveGenerationForced: effectiveGenerationForced.length ? effectiveGenerationForced : uniqueDraftNumbers(trend, latestNeighbourTargets, hotCold, droughtBreakForced, pasteWeightedMissing, carryOverBoosted),
+    },
+    exclusionSources: {
+      user: userExcluded,
+      hotCold: hotColdExcluded,
+      autoUnselected,
+      mainBucketAuto,
+      sde1,
+      hc3,
+      effectiveGeneration: effectiveGenerationExcluded,
+    },
+    droughtBreakShortlist: {
+      scope: "mains+supps",
+      strictThreshold,
+      shortlistTop,
+      strictDroughtShortlistNumbers,
+      empiricalHazardShortlistNumbers,
+      selectedNumbers,
+      selectedAnyShortlistNumbers,
+      selectedOutsideShortlistNumbers,
+      selectedStrictDroughtNumbers,
+      selectedEmpiricalHazardNumbers,
+      selectedBothNumbers,
+      anySelectedFromShortlist: selectedAnyShortlistNumbers.length > 0,
+      allSelectedFromShortlist: selectedNumbers.length > 0 && selectedOutsideShortlistNumbers.length === 0,
+      classifications,
+    },
+  };
+}
+
+const formatDroughtBreakProvenanceNote = (provenance: PredictionJournalDroughtBreakProvenance): string => {
+  if (provenance.selectedNumbers.length === 0) {
+    return "Drought-break shortlist check: no prediction numbers selected.";
+  }
+  return [
+    `Drought-break shortlist check: matched ${formatDraftNumbers(provenance.selectedAnyShortlistNumbers)}`,
+    `all selected from shortlist: ${provenance.allSelectedFromShortlist ? "yes" : "no"}`,
+    `Strict drought ${provenance.strictThreshold}+: ${formatDraftNumbers(provenance.selectedStrictDroughtNumbers)}`,
+    `Empirical hazard: ${formatDraftNumbers(provenance.selectedEmpiricalHazardNumbers)}`,
+    `outside shortlist: ${formatDraftNumbers(provenance.selectedOutsideShortlistNumbers)}`,
+  ].join("; ") + ".";
+};
+
 const positiveBucketCounts = (counts: PredictionBucketCounts | undefined): PredictionBucketCounts | undefined => {
   if (!counts) return undefined;
   const output: PredictionBucketCounts = {};
@@ -319,10 +515,19 @@ export function buildPredictionJournalDraftFromSetup(snapshot: AppPresetSnapshot
   const latestNeighbourForced = normalizeNumberList(setup.previousNeighbourConstraintNumbers, 1, 45) ?? [];
   const hotColdForced = normalizeNumberList(setup.hotColdForcedNumbers, 1, 45) ?? [];
   const droughtForced = normalizeNumberList(setup.droughtBreakSelectedNumbers, 1, 45) ?? [];
+  const pasteWeightedForced = normalizeNumberList(setup.pasteWeightedForcedNumbers, 1, 45) ?? [];
   const carryOverBoosted = normalizeNumberList(setup.selectedCarryOverBoostNumbers, 1, 45) ?? [];
   const userExcluded = normalizeNumberList(setup.excludedNumbers, 1, 45) ?? [];
   const hotColdExcluded = normalizeNumberList(setup.hotColdExcludedNumbers, 1, 45) ?? [];
-  const forcedUnion = uniqueDraftNumbers(trendForced, latestNeighbourForced, hotColdForced, droughtForced, carryOverBoosted);
+  const autoSelectionExcluded = normalizeNumberList(setup.autoExcludedFromSelection, 1, 45) ?? [];
+  const bucketAutoExcluded = normalizeNumberList(setup.mainConstraintAutoExcludedNumbers, 1, 45) ?? [];
+  const effectiveExcluded = normalizeNumberList(setup.effectiveExcludedNumbers, 1, 45) ?? uniqueDraftNumbers(userExcluded, hotColdExcluded, autoSelectionExcluded);
+  const generationExcluded = normalizeNumberList(setup.generationExcludedNumbers, 1, 45) ?? uniqueDraftNumbers(effectiveExcluded, bucketAutoExcluded);
+  const sde1Excluded = normalizeNumberList(setup.sde1Exclusions, 1, 45) ?? [];
+  const hc3Excluded = normalizeNumberList(setup.hc3Exclusions, 1, 45) ?? [];
+  const allExcluded = normalizeNumberList(setup.allExcludedNumbers, 1, 45) ?? uniqueDraftNumbers(generationExcluded, sde1Excluded, hc3Excluded);
+  const forcedUnion = uniqueDraftNumbers(trendForced, latestNeighbourForced, hotColdForced, droughtForced, pasteWeightedForced, carryOverBoosted);
+  const effectiveForced = normalizeNumberList(setup.generationForcedNumbers, 1, 45) ?? forcedUnion;
   const candidateNumbers = uniqueDraftNumbers(userSelected, forcedUnion);
   const copiedNumbers = candidateNumbers.slice(0, 8);
   const selectedRatios = Array.isArray(setup.selectedRatios)
@@ -366,11 +571,14 @@ export function buildPredictionJournalDraftFromSetup(snapshot: AppPresetSnapshot
     }
   }
 
-  notes.push(`SDE1: ${knobs.enableSDE1 ? "ON" : "OFF"}.`);
-  notes.push(`HC3: ${knobs.enableHC3 ? "ON" : "OFF"}.`);
+  notes.push(`SDE1: ${knobs.enableSDE1 ? `ON; exclusions ${formatDraftNumbers(sde1Excluded)}` : "OFF"}.`);
+  notes.push(`HC3: ${knobs.enableHC3 ? `ON; exclusions ${formatDraftNumbers(hc3Excluded)}` : "OFF"}.`);
   notes.push(`User selected numbers: ${formatDraftNumbers(userSelected)}.`);
-  notes.push(`Forced/boosted inclusion sources: trend ${formatDraftNumbers(trendForced)}; latest +/- targets ${formatDraftNumbers(latestNeighbourForced)}; hot/cold ${formatDraftNumbers(hotColdForced)}; drought-break ${formatDraftNumbers(droughtForced)}; carry-over boosted ${formatDraftNumbers(carryOverBoosted)}.`);
-  notes.push(`Forced exclusions: user ${formatDraftNumbers(userExcluded)}; hot/cold ${formatDraftNumbers(hotColdExcluded)}.`);
+  notes.push(`Forced/boosted inclusion sources: trend ${formatDraftNumbers(trendForced)}; latest +/- targets ${formatDraftNumbers(latestNeighbourForced)}; hot/cold ${formatDraftNumbers(hotColdForced)}; drought-break ${formatDraftNumbers(droughtForced)}; paste-weighted missing ${formatDraftNumbers(pasteWeightedForced)}; carry-over boosted ${formatDraftNumbers(carryOverBoosted)}.`);
+  notes.push(`Effective generation forced numbers: ${formatDraftNumbers(effectiveForced)}.`);
+  notes.push(`Exclusion sources: user ${formatDraftNumbers(userExcluded)}; hot/cold ${formatDraftNumbers(hotColdExcluded)}; auto-unselected ${formatDraftNumbers(autoSelectionExcluded)}; main-bucket auto ${formatDraftNumbers(bucketAutoExcluded)}; SDE1 ${formatDraftNumbers(sde1Excluded)}; HC3 ${formatDraftNumbers(hc3Excluded)}.`);
+  notes.push(`Effective generation exclusions: ${formatDraftNumbers(allExcluded)}.`);
+  notes.push(formatDroughtBreakProvenanceNote(buildPredictionJournalProvenance(inputs, snapshot).droughtBreakShortlist));
   notes.push(`Scoring influence: ${setup.scoringGenerationInfluence ?? "off"}; selected-number boost: ${setup.selectedBoostEnabled ? `ON x${setup.selectedBoostFactor ?? "-"}` : "OFF"}.`);
   notes.push("Review this draft before saving; copied values are starting points, not predictions made by Windfall.");
 
@@ -396,8 +604,8 @@ export function summarizePredictionJournalSetup(snapshot: AppPresetSnapshot | nu
     `Extra MiAN post-filter: ${setup.acceptanceNeedsEnabled ? (setup.acceptanceNeedsHardExclude ? "hard exclude" : "on") : "off"}`,
   ];
   const filters: string[] = [
-    `SDE1 ${knobs.enableSDE1 ? "on" : "off"}`,
-    `HC3 ${knobs.enableHC3 ? "on" : "off"}`,
+    `SDE1 ${knobs.enableSDE1 ? `on (${countList(setup.sde1Exclusions)})` : "off"}`,
+    `HC3 ${knobs.enableHC3 ? `on (${countList(setup.hc3Exclusions)})` : "off"}`,
   ];
   const sumFilter = formatSumFilter(setup.sumFilter);
   if (sumFilter) filters.push(sumFilter);
@@ -414,7 +622,10 @@ export function summarizePredictionJournalSetup(snapshot: AppPresetSnapshot | nu
     [setup.hotColdForcedNumbers, "Hot/cold forced"],
     [setup.hotColdExcludedNumbers, "Hot/cold excluded"],
     [setup.droughtBreakSelectedNumbers, "Drought-break forced"],
+    [setup.pasteWeightedForcedNumbers, "Paste-weighted forced"],
     [setup.selectedCarryOverBoostNumbers, "Carry-over boosted"],
+    [setup.generationForcedNumbers, "Effective generation forced"],
+    [setup.allExcludedNumbers, "Effective generation exclusions"],
   ];
   for (const [value, label] of selectionCounts) {
     const count = countList(value);
@@ -475,6 +686,11 @@ export function buildPredictionJournalEntry(options: BuildPredictionJournalEntry
   const setupSnapshot = options.setupSnapshot === undefined
     ? previous?.setupSnapshot
     : cloneSetupSnapshot(options.setupSnapshot);
+  const inputs = normalizePredictionJournalInputs(options.inputs);
+  const reviewStatus = normalizeReviewStatus(options.reviewStatus ?? previous?.reviewStatus);
+  const reviewedAt = reviewStatus === "reviewedByUser"
+    ? previous?.reviewStatus === "reviewedByUser" && previous.reviewedAt ? previous.reviewedAt : now
+    : undefined;
 
   return {
     id: previous?.id ?? options.id ?? `prediction-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
@@ -484,9 +700,13 @@ export function buildPredictionJournalEntry(options: BuildPredictionJournalEntry
     anchorLatestDrawDate: previous?.anchorLatestDrawDate ?? options.latestDraw.date,
     anchorDrawFingerprint: previous?.anchorDrawFingerprint ?? drawFingerprint(options.latestDraw),
     targetKind: options.targetKind,
-    inputs: normalizePredictionJournalInputs(options.inputs),
+    reviewStatus,
+    reviewedAt,
+    archivedAt: previous?.archivedAt,
+    inputs,
     setupSnapshot,
     setupSummary: setupSnapshot ? summarizePredictionJournalSetup(setupSnapshot) : previous?.setupSummary,
+    provenance: buildPredictionJournalProvenance(inputs, setupSnapshot),
   };
 }
 
@@ -785,10 +1005,18 @@ export function loadPredictionJournalEntries(storage: Storage = window.localStor
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(isPredictionJournalEntry).map((entry) => ({
-      ...entry,
-      inputs: normalizePredictionJournalInputs(entry.inputs),
-    }));
+    return parsed.filter(isPredictionJournalEntry).map((entry) => {
+      const inputs = normalizePredictionJournalInputs(entry.inputs);
+      const reviewStatus = normalizeReviewStatus(entry.reviewStatus);
+      return {
+        ...entry,
+        inputs,
+        reviewStatus,
+        reviewedAt: reviewStatus === "reviewedByUser" && typeof entry.reviewedAt === "string" ? entry.reviewedAt : undefined,
+        archivedAt: typeof entry.archivedAt === "string" ? entry.archivedAt : undefined,
+        provenance: buildPredictionJournalProvenance(inputs, entry.setupSnapshot),
+      };
+    });
   } catch {
     return [];
   }

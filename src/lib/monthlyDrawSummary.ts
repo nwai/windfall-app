@@ -214,6 +214,69 @@ export const bucketLabelForTimes = (times: number): string => {
   return times >= DEFAULT_MAX_BUCKET ? "8x+" : `${times}x`;
 };
 
+export interface MonthlyBucketNumberDisplay {
+  key: MonthlyBucketKey;
+  times: number;
+  label: string;
+  color: string;
+  softColor: string;
+  textColor: string;
+}
+
+const MONTHLY_BUCKET_DISPLAY_COLORS: Record<number, { color: string; softColor: string }> = {
+  0: { color: "#64748b", softColor: "#f1f5f9" },
+  1: { color: "#2563eb", softColor: "#eff6ff" },
+  2: { color: "#16a34a", softColor: "#f0fdf4" },
+  3: { color: "#0891b2", softColor: "#ecfeff" },
+  4: { color: "#ca8a04", softColor: "#fefce8" },
+  5: { color: "#ea580c", softColor: "#fff7ed" },
+  6: { color: "#dc2626", softColor: "#fef2f2" },
+  7: { color: "#be123c", softColor: "#fff1f2" },
+  8: { color: "#7c3aed", softColor: "#f5f3ff" },
+};
+
+const textColorForBackground = (hexColor: string): string => {
+  const normalized = hexColor.replace("#", "");
+  if (normalized.length !== 6) return "#fff";
+  const red = Number.parseInt(normalized.slice(0, 2), 16);
+  const green = Number.parseInt(normalized.slice(2, 4), 16);
+  const blue = Number.parseInt(normalized.slice(4, 6), 16);
+  const luminance = (0.299 * red + 0.587 * green + 0.114 * blue) / 255;
+  return luminance > 0.54 ? "#111827" : "#fff";
+};
+
+export const monthlyBucketDisplayForTimes = (times: number): MonthlyBucketNumberDisplay => {
+  const clampedTimes = Math.min(Math.max(0, Math.floor(Number.isFinite(times) ? times : 0)), DEFAULT_MAX_BUCKET);
+  const palette = MONTHLY_BUCKET_DISPLAY_COLORS[clampedTimes] ?? MONTHLY_BUCKET_DISPLAY_COLORS[DEFAULT_MAX_BUCKET];
+  return {
+    key: bucketKeyForTimes(clampedTimes),
+    times: clampedTimes,
+    label: bucketLabelForTimes(clampedTimes),
+    color: palette.color,
+    softColor: palette.softColor,
+    textColor: textColorForBackground(palette.color),
+  };
+};
+
+export const monthlyBucketTimesForNumber = (
+  buckets: MonthlyBucketSets | null | undefined,
+  number: number,
+): number | null => {
+  if (!buckets) return null;
+  for (let index = 0; index < MONTHLY_BUCKET_KEYS.length; index += 1) {
+    if (buckets[MONTHLY_BUCKET_KEYS[index]].has(number)) return index;
+  }
+  return null;
+};
+
+export const monthlyBucketDisplayForNumber = (
+  buckets: MonthlyBucketSets | null | undefined,
+  number: number,
+): MonthlyBucketNumberDisplay | null => {
+  const times = monthlyBucketTimesForNumber(buckets, number);
+  return times === null ? null : monthlyBucketDisplayForTimes(times);
+};
+
 export const monthlyFrequencyConstraintsFromSelections = (
   selectedByBucket: MonthlyBucketSelections,
 ): MonthlyFrequencyConstraints => ({

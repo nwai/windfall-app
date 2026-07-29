@@ -26,4 +26,32 @@ describe("candidate generation hard-filter defaults", () => {
     expect(appSource).toContain("applyConfiguredReadinessHardFilters(processedCandidates)");
     expect(appSource).toContain("applyConfiguredReadinessHardFilters(processed)");
   });
+
+  it("keeps disabled readiness component filters at zero threshold", () => {
+    const appSource = readFileSync(resolve(__dirname, "../src/App.tsx"), "utf8");
+
+    expect(appSource).toContain("thresholdPercent: enabled ? clampPercent(rule.thresholdPercent, 0) : 0");
+    expect(appSource).toContain("thresholdPercent: event.target.checked ? previous[key].thresholdPercent : 0");
+    expect(appSource).toContain("disabled={!rule.enabled}");
+  });
+
+  it("starts Rdy scoring weights neutral and preserves explicit Off controls", () => {
+    const appSource = readFileSync(resolve(__dirname, "../src/App.tsx"), "utf8");
+    const generatedSource = readFileSync(resolve(__dirname, "../src/components/candidates/GeneratedCandidatesPanel.tsx"), "utf8");
+    const presetsSource = readFileSync(resolve(__dirname, "../src/lib/presets.ts"), "utf8");
+
+    const defaultRdyWeightsBlock = appSource.match(/const DEFAULT_RDY_WEIGHTS: ReadinessWeights = \{[\s\S]*?\n\};/)?.[0] ?? "";
+    const defaultRdyOffBlock = appSource.match(/const DEFAULT_RDY_WEIGHT_OFF_STATE: RdyWeightOffState = \{[\s\S]*?\n\};/)?.[0] ?? "";
+
+    expect(defaultRdyWeightsBlock).toContain("idm: 0");
+    expect(defaultRdyWeightsBlock).toContain("conv: 0");
+    expect(defaultRdyWeightsBlock).toContain("oga: 0");
+    expect(defaultRdyOffBlock).toContain("idm: true");
+    expect(defaultRdyOffBlock).toContain("conv: true");
+    expect(defaultRdyOffBlock).toContain("oga: true");
+    expect(appSource).toContain("rdyWeights={effectiveRdyWeights}");
+    expect(appSource).toContain("rdyWeightOffState: { ...rdyWeightOffState }");
+    expect(generatedSource).toContain("rdyWeights = { idm: 0, conv: 0, oga: 0 }");
+    expect(presetsSource).toContain("rdyWeightOffState?: Partial<Record<\"idm\" | \"conv\" | \"oga\", boolean>>");
+  });
 });

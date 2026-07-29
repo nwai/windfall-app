@@ -22,6 +22,22 @@ const setInputValue = (input: HTMLInputElement | HTMLTextAreaElement, value: str
   input.dispatchEvent(new Event("change", { bubbles: true }));
 };
 
+const controlByLabel = <T extends HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
+  container: HTMLElement,
+  labelText: string,
+): T => {
+  const label = Array.from(container.querySelectorAll("label"))
+    .find((candidate) => candidate.textContent?.trim() === labelText);
+  const ariaControl = container.querySelector(
+    `input[aria-label="${labelText}"], select[aria-label="${labelText}"], textarea[aria-label="${labelText}"]`,
+  );
+  expect(label || ariaControl).toBeTruthy();
+  const control = label?.htmlFor ? label.ownerDocument.getElementById(label.htmlFor) : label?.querySelector("input, select, textarea");
+  const resolvedControl = control ?? ariaControl;
+  expect(resolvedControl).toBeTruthy();
+  return resolvedControl as T;
+};
+
 describe("PredictionJournalPanel", () => {
   beforeEach(() => {
     window.localStorage.clear();
@@ -39,12 +55,22 @@ describe("PredictionJournalPanel", () => {
 
     expect(html).toContain("Prediction Journal &amp; Scorecard");
     expect(html).toContain("Anchor latest draw");
+    expect(html).toContain("windfall-prediction-journal-anchor-numbers");
+    expect(html).toContain("windfall-prediction-journal-top-grid");
+    expect(html).toContain("windfall-prediction-journal-text-grid");
+    expect(html).toContain("windfall-prediction-journal-text-stack");
+    expect(html).toContain("windfall-prediction-journal-text-box");
+    expect(html).toContain("windfall-prediction-journal-notes-field");
     expect(html).toContain("6/24/26");
+    expect(html).toContain("Review status");
+    expect(html).toContain("Not reviewed");
+    expect(html).toContain("Reviewed by user");
     expect(html).toContain("No prediction fields are required");
     expect(html).toContain("Save prediction");
     expect(html).toContain("No journal entries yet");
     expect(html).not.toContain("<h3");
     expect(html).not.toContain("1,2,3,4,5,6");
+    expect(html).not.toContain("Mark reviewed only after you have checked the draft. Future scoring can use this flag to include or ignore entries.");
   });
 
   it("shows the next scheduled draw date beside the target window control", () => {
@@ -78,6 +104,7 @@ describe("PredictionJournalPanel", () => {
       now: "2026-06-03T10:30:00.000Z",
       latestDraw: history[1],
       targetKind: "nextDraw",
+      reviewStatus: "reviewedByUser",
       inputs: {
         oddEvenRatio: "3:5",
         numbers: [1, 12, 20, 45],
@@ -90,6 +117,7 @@ describe("PredictionJournalPanel", () => {
     );
 
     expect(html).toContain("Scored");
+    expect(html).toContain("Reviewed by user");
     expect(html).toContain("Locked after target draw arrived");
     expect(html).toContain("Next draw");
     expect(html).toContain("3 checks");
@@ -134,6 +162,12 @@ describe("PredictionJournalPanel", () => {
       setInputValue(notesTextArea, "Note mentions 4, 5, 6 and 7, but they are not listed picks.");
     });
 
+    const reviewedRadio = container.querySelector("input[value='reviewedByUser']") as HTMLInputElement;
+    await act(async () => {
+      reviewedRadio.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      reviewedRadio.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
     const saveButton = Array.from(container.querySelectorAll("button"))
       .find((button) => button.textContent === "Save prediction") as HTMLButtonElement;
 
@@ -143,6 +177,7 @@ describe("PredictionJournalPanel", () => {
 
     const rowButton = container.querySelector("button[aria-controls^='prediction-journal-entry-']") as HTMLButtonElement;
     expect(rowButton.textContent).toContain("Listed numbers: 3");
+    expect(rowButton.textContent).toContain("Reviewed by user");
     expect(rowButton.textContent).not.toContain("7 numbers");
 
     await act(async () => {
@@ -151,6 +186,90 @@ describe("PredictionJournalPanel", () => {
 
     expect(container.textContent).toContain("User-selected strip: 7");
     expect(container.textContent).not.toContain("User selected: 7");
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it("shows the not-reviewed guidance only after saving an unreviewed entry", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(React.createElement(PredictionJournalPanel, {
+        history: [
+          draw("6/22/26", [2, 4, 6, 8, 10, 12], [14, 16]),
+          draw("6/24/26", [1, 3, 5, 7, 9, 11], [13, 15]),
+        ],
+      }));
+    });
+
+    const alertText = "Mark reviewed only after you have checked the draft. Future scoring can use this flag to include or ignore entries.";
+    expect(container.textContent).not.toContain(alertText);
+
+    const notesTextArea = Array.from(container.querySelectorAll("textarea"))
+      .find((textarea) => textarea.placeholder === "Why this looked plausible before the draw...") as HTMLTextAreaElement;
+
+    await act(async () => {
+      setInputValue(notesTextArea, "Quick capture, not reviewed yet.");
+    });
+
+    const saveButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent === "Save prediction") as HTMLButtonElement;
+
+    await act(async () => {
+      saveButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    const alert = container.querySelector("[role='alert']");
+    expect(alert?.textContent).toContain(alertText);
+    const rowButton = container.querySelector("button[aria-controls^='prediction-journal-entry-']") as HTMLButtonElement;
+    expect(rowButton.textContent).toContain("Not reviewed");
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it("autofills diagnostic fields from numbers entered into the Numbers field", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(React.createElement(PredictionJournalPanel, {
+        history: [
+          draw("6/29/26", [1, 2, 3, 4, 5, 6], [7, 8]),
+          draw("7/1/26", [1, 10, 20, 30, 40, 45], [2, 12]),
+          draw("7/3/26", [3, 13, 23, 33, 43, 5], [15, 25]),
+        ],
+        now: () => "2026-07-04T09:00:00.000Z",
+      }));
+    });
+
+    const numbersTextArea = container.querySelector("textarea[placeholder='12, 14, 22, 27']") as HTMLTextAreaElement;
+
+    await act(async () => {
+      setInputValue(numbersTextArea, "1, 4, 10, 11, 22, 35, 40, 45");
+    });
+
+    expect((controlByLabel<HTMLInputElement>(container, "Odd/even ratio")).value).toBe("4:4");
+    expect((controlByLabel<HTMLTextAreaElement>(container, "Terminal digits")).value).toBe("0, 1, 2, 4, 5");
+    expect((controlByLabel<HTMLInputElement>(container, "Undrawn")).value).toBe("4");
+    expect((controlByLabel<HTMLInputElement>(container, "1x")).value).toBe("4");
+    expect((controlByLabel<HTMLInputElement>(container, "Single-digit")).value).toBe("2");
+    expect((controlByLabel<HTMLInputElement>(container, "Double-digit")).value).toBe("6");
+    expect((controlByLabel<HTMLInputElement>(container, "Sum min")).value).toBe("168");
+    expect((controlByLabel<HTMLInputElement>(container, "Sum max")).value).toBe("168");
+    expect((controlByLabel<HTMLInputElement>(container, "U/D/F ratio")).value).toBe("0/0/8");
+    expect((controlByLabel<HTMLInputElement>(container, "Repeat count")).value).toBe("0");
+    expect((controlByLabel<HTMLInputElement>(container, "±1/±2 count")).value).toBe("6");
+    expect((controlByLabel<HTMLInputElement>(container, "Drought count")).value).toBe("0");
+    expect((controlByLabel<HTMLInputElement>(container, "Carry-over count")).value).toBe("4");
 
     await act(async () => {
       root.unmount();
@@ -180,6 +299,12 @@ describe("PredictionJournalPanel", () => {
         monthEndCarryOverStrength: "strong",
         userSelectedNumbers: [1, 2, 3],
         excludedNumbers: [44],
+        generationForcedNumbers: [1, 12],
+        allExcludedNumbers: [44],
+        droughtBreakStrictShortlistNumbers: [12, 31],
+        droughtBreakEmpiricalHazardNumbers: [20, 31, 45],
+        droughtBreakShortlistTop: 8,
+        droughtBreakStrictThreshold: 6,
       } as any,
     });
 
@@ -209,6 +334,7 @@ describe("PredictionJournalPanel", () => {
       now: "2026-06-03T10:30:00.000Z",
       latestDraw: history[1],
       targetKind: "nextDraw",
+      reviewStatus: "reviewedByUser",
       inputs: {
         oddEvenRatio: "3:5",
         numbers: [1, 12, 20, 45],
@@ -226,6 +352,12 @@ describe("PredictionJournalPanel", () => {
         monthEndCarryOverStrength: "strong",
         userSelectedNumbers: [1, 2, 3],
         excludedNumbers: [44],
+        generationForcedNumbers: [1, 12],
+        allExcludedNumbers: [44],
+        droughtBreakStrictShortlistNumbers: [12, 31],
+        droughtBreakEmpiricalHazardNumbers: [20, 31, 45],
+        droughtBreakShortlistTop: 8,
+        droughtBreakStrictThreshold: 6,
       } as any,
     });
 
@@ -237,6 +369,7 @@ describe("PredictionJournalPanel", () => {
     expect(rowButton).toBeTruthy();
     expect(rowButton.getAttribute("aria-expanded")).toBe("false");
     expect(container.textContent).toContain("Scored");
+    expect(container.textContent).toContain("Reviewed by user");
     expect(container.textContent).toContain("3 checks");
     expect(container.textContent).toContain("Saved setup");
     expect(container.textContent).not.toContain("Testing a compact journal row.");
@@ -255,6 +388,19 @@ describe("PredictionJournalPanel", () => {
     expect(container.textContent).toContain("Partial");
     expect(container.textContent).toContain("Hits: 1, 12, 45");
     expect(container.textContent).toContain("WFMQYH Custom 13");
+    const provenance = container.querySelector("[data-testid='prediction-structured-provenance']");
+    expect(provenance).toBeTruthy();
+    expect(provenance?.textContent).toContain("Structured provenance");
+    expect(provenance?.textContent).toContain("Numbers 1, 12, 20, 45");
+    expect(provenance?.textContent).toContain("Forced 1, 12");
+    expect(provenance?.textContent).toContain("Excluded 44");
+    expect(provenance?.textContent).toContain("Any shortlist yes");
+    expect(provenance?.textContent).toContain("All from shortlist no");
+    expect(provenance?.textContent).toContain("Strict drought 6+ 12");
+    expect(provenance?.textContent).toContain("Empirical hazard 20, 45");
+    expect(provenance?.textContent).toContain("Outside shortlist 1");
+    expect(provenance?.textContent).toContain("12: Strict drought 6+");
+    expect(provenance?.textContent).toContain("20: Empirical hazard");
     expect(container.querySelector("table")).toBeNull();
     const immediateTile = container.querySelector("[data-testid='prediction-immediate-next-draw']");
     expect(immediateTile).toBeTruthy();
@@ -266,6 +412,33 @@ describe("PredictionJournalPanel", () => {
     expect(scorecardGrid?.textContent).toContain("Actual");
     expect(scorecardGrid?.textContent).toContain("Result");
     expect(scorecardGrid?.querySelectorAll("[data-testid='prediction-scorecard-tile']").length).toBe(3);
+
+    const archiveButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent === "Archive") as HTMLButtonElement;
+    expect(archiveButton).toBeTruthy();
+
+    await act(async () => {
+      archiveButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(container.textContent).toContain("Prediction archived");
+    expect(container.textContent).toContain("Show archived (1)");
+    expect(container.textContent).toContain("No active journal entries");
+
+    const showArchivedButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent === "Show archived (1)") as HTMLButtonElement;
+    expect(showArchivedButton).toBeTruthy();
+
+    await act(async () => {
+      showArchivedButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(container.textContent).toContain("Archived");
+    const archivedRowButton = container.querySelector("button[aria-controls^='prediction-journal-entry-']") as HTMLButtonElement;
+    await act(async () => {
+      archivedRowButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(container.textContent).toContain("Restore");
 
     await act(async () => {
       root.unmount();
@@ -327,6 +500,7 @@ describe("PredictionJournalPanel", () => {
           draw("6/22/26", [2, 4, 6, 8, 10, 12], [14, 16]),
           draw("6/24/26", [1, 3, 5, 7, 9, 11], [13, 15]),
         ],
+        now: () => "2026-06-25T09:00:00.000Z",
         newPredictionDraft: {
           id: 1,
           setupSnapshot: {
@@ -343,7 +517,15 @@ describe("PredictionJournalPanel", () => {
             droughtBreakSelectedNumbers: [],
             selectedCarryOverBoostNumbers: [],
             excludedNumbers: [44],
-            hotColdExcludedNumbers: [],
+            hotColdExcludedNumbers: [42],
+            autoExcludedFromSelection: [21],
+            mainConstraintAutoExcludedNumbers: [35],
+            effectiveExcludedNumbers: [21, 42, 44],
+            generationForcedNumbers: [10, 12, 20],
+            generationExcludedNumbers: [21, 35, 42, 44],
+            allExcludedNumbers: [4, 6, 8, 21, 22, 24, 35, 42, 44],
+            sde1Exclusions: [4, 6, 8],
+            hc3Exclusions: [22, 24],
             monthlyConstructiveEnabled: true,
             acceptanceNeedsEnabled: true,
             acceptanceNeedsCounts: {
@@ -364,13 +546,28 @@ describe("PredictionJournalPanel", () => {
 
     const oddEvenInput = container.querySelector("input[placeholder='2:6']") as HTMLInputElement;
     const numbersTextArea = container.querySelector("textarea[placeholder='12, 14, 22, 27']") as HTMLTextAreaElement;
+    const terminalDigitsTextArea = controlByLabel<HTMLTextAreaElement>(container, "Terminal digits");
     const notesTextArea = container.querySelector("textarea[placeholder='Why this looked plausible before the draw...']") as HTMLTextAreaElement;
 
     expect(oddEvenInput.value).toBe("5:3");
     expect(numbersTextArea.value).toBe("1, 2, 3, 10, 12, 20");
+    expect(terminalDigitsTextArea.value).toBe("0, 1, 2, 3");
+    expect((controlByLabel<HTMLInputElement>(container, "Undrawn")).value).toBe("2");
+    expect((controlByLabel<HTMLInputElement>(container, "1x")).value).toBe("3");
+    expect((controlByLabel<HTMLInputElement>(container, "3x")).value).toBe("1");
+    expect((controlByLabel<HTMLInputElement>(container, "Single-digit")).value).toBe("3");
+    expect((controlByLabel<HTMLInputElement>(container, "Double-digit")).value).toBe("3");
+    expect((controlByLabel<HTMLInputElement>(container, "U/D/F ratio")).value).not.toBe("");
+    expect((controlByLabel<HTMLInputElement>(container, "Repeat count")).value).toBe("2");
+    expect((controlByLabel<HTMLInputElement>(container, "±1/±2 count")).value).not.toBe("");
+    expect((controlByLabel<HTMLInputElement>(container, "Drought count")).value).not.toBe("");
+    expect((controlByLabel<HTMLInputElement>(container, "Carry-over count")).value).not.toBe("");
     expect(notesTextArea.value).toContain("New prediction draft created from the current app setup.");
-    expect(notesTextArea.value).toContain("SDE1: ON.");
-    expect(notesTextArea.value).toContain("HC3: ON.");
+    expect(notesTextArea.value).toContain("SDE1: ON; exclusions 4, 6, 8.");
+    expect(notesTextArea.value).toContain("HC3: ON; exclusions 22, 24.");
+    expect(notesTextArea.value).toContain("Effective generation forced numbers: 10, 12, 20.");
+    expect(notesTextArea.value).toContain("Exclusion sources: user 44; hot/cold 42; auto-unselected 21; main-bucket auto 35; SDE1 4, 6, 8; HC3 22, 24.");
+    expect(notesTextArea.value).toContain("Effective generation exclusions: 4, 6, 8, 21, 22, 24, 35, 42, 44.");
     expect(container.textContent).toContain("New prediction draft created from current setup");
 
     await act(async () => {

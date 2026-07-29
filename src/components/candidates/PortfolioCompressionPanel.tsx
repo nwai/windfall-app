@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from "react";
-import type { Draw } from "../../types";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import type { Draw, KeptGeneratedCandidateRow } from "../../types";
 import {
   buildPortfolioAdjacentComboEvidence,
   type PortfolioAdjacentComboEvidence,
@@ -35,6 +35,7 @@ export interface PortfolioCandidateSource {
 interface PortfolioCompressionPanelProps {
   initialPasteText?: string;
   candidateSources?: PortfolioCandidateSource[];
+  keptGeneratedRows?: readonly KeptGeneratedCandidateRow[];
   userSelectedNumbers?: readonly unknown[];
   monthEndCarryOverBiasEnabled?: boolean;
   monthEndCarryOverWeights?: Record<number, number> | undefined;
@@ -255,6 +256,15 @@ const rowsForSource = (source: PortfolioCandidateSource): string[] => (
     .filter((row) => row.length > 0)
 );
 
+const appendTextRows = (current: string, rows: readonly string[]): string => {
+  const existing = current.trim();
+  return [existing, ...rows].filter(Boolean).join("\n");
+};
+
+const formatKeptPortfolioRow = (row: KeptGeneratedCandidateRow): string => (
+  formatCandidateRow([...row.main, ...row.supp])
+);
+
 const buildSourceFrequencySummary = (rows: readonly string[]): SourceFrequencySummary => {
   const countsByNumber = new Map<number, number>();
 
@@ -456,6 +466,7 @@ const PortfolioBacktestChart: React.FC<{
 export const PortfolioCompressionPanel: React.FC<PortfolioCompressionPanelProps> = ({
   initialPasteText = "",
   candidateSources = [],
+  keptGeneratedRows = [],
   userSelectedNumbers = [],
   monthEndCarryOverBiasEnabled = false,
   monthEndCarryOverWeights,
@@ -470,6 +481,7 @@ export const PortfolioCompressionPanel: React.FC<PortfolioCompressionPanelProps>
   activeSimulatedKey = null,
   copyText,
 }) => {
+  const consumedKeptRowIdsRef = useRef<Set<string>>(new Set());
   const [pasteText, setPasteText] = useState(initialPasteText);
   const [loadedSourceSignatures, setLoadedSourceSignatures] = useState<string[]>([]);
   const [loadedSourceRows, setLoadedSourceRows] = useState<LoadedSourceRow[]>([]);
@@ -551,6 +563,26 @@ export const PortfolioCompressionPanel: React.FC<PortfolioCompressionPanelProps>
   const backtestHistoryCount = backtestHistory.length;
   const activeOptionalSignalCount = Object.values(enabledEvidenceSignals).filter(Boolean).length;
   const activeSignalLabel = `${activeOptionalSignalCount} optional signal${activeOptionalSignalCount === 1 ? "" : "s"} active`;
+
+  useEffect(() => {
+    const newRows = keptGeneratedRows
+      .filter((row) => !consumedKeptRowIdsRef.current.has(row.id))
+      .map((row) => ({
+        sourceId: row.id,
+        sourceLabel: `Kept Generated #${row.sourceIndex + 1}`,
+        rowText: formatKeptPortfolioRow(row),
+      }))
+      .filter((row) => row.rowText.length > 0);
+
+    if (newRows.length === 0) return;
+
+    newRows.forEach((row) => consumedKeptRowIdsRef.current.add(row.sourceId));
+    setPasteText((current) => appendTextRows(current, newRows.map((row) => row.rowText)));
+    setLoadedSourceRows((current) => [...current, ...newRows]);
+    setLoadMessage(`${newRows.length} kept generated candidate row${newRows.length === 1 ? "" : "s"} added.`);
+    setCopyMessage("");
+    setBacktestResult(null);
+  }, [keptGeneratedRows]);
 
   const sourceFrequencyLabel = (sourceId: string, number: number): string => {
     const summary = sourceFrequencyById.get(sourceId);
@@ -1545,7 +1577,7 @@ export const PortfolioCompressionPanel: React.FC<PortfolioCompressionPanelProps>
           {isCoreSimulated ? "Core simulated" : "Simulate top-six core"}
         </button>
         <button type="button" onClick={handleClear} className="windfall-secondary-button">
-          Clear
+          Clear pasted rows
         </button>
         <span style={mutedStyle}>
           {availableSourceRows > 0

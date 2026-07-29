@@ -88,6 +88,25 @@ const colorForTimes = (times: number): string => {
   return palette[Math.min(Math.max(0, times), 8)] ?? "#334155";
 };
 
+const softColorForTimes = (times: number): string => {
+  const palette: Record<number, string> = {
+    0: "#f1f5f9",
+    1: "#eff6ff",
+    2: "#f0fdf4",
+    3: "#ecfeff",
+    4: "#fefce8",
+    5: "#fff7ed",
+    6: "#fef2f2",
+    7: "#fff1f2",
+    8: "#f5f3ff",
+  };
+  return palette[Math.min(Math.max(0, times), 8)] ?? "#f8fafc";
+};
+
+const textOnColorForTimes = (times: number): string => (
+  times >= 2 && times <= 5 ? "#0f172a" : "#fff"
+);
+
 const panelStyle: React.CSSProperties = {
   width: "100%",
   maxWidth: "100%",
@@ -150,6 +169,29 @@ const tdStyle: React.CSSProperties = {
   verticalAlign: "top",
   fontSize: 12,
   color: "#1e293b",
+};
+
+const undrawnInMonthCellStyle: React.CSSProperties = {
+  ...tdStyle,
+  textAlign: "center",
+  verticalAlign: "middle",
+};
+
+const undrawnInMonthBadgeStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minWidth: 34,
+  height: 34,
+  padding: "0 8px",
+  borderRadius: 999,
+  border: "2px solid #0f172a",
+  background: "#fff",
+  color: "#0f172a",
+  fontWeight: 900,
+  lineHeight: 1,
+  fontVariantNumeric: "tabular-nums",
+  boxSizing: "border-box",
 };
 
 const sameSelections = (a: SelectedByBucket, b: SelectedByBucket): boolean => (
@@ -218,16 +260,26 @@ const NumberPills: React.FC<{
   numbers: number[];
   selected?: number[];
   excludedNumbers?: readonly number[];
+  bucketTimes?: number;
+  bucketLabel?: string;
   onToggle?: (n: number) => void;
 }> = ({
   numbers,
   selected = [],
   excludedNumbers = [],
+  bucketTimes,
+  bucketLabel,
   onToggle,
 }) => {
   if (!numbers.length) return <span style={{ color: "#94a3b8" }}>none</span>;
   const selectedSet = new Set(selected);
   const excludedSet = new Set(excludedNumbers);
+  const hasBucketTone = typeof bucketTimes === "number";
+  const bucketColor = hasBucketTone ? colorForTimes(bucketTimes) : "#2563eb";
+  const bucketSoftColor = hasBucketTone ? softColorForTimes(bucketTimes) : "#dbeafe";
+  const activeTextColor = hasBucketTone ? textOnColorForTimes(bucketTimes) : "#fff";
+  const bucketTitleSuffix = bucketLabel ? `, ${bucketLabel} bucket` : "";
+  const bucketTitleText = bucketLabel ? `${bucketLabel} bucket` : undefined;
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
       {numbers.map((n) => {
@@ -244,12 +296,14 @@ const NumberPills: React.FC<{
                 width: 28,
                 height: 24,
                 borderRadius: 6,
-                background: "#f8fafc",
-                border: "1px solid #e2e8f0",
-                color: "#0f172a",
-                fontWeight: 700,
+                background: hasBucketTone ? bucketSoftColor : "#f8fafc",
+                border: hasBucketTone ? `1px solid ${bucketColor}` : "1px solid #e2e8f0",
+                color: hasBucketTone ? bucketColor : "#0f172a",
+                fontWeight: 800,
                 fontVariantNumeric: "tabular-nums",
               }}
+              title={bucketTitleText ? `${n} · ${bucketTitleText}` : undefined}
+              data-monthly-bucket-times={hasBucketTone ? bucketTimes : undefined}
             >
               {n}
             </span>
@@ -266,17 +320,19 @@ const NumberPills: React.FC<{
               width: 34,
               height: 30,
               borderRadius: 6,
-              border: active ? "1px solid #2563eb" : isUserExcluded ? "1px solid #cbd5e1" : "1px solid #cbd5e1",
-              background: active ? "#dbeafe" : isUserExcluded ? "#f1f5f9" : "#fff",
-              color: active ? "#1d4ed8" : isUserExcluded ? "#94a3b8" : "#0f172a",
+              border: active ? `2px solid ${bucketColor}` : isUserExcluded ? "1px solid #cbd5e1" : hasBucketTone ? `1px solid ${bucketColor}` : "1px solid #cbd5e1",
+              background: active ? bucketColor : isUserExcluded ? "#f1f5f9" : bucketSoftColor,
+              color: active ? activeTextColor : isUserExcluded ? "#94a3b8" : hasBucketTone ? bucketColor : "#0f172a",
               fontWeight: 800,
               cursor: isUserExcluded ? "not-allowed" : "pointer",
               fontVariantNumeric: "tabular-nums",
+              boxShadow: active ? `0 0 0 2px ${bucketSoftColor}` : "none",
             }}
             aria-pressed={active}
-            aria-label={isUserExcluded ? `Number ${n} is excluded by User Exclusions` : `${active ? "Remove" : "Select"} ${n}`}
-            title={isUserExcluded ? `Clear it in WFMQYH User Exclusions before selecting ${n}.` : `${active ? "Remove" : "Select"} ${n}`}
+            aria-label={isUserExcluded ? `Number ${n} is excluded by User Exclusions${bucketTitleSuffix}` : `${active ? "Remove" : "Select"} ${n}${bucketTitleSuffix}`}
+            title={isUserExcluded ? `Clear it in WFMQYH User Exclusions before selecting ${n}${bucketTitleSuffix}.` : `${active ? "Remove" : "Select"} ${n}${bucketTitleSuffix}`}
             data-user-excluded={isUserExcluded ? "true" : undefined}
+            data-monthly-bucket-times={hasBucketTone ? bucketTimes : undefined}
           >
             {n}
           </button>
@@ -617,7 +673,7 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
                     <th style={thStyle}>Observed Numbers</th>
                     <th style={thStyle}>Bucket Counts</th>
                     <th
-                      style={{ ...thStyle, textAlign: "right" }}
+                      style={{ ...thStyle, textAlign: "center" }}
                       title="Numbers that never appeared anywhere in the month"
                     >
                       Undrawn in month
@@ -633,7 +689,15 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
                       </td>
                       <td style={tdStyle}><MonthNumbers row={row} /></td>
                       <td style={tdStyle}><FrequencyChips counts={row.frequencyCounts} includeZero={row.undrawn.length} /></td>
-                      <td style={{ ...tdStyle, textAlign: "right", fontWeight: 800 }}>{row.undrawn.length}</td>
+                      <td style={undrawnInMonthCellStyle}>
+                        <span
+                          aria-label={`${row.undrawn.length} numbers undrawn in month`}
+                          title={`${row.undrawn.length} numbers undrawn in this month`}
+                          style={undrawnInMonthBadgeStyle}
+                        >
+                          {row.undrawn.length}
+                        </span>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -766,6 +830,8 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
                     numbers={bucketOptions[key]}
                     selected={selectedByBucket[key]}
                     excludedNumbers={userExcludedNumbers}
+                    bucketTimes={times}
+                    bucketLabel={label}
                     onToggle={(n) => toggleBucketNumber(key, n)}
                   />
                 </div>

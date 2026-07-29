@@ -39,7 +39,10 @@ describe("computeHistoricalTrendRatios", () => {
     expect(stats.map((row) => row.tag).sort()).toEqual(allTrendRatioTags().sort());
     expect(stats.reduce((sum, row) => sum + row.count, 0)).toBe(1);
     expect(stats.find((row) => row.tag === "0-0-8")?.count).toBe(1);
+    expect(stats.find((row) => row.tag === "0-0-8")?.expected).toBeCloseTo(1, 8);
+    expect(stats.find((row) => row.tag === "0-0-8")?.prob).toBeCloseTo(1, 8);
     expect(stats.find((row) => row.tag === "8-0-0")?.count).toBe(0);
+    expect(stats.find((row) => row.tag === "8-0-0")?.expected).toBeCloseTo(0, 8);
   });
 
   it("classifies draw t using only trend values available before draw t", () => {
@@ -62,5 +65,23 @@ describe("computeHistoricalTrendRatios", () => {
     expect(stats.reduce((sum, row) => sum + row.count, 0)).toBe(1);
     expect(stats.find((row) => row.tag === "8-0-0")?.count).toBe(1);
     expect(stats.find((row) => row.tag === "0-8-0")?.count).toBe(0);
+  });
+
+  it("skips malformed draws and incomplete per-number series instead of treating missing values as flat", () => {
+    const valueSeries = buildFlatSeries(3);
+    valueSeries[0] = [0.1];
+
+    const stats = computeHistoricalTrendRatios({
+      lookback: 1,
+      threshold: 0.05,
+      valueSeries,
+      historyDraws: [
+        draw([30, 31, 32, 33, 34, 35], [36, 37]),
+        draw([20, 21, 22, 23, 24, 25], [26, 27]),
+        draw([1, 2, 3, 4, 5, 6], [7, 8]),
+      ],
+    });
+
+    expect(stats).toEqual([]);
   });
 });

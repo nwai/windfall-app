@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 
 import { HigSlider } from "./shared/HigControls";
-import { normalizeDgaSelectedNumbers, summarizeDgaSelectedNumbers } from "../lib/dgaSelectedNumbers";
+import { normalizeDgaSelectedNumbers } from "../lib/dgaSelectedNumbers";
 import type { MonthlyBucketTimelineDrawState, MonthlyBucketTimelineEntry } from "../lib/monthlyBucketTimeline";
 import type { MonthlyBucketSets } from "../lib/monthlyDrawSummary";
 
@@ -109,7 +109,6 @@ const countForTimes = (times: number, buckets: MonthlyBucketSets): number => {
 
 const legendTimes = [0, 1, 2, 3, 4, 5, 6, 7, 8] as const;
 const ROW_LABEL_WIDTH = 46;
-const UNSELECTED_ROW_OPACITY = 0.38;
 
 interface BucketCountChip {
   times: number;
@@ -199,10 +198,6 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
   );
   const selectedNumberSet = useMemo(
     () => new Set<number>(normalizedSelectedNumbers),
-    [normalizedSelectedNumbers],
-  );
-  const selectedNumbersSummary = useMemo(
-    () => summarizeDgaSelectedNumbers(normalizedSelectedNumbers),
     [normalizedSelectedNumbers],
   );
 
@@ -305,7 +300,7 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
       {!expanded ? (
         <div style={{ padding: "0 12px 10px", color: "#64748b", fontSize: 12 }}>
           Rows are numbers 1–45; the pinned first month column mirrors the DGA strip, and hovering a strip number or grid row spotlights the same number in both places.
-          {hasActiveStripSelection ? ` With active strip selections, unselected rows are dimmed so ${selectedNumbersSummary} stay in focus.` : ""}
+          {hasActiveStripSelection ? " Active strip selections are marked with a tick in the number row label." : ""}
         </div>
       ) : (
         <>
@@ -313,7 +308,7 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
         <div>
           <div style={{ color: "#64748b", fontSize: 12, marginTop: 2 }}>
             45 rows by month and scheduled draw slot. The current month is grouped first; each month runs latest scheduled slot on the left down to draw 1 on the right.
-            {hasActiveStripSelection ? " Non-selected rows are dimmed while strip selections are active." : ""}
+            {hasActiveStripSelection ? " Selected strip numbers keep a tick in the row label while the grid stays fully readable." : ""}
           </div>
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", justifyContent: "flex-end" }}>
@@ -462,7 +457,7 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
         <div><strong>Left colour rail:</strong> current strip colour for each number.</div>
         <div><strong>Cell colour:</strong> the bucket that number occupied after that recorded or simulated slot.</div>
         <div><strong>Blank slots:</strong> scheduled future slots with no recorded state yet.</div>
-        <div><strong>Strip focus:</strong> active strip selections dim the non-selected rows.</div>
+        <div><strong>Strip focus:</strong> active strip selections add a tick beside the matching row label.</div>
         <div><strong>Hover totals:</strong> hover any populated draw header or cell to see that draw-state column’s bucket totals.</div>
         <div><strong>Hover link:</strong> hover a strip number or grid row to spotlight the same number in both places.</div>
       </div>
@@ -546,7 +541,7 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
             <div style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 0 }}>
               <strong style={{ color: "#0d47a1" }}>Selected in DGA strip</strong>
               <span style={{ color: "#64748b", fontSize: 12 }}>
-                These rows stay fully visible while the other rows are dimmed until you clear them from the strip.
+                These rows are marked with a tick beside the number label until you clear them from the strip.
               </span>
             </div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
@@ -715,14 +710,13 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
                 >
                   {(() => {
                     const isSelectedRow = selectedNumberSet.has(n);
-                    const isDimmedRow = hasActiveStripSelection && !isSelectedRow && hoveredNumber !== n;
                     const rowLabelBoxShadow = [
                       hoveredNumber === n ? "inset 0 0 0 2px rgba(255,255,255,0.94), 0 0 0 2px rgba(13,71,161,0.30)" : "",
                     ].filter(Boolean).join(", ") || undefined;
 
                     return (
                       <td
-                        title={`${n} · current strip bucket ${labelForTimes(currentBucketSets ? timesForNumber(n, currentBucketSets) : 0)} · ${currentDrawCountLabel}${currentColumnSummary ? ` · totals: ${currentColumnSummary.totalsLabel}` : ""}${isSelectedRow ? " · selected in DGA strip" : ""}${isDimmedRow ? " · dimmed because it is not selected in the DGA strip" : ""}`}
+                        title={`${n} · current strip bucket ${labelForTimes(currentBucketSets ? timesForNumber(n, currentBucketSets) : 0)} · ${currentDrawCountLabel}${currentColumnSummary ? ` · totals: ${currentColumnSummary.totalsLabel}` : ""}${isSelectedRow ? " · selected in DGA strip" : ""}`}
                         style={{
                           position: "sticky",
                           left: 0,
@@ -742,7 +736,7 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
                           fontVariantNumeric: "tabular-nums",
                           boxSizing: "border-box",
                           boxShadow: rowLabelBoxShadow,
-                          opacity: isDimmedRow ? UNSELECTED_ROW_OPACITY : 1,
+                          opacity: 1,
                         }}
                       >
                         <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "flex-end", gap: 4, width: "100%" }}>
@@ -763,13 +757,12 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
                       const isCurrent = entry.monthLabel === currentEntry.monthLabel;
                       const isHoveredColumn = key === hoveredColumnKey;
                       const isSelectedRow = selectedNumberSet.has(n);
-                      const isDimmedRow = hasActiveStripSelection && !isSelectedRow && hoveredNumber !== n;
                       const isCrossHighlight = !!state && isCurrent && hoveredNumber === n;
                       const stickyLeft = ROW_LABEL_WIDTH + slotIndex * columnWidth;
                       const columnSummary = columnSummaryByKey.get(key);
                       const title = state
-                        ? `${n} · ${entry.monthLabel} · ${drawStateLabel(state)} · ${labelForTimes(times ?? 0)}${state.drawDate ? ` · ${state.drawDate}` : ""}${columnSummary ? ` · totals: ${columnSummary.totalsLabel}` : ""}${state.isSimulated ? " · simulated draw state" : ""}${isCurrent ? " · current strip month" : ""}${isSelectedRow ? " · selected in DGA strip" : ""}${isDimmedRow ? " · dimmed because it is not selected in the DGA strip" : ""}${isCrossHighlight ? " · linked to DGA strip hover" : ""}`
-                        : `${n} · ${entry.monthLabel} · ${drawSlotLabel(slotNumber)} · no recorded draw state${isCurrent ? " · current strip month" : ""}${isSelectedRow ? " · selected in DGA strip" : ""}${isDimmedRow ? " · dimmed because it is not selected in the DGA strip" : ""}`;
+                        ? `${n} · ${entry.monthLabel} · ${drawStateLabel(state)} · ${labelForTimes(times ?? 0)}${state.drawDate ? ` · ${state.drawDate}` : ""}${columnSummary ? ` · totals: ${columnSummary.totalsLabel}` : ""}${state.isSimulated ? " · simulated draw state" : ""}${isCurrent ? " · current strip month" : ""}${isSelectedRow ? " · selected in DGA strip" : ""}${isCrossHighlight ? " · linked to DGA strip hover" : ""}`
+                        : `${n} · ${entry.monthLabel} · ${drawSlotLabel(slotNumber)} · no recorded draw state${isCurrent ? " · current strip month" : ""}${isSelectedRow ? " · selected in DGA strip" : ""}`;
                       return (
                         <td
                           key={`${key}-${n}`}
@@ -788,7 +781,7 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
                             borderBottom: "1px solid #edf2f7",
                             padding: 0,
                             boxSizing: "border-box",
-                            opacity: isDimmedRow ? UNSELECTED_ROW_OPACITY : (state ? normalizedCellOpacity : 0.72),
+                            opacity: state ? normalizedCellOpacity : 0.72,
                             filter: isHoveredColumn ? "brightness(1.03)" : undefined,
                           }}
                         />

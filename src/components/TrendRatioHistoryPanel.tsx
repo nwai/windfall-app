@@ -14,6 +14,9 @@ export interface TrendRatioStat {
   up: number;
   down: number;
   flat: number;
+  expected?: number;
+  variance?: number;
+  prob?: number;
 }
 
 interface TrendRatioHistoryPanelProps {
@@ -29,7 +32,7 @@ interface TrendRatioHistoryPanelProps {
 }
 
 /**
- * Compute factorial quickly for small n (n <= 8 here).
+ * Compute factorial quickly for legacy fallback only (n <= 8 here).
  */
 function factorial(n: number): number {
   let r = 1;
@@ -38,11 +41,10 @@ function factorial(n: number): number {
 }
 
 /**
- * Computes z-scores for each ratio under a multinomial independence model:
- *  P_r = 8!/(u! d! f!) * pU^u * pD^d * pF^f
- * Expected E_r = N * P_r
- * Var(O_r) = N * P_r * (1 - P_r)
- * z = (O_r - E_r) / sqrt(Var)
+ * Computes z-scores for each ratio. Current production rows provide
+ * finite-population expected/variance values from the historical classifier.
+ * The multinomial branch is retained only as a defensive fallback for older
+ * callers that do not provide those fields.
  *
  * When expected < minExpectedForZ we suppress z (null) and show a warning indicator.
  */
@@ -76,10 +78,15 @@ function enrichWithZ(
         zWarn: "Invalid ratio"
       };
     }
-    // Multinomial probability
+    const hasFinitePopulationNull =
+      Number.isFinite(s.expected) &&
+      Number.isFinite(s.variance) &&
+      Number.isFinite(s.prob);
     const multinomialCoeff = factorial(8) / (factorial(u) * factorial(d) * factorial(f));
-    const P_r = multinomialCoeff * Math.pow(pU, u) * Math.pow(pD, d) * Math.pow(pF, f);
-    const expected = drawsConsidered * P_r;
+    const fallbackProbability = multinomialCoeff * Math.pow(pU, u) * Math.pow(pD, d) * Math.pow(pF, f);
+    const P_r = hasFinitePopulationNull ? (s.prob as number) : fallbackProbability;
+    const expected = hasFinitePopulationNull ? (s.expected as number) : drawsConsidered * fallbackProbability;
+    const variance = hasFinitePopulationNull ? (s.variance as number) : drawsConsidered * fallbackProbability * (1 - fallbackProbability);
     if (expected < minExpectedForZ) {
       return {
         ...s,
@@ -89,14 +96,13 @@ function enrichWithZ(
         zWarn: "Low expected"
       };
     }
-    const variance = drawsConsidered * P_r * (1 - P_r);
     const z = variance > 0 ? (s.count - expected) / Math.sqrt(variance) : null;
     return {
       ...s,
       expected,
       prob: P_r,
       z,
-      zWarn: null
+      zWarn: variance > 0 ? null : "Zero variance"
     };
   });
 }
@@ -157,14 +163,14 @@ export const TrendRatioHistoryPanel: React.FC<TrendRatioHistoryPanelProps> = ({
     arr.sort((a, b) => {
       const dir = descending ? 1 : -1;
       switch (sortKey) {
-        case "tag": return dir * a.tag.localeCompare(b.tag);
+        case "tag": return descending ? b.tag.localeCompare(a.tag) : a.tag.localeCompare(b.tag);
         case "count": return dir * (b.count - a.count);
         case "percent": return dir * (b.percent - a.percent);
         case "expected": return dir * ((b.expected ?? 0) - (a.expected ?? 0));
         case "z": {
           const az = a.z ?? -Infinity;
           const bz = b.z ?? -Infinity;
-            return dir * (bz - az);
+          return dir * (bz - az);
         }
         case "prob": return dir * ((b.prob ?? 0) - (a.prob ?? 0));
         default: return 0;
@@ -178,8 +184,8 @@ export const TrendRatioHistoryPanel: React.FC<TrendRatioHistoryPanelProps> = ({
     { key: "tag", label: "Ratio", title: "u-d-f pattern" },
     { key: "count", label: "Count", title: "Observed occurrences" },
     { key: "percent", label: "%", title: "Observed % of eligible draws" },
-    { key: "expected", label: "Exp", title: "Expected occurrences under null (multinomial)", hidden: !showExpected },
-    { key: "prob", label: "P%", title: "Model P(r) * 100", formatter: v => (v * 100).toFixed(2) },
+    { key: "expected", label: "Exp", title: "Expected occurrences under finite-population null", hidden: !showExpected },
+    { key: "prob", label: "P%", title: "Average reference P(r) * 100", formatter: v => (v * 100).toFixed(2) },
     { key: "z", label: "z", title: "Z-score (|z|>2 ≈ notable)" }
   ];
 
@@ -213,8 +219,8 @@ export const TrendRatioHistoryPanel: React.FC<TrendRatioHistoryPanelProps> = ({
         )}
       </div>
       <div style={infoSubStyle}>
-        L={lookback} compares the pre-draw hybrid value with draw L back; θ={threshold}. Ratio totals use 6 mains + 2 supplementary numbers. pU={pU.toFixed(2)}, pD={pD.toFixed(2)}, pF={pF.toFixed(2)}.
-        z uses multinomial null; suppressed when expected &lt; {minExpectedForZ}.
+        L={lookback} compares the pre-draw hybrid value with draw L back; θ={threshold}. Ratio totals use 6 mains + 2 supplementary numbers. Observed drawn shares: pU={pU.toFixed(2)}, pD={pD.toFixed(2)}, pF={pF.toFixed(2)}.
+        z uses a per-draw finite-population reference where the 8 values are sampled without replacement from the 45 classified numbers; suppressed when expected &lt; {minExpectedForZ}.
       </div>
 
       {/* Bar visualization (top 20 by currently sorted order) */}

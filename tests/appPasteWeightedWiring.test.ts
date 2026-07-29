@@ -13,6 +13,21 @@ describe("App paste-weighted panel wiring", () => {
 
     const pastePanelCall = appSource.match(/<PasteWeightedCandidatesPanel[\s\S]*?\/>/)?.[0] ?? "";
     expect(pastePanelCall).toContain("stageIdealDrawState={stageIdealDrawState}");
+    expect(pastePanelCall).toContain("forcedNumbers={pasteWeightedForcedNumbers}");
+    expect(pastePanelCall).toContain("excludedNumbers={allExclusions}");
+    expect(pastePanelCall).toContain("onToggleForcedNumber={togglePasteWeightedForcedNumber}");
+    expect(pastePanelCall).toContain("keptGeneratedRows={keptGeneratedCandidateRows}");
+  });
+
+  it("wires Paste-Weighted missing-number selections into hard forced generation numbers", () => {
+    const appSource = readFileSync(resolve(process.cwd(), "src/App.tsx"), "utf8");
+
+    expect(appSource).toContain("const [pasteWeightedForcedNumbers, setPasteWeightedForcedNumbers] = useState<number[]>([]);");
+    expect(appSource).toContain("...pasteWeightedForcedNumbers,");
+    expect(appSource).toContain('{ kind: "hardInclude", label: "Paste-Weighted missing-number selections", numbers: pasteWeightedForcedNumbers }');
+    expect(appSource).toContain("paste-weighted missing selections");
+    expect(appSource).toContain("pasteWeightedForcedNumbers: [...pasteWeightedForcedNumbers]");
+    expect(appSource).toContain("setPasteWeightedForcedNumbers(normalizeHotColdGenerationNumbers(s.pasteWeightedForcedNumbers));");
   });
 
   it("replaces the shared user-selected strip when simulating a paste-weighted candidate", () => {
@@ -48,7 +63,42 @@ describe("App paste-weighted panel wiring", () => {
     expect(portfolioPanelCall).toContain("backtestHistory={realHistory}");
     expect(portfolioPanelCall).toContain("onSimulateCore={handleSimulatePortfolioCore}");
     expect(portfolioPanelCall).toContain("activeSimulatedKey={activeSimulatedMainKey}");
+    expect(portfolioPanelCall).toContain("keptGeneratedRows={keptGeneratedCandidateRows}");
     expect(portfolioPanelCall).toContain("...candidate.main");
     expect(portfolioPanelCall).toContain("...candidate.supp");
+  });
+
+  it("wires Generated Candidates Keep into the shared keep row ledger", () => {
+    const appSource = readFileSync(resolve(process.cwd(), "src/App.tsx"), "utf8");
+    const generatedPanelCall = appSource.match(/<GeneratedCandidatesPanel[\s\S]*?\/>/)?.[0] ?? "";
+    const handlerStart = appSource.indexOf("const handleKeepGeneratedCandidate");
+    const handlerEnd = appSource.indexOf("const handleSimulatePickSixManual", handlerStart);
+    const handlerBlock = appSource.slice(handlerStart, handlerEnd);
+
+    expect(appSource).toContain("const [keptGeneratedCandidateRows, setKeptGeneratedCandidateRows] = useState<KeptGeneratedCandidateRow[]>([]);");
+    expect(generatedPanelCall).toContain("onKeepCandidate={handleKeepGeneratedCandidate}");
+    expect(handlerBlock).toContain("setKeptGeneratedCandidateRows((current) => [...current, keptRow]);");
+    expect(handlerBlock).toContain("appended to Portfolio Compression and Paste-Weighted rows");
+  });
+
+  it("wires Generated Candidates sessions into the same shared keep row ledger", () => {
+    const appSource = readFileSync(resolve(process.cwd(), "src/App.tsx"), "utf8");
+    const generatedPanelCall = appSource.match(/<GeneratedCandidatesPanel[\s\S]*?\/>/)?.[0] ?? "";
+    const exportHandlerStart = appSource.indexOf("const handleExportGenerationSession");
+    const exportHandlerEnd = appSource.indexOf("const handleKeepGeneratedCandidate", exportHandlerStart);
+    const exportHandlerBlock = appSource.slice(exportHandlerStart, exportHandlerEnd);
+
+    expect(appSource).toContain("const [generationSessionActive, setGenerationSessionActive] = useState<boolean>(false);");
+    expect(appSource).toContain("const [generationSessionRows, setGenerationSessionRows] = useState<KeptGeneratedCandidateRow[]>([]);");
+    expect(appSource).toContain("filterCandidatesForGenerationSession");
+    expect(generatedPanelCall).toContain("generationSessionActive={generationSessionActive}");
+    expect(generatedPanelCall).toContain("generationSessionCount={generationSessionRows.length}");
+    expect(generatedPanelCall).toContain("onStartGenerationSession={handleStartGenerationSession}");
+    expect(generatedPanelCall).toContain("onEndGenerationSession={handleEndGenerationSession}");
+    expect(generatedPanelCall).toContain("onClearGenerationSession={handleClearGenerationSession}");
+    expect(generatedPanelCall).toContain("onExportGenerationSession={handleExportGenerationSession}");
+    expect(exportHandlerBlock).toContain("setKeptGeneratedCandidateRows((current) => [...current, ...exportedRows]);");
+    expect(exportHandlerBlock).toContain("setGenerationSessionRows([]);");
+    expect(exportHandlerBlock).toContain("Portfolio Compression as mains+supps and Paste-Weighted as mains-only rows");
   });
 });
