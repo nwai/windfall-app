@@ -39,6 +39,7 @@ export type {
 
 interface MonthlyDrawsSummaryPanelProps {
   history: Draw[];
+  today?: Date;
   onConstraintsChange?: (payload: MonthlyConstraintPayload | null) => void;
   onUseSelectedNumbers?: (numbers: number[]) => void;
   constructiveFillEnabled?: boolean;
@@ -329,8 +330,8 @@ const NumberPills: React.FC<{
               boxShadow: active ? `0 0 0 2px ${bucketSoftColor}` : "none",
             }}
             aria-pressed={active}
-            aria-label={isUserExcluded ? `Number ${n} is excluded by User Exclusions${bucketTitleSuffix}` : `${active ? "Remove" : "Select"} ${n}${bucketTitleSuffix}`}
-            title={isUserExcluded ? `Clear it in WFMQYH User Exclusions before selecting ${n}${bucketTitleSuffix}.` : `${active ? "Remove" : "Select"} ${n}${bucketTitleSuffix}`}
+            aria-label={isUserExcluded ? `Number ${n} is unavailable because it is excluded${bucketTitleSuffix}` : `${active ? "Remove" : "Select"} ${n}${bucketTitleSuffix}`}
+            title={isUserExcluded ? `Clear the active exclusion or turn off the rule before selecting ${n}${bucketTitleSuffix}.` : `${active ? "Remove" : "Select"} ${n}${bucketTitleSuffix}`}
             data-user-excluded={isUserExcluded ? "true" : undefined}
             data-monthly-bucket-times={hasBucketTone ? bucketTimes : undefined}
           >
@@ -419,6 +420,7 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
   onStageIdealDrawStateChange,
   onSimulateNumbers,
   excludedNumbers = [],
+  today,
 }) => {
   const [drawLimit, setDrawLimit] = useState<DrawLimit>("all");
   const [averageDrawCountFilter, setAverageDrawCountFilter] = useState<DrawLimit>("all");
@@ -440,8 +442,9 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
     analyzeMonthlyDrawSummary(history, {
       drawLimitPerMonth: drawLimit,
       averageDrawCountFilter,
+      today,
     })
-  ), [averageDrawCountFilter, drawLimit, history]);
+  ), [averageDrawCountFilter, drawLimit, history, today]);
   const monthlyBucketDisplayRows = useMemo(() => {
     const rows = averageDrawCountFilter === "all"
       ? summary.rows
@@ -457,7 +460,8 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
     drawLimitPerMonth: "all",
     averageDrawCountFilter,
     expectedDrawCountOverride: stageExpectedDrawCount,
-  }), [averageDrawCountFilter, history, stageExpectedDrawCount]);
+    today,
+  }), [averageDrawCountFilter, history, stageExpectedDrawCount, today]);
 
   const constraints = useMemo(
     () => monthlyFrequencyConstraintsFromSelections(selectedByBucket),
@@ -770,7 +774,7 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
                 </div>
                 {userExclusionReminder && (
                   <div role="status" style={{ color: "#475569", fontSize: 12, marginTop: 4 }}>
-                    {userExclusionReminder}. Clear these in WFMQYH User Exclusions before selecting them here.
+                    {userExclusionReminder}. Clear the manual exclusion or turn off the rule that excludes them before selecting them here.
                   </div>
                 )}
               </div>

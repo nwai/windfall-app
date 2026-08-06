@@ -132,7 +132,7 @@ const EventChips: React.FC<{
             key={`${event.boundaryLabel}-${event.number}-${event.sourceLastDrawDate}`}
             type="button"
             aria-pressed={selected}
-            aria-label={isUserExcluded ? `Number ${event.number} is excluded by User Exclusions` : `${selected ? "Remove" : "Add"} carry-over boost for ${event.number}`}
+            aria-label={isUserExcluded ? `Number ${event.number} is unavailable because it is excluded` : `${selected ? "Remove" : "Add"} carry-over boost for ${event.number}`}
             onClick={() => onToggleBoostNumber(event.number)}
             disabled={isUserExcluded}
             style={{
@@ -140,7 +140,7 @@ const EventChips: React.FC<{
               cursor: isUserExcluded ? "not-allowed" : "pointer",
               opacity: isUserExcluded ? 0.55 : 1,
             }}
-            title={isUserExcluded ? `${title}; clear it in WFMQYH User Exclusions before boosting it here` : `${title}; ${selected ? "click to remove the explicit boost" : "click to apply a massive explicit boost"}`}
+            title={isUserExcluded ? `${title}; clear the active exclusion or turn off the rule before boosting it here` : `${title}; ${selected ? "click to remove the explicit boost" : "click to apply a massive explicit boost"}`}
             data-user-excluded={isUserExcluded ? "true" : undefined}
           >
             {event.number}
@@ -223,7 +223,7 @@ export const MonthEndCarryOverBucketsPanel: React.FC<MonthEndCarryOverBucketsPan
 
       {userExclusionReminder && (
         <div role="status" style={{ margin: "0 0 10px", color: "#475569", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 6, padding: "7px 9px", fontSize: 12 }}>
-          {userExclusionReminder}. Clear these in WFMQYH User Exclusions before boosting them here.
+          {userExclusionReminder}. Clear the manual exclusion or turn off the rule that excludes them before boosting them here.
         </div>
       )}
 

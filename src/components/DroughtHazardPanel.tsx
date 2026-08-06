@@ -84,12 +84,12 @@ export const DroughtHazardPanel: React.FC<{
     const toggleLabel = isForced
       ? `Remove drought-break forced inclusion ${number}`
       : isUserExcluded
-        ? `Number ${number} is excluded by User Exclusions`
+        ? `Number ${number} is unavailable because it is excluded`
         : disabled
         ? `Maximum drought-break forced inclusions reached; remove another number before adding ${number}`
         : `Add drought-break forced inclusion ${number}`;
     const title = isUserExcluded
-      ? `Clear it in WFMQYH User Exclusions before selecting ${number}.`
+      ? `Clear the active exclusion or turn off the rule before selecting ${number}.`
       : toggleLabel;
 
     if (!onToggleNumber) return number;
@@ -159,7 +159,7 @@ export const DroughtHazardPanel: React.FC<{
       </div>
       {userExclusionReminder && (
         <div role="status" style={{ fontSize: 12, color: "#475569", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "7px 9px", marginBottom: 8 }}>
-          {userExclusionReminder}. Clear these in WFMQYH User Exclusions before selecting them here.
+          {userExclusionReminder}. Clear the manual exclusion or turn off the rule that excludes them before selecting them here.
         </div>
       )}
       <div style={{ overflowX: "auto" }}>

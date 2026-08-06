@@ -129,9 +129,9 @@ describe("analyzeHotColdRanking", () => {
       onToggleExcludedNumber: () => undefined,
     }));
 
-    expect(html).toContain("User exclusions active: 1");
+    expect(html).toContain("Active exclusions: 1");
     expect(html).toContain("User Excluded");
-    expect(html).toContain("Clear it in WFMQYH User Exclusions");
+    expect(html).toContain("Clear the manual exclusion or turn off the rule");
   });
 
   it("lets every hot/cold breakdown column expose a sortable header and toggles number order", async () => {

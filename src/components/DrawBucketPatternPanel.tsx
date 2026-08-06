@@ -35,6 +35,9 @@ interface HeatmapCellData {
 export interface DrawBucketPatternPanelProps {
   draws: Draw[];
   allDraws?: Draw[];
+  planningMonthLabel?: string;
+  planningMonthExpectedDrawCount?: number;
+  planningMonthIsReset?: boolean;
 }
 
 const getHeatmapCellColors = (
@@ -533,7 +536,7 @@ const BucketLeaderboardTable: React.FC<{
       <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", marginBottom: 10 }}>
         <div style={{ fontWeight: 700, color: "#223", fontSize: 14 }}>Detailed bucket leaderboard</div>
         <span style={{ fontSize: 11, color: "#667" }}>
-          Current order follows <b>{currentSortLabel}</b>. Each metric also shows that bucket&apos;s own rank position.
+          Current order follows <b>{currentSortLabel}</b>. Overall is an equal-weight diagnostic rank across the metric positions.
         </span>
       </div>
 
@@ -542,7 +545,7 @@ const BucketLeaderboardTable: React.FC<{
           <thead>
             <tr style={{ background: "#f7fbff" }}>
               {[
-                { label: "Pos", title: "Current position under the selected sort mode" },
+                { label: "Overall", title: "Equal-weight percentile rank aggregation across the visible bucket metrics; diagnostic only" },
                 { label: "Bucket", title: "Bucket label and description" },
                 { label: "Numbers", title: "Numbers tracked by this bucket" },
                 { label: "≥1 hit", title: "Value plus rank position for draws with at least one hit" },
@@ -574,9 +577,15 @@ const BucketLeaderboardTable: React.FC<{
           </thead>
           <tbody>
             {rows.map((row) => (
-              <tr key={`leaderboard-${row.stat.key}`} style={{ background: row.selectedSortPosition === 1 ? "#fcfeff" : "#fff" }}>
-                <td style={leaderboardCellStyle}>
-                  <PositionBadge position={row.selectedSortPosition} />
+              <tr key={`leaderboard-${row.stat.key}`} style={{ background: row.overallPosition === 1 ? "#fcfeff" : "#fff" }}>
+                <td
+                  style={leaderboardCellStyle}
+                  title={`${row.stat.label}: overall diagnostic support ${row.overallScore.toFixed(1)}/100 • rank #${row.overallPosition}. Equal weights: ≥1 hit, avg/draw, recent avg, mode, low 0-hit rate, max seen, and total hits.`}
+                >
+                  <PositionBadge position={row.overallPosition} />
+                  <div style={{ marginTop: 5, fontSize: 11, color: "#667", fontVariantNumeric: "tabular-nums" }}>
+                    {row.overallScore.toFixed(1)}/100
+                  </div>
                 </td>
                 <td style={leaderboardCellStyle}>
                   <div style={{ fontWeight: 700, color: "#223", fontSize: 13 }}>{row.stat.label}</div>
@@ -645,9 +654,15 @@ const BucketLeaderboardTable: React.FC<{
   );
 };
 
-export const DrawBucketPatternPanel: React.FC<DrawBucketPatternPanelProps> = ({ draws, allDraws = [] }) => {
+export const DrawBucketPatternPanel: React.FC<DrawBucketPatternPanelProps> = ({
+  draws,
+  allDraws = [],
+  planningMonthLabel,
+  planningMonthExpectedDrawCount,
+  planningMonthIsReset = false,
+}) => {
   const [includeSupp, setIncludeSupp] = useState<boolean>(true);
-  const [sortMode, setSortMode] = useState<DrawBucketPatternSortMode>("atLeastOne");
+  const [sortMode, setSortMode] = useState<DrawBucketPatternSortMode>("overall");
   const [selectedPastMonthKey, setSelectedPastMonthKey] = useState<string>("");
   const [showForecast, setShowForecast] = useState<boolean>(true);
 
@@ -662,10 +677,11 @@ export const DrawBucketPatternPanel: React.FC<DrawBucketPatternPanelProps> = ({ 
     const mostRecentDraw = getMostRecentDraw(comparisonHistory);
     return mostRecentDraw ? getDrawMonthKey(mostRecentDraw.date) ?? "" : "";
   }, [comparisonHistory]);
+  const activeMonthKey = planningMonthLabel || latestAllHistoryMonthKey;
 
   const pastMonthOptions = useMemo(
-    () => monthOptions.filter((option) => option.key !== latestAllHistoryMonthKey),
-    [monthOptions, latestAllHistoryMonthKey],
+    () => monthOptions.filter((option) => option.key !== activeMonthKey),
+    [activeMonthKey, monthOptions],
   );
 
   useEffect(() => {
@@ -684,8 +700,8 @@ export const DrawBucketPatternPanel: React.FC<DrawBucketPatternPanelProps> = ({ 
   );
 
   const currentMonthDraws = useMemo(
-    () => selectDrawMonthDraws(comparisonHistory, latestAllHistoryMonthKey || null),
-    [comparisonHistory, latestAllHistoryMonthKey],
+    () => selectDrawMonthDraws(comparisonHistory, activeMonthKey || null),
+    [activeMonthKey, comparisonHistory],
   );
 
   const currentHeatmapStats = useMemo(
@@ -703,9 +719,14 @@ export const DrawBucketPatternPanel: React.FC<DrawBucketPatternPanelProps> = ({ 
     [comparablePastDraws, includeSupp],
   );
 
+  const activeMonthExpectedSlotCount = useMemo(
+    () => Math.max(planningMonthExpectedDrawCount ?? currentMonthDraws.length, currentMonthDraws.length),
+    [currentMonthDraws.length, planningMonthExpectedDrawCount],
+  );
+
   const currentHeatmapColumnCount = useMemo(
-    () => Math.max(currentMonthDraws.length, comparablePastDraws.length),
-    [currentMonthDraws.length, comparablePastDraws.length],
+    () => Math.max(activeMonthExpectedSlotCount, comparablePastDraws.length),
+    [activeMonthExpectedSlotCount, comparablePastDraws.length],
   );
 
   const currentHeatmapSlots = useMemo(
@@ -720,16 +741,16 @@ export const DrawBucketPatternPanel: React.FC<DrawBucketPatternPanelProps> = ({ 
 
   const currentMonthForecast = useMemo(
     () => {
-      if (!showForecast || currentHeatmapColumnCount <= currentMonthDraws.length || !latestAllHistoryMonthKey) {
+      if (!showForecast || activeMonthExpectedSlotCount <= currentMonthDraws.length || !activeMonthKey) {
         return null;
       }
       return forecastDrawBucketMonth(comparisonHistory, {
         includeSupp,
-        currentMonthKey: latestAllHistoryMonthKey,
-        targetSlotCount: currentHeatmapColumnCount,
+        currentMonthKey: activeMonthKey,
+        targetSlotCount: activeMonthExpectedSlotCount,
       });
     },
-    [showForecast, currentHeatmapColumnCount, currentMonthDraws.length, latestAllHistoryMonthKey, comparisonHistory, includeSupp],
+    [activeMonthExpectedSlotCount, activeMonthKey, showForecast, currentMonthDraws.length, comparisonHistory, includeSupp],
   );
 
   const leaderboardRows = useMemo(
@@ -786,20 +807,28 @@ export const DrawBucketPatternPanel: React.FC<DrawBucketPatternPanelProps> = ({ 
     return map;
   }, [alignedCurrentHeatmapStats, currentHeatmapSlots, currentMonthForecast]);
 
-  const strongestBucket = leaderboardRows[0]?.stat ?? null;
+  const strongestBucketRow = leaderboardRows[0] ?? null;
+  const strongestBucket = strongestBucketRow?.stat ?? null;
   const totalDraws = draws.length;
   const selectedPastMonthLabel = selectedPastMonthKey ? formatDrawMonthLabel(selectedPastMonthKey) : "None";
-  const currentMonthLabel = latestAllHistoryMonthKey ? formatDrawMonthLabel(latestAllHistoryMonthKey) : "Current month";
+  const currentMonthLabel = activeMonthKey ? formatDrawMonthLabel(activeMonthKey) : "Active month";
+  const activeMonthDescriptor = planningMonthIsReset && activeMonthKey !== latestAllHistoryMonthKey
+    ? `${currentMonthLabel} planning reset`
+    : currentMonthLabel;
   const currentMonthHasPendingSlots = currentHeatmapColumnCount > currentMonthDraws.length;
+  const activeFutureSlotCount = Math.max(0, activeMonthExpectedSlotCount - currentMonthDraws.length);
+  const alignmentSlotCount = Math.max(0, currentHeatmapColumnCount - activeMonthExpectedSlotCount);
   const forecastedSlotCount = currentMonthForecast?.forecastSlotCount ?? 0;
   const recentWindowSize = stats[0]?.recentHits.length ?? Math.min(DEFAULT_RECENT_DRAW_BUCKET_WINDOW, draws.length);
-  const currentSortLabel = sortMode === "atLeastOne"
-    ? "≥1 hit rate"
-    : sortMode === "averageHits"
-      ? "Average hits"
-      : sortMode === "modeHits"
-        ? "Mode hits"
-        : "Label";
+  const currentSortLabel = sortMode === "overall"
+    ? "Overall diagnostic rank"
+    : sortMode === "atLeastOne"
+      ? "≥1 hit rate"
+      : sortMode === "averageHits"
+        ? "Average hits"
+        : sortMode === "modeHits"
+          ? "Mode hits"
+          : "Label";
 
   return (
     <section
@@ -833,13 +862,14 @@ export const DrawBucketPatternPanel: React.FC<DrawBucketPatternPanelProps> = ({ 
               onChange={(e) => setSortMode(e.target.value as DrawBucketPatternSortMode)}
               style={{ marginLeft: 6, fontSize: 12 }}
             >
+              <option value="overall">Overall</option>
               <option value="atLeastOne">≥1 hit rate</option>
               <option value="averageHits">Average hits</option>
               <option value="modeHits">Mode hits</option>
               <option value="label">Label</option>
             </select>
           </label>
-          <label style={{ fontSize: 12, color: "#444" }} title="Choose a historical month to compare against the current month heatmap">
+          <label style={{ fontSize: 12, color: "#444" }} title="Choose a historical month to compare against the active planning month heatmap">
             Compare month:
             <select
               value={selectedPastMonthKey}
@@ -869,17 +899,20 @@ export const DrawBucketPatternPanel: React.FC<DrawBucketPatternPanelProps> = ({ 
           Pool: <b>{includeSupp ? "main + supp" : "main only"}</b>
         </span>
         {strongestBucket && (
-          <span style={summaryChip} title="Current top-ranked bucket under the selected sort mode">
-            Highlight: <b>{strongestBucket.label}</b> ({strongestBucket.atLeastOneRate.toFixed(1)}% with ≥1 hit)
+          <span style={summaryChip} title="Current top-ranked bucket under the selected sort mode. Overall score is equal-weight metric-rank support, not probability.">
+            Highlight: <b>{strongestBucket.label}</b>
+            {strongestBucketRow
+              ? ` (Overall #${strongestBucketRow.overallPosition}, ${strongestBucketRow.overallScore.toFixed(1)}/100)`
+              : ""}
           </span>
         )}
         <span style={summaryChip} title="The Past heatmap now shows every draw from the selected comparison month.">
           Past compare: <b>{selectedPastMonthLabel}</b> ({comparablePastDraws.length} draw{comparablePastDraws.length === 1 ? "" : "s"})
         </span>
-        <span style={summaryChip} title="The Current heatmap shows the current month and keeps any remaining side-by-side month slots visibly empty.">
-          Current month: <b>{currentMonthLabel}</b> ({currentMonthDraws.length}/{currentHeatmapColumnCount} slot{currentHeatmapColumnCount === 1 ? "" : "s"} filled)
+        <span style={summaryChip} title="The Active month follows the shared next-draw planning context. A reset month has no recorded rows yet, so all slots remain empty until the first draw is loaded.">
+          Active month: <b>{activeMonthDescriptor}</b> ({currentMonthDraws.length}/{activeMonthExpectedSlotCount} expected slot{activeMonthExpectedSlotCount === 1 ? "" : "s"} filled)
         </span>
-        <span style={summaryChip} title="Forecast cells fill blank current-month slots using month-summary, overlap, ending-sequence, and 1-digit/2-digit signals from historical months.">
+        <span style={summaryChip} title="Forecast cells fill blank active-month slots using month-summary, overlap, ending-sequence, and 1-digit/2-digit signals from historical months.">
           Forecast: <b>{showForecast ? `${forecastedSlotCount} slot${forecastedSlotCount === 1 ? "" : "s"}` : "off"}</b>
         </span>
       </div>
@@ -906,15 +939,15 @@ export const DrawBucketPatternPanel: React.FC<DrawBucketPatternPanelProps> = ({ 
           <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", marginBottom: 10 }}>
             <div style={{ fontWeight: 700, color: "#223", fontSize: 14 }}>Draw month comparison heatmap</div>
             <span style={{ fontSize: 11, color: "#667" }}>
-              Past shows the full selected month; Current shows the current month with empty future slots when needed.
+              Past shows the full selected month; Active shows the shared planning month with empty future slots when needed.
             </span>
-            <label style={{ fontSize: 11, color: "#455a64", display: "inline-flex", alignItems: "center", gap: 6 }} title="Predict blank current-month slots from historical month progress using monthly summary, overlap, ending sequence, and digit-width signals.">
+            <label style={{ fontSize: 11, color: "#455a64", display: "inline-flex", alignItems: "center", gap: 6 }} title="Predict blank active-month slots from historical month progress using monthly summary, overlap, ending sequence, and digit-width signals.">
               <input
                 type="checkbox"
                 checked={showForecast}
                 onChange={(e) => setShowForecast(e.target.checked)}
               />
-              Forecast blank current slots
+              Forecast blank active slots
             </label>
             <div style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", gap: 14 }}>
               <HeatmapLegend tone="past" title="Past" />
@@ -926,7 +959,7 @@ export const DrawBucketPatternPanel: React.FC<DrawBucketPatternPanelProps> = ({ 
             </div>
           </div>
           <div style={{ fontSize: 11, color: "#667", marginBottom: 10, lineHeight: 1.45 }}>
-            <b>Past</b> shows every draw from <b>{selectedPastMonthLabel}</b>. <b>Current</b> shows <b>{currentMonthLabel}</b> and {showForecast ? "models" : "leaves"} later month slots when the comparison month has more draws than the current month so far.
+            <b>Past</b> shows every draw from <b>{selectedPastMonthLabel}</b>. <b>Active</b> shows <b>{activeMonthDescriptor}</b> and {showForecast ? "models" : "leaves"} later month slots when the comparison month has more draws than the active month so far.
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "136px minmax(0, 1fr) 10px minmax(0, 1fr)", gap: 10, alignItems: "start" }}>
             <BucketHeatmapColumn stats={sortedStats} />
@@ -950,9 +983,9 @@ export const DrawBucketPatternPanel: React.FC<DrawBucketPatternPanelProps> = ({ 
               }}
             />
             <HeatmapSection
-              title={`Current · ${currentMonthLabel} →`}
+              title={`Active · ${activeMonthDescriptor} →`}
               subtitle={currentMonthHasPendingSlots
-                ? `Showing ${currentMonthDraws.length} current draw${currentMonthDraws.length === 1 ? "" : "s"} plus ${currentHeatmapColumnCount - currentMonthDraws.length} future slot${currentHeatmapColumnCount - currentMonthDraws.length === 1 ? "" : "s"}${showForecast ? " forecasted from historical month progress" : " left empty"}.`
+                ? `Showing ${currentMonthDraws.length} active-month draw${currentMonthDraws.length === 1 ? "" : "s"} plus ${activeFutureSlotCount} expected future slot${activeFutureSlotCount === 1 ? "" : "s"}${showForecast ? " forecasted from historical month progress" : " left empty"}${alignmentSlotCount ? `; ${alignmentSlotCount} extra comparison-alignment slot${alignmentSlotCount === 1 ? "" : "s"} left empty` : ""}.`
                 : `Showing all ${currentMonthDraws.length} draw${currentMonthDraws.length === 1 ? "" : "s"} from ${currentMonthLabel}.`}
               tone="current"
               stats={alignedCurrentHeatmapStats}

@@ -185,7 +185,7 @@ The current ML diagnostic feature set is defined in `churnFeatures.ts`.
 - Low agreement means the diagnostics disagree
 - Model agreement means shared evidence or shared assumptions, not reliability by itself
 
-## Integration with WFMQY Data
+## Integration with WFMQYH Data
 
 All diagnostics work with the standard WFMQYH windowing:
 - Models use the current filtered history window

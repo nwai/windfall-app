@@ -15,8 +15,9 @@ describe("userExclusionLocks", () => {
     expect(removeUserExcludedNumbers([7, 3, 12, 7, 45], [12, 45])).toEqual([3, 7]);
   });
 
-  it("formats a short reminder for active user exclusions", () => {
-    expect(formatUserExclusionReminder([12, 7, 12])).toBe("User exclusions active: 7, 12");
+  it("formats a short reminder for active exclusions", () => {
+    expect(formatUserExclusionReminder([12, 7, 12])).toBe("Active exclusions: 7, 12");
+    expect(formatUserExclusionReminder([12, 7, 12], "User exclusions active")).toBe("User exclusions active: 7, 12");
     expect(formatUserExclusionReminder([])).toBe("");
   });
 });

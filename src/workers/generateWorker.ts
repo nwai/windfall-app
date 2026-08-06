@@ -14,6 +14,7 @@ import { generateCandidates } from "../generateCandidates";
 import type { GenerateCandidateRatioOption, GenerateCandidatesResult } from "../generateCandidates";
 import type { ScoringGenerationProfile } from "../lib/scoringGenerationInfluence";
 import type { LatestNeighbourSupportOptions } from "../lib/latestNeighbourSupport";
+import type { D1TerminalMomentumGenerationProfile } from "../lib/d1TerminalMomentumInfluence";
 
 /** Monthly bucket options with arrays instead of Sets (for structured clone) */
 interface SerializedMonthlyBucketOptions {
@@ -100,6 +101,8 @@ export interface GenerateWorkerArgs {
   monthEndCarryOverWeights?: Record<number, number>;
   /** Serializable Scoring Diagnostics evidence profile for generation weighting. */
   scoringGenerationProfile?: ScoringGenerationProfile;
+  /** Serializable D1 terminal momentum profile for soft generation weighting. */
+  d1TerminalMomentumProfile?: D1TerminalMomentumGenerationProfile;
   /** Default-off experimental latest-draw +/-1 support rule. */
   latestNeighbourSupportOptions?: LatestNeighbourSupportOptions;
 }
@@ -215,6 +218,7 @@ ctx.addEventListener("message", (e: MessageEvent) => {
       args.mainDecadeBiases,
       args.monthEndCarryOverWeights,
       args.scoringGenerationProfile,
+      args.d1TerminalMomentumProfile,
       progressSetter,
       args.latestNeighbourSupportOptions
     );

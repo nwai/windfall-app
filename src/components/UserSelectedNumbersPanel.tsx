@@ -67,6 +67,10 @@ export const UserSelectedNumbersPanel: React.FC<UserSelectedNumbersPanelProps> =
     () => removeUserExcludedNumbers(normalizeUserSelectedNumbers(userSelectedNumbers), userExcludedNumbers),
     [userExcludedNumbers, userSelectedNumbers],
   );
+  const selectableNumbers = React.useMemo(
+    () => NUMBER_OPTIONS.filter((number) => !userExcludedSet.has(number)),
+    [userExcludedSet],
+  );
   const selectedSet = React.useMemo(() => new Set(selectedNumbers), [selectedNumbers]);
   const lockedExternalNumbers = React.useMemo(
     () => removeUserExcludedNumbers(normalizeUserSelectedNumbers(externalSelectedNumbers), userExcludedNumbers)
@@ -137,6 +141,10 @@ export const UserSelectedNumbersPanel: React.FC<UserSelectedNumbersPanelProps> =
     setUserSelectedNumbers([]);
   }, [onClear, onToggleAutoExclude, setUserSelectedNumbers]);
 
+  const handleSelectAll = React.useCallback(() => {
+    setUserSelectedNumbers(selectableNumbers);
+  }, [selectableNumbers, setUserSelectedNumbers]);
+
   const handleSimulate = React.useCallback(() => {
     if (!onSimulate) return;
     if (isSimulatingUser) {
@@ -164,11 +172,22 @@ export const UserSelectedNumbersPanel: React.FC<UserSelectedNumbersPanelProps> =
           )}
           {userExclusionReminder && (
             <div style={{ ...subtleText, color: "#475569", marginTop: 3 }}>
-              {userExclusionReminder}. Clear these in WFMQYH User Exclusions before selecting them here.
+              {userExclusionReminder}. Clear the manual exclusion or turn off the rule that excludes them before selecting them here.
             </div>
           )}
         </div>
         <div style={toolbar}>
+          <button
+            type="button"
+            onClick={handleSelectAll}
+            disabled={selectableNumbers.length === 0 || selectedCount === selectableNumbers.length}
+            style={secondaryButton(selectableNumbers.length === 0 || selectedCount === selectableNumbers.length)}
+            title={userExcludedNumbers.length > 0
+              ? `Select every currently available number. Active exclusions remain unavailable: ${userExcludedNumbers.join(", ")}.`
+              : "Select all 45 numbers."}
+          >
+            Select All
+          </button>
           <button
             type="button"
             onClick={handleSimulate}
@@ -209,14 +228,14 @@ export const UserSelectedNumbersPanel: React.FC<UserSelectedNumbersPanelProps> =
           const bucketDisplay = monthlyBucketDisplayForNumber(monthlyBuckets, number);
           const bucketTitle = bucketDisplay ? ` Monthly bucket: ${bucketDisplay.label}.` : "";
           const ariaLabel = userExcluded
-            ? `Number ${number} is excluded by User Exclusions`
+            ? `Number ${number} is unavailable because it is excluded`
             : locked
             ? `Number ${number} is forced by ${externalSelectedLabel}`
             : active
               ? `Remove user selected number ${number}`
               : `Add user selected number ${number}`;
           const title = userExcluded
-            ? `Clear it in WFMQYH User Exclusions before selecting ${number}.${bucketTitle}`
+            ? `Clear the active exclusion or turn off the rule before selecting ${number}.${bucketTitle}`
             : locked
               ? `Selected in ${externalSelectedLabel}; deselect it there to release it.${bucketTitle}`
               : active

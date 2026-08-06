@@ -75,6 +75,48 @@ describe("GeneratedCandidatesPanel", () => {
     expect(strip?.querySelector('[aria-label="Toggle user selected number 4"]')?.getAttribute("aria-pressed")).toBe("false");
   });
 
+  it("locks active exclusions in the compact generator user selected strip", async () => {
+    const setUserSelectedNumbers = vi.fn();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    try {
+      await act(async () => {
+        root.render(React.createElement(GeneratedCandidatesPanel, buildProps({
+          excludedNumbers: [12, 22],
+          setUserSelectedNumbers,
+          userSelectedNumbers: [3, 12],
+        })));
+      });
+
+      const strip = container.querySelector('[data-testid="generated-user-selected-strip"]');
+      const lockedButton = strip?.querySelector(
+        'button[aria-label="Number 12 is unavailable because it is excluded"]',
+      ) as HTMLButtonElement | null;
+      const selectedButton = strip?.querySelector(
+        'button[aria-label="Toggle user selected number 3"]',
+      ) as HTMLButtonElement | null;
+
+      expect(strip?.textContent).toContain("1 selected");
+      expect(lockedButton).not.toBeNull();
+      expect(lockedButton?.disabled).toBe(true);
+      expect(lockedButton?.getAttribute("title")).toContain("Clear the active exclusion");
+      expect(selectedButton?.getAttribute("aria-pressed")).toBe("true");
+
+      await act(async () => {
+        lockedButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+
+      expect(setUserSelectedNumbers).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
   it("colors compact user-selected strip numbers by monthly bucket", () => {
     const html = renderToStaticMarkup(
       React.createElement(GeneratedCandidatesPanel, buildProps({
@@ -228,6 +270,27 @@ describe("GeneratedCandidatesPanel", () => {
         delete (navigator as Navigator & { clipboard?: unknown }).clipboard;
       }
     }
+  });
+
+  it("labels the active generated-candidate simulation button as Simulated", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(GeneratedCandidatesPanel, buildProps({
+        candidates: [buildCandidate(0), buildCandidate(1)],
+        activeSimCandidateIdx: 1,
+        simSourceKind: "candidate",
+      })),
+    );
+    const document = new DOMParser().parseFromString(html, "text/html");
+    const activeButton = document.querySelector('button[aria-label="Generated candidate 2 is simulated"]');
+    const inactiveButton = document.querySelector('button[aria-label="Simulate generated candidate 1"]');
+
+    expect(activeButton).not.toBeNull();
+    expect(activeButton?.textContent).toBe("Simulated");
+    expect(activeButton?.getAttribute("aria-pressed")).toBe("true");
+    expect(activeButton?.getAttribute("title")).toContain("currently simulated");
+    expect(inactiveButton).not.toBeNull();
+    expect(inactiveButton?.textContent).toBe("Simulate");
+    expect(inactiveButton?.getAttribute("aria-pressed")).toBe("false");
   });
 
   it("keeps a generated candidate row for downstream portfolio and paste-weighted panels", async () => {

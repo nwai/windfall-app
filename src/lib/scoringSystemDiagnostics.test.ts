@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Draw } from "../types";
 import {
+  analyzePredictionTerminalDigitHistory,
   analyzeScoringSystemDiagnostics,
   buildOddEvenBlueprint,
   buildTerminalDigitSets,
@@ -193,6 +194,31 @@ describe("scoring system diagnostics analytics", () => {
       "newer",
       "newest",
     ]);
+  });
+
+  it("summarizes prediction terminal digit history as exact, contained, or never seen", () => {
+    const full = [
+      draw("D1", [1, 11, 21, 31, 41, 2], [12, 22]),
+      draw("D2", [44, 43, 32, 34, 38, 24], [33, 40]),
+      draw("D3", [5, 15, 25, 35, 45, 6], [16, 26]),
+    ];
+
+    const exact = analyzePredictionTerminalDigitHistory(full, [1, 2]);
+    expect(exact?.key).toBe("1,2");
+    expect(exact?.exactCount).toBe(1);
+    expect(exact?.containedCount).toBe(1);
+    expect(exact?.latestExactExample?.date).toBe("D1");
+
+    const contained = analyzePredictionTerminalDigitHistory(full, [3, 4]);
+    expect(contained?.exactCount).toBe(0);
+    expect(contained?.containedCount).toBe(1);
+    expect(contained?.containedPercent).toBe(33.33);
+    expect(contained?.latestContainedExample?.date).toBe("D2");
+
+    const neverSeen = analyzePredictionTerminalDigitHistory(full, [7, 9]);
+    expect(neverSeen?.exactCount).toBe(0);
+    expect(neverSeen?.containedCount).toBe(0);
+    expect(neverSeen?.band).toBe("never-seen");
   });
 
   it("normalizes scoring search inputs for months and unique terminal digits", () => {

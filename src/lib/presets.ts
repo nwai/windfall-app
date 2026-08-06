@@ -3,6 +3,7 @@
 
 import { normalizeBatesParameters, type BatesParameterSet } from "./batesWeightsCore";
 import { normalizeFavoritePanelIds } from "./panelFavorites";
+import type { SelectionInsightsSnapshot } from "./selectionInsights";
 import { normalizeWeightedTargetNumbers, normalizeWeightedTargets } from "./weightedTargets";
 
 export type UUID = string;
@@ -131,12 +132,25 @@ export interface AppPresetSnapshot {
   generationForcedNumbers?: number[];
   generationExcludedNumbers?: number[];
   allExcludedNumbers?: number[];
+  dgaSuggestedMainNumbers?: number[];
+  dgaSuggestedSuppNumbers?: number[];
+  dgaSuggestedSuppPair?: number[];
+  dgaSuggestedSuppPairActiveCount?: number;
+  dgaSuggestedSuppPairFullCount?: number;
+  dgaSuggestedSuppPairActiveDrawCount?: number;
+  dgaSuggestedSuppPairFullDrawCount?: number;
+  dgaSuggestedSuppPairActiveGap?: number | null;
+  dgaSuggestedSuppPairFullGap?: number | null;
+  dgaSuppPairActiveCoverage?: number;
+  dgaSuppPairFullCoverage?: number;
+  dgaSuppPairTotalCoverage?: number;
   sde1Exclusions?: number[];
   hc3Exclusions?: number[];
   droughtBreakStrictShortlistNumbers?: number[];
   droughtBreakEmpiricalHazardNumbers?: number[];
   droughtBreakShortlistTop?: number;
   droughtBreakStrictThreshold?: number;
+  selectionInsightsSnapshot?: SelectionInsightsSnapshot;
 
   // Trend settings
   trendLookback: number;
@@ -226,6 +240,13 @@ export interface AppPresetSnapshot {
 
   // Scoring System Diagnostics generation evidence weighting
   scoringGenerationInfluence?: "off" | "light" | "normal" | "strong";
+  d1TerminalMomentumSgiEnabled?: boolean;
+  d1TerminalMomentumInternalStrength?: "off" | "light" | "normal" | "strong";
+  d1TerminalMomentumStageMode?: "early-unique" | "terminal-momentum" | "closed-review" | "unavailable";
+  d1TerminalMomentumMonthLabel?: string;
+  d1TerminalMomentumTargetDrawNumber?: number | null;
+  d1TerminalMomentumTraceLabel?: string;
+  d1TerminalMomentumActiveDigits?: number[];
 
   // MiAN hard-exclusion toggle
   acceptanceNeedsEnabled?: boolean;
@@ -430,6 +451,17 @@ export function normalizeAppPresetSnapshot(snapshot: AppPresetSnapshot): AppPres
     scoringGenerationInfluence: snapshot.scoringGenerationInfluence === "light" || snapshot.scoringGenerationInfluence === "normal" || snapshot.scoringGenerationInfluence === "strong"
       ? snapshot.scoringGenerationInfluence
       : "off",
+    d1TerminalMomentumSgiEnabled: !!snapshot.d1TerminalMomentumSgiEnabled,
+    d1TerminalMomentumInternalStrength: snapshot.d1TerminalMomentumInternalStrength === "light" || snapshot.d1TerminalMomentumInternalStrength === "normal" || snapshot.d1TerminalMomentumInternalStrength === "strong"
+      ? snapshot.d1TerminalMomentumInternalStrength
+      : "off",
+    d1TerminalMomentumStageMode: snapshot.d1TerminalMomentumStageMode === "early-unique" || snapshot.d1TerminalMomentumStageMode === "terminal-momentum" || snapshot.d1TerminalMomentumStageMode === "closed-review"
+      ? snapshot.d1TerminalMomentumStageMode
+      : "unavailable",
+    d1TerminalMomentumActiveDigits: Array.from(new Set((snapshot.d1TerminalMomentumActiveDigits ?? [])
+      .map((value) => Number(value))
+      .filter((value) => Number.isInteger(value) && value >= 0 && value <= 9)))
+      .sort((left, right) => left - right),
     pickSixSource: normalizePickSixSource(snapshot.pickSixSource),
     pickSixManual: normalizePickSixManual(snapshot.pickSixManual),
   };

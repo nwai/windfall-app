@@ -1,49 +1,11 @@
-/**
- * SelectionInsightsPanel – Enhanced with dynamic OGA score for selected 8-number set.
- *
- * New features:
- *  - If exactly 8 numbers are selected, compute the canonical OGA raw for that set
- *    against the chosen history (window or full), and compute its percentile vs past draws.
- *  - Display this "Selected Set OGA" card at the top, updating live when selection changes.
- *
- * Notes:
- *  - We keep the original co-occurrence analytics (pairs/triplets/companions/never).
- *  - The "per-number OGA raw" rows remain optional informational context, but the canonical
- *    set OGA is now the primary highlight when 8 numbers are selected.
- */
-
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { Draw } from "../types";
+import {
+  buildSelectionInsightPredictedCompanions,
+  buildSelectionInsightsAnalytics,
+  type SelectionInsightAnalytics,
+} from "../lib/selectionInsights";
 import { computeOGA, getOGAPercentile } from "../utils/oga";
-
-// Helper utilities for combinations and stable keys
-function combinations2(nums: number[]): [number, number][] {
-  const res: [number, number][] = [];
-  for (let i = 0; i < nums.length; i++) {
-    for (let j = i + 1; j < nums.length; j++) {
-      res.push([nums[i], nums[j]]);
-    }
-  }
-  return res;
-}
-function combinations3(nums: number[]): [number, number, number][] {
-  const res: [number, number, number][] = [];
-  for (let i = 0; i < nums.length; i++) {
-    for (let j = i + 1; j < nums.length; j++) {
-      for (let k = j + 1; k < nums.length; k++) {
-        res.push([nums[i], nums[j], nums[k]]);
-      }
-    }
-  }
-  return res;
-}
-function keyPair(a: number, b: number): string {
-  return a < b ? `${a}-${b}` : `${b}-${a}`;
-}
-function keyTriplet(a: number, b: number, c: number): string {
-  const arr = [a, b, c].sort((x, y) => x - y);
-  return `${arr[0]}-${arr[1]}-${arr[2]}`;
-}
 
 export interface SelectionInsightsPanelProps {
   history: Draw[];
@@ -58,15 +20,13 @@ export interface SelectionInsightsPanelProps {
   useIdleCallback?: boolean;
   // New optional trace hook
   onTrace?: (line: string) => void;
+  showOgaDiagnostics?: boolean;
 }
 
-interface AnalyticsInfo {
-  pairRows: { a: number; b: number; total: number; consecutive: number }[];
-  tripletRows: { a: number; b: number; c: number; total: number }[];
-  topCompanions: { n: number; count: number }[];
-  neverWithCount: number;
-  neverWithSample: number[];
-  cappedTriplets: boolean;
+export interface SelectionInsightsPredictionPanelProps {
+  windowAnalytics: SelectionInsightAnalytics;
+  allHistoryAnalytics: SelectionInsightAnalytics;
+  title?: string;
 }
 
 export const SelectionInsightsPanel: React.FC<SelectionInsightsPanelProps> = ({
@@ -81,9 +41,10 @@ export const SelectionInsightsPanel: React.FC<SelectionInsightsPanelProps> = ({
   lazyThreshold = 400,
   useIdleCallback = true,
   onTrace,
+  showOgaDiagnostics = false,
 }) => {
   // Previous local state/hooks unchanged...
-  const [info, setInfo] = useState<AnalyticsInfo | null>(null);
+  const [info, setInfo] = useState<SelectionInsightAnalytics | null>(null);
   const [ogaRawMap, setOgaRawMap] = useState<Record<number, number>>(
     () => perNumberOGARaw || {}
   );
@@ -94,8 +55,12 @@ export const SelectionInsightsPanel: React.FC<SelectionInsightsPanelProps> = ({
     if (perNumberOGARaw) setOgaRawMap(perNumberOGARaw);
   }, [perNumberOGARaw]);
 
-  // Auto-compute per-number OGA raw (unchanged)
+  // OGA is optional here; companion counts are the direct evidence.
   useEffect(() => {
+    if (!showOgaDiagnostics) {
+      setOgaRawMap({});
+      return;
+    }
     if (!autoComputeOGARaw) return;
     if (!history.length) {
       setOgaRawMap({});
@@ -126,7 +91,7 @@ export const SelectionInsightsPanel: React.FC<SelectionInsightsPanelProps> = ({
     setOgaRawMap(map);
     onComputedOGARaw?.(map);
     onTrace?.(`[SelectionInsights] per-number OGA computed.`);
-  }, [autoComputeOGARaw, history, ogaHistory, onComputedOGARaw, onTrace]);
+  }, [autoComputeOGARaw, history, ogaHistory, onComputedOGARaw, onTrace, showOgaDiagnostics]);
 
   // Heavy analytics (pairs/triplets/companions) – unchanged from enhanced version
   useEffect(() => {
@@ -139,83 +104,9 @@ export const SelectionInsightsPanel: React.FC<SelectionInsightsPanelProps> = ({
     onTrace?.(`[SelectionInsights] computing pairs/triplets/companions for ${selected.length} selected…`);
     const heavy = () => {
       if (computeAbortRef.current) return;
-      const drawSets: Array<Set<number>> = history.map((d) => new Set([...d.main, ...d.supp]));
-      const companionCount = new Array(46).fill(0) as number[];
-      const sel = Array.from(new Set(selected)).sort((a, b) => a - b);
-      const pairs = combinations2(sel);
-      const pairTotals = new Map<string, number>();
-      const pairConsecutive = new Map<string, number>();
-      const triplets = sel.length <= 12 ? combinations3(sel) : [] as [number, number, number][];
-      const tripletTotals = new Map<string, number>();
-      for (let t = 0; t < drawSets.length; t++) {
-        if (computeAbortRef.current) return;
-        const s = drawSets[t];
-        const selectedPresent = sel.some((n) => s.has(n));
-        if (selectedPresent) {
-          for (let n = 1; n <= 45; n++) if (s.has(n)) companionCount[n] += 1;
-        }
-        for (const [a, b] of pairs) {
-          if (s.has(a) && s.has(b)) {
-            const k = keyPair(a, b);
-            pairTotals.set(k, (pairTotals.get(k) || 0) + 1);
-            if (t + 1 < drawSets.length) {
-              const s2 = drawSets[t + 1];
-              if (s2.has(a) && s2.has(b)) {
-                pairConsecutive.set(k, (pairConsecutive.get(k) || 0) + 1);
-              }
-            }
-          }
-        }
-        if (triplets.length) {
-          for (const [a, b, c] of triplets) {
-            if (s.has(a) && s.has(b) && s.has(c)) {
-              const k = keyTriplet(a, b, c);
-              tripletTotals.set(k, (tripletTotals.get(k) || 0) + 1);
-            }
-          }
-        }
-      }
-      const everCompanion = new Set<number>();
-      for (let n = 1; n <= 45; n++) if (companionCount[n] > 0) everCompanion.add(n);
-      for (const n of sel) everCompanion.delete(n);
-      const neverWithCount = 45 - sel.length - everCompanion.size;
-      const neverWithSample: number[] = [];
-      for (let n = 1; n <= 45 && neverWithSample.length < 10; n++) {
-        if (sel.includes(n)) continue;
-        if (companionCount[n] === 0) neverWithSample.push(n);
-      }
-      const pairRows = pairs
-        .map(([a, b]: [number, number]) => {
-          const k = keyPair(a, b);
-          return { a, b, total: pairTotals.get(k) || 0, consecutive: pairConsecutive.get(k) || 0 };
-        })
-        .sort((x: { a: number; b: number; total: number; consecutive: number }, y: { a: number; b: number; total: number; consecutive: number }) =>
-          y.total - x.total || y.consecutive - x.consecutive || x.a - y.a || x.b - y.b
-        );
-      const tripletRows = triplets
-        .map(([a, b, c]: [number, number, number]) => {
-          const k = keyTriplet(a, b, c);
-          return { a, b, c, total: tripletTotals.get(k) || 0 };
-        })
-        .sort((x: { a: number; b: number; c: number; total: number }, y: { a: number; b: number; c: number; total: number }) =>
-          y.total - x.total || x.a - y.a || x.b - y.b || x.c - y.c
-        )
-        .slice(0, topKTriplets);
-      const topCompanions = Array.from({ length: 45 }, (_, i) => i + 1)
-        .filter((n) => !sel.includes(n))
-        .map((n) => ({ n, count: companionCount[n] as number }))
-        .filter(({ count }) => count > 0)
-        .sort((a, b) => b.count - a.count || a.n - b.n)
-        .slice(0, 12);
-      if (!computeAbortRef.current) setInfo({
-        pairRows,
-        tripletRows,
-        topCompanions,
-        neverWithCount,
-        neverWithSample,
-        cappedTriplets: sel.length > 12,
-      });
-      onTrace?.(`[SelectionInsights] analytics ready: ${pairRows.length} pairs, ${tripletRows.length} triplets`);
+      const analytics = buildSelectionInsightsAnalytics(history, selected, { topKTriplets });
+      if (!computeAbortRef.current) setInfo(analytics);
+      onTrace?.(`[SelectionInsights] analytics ready: ${analytics.pairRows.length} pairs, ${analytics.tripletRows.length} triplets, ${analytics.companionRows.length} companions`);
     };
 
     const shouldLazy = history.length > lazyThreshold;
@@ -243,6 +134,7 @@ export const SelectionInsightsPanel: React.FC<SelectionInsightsPanelProps> = ({
 
   // Compute dynamic OGA for selected 8-number set when exactly 8 selected
   const setOGARaw = useMemo(() => {
+    if (!showOgaDiagnostics) return null;
     if (selected.length !== 8) return null;
     const nums = [...selected].slice(0, 8);
     try {
@@ -251,12 +143,13 @@ export const SelectionInsightsPanel: React.FC<SelectionInsightsPanelProps> = ({
     } catch {
       return null;
     }
-  }, [selected, history]);
+  }, [selected, history, showOgaDiagnostics]);
 
   const pastDrawOGAs = useMemo(() => {
+    if (!showOgaDiagnostics || setOGARaw == null) return [];
     // Build OGA raw distribution of past draws for percentile
     return history.map((d, idx) => computeOGA([...d.main, ...d.supp], history.slice(0, idx)));
-  }, [history]);
+  }, [history, setOGARaw, showOgaDiagnostics]);
 
   const setOGAPercentile = useMemo(() => {
     if (setOGARaw == null) return null;
@@ -279,66 +172,65 @@ export const SelectionInsightsPanel: React.FC<SelectionInsightsPanelProps> = ({
   }
   if (!info) return null;
 
-  const { pairRows, tripletRows, topCompanions, neverWithCount, neverWithSample, cappedTriplets } = info;
+  const { selectedNumbers, pairRows, tripletRows, companionRows, neverWithCount, neverWithNumbers, cappedTriplets } = info;
 
   const fmtOGARaw = (n: number) =>
     ogaRawMap[n] !== undefined ? ogaRawMap[n].toFixed(2) : "—";
 
   return (
     <section style={sectionStyle}>
-      <div style={{ display: "flex", gap: 16, alignItems: "center", marginBottom: 10 }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
         {historyWindowName && (
-          <span style={{ fontSize: 12, color: "#1a4fa3", background: "#e8eefc", padding: "2px 8px", borderRadius: 6, fontWeight: 600 }}>
+          <span style={scopePillStyle}>
             {historyWindowName}
           </span>
         )}
         {cappedTriplets && (
-          <span style={{ fontSize: 12, color: "#a15e00", background: "#fff3e0", padding: "2px 8px", borderRadius: 6 }}>
+          <span style={warningPillStyle}>
             Triplets limited (selection &gt; 12)
           </span>
         )}
       </div>
 
-      {/* Selected Set OGA card */}
-      <div style={{ marginBottom: 12 }}>
-        {selected.length < 8 ? (
-          <div style={{ fontSize: 12, color: "#555" }}>
-            Select exactly 8 numbers to compute the set’s OGA score.
-          </div>
-        ) : selected.length > 8 ? (
-          <div style={{ fontSize: 12, color: "#a00" }}>
-            More than 8 selected. Trim to 8 to compute OGA for a single set.
-          </div>
-        ) : setOGARaw != null ? (
-          <div style={{ display: "inline-flex", gap: 10, alignItems: "center", background: "#f0f7ff", border: "1px solid #cfe5ff", borderRadius: 6, padding: "8px 10px" }}>
-            <b>Selected Set OGA:</b>
-            <span title="Raw OGA score for the current 8-number selection">{setOGARaw.toFixed(2)}</span>
-            {setOGAPercentile != null && (
-              <span style={{ color: "#1976d2" }} title="Percentile vs OGA scores of past draws">
-                ({setOGAPercentile.toFixed(1)}%)
-              </span>
+      {showOgaDiagnostics ? (
+        <details style={detailsStyle}>
+          <summary style={summaryStyle}>OGA geometry diagnostic</summary>
+          <div style={{ marginTop: 6 }}>
+            {selected.length < 8 ? (
+              <div style={mutedTextStyle}>Select exactly 8 numbers to compute the set's OGA score.</div>
+            ) : selected.length > 8 ? (
+              <div style={warnTextStyle}>More than 8 selected. Trim to 8 to compute OGA for a single set.</div>
+            ) : setOGARaw != null ? (
+              <div style={{ display: "inline-flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <b>Selected set OGA:</b>
+                <span title="Raw OGA score for the current 8-number selection">{setOGARaw.toFixed(2)}</span>
+                {setOGAPercentile != null ? (
+                  <span style={{ color: "#1976d2" }} title="Percentile vs OGA scores of past draws">
+                    {setOGAPercentile.toFixed(1)}%
+                  </span>
+                ) : null}
+                <span style={mutedTextStyle}>Geometry only; not a calibrated win probability.</span>
+              </div>
+            ) : (
+              <div style={warnTextStyle}>Failed to compute OGA for the current selection.</div>
             )}
           </div>
-        ) : (
-          <div style={{ fontSize: 12, color: "#a00" }}>
-            Failed to compute OGA for the current selection.
-          </div>
-        )}
-      </div>
+        </details>
+      ) : null}
 
       {/* Pairs */}
-      <div style={{ marginBottom: 14 }}>
-        <h4 style={{ margin: "0 0 6px 0" }}>Pairs (co-draws across history) + OGA raw</h4>
+      <div style={{ marginBottom: 10 }}>
+        <h4 style={subheadStyle}>Pairs</h4>
         {pairRows.length ? (
           <div style={{ overflowX: "auto" }}>
-            <table style={{ borderCollapse: "collapse", fontSize: 12, minWidth: 520 }}>
+            <table style={{ borderCollapse: "collapse", fontSize: 12, minWidth: showOgaDiagnostics ? 520 : 300, width: "100%" }}>
               <thead>
                 <tr style={{ background: "#fafafa" }}>
                   <th style={thL}>Pair</th>
                   <th style={thR} title="Draws both appeared">Co-draws</th>
                   <th style={thR} title="Consecutive co-draw streaks">Consecutive</th>
-                  <th style={thR} title="Avg OGA raw number A">A OGA raw</th>
-                  <th style={thR} title="Avg OGA raw number B">B OGA raw</th>
+                  {showOgaDiagnostics ? <th style={thR} title="Average OGA raw number A">A OGA</th> : null}
+                  {showOgaDiagnostics ? <th style={thR} title="Average OGA raw number B">B OGA</th> : null}
                 </tr>
               </thead>
               <tbody>
@@ -347,31 +239,35 @@ export const SelectionInsightsPanel: React.FC<SelectionInsightsPanelProps> = ({
                     <td style={tdL}>({r.a}, {r.b})</td>
                     <td style={tdR}>{r.total}</td>
                     <td style={tdR}>{r.consecutive}</td>
-                    <td style={tdR}>{fmtOGARaw(r.a)}</td>
-                    <td style={tdR}>{fmtOGARaw(r.b)}</td>
+                    {showOgaDiagnostics ? <td style={tdR}>{fmtOGARaw(r.a)}</td> : null}
+                    {showOgaDiagnostics ? <td style={tdR}>{fmtOGARaw(r.b)}</td> : null}
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         ) : (
-          <i style={{ color: "#777" }}>Select at least 2 numbers to see pairs.</i>
+          <i style={{ color: "#777" }}>
+            {selectedNumbers.length < 2
+              ? "Select at least 2 numbers to see pairs."
+              : "No selected pairs have been co-drawn in this scope."}
+          </i>
         )}
       </div>
 
       {/* Triplets */}
-      <div style={{ marginBottom: 14 }}>
-        <h4 style={{ margin: "0 0 6px 0" }}>Triplets (top co-draws) + OGA raw</h4>
+      <div style={{ marginBottom: 10 }}>
+        <h4 style={subheadStyle}>Triplets</h4>
         {tripletRows.length ? (
           <div style={{ overflowX: "auto" }}>
-            <table style={{ borderCollapse: "collapse", fontSize: 12, minWidth: 520 }}>
+            <table style={{ borderCollapse: "collapse", fontSize: 12, minWidth: showOgaDiagnostics ? 520 : 300, width: "100%" }}>
               <thead>
                 <tr style={{ background: "#fafafa" }}>
                   <th style={thL}>Triplet</th>
                   <th style={thR}>Co-draws</th>
-                  <th style={thR}>A OGA raw</th>
-                  <th style={thR}>B OGA raw</th>
-                  <th style={thR}>C OGA raw</th>
+                  {showOgaDiagnostics ? <th style={thR}>A OGA</th> : null}
+                  {showOgaDiagnostics ? <th style={thR}>B OGA</th> : null}
+                  {showOgaDiagnostics ? <th style={thR}>C OGA</th> : null}
                 </tr>
               </thead>
               <tbody>
@@ -379,47 +275,94 @@ export const SelectionInsightsPanel: React.FC<SelectionInsightsPanelProps> = ({
                   <tr key={`${r.a}-${r.b}-${r.c}`} style={{ borderBottom: "1px solid #eee" }}>
                     <td style={tdL}>({r.a}, {r.b}, {r.c})</td>
                     <td style={tdR}>{r.total}</td>
-                    <td style={tdR}>{fmtOGARaw(r.a)}</td>
-                    <td style={tdR}>{fmtOGARaw(r.b)}</td>
-                    <td style={tdR}>{fmtOGARaw(r.c)}</td>
+                    {showOgaDiagnostics ? <td style={tdR}>{fmtOGARaw(r.a)}</td> : null}
+                    {showOgaDiagnostics ? <td style={tdR}>{fmtOGARaw(r.b)}</td> : null}
+                    {showOgaDiagnostics ? <td style={tdR}>{fmtOGARaw(r.c)}</td> : null}
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         ) : (
-          <i style={{ color: "#777" }}>Select at least 3 numbers to see triplets.</i>
+          <i style={{ color: "#777" }}>
+            {selectedNumbers.length < 3
+              ? "Select at least 3 numbers to see triplets."
+              : cappedTriplets
+                ? "Triplets are skipped for very large selections."
+                : "No selected triplets have been co-drawn in this scope."}
+          </i>
         )}
       </div>
 
       {/* Companions + Never */}
-      <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
-        <div style={{ minWidth: 220 }}>
-          <h4 style={{ margin: "0 0 6px 0" }}>Top companions (with any selected)</h4>
-          {topCompanions.length ? (
-            <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12 }}>
-              {topCompanions.map((x) => (
-                <li key={x.n}>
-                  #{x.n} — {x.count} co-draws (OGA {fmtOGARaw(x.n)})
-                </li>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10 }}>
+        <div style={{ minWidth: 0 }}>
+          <h4 style={subheadStyle}>Companions ranked ({companionRows.length})</h4>
+          {companionRows.length ? (
+            <div style={scrollListStyle} aria-label="All observed companions ranked">
+              {companionRows.map((x, index) => (
+                <div key={x.n} style={rankRowStyle}>
+                  <span style={rankStyle}>{index + 1}</span>
+                  <b>#{x.n}</b>
+                  <span style={{ marginLeft: "auto" }}>{x.count} co-draws</span>
+                  <span style={mutedTextStyle}>{(x.rate * 100).toFixed(1)}%</span>
+                </div>
               ))}
-            </ul>
+            </div>
           ) : (
             <i style={{ color: "#777" }}>No companions observed.</i>
           )}
         </div>
-        <div style={{ minWidth: 220 }}>
-          <h4 style={{ margin: "0 0 6px 0" }}>Never co-drawn with selection</h4>
-          <div style={{ fontSize: 12 }}>
-            Count: <b>{neverWithCount}</b>
-            {neverWithSample.length > 0 && (
-              <>
-                {" "}• Sample: <span>{neverWithSample.join(", ")}</span>
-              </>
-            )}
-          </div>
+        <div style={{ minWidth: 0 }}>
+          <h4 style={subheadStyle}>Never co-drawn ({neverWithCount})</h4>
+          {neverWithNumbers.length ? (
+            <div style={chipScrollStyle} aria-label="All numbers never co-drawn with the current selection">
+              {neverWithNumbers.map((number) => (
+                <span key={number} style={numberChipStyle}>{number}</span>
+              ))}
+            </div>
+          ) : (
+            <div style={mutedTextStyle}>Every unselected number has appeared with the selection at least once.</div>
+          )}
         </div>
       </div>
+    </section>
+  );
+};
+
+export const SelectionInsightsPredictionPanel: React.FC<SelectionInsightsPredictionPanelProps> = ({
+  windowAnalytics,
+  allHistoryAnalytics,
+  title = "Predicted",
+}) => {
+  const rows = useMemo(
+    () => buildSelectionInsightPredictedCompanions(windowAnalytics, allHistoryAnalytics),
+    [windowAnalytics, allHistoryAnalytics],
+  );
+
+  return (
+    <section style={sectionStyle}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", marginBottom: 8 }}>
+        <span style={scopePillStyle}>{title}</span>
+        <span style={mutedTextStyle}>{rows.length} ranked</span>
+      </div>
+      <div style={{ fontSize: 12, color: "#475569", lineHeight: 1.35, marginBottom: 8 }}>
+        Blends Windowed and All History companion rates. This is a shortlist diagnostic, not a calibrated probability.
+      </div>
+      {rows.length ? (
+        <div style={scrollListStyle} aria-label="Predicted companion shortlist">
+          {rows.map((row, index) => (
+            <div key={row.n} style={rankRowStyle}>
+              <span style={rankStyle}>{index + 1}</span>
+              <b>#{row.n}</b>
+              <span style={{ marginLeft: "auto" }}>{row.supportScore.toFixed(1)}</span>
+              <span style={mutedTextStyle}>W {row.windowCount} · All {row.allCount}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div style={mutedTextStyle}>Select at least one number to rank companion evidence.</div>
+      )}
     </section>
   );
 };
@@ -428,13 +371,92 @@ export const SelectionInsightsPanel: React.FC<SelectionInsightsPanelProps> = ({
 const sectionStyle: React.CSSProperties = {
   border: "1px solid #e0e0e0",
   borderRadius: 8,
-  padding: 14,
+  padding: 10,
   background: "#fdfdfd",
-  marginTop: 12,
+  marginTop: 4,
 };
-const thL: React.CSSProperties = { textAlign: "left", padding: "4px 8px" };
-const thR: React.CSSProperties = { textAlign: "right", padding: "4px 8px" };
-const tdL: React.CSSProperties = { textAlign: "left", padding: "4px 8px" };
-const tdR: React.CSSProperties = { textAlign: "right", padding: "4px 8px" };
-
-// NOTE: combinations2, combinations3, keyPair, keyTriplet helper functions are same as before (keep them above).
+const scopePillStyle: React.CSSProperties = {
+  fontSize: 12,
+  color: "#155a8a",
+  background: "#eef6ff",
+  border: "1px solid #cfe3f7",
+  padding: "2px 8px",
+  borderRadius: 999,
+  fontWeight: 850,
+};
+const warningPillStyle: React.CSSProperties = {
+  fontSize: 12,
+  color: "#9a3412",
+  background: "#fff7ed",
+  border: "1px solid #fed7aa",
+  padding: "2px 8px",
+  borderRadius: 999,
+  fontWeight: 850,
+};
+const detailsStyle: React.CSSProperties = {
+  marginBottom: 10,
+  border: "1px solid #e2e8f0",
+  borderRadius: 8,
+  padding: "6px 8px",
+  background: "#fff",
+  fontSize: 12,
+};
+const summaryStyle: React.CSSProperties = {
+  cursor: "pointer",
+  color: "#334155",
+  fontWeight: 850,
+};
+const subheadStyle: React.CSSProperties = { margin: "0 0 5px 0", fontSize: 12, color: "#26313d" };
+const thL: React.CSSProperties = { textAlign: "left", padding: "4px 6px" };
+const thR: React.CSSProperties = { textAlign: "right", padding: "4px 6px" };
+const tdL: React.CSSProperties = { textAlign: "left", padding: "4px 6px" };
+const tdR: React.CSSProperties = { textAlign: "right", padding: "4px 6px" };
+const mutedTextStyle: React.CSSProperties = { color: "#64748b", fontSize: 11, fontWeight: 750 };
+const warnTextStyle: React.CSSProperties = { color: "#9a3412", fontSize: 12, fontWeight: 750 };
+const scrollListStyle: React.CSSProperties = {
+  maxHeight: 210,
+  overflowY: "auto",
+  border: "1px solid #edf2f7",
+  borderRadius: 8,
+  background: "#fff",
+};
+const rankRowStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 7,
+  padding: "5px 7px",
+  borderBottom: "1px solid #f1f5f9",
+  fontSize: 12,
+  color: "#26313d",
+};
+const rankStyle: React.CSSProperties = {
+  minWidth: 20,
+  color: "#64748b",
+  fontSize: 11,
+  fontWeight: 850,
+  textAlign: "right",
+};
+const chipScrollStyle: React.CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 5,
+  maxHeight: 114,
+  overflowY: "auto",
+  border: "1px solid #edf2f7",
+  borderRadius: 8,
+  background: "#fff",
+  padding: 6,
+};
+const numberChipStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minWidth: 24,
+  height: 22,
+  borderRadius: 999,
+  border: "1px solid #dbe3ec",
+  background: "#f8fafc",
+  color: "#334155",
+  fontSize: 11,
+  fontWeight: 850,
+};

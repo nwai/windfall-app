@@ -383,7 +383,7 @@ export const HotColdRankingPanel: React.FC<HotColdRankingPanelProps> = ({
       </div>
       {userExclusionReminder && (
         <div role="status" style={{ fontSize: 12, color: "#475569", lineHeight: 1.45, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 10px" }}>
-          {userExclusionReminder}. Clear it in WFMQYH User Exclusions before selecting locked numbers here.
+          {userExclusionReminder}. Clear the manual exclusion or turn off the rule that excludes them before selecting locked numbers here.
         </div>
       )}
 
@@ -496,7 +496,7 @@ export const HotColdRankingPanel: React.FC<HotColdRankingPanelProps> = ({
                     const rowBackground = isForced ? "#fffaf5" : isUserExcluded || isExcluded ? "#f8fafc" : "#ffffff";
                     const rowCanActivate = breakdownRowsInteractive && !isUserExcluded;
                     const rowTitle = isUserExcluded
-                      ? `Number ${row.number} is excluded by User Exclusions. Clear it in WFMQYH User Exclusions before selecting it here.`
+                      ? `Number ${row.number} is unavailable because it is excluded. Clear the active exclusion or turn off the rule before selecting it here.`
                       : rowCanActivate
                       ? `${includeRowsMode ? "Toggle forced inclusion" : "Toggle forced exclusion"} for ${row.number}`
                       : undefined;

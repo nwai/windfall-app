@@ -1,6 +1,7 @@
 import React, { useMemo, useState, useCallback } from "react";
 import type { Draw } from "../types";
 import { filterRowsForHistoryBaselines, getExcludedMonthLabelsForHistoryBaselines } from "../lib/monthlyAverageScope";
+import { buildPlanningDrawContext } from "../lib/planningDrawContext";
 
 interface OverlapRow {
   monthLabel: string;
@@ -131,13 +132,16 @@ function buildRows(history: Draw[], includeSupp: boolean, targetDrawIndex: numbe
   return rows;
 }
 
-export const MonthlyOverlapPanel: React.FC<{ history: Draw[] }> = ({ history }) => {
+export const MonthlyOverlapPanel: React.FC<{ history: Draw[]; today?: Date }> = ({ history, today }) => {
   const [includeSupp, setIncludeSupp] = useState<boolean>(false);
   const [targetDrawIndex, setTargetDrawIndex] = useState<number>(4); // default 4th draw
+  const planningContext = useMemo(
+    () => buildPlanningDrawContext(history, { now: today }),
+    [history, today],
+  );
 
-  // Compute the maximum draws available in any month to clamp the input dynamically
+  // Compute the maximum useful draw count for historical comparison and the active planning month.
   const maxDrawsPerMonth = useMemo(() => {
-    if (!history.length) return 12; // sensible fallback
     const counts = new Map<string, number>();
     history.forEach((d) => {
       const dt = parseDate(d.date || "");
@@ -145,65 +149,48 @@ export const MonthlyOverlapPanel: React.FC<{ history: Draw[] }> = ({ history }) 
       const k = getMonthKey(dt);
       counts.set(k, (counts.get(k) || 0) + 1);
     });
-    let max = 0;
+    let max = planningContext.targetMonthExpectedDrawCount;
     counts.forEach((v) => { if (v > max) max = v; });
     return Math.max(1, max);
-  }, [history]);
+  }, [history, planningContext.targetMonthExpectedDrawCount]);
 
   const rows = useMemo(() => {
     const built = buildRows(history, includeSupp, targetDrawIndex);
-    const today = new Date();
-    const currentKey = (() => { const d = today; return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; })();
-    const latestBuiltRow = built.length ? built[built.length - 1] : null;
-    const latestKey = latestBuiltRow?.monthLabel ?? null;
-    if (!latestKey) return built;
-
-    // Helper: month key immediately after a given YYYY-MM string
-    const nextMonthKey = (key: string) => {
-      const [y, m] = key.split('-').map(Number);
-      return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
-    };
-
-    let pendingKey: string | null = null;
-
-    if (currentKey > latestKey) {
-      // Today is already in a later calendar month — show it as pending.
-      pendingKey = currentKey;
-    } else if (currentKey === latestKey) {
-      // Today is still in the same month as the last draw.
-      // If that month's draw count has reached maxDrawsPerMonth the month is
-      // "complete" — show next month as pending so the user can plan ahead.
-      // Find the row for the current month to get its actual draw count.
-      const currentMonthRow = built.find(r => r.monthLabel === currentKey);
-      if (currentMonthRow && !currentMonthRow.isPending && currentMonthRow.totalDrawsInMonth >= maxDrawsPerMonth) {
-        const nk = nextMonthKey(latestKey);
-        if (!built.find(r => r.monthLabel === nk)) {
-          pendingKey = nk;
-        }
-      }
+    const targetMonthLabel = planningContext.targetMonthLabel;
+    const planningMessage = `Planning ${targetMonthLabel} D${planningContext.targetDrawOrdinal} (${planningContext.targetDrawDate}) - overlap data will appear once ${targetDrawIndex} draw${targetDrawIndex !== 1 ? "s" : ""} have been added`;
+    const existingTargetRow = built.find((row) => row.monthLabel === targetMonthLabel);
+    if (existingTargetRow) {
+      return built.map((row) => (
+        row.monthLabel === targetMonthLabel && row.isPending
+          ? {
+            ...row,
+            targetDate: row.targetDate || planningContext.targetDrawDate,
+            priorDrawCount: planningContext.completedDrawsInTargetMonth,
+            totalDrawsInMonth: Math.max(row.totalDrawsInMonth, planningContext.targetMonthExpectedDrawCount),
+            pendingMessage: planningMessage,
+          }
+          : row
+      ));
     }
 
-    if (pendingKey) {
-      built.push({
-        monthLabel: pendingKey,
+    return [...built, {
+        monthLabel: targetMonthLabel,
         targetDate: "",
-        priorDrawCount: 0,
-        totalDrawsInMonth: 0,
+        priorDrawCount: planningContext.completedDrawsInTargetMonth,
+        totalDrawsInMonth: planningContext.targetMonthExpectedDrawCount,
         overlapCount: 0,
         overlaps: [],
         overlapCounts: {},
         totalOverlapFreq: 0,
         avgOverlapFreq: 0,
         targetNums: [],
-        undrawnNums: [],
-        undrawnCount: 0,
+        undrawnNums: Array.from({ length: 45 }, (_, i) => i + 1),
+        undrawnCount: 45,
         allMonthNumFreqs: [],
         isPending: true,
-        pendingMessage: `Awaiting first draw — overlap data will appear once ${targetDrawIndex} draw${targetDrawIndex !== 1 ? "s" : ""} have been added`,
-      });
-    }
-    return built;
-  }, [history, includeSupp, targetDrawIndex, maxDrawsPerMonth]);
+        pendingMessage: planningMessage,
+      }];
+  }, [history, includeSupp, planningContext, targetDrawIndex]);
 
   /** The most recent non-pending month label — excluded from footer averages (may be incomplete). */
   const mostRecentLabel = useMemo(

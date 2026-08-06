@@ -188,6 +188,7 @@ describe("analyzeDrawBucketPatterns", () => {
     expect(sortDrawBucketPatternStats(stats, "averageHits").map((stat) => stat.key)).toEqual(["beta", "alpha", "gamma"]);
     expect(sortDrawBucketPatternStats(stats, "modeHits").map((stat) => stat.key)).toEqual(["beta", "gamma", "alpha"]);
     expect(sortDrawBucketPatternStats(stats, "label").map((stat) => stat.key)).toEqual(["alpha", "beta", "gamma"]);
+    expect(sortDrawBucketPatternStats(stats, "overall").map((stat) => stat.key)).toEqual(["beta", "alpha", "gamma"]);
   });
 
   it("builds leaderboard rows with explicit per-metric positions", () => {
@@ -208,6 +209,7 @@ describe("analyzeDrawBucketPatterns", () => {
     expect(leaderboard[0]).toMatchObject({
       stat: { key: "beta" },
       selectedSortPosition: 1,
+      overallPosition: 1,
       atLeastOnePosition: 3,
       averageHitsPosition: 1,
       modeHitsPosition: 1,
@@ -216,11 +218,13 @@ describe("analyzeDrawBucketPatterns", () => {
       totalHitsPosition: 1,
       recentAveragePosition: 1,
     });
+    expect(leaderboard[0].overallScore).toBeCloseTo(500 / 7, 5);
     expect(leaderboard[0].recentAverageHits).toBeCloseTo(5 / 3, 5);
 
     expect(leaderboard[2]).toMatchObject({
       stat: { key: "gamma" },
       selectedSortPosition: 3,
+      overallPosition: 3,
       atLeastOnePosition: 1,
       averageHitsPosition: 3,
       modeHitsPosition: 2,
@@ -229,6 +233,24 @@ describe("analyzeDrawBucketPatterns", () => {
       totalHitsPosition: 3,
       recentAveragePosition: 3,
     });
+    expect(leaderboard[2].overallScore).toBeCloseTo(250 / 7, 5);
     expect(leaderboard[2].recentAverageHits).toBeCloseTo(1 / 3, 5);
+  });
+
+  it("orders leaderboard rows by equal-weight overall metric support", () => {
+    const stats: DrawBucketPatternStats[] = [
+      leaderboardFixture({ key: "alpha", label: "Alpha", averageHits: 1.1, atLeastOneRate: 70, zeroRate: 30, modeHits: 1, maxObservedHits: 2, totalHits: 22, recentHits: [1, 1, 1] }),
+      leaderboardFixture({ key: "beta", label: "Beta", averageHits: 1.4, atLeastOneRate: 60, zeroRate: 40, modeHits: 2, maxObservedHits: 3, totalHits: 28, recentHits: [2, 2, 1] }),
+      leaderboardFixture({ key: "gamma", label: "Gamma", averageHits: 0.9, atLeastOneRate: 90, zeroRate: 10, modeHits: 1, maxObservedHits: 1, totalHits: 18, recentHits: [0, 1, 0] }),
+    ];
+
+    const leaderboard = buildDrawBucketPatternLeaderboard(stats, "overall");
+
+    expect(leaderboard.map((row) => [row.overallPosition, row.stat.key])).toEqual([
+      [1, "beta"],
+      [2, "alpha"],
+      [3, "gamma"],
+    ]);
+    expect(leaderboard.map((row) => row.selectedSortPosition)).toEqual([1, 2, 3]);
   });
 });

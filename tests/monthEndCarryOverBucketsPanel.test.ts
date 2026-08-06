@@ -54,8 +54,8 @@ describe("MonthEndCarryOverBucketsPanel", () => {
       }),
     );
 
-    expect(html).toContain("User exclusions active: 1");
-    expect(html).toContain("Number 1 is excluded by User Exclusions");
+    expect(html).toContain("Active exclusions: 1");
+    expect(html).toContain("Number 1 is unavailable because it is excluded");
     expect(html).toContain("disabled");
   });
 });

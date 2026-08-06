@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import type { Draw } from "../types";
 import {
+  analyzeD1TerminalMomentum,
   analyzeEndingDigitSequences,
+  analyzeEndingDigitMonthStage,
+  buildEndingDigitMonthOptions,
   predictNextEndingDigitSequence,
 } from "./endingDigitSequences";
 
@@ -55,6 +58,137 @@ describe("analyzeEndingDigitSequences", () => {
 
     expect(summary.perDraw[0].numbers).toEqual([1, 12, 35, 20]);
     expect(summary.perDraw[0].endings).toEqual([1, 2, 5, 0]);
+  });
+});
+
+describe("analyzeEndingDigitMonthStage", () => {
+  const draw = (date: string, main: number[], supp: number[] = []): Draw => ({ date, main, supp });
+
+  it("builds selectable months newest first with their loaded draw counts", () => {
+    const options = buildEndingDigitMonthOptions([
+      draw("2026-05-01", [1, 2, 3, 4, 5, 6]),
+      draw("2026-06-01", [11, 12, 13, 14, 15, 16]),
+      draw("2026-06-03", [21, 22, 23, 24, 25, 26]),
+    ], { includeSupp: false });
+
+    expect(options.map((option) => [option.monthKey, option.drawCount])).toEqual([
+      ["2026-06", 2],
+      ["2026-05", 1],
+    ]);
+  });
+
+  it("shows first-N terminal digit movement from early month hits to month-end buckets", () => {
+    const analysis = analyzeEndingDigitMonthStage([
+      draw("2026-05-01", [12, 22, 31, 44, 5, 6], [32, 42]),
+      draw("2026-05-03", [2, 12, 13, 24, 35, 40], [7, 8]),
+      draw("2026-06-01", [12, 22, 32, 42, 5, 6], [1, 3]),
+      draw("2026-06-03", [2, 12, 13, 24, 35, 40], [7, 8]),
+    ], { includeSupp: true, monthKey: "2026-06", drawCount: 1 });
+
+    expect(analysis?.monthKey).toBe("2026-06");
+    expect(analysis?.selectedDrawCount).toBe(1);
+
+    const digitTwo = analysis?.rows.find((row) => row.digit === 2);
+    expect(digitTwo?.familyNumbers).toEqual([2, 12, 22, 32, 42]);
+    expect(digitTwo?.firstDrawNumbers).toEqual([12, 22, 32, 42]);
+    expect(digitTwo?.firstDrawHits).toBe(4);
+    expect(digitTwo?.firstDrawMultiple).toBe(true);
+    expect(digitTwo?.stageHits).toBe(4);
+    expect(digitTwo?.stageUnique).toBe(4);
+    expect(digitTwo?.stageBucketMix).toEqual([1, 4, 0, 0, 0, 0, 0, 0, 0]);
+    expect(digitTwo?.monthEndHits).toBe(6);
+    expect(digitTwo?.monthEndUnique).toBe(5);
+    expect(digitTwo?.monthEndBucketMix).toEqual([0, 4, 1, 0, 0, 0, 0, 0, 0]);
+    expect(digitTwo?.postStageHits).toBe(2);
+    expect(digitTwo?.numbersAdvancedAfterStage).toBe(2);
+  });
+
+  it("builds D1 multi context from prior months only", () => {
+    const analysis = analyzeEndingDigitMonthStage([
+      draw("2026-03-01", [1, 13, 24, 35, 40, 41]),
+      draw("2026-03-03", [2, 12, 23, 34, 45, 6]),
+      draw("2026-04-01", [12, 22, 31, 44, 5, 6], [32, 42]),
+      draw("2026-04-03", [2, 12, 13, 24, 35, 40], [7, 8]),
+      draw("2026-05-01", [12, 22, 32, 42, 5, 6]),
+      draw("2026-05-03", [2, 12, 13, 24, 35, 40]),
+      draw("2026-06-01", [12, 22, 32, 42, 2, 6]),
+      draw("2026-06-03", [2, 12, 22, 32, 42, 40]),
+    ], { includeSupp: true, monthKey: "2026-05", drawCount: 1 });
+
+    const digitTwo = analysis?.rows.find((row) => row.digit === 2);
+
+    expect(digitTwo?.context.priorMonthsWithFirstDrawMultiple).toBe(1);
+    expect(digitTwo?.context.priorMonthsWithoutFirstDrawMultiple).toBe(1);
+    expect(digitTwo?.context.avgPostD1HitsWhenMultiple).toBe(2);
+    expect(digitTwo?.context.avgPostD1HitsWhenNotMultiple).toBe(2);
+    expect(digitTwo?.context.lift).toBe(1);
+  });
+});
+
+describe("analyzeD1TerminalMomentum", () => {
+  const draw = (date: string, main: number[], supp: number[] = []): Draw => ({ date, main, supp });
+
+  it("classifies early D1 multi terminal families as strong when prior same-stage unique expansion is consistent", () => {
+    const analysis = analyzeD1TerminalMomentum([
+      draw("2026-02-01", [12, 22, 1, 3, 4, 5]),
+      draw("2026-02-03", [2, 13, 24, 35, 40, 41]),
+      draw("2026-03-01", [12, 22, 1, 3, 4, 5]),
+      draw("2026-03-03", [32, 13, 24, 35, 40, 41]),
+      draw("2026-04-01", [12, 22, 1, 3, 4, 5]),
+      draw("2026-04-03", [42, 13, 24, 35, 40, 41]),
+      draw("2026-05-01", [12, 22, 1, 3, 4, 5]),
+      draw("2026-05-03", [7, 13, 24, 35, 40, 41]),
+    ], { includeSupp: false, monthKey: "2026-05", drawCount: 1 });
+
+    const digitTwo = analysis?.activeRows.find((row) => row.digit === 2);
+
+    expect(analysis?.stageMode).toBe("early-unique");
+    expect(analysis?.overallSuggestedStrength).toBe("strong");
+    expect(digitTwo?.suggestedStrength).toBe("strong");
+    expect(digitTwo?.prior.d1MultiTrials).toBe(3);
+    expect(digitTwo?.prior.nextHitRate).toBe(1);
+    expect(digitTwo?.prior.nextUniqueRate).toBe(1);
+  });
+
+  it("uses prior months only for D1 terminal momentum context", () => {
+    const analysis = analyzeD1TerminalMomentum([
+      draw("2026-04-01", [12, 22, 1, 3, 4, 5]),
+      draw("2026-04-03", [2, 13, 24, 35, 40, 41]),
+      draw("2026-05-01", [12, 22, 1, 3, 4, 5]),
+      draw("2026-05-03", [7, 13, 24, 35, 40, 41]),
+      draw("2026-06-01", [12, 22, 1, 3, 4, 5]),
+      draw("2026-06-03", [32, 13, 24, 35, 40, 41]),
+    ], { includeSupp: false, monthKey: "2026-05", drawCount: 1 });
+
+    const digitTwo = analysis?.activeRows.find((row) => row.digit === 2);
+
+    expect(digitTwo?.prior.d1MultiTrials).toBe(1);
+    expect(digitTwo?.prior.avgNextHits).toBe(1);
+  });
+
+  it("turns the SGI preview off when the selected month stage is already closed", () => {
+    const analysis = analyzeD1TerminalMomentum([
+      draw("2026-04-01", [12, 22, 1, 3, 4, 5]),
+      draw("2026-04-03", [2, 13, 24, 35, 40, 41]),
+      draw("2026-05-01", [12, 22, 1, 3, 4, 5]),
+      draw("2026-05-03", [7, 13, 24, 35, 40, 41]),
+    ], { includeSupp: false, monthKey: "2026-05", drawCount: 2 });
+
+    expect(analysis?.stageMode).toBe("closed-review");
+    expect(analysis?.overallSuggestedStrength).toBe("off");
+    expect(analysis?.activeRows[0]?.suggestedStrength).toBe("off");
+  });
+
+  it("uses the expected planning-month draw count so live next draws are not mistaken for closed months", () => {
+    const analysis = analyzeD1TerminalMomentum([
+      draw("2026-04-01", [12, 22, 1, 3, 4, 5]),
+      draw("2026-04-03", [2, 13, 24, 35, 40, 41]),
+      draw("2026-05-01", [12, 22, 1, 3, 4, 5]),
+    ], { includeSupp: false, monthKey: "2026-05", drawCount: 1, expectedDrawCount: 13 });
+
+    expect(analysis?.stageMode).toBe("early-unique");
+    expect(analysis?.targetDrawNumber).toBe(2);
+    expect(analysis?.totalDrawsInMonth).toBe(13);
   });
 });
 

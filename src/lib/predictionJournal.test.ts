@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import type { Draw } from "../types";
 import {
+  PREDICTION_JOURNAL_SELECTION_REASON_LABELS,
   buildPredictionJournalDraftFromSetup,
   buildPredictionJournalEntry,
   canEditPredictionJournalEntry,
@@ -29,6 +30,11 @@ describe("predictionJournal", () => {
         oddEvenRatio: " 2 : 6 ",
         numbers: [3, 3, 46, 4, 1, Number.NaN],
         terminalDigits: [1, 1, 12, -1, 9],
+        selectionReason: {
+          version: 1,
+          key: "dgaPattern",
+          label: "Outdated label",
+        },
         notes: "   Watching odd/even only.   ",
       },
     });
@@ -42,8 +48,13 @@ describe("predictionJournal", () => {
       targetKind: "nextDraw",
       inputs: {
         oddEvenRatio: "2:6",
-        numbers: [1, 3, 4],
+        numbers: [3, 4, 1],
         terminalDigits: [1, 2, 9],
+        selectionReason: {
+          version: 1,
+          key: "dgaPattern",
+          label: PREDICTION_JOURNAL_SELECTION_REASON_LABELS.dgaPattern,
+        },
         notes: "Watching odd/even only.",
       },
     });
@@ -192,6 +203,20 @@ describe("predictionJournal", () => {
       droughtBreakEmpiricalHazardNumbers: [20, 31, 34],
       droughtBreakShortlistTop: 8,
       droughtBreakStrictThreshold: 6,
+      selectionInsightsSnapshot: {
+        version: 1,
+        enabled: true,
+        selectedNumbers: [1, 2, 3],
+        windowLabel: "Custom 13",
+        windowDrawCount: 13,
+        allDrawCount: 338,
+        windowTopCompanionNumbers: [12, 14],
+        allTopCompanionNumbers: [10, 12],
+        predictedCompanionNumbers: [12, 10],
+        predictedCompanions: [
+          { number: 12, supportScore: 38.4, windowCount: 6, allCount: 82 },
+        ],
+      },
       favoritePanelIds: ["prediction-journal"],
     } as any;
 
@@ -229,6 +254,16 @@ describe("predictionJournal", () => {
         anySelectedFromShortlist: true,
         allSelectedFromShortlist: false,
       },
+      selectionInsights: {
+        enabled: true,
+        selectedNumbers: [1, 2, 3],
+        windowLabel: "Custom 13",
+        windowDrawCount: 13,
+        allDrawCount: 338,
+        windowTopCompanionNumbers: [12, 14],
+        allTopCompanionNumbers: [10, 12],
+        predictedCompanionNumbers: [12, 10],
+      },
     });
     expect(entry.provenance?.droughtBreakShortlist.classifications).toEqual([
       expect.objectContaining({ number: 20, category: "empirical-hazard", label: "Empirical hazard" }),
@@ -257,6 +292,7 @@ describe("predictionJournal", () => {
         "Hot/cold forced: 1",
         "Hot/cold excluded: 1",
         "Drought-break forced: 1",
+        "Selection insights: predicted companions 12, 10",
       ]),
     });
   });
@@ -285,6 +321,21 @@ describe("predictionJournal", () => {
       droughtBreakEmpiricalHazardNumbers: [20, 31, 34],
       droughtBreakShortlistTop: 8,
       droughtBreakStrictThreshold: 6,
+      selectionInsightsSnapshot: {
+        version: 1,
+        enabled: true,
+        selectedNumbers: [1, 2, 3],
+        windowLabel: "Custom 13",
+        windowDrawCount: 13,
+        allDrawCount: 338,
+        windowTopCompanionNumbers: [12, 14, 20],
+        allTopCompanionNumbers: [10, 12, 31],
+        predictedCompanionNumbers: [12, 10, 14],
+        predictedCompanions: [
+          { number: 12, supportScore: 38.4, windowCount: 6, allCount: 82 },
+          { number: 10, supportScore: 35.1, windowCount: 4, allCount: 90 },
+        ],
+      },
       monthlyConstructiveEnabled: true,
       acceptanceNeedsEnabled: true,
       acceptanceNeedsCounts: {
@@ -313,6 +364,42 @@ describe("predictionJournal", () => {
     expect(draft.inputs.notes).toContain("HC3: OFF.");
     expect(draft.inputs.notes).toContain("Exclusion sources: user 44; hot/cold 45;");
     expect(draft.inputs.notes).toContain("Drought-break shortlist check: matched 20, 31; all selected from shortlist: no; Strict drought 6+: 31; Empirical hazard: 20, 31; outside shortlist: 1, 2, 3, 10, 12, 14.");
+    expect(draft.inputs.notes).toContain("Selection Insights snapshot: anchors 1, 2, 3; window Custom 13 (13 draws) top companions 12, 14, 20; all-history (338 draws) top companions 10, 12, 31; Predicted companion shortlist 12, 10, 14; companion evidence is observe-only and not a calibrated probability.");
+  });
+
+  it("preserves DGA suggested supplementary roles when drafting from setup", () => {
+    const draft = buildPredictionJournalDraftFromSetup({
+      windowEnabled: true,
+      windowMode: "H",
+      customDrawCount: 13,
+      selectedRatios: [],
+      useTrickyRule: false,
+      knobs: {},
+      userSelectedNumbers: [1, 2, 3, 4, 5, 6, 7, 8],
+      trendSelectedNumbers: [],
+      previousNeighbourConstraintNumbers: [],
+      hotColdForcedNumbers: [],
+      droughtBreakSelectedNumbers: [],
+      selectedCarryOverBoostNumbers: [],
+      excludedNumbers: [],
+      dgaSuggestedMainNumbers: [1, 2, 4, 6, 7, 8],
+      dgaSuggestedSuppNumbers: [3, 5],
+      dgaSuggestedSuppPair: [3, 5],
+      dgaSuggestedSuppPairActiveCount: 1,
+      dgaSuggestedSuppPairFullCount: 2,
+      dgaSuggestedSuppPairActiveDrawCount: 13,
+      dgaSuggestedSuppPairFullDrawCount: 344,
+      dgaSuggestedSuppPairActiveGap: 4,
+      dgaSuggestedSuppPairFullGap: 21,
+      dgaSuppPairActiveCoverage: 3,
+      dgaSuppPairFullCoverage: 8,
+      dgaSuppPairTotalCoverage: 28,
+    } as any);
+
+    expect(draft.inputs.numbers).toEqual([1, 2, 4, 6, 7, 8, 3, 5]);
+    expect(draft.inputs.oddEvenRatio).toBe("4:4");
+    expect(draft.inputs.notes).toContain("DGA supplementary-role split copied: mains 1, 2, 4, 6, 7, 8; supps 3, 5.");
+    expect(draft.inputs.notes).toContain("DGA supplementary-pair tie-break evidence: pair 3, 5; WFMQYH exact pair 1/13 · latest exact-pair gap 4; all-history exact pair 2/344 · latest exact-pair gap 21. Selected-8 pair coverage: WFMQYH 3/28, all-history 8/28. This is diagnostic evidence, not a probability.");
   });
 
   it("distinguishes Monthly Draws Summary construction from the extra MiAN post-filter", () => {

@@ -1,4 +1,5 @@
 import type { Draw } from "../types";
+import { buildPlanningDrawContext } from "./planningDrawContext";
 import { parseDrawDateToEpoch, sortDrawsChronologically } from "./recentDraws";
 import type { MonthlyBucketKey } from "./monthlyDrawSummary";
 
@@ -27,6 +28,7 @@ export interface LatestNeighbourSupportOptions {
   terminalRuleActive?: Partial<Record<TerminalCoordinationDigit, boolean>>;
   excludedNumbers?: readonly number[];
   planningLastDrawOverride?: boolean;
+  planningNow?: Date | string;
 }
 
 export interface LatestNeighbourSupportTarget {
@@ -177,14 +179,11 @@ const isPlanningLastDraw = (
   history: Draw[],
   latestDraw: Draw,
   override: boolean | undefined,
+  planningNow: Date | string | undefined,
 ): boolean => {
   if (typeof override === "boolean") return override;
-  const latestEpoch = parseDrawDateToEpoch(latestDraw.date);
-  const latestMonthLabel = monthLabelForEpoch(latestEpoch);
-  if (!latestMonthLabel) return false;
-  const observedThisMonth = history.filter((draw) => monthLabelForEpoch(parseDrawDateToEpoch(draw.date)) === latestMonthLabel).length;
-  const expectedDrawCount = inferExpectedDrawCountForLatestMonth(history, latestDraw);
-  return expectedDrawCount !== null && observedThisMonth + 1 >= expectedDrawCount;
+  if (!latestDraw.date) return false;
+  return buildPlanningDrawContext(history, { now: planningNow }).isPlanningLastDraw;
 };
 
 const trailingHitStreak = (chronologicalHistory: Draw[], number: number, recentWindow: number): number => {
@@ -303,6 +302,7 @@ export function analyzeLatestNeighbourSupport(
     chronologicalHistory,
     latestDraw,
     options.planningLastDrawOverride,
+    options.planningNow,
   );
   const targets: LatestNeighbourSupportTarget[] = [];
   const disqualified: LatestNeighbourSupportDisqualification[] = [];

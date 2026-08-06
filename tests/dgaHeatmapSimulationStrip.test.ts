@@ -23,14 +23,17 @@ describe("DGA heatmap simulation strip wiring", () => {
     expect(heatmapBlock).toContain("<DGASimulateStrip");
     expect(heatmapBlock).toContain("selectedNumbers={dgaStripSelectedNumbers}");
     expect(heatmapBlock).toContain("scoringNumberDiagnostics={dgaScoringNumberDiagnostics}");
+    expect(heatmapBlock).toContain("suppSuggestion={dgaSuppSuggestion}");
     expect(heatmapBlock).toContain("onChange={handleDgaStripChange}");
     expect(heatmapBlock).not.toContain("<UserExclusionsStrip");
     expect(gridBlock).toContain("selectedNumbers={dgaStripSelectedNumbers}");
     expect(gridBlock).toContain("scoringNumberDiagnostics={dgaScoringNumberDiagnostics}");
+    expect(gridBlock).toContain("suppSuggestion={dgaSuppSuggestion}");
     expect(gridBlock).toContain("onChange={handleDgaStripChange}");
     expect(monthlyBucketBlock).toContain("selectedNumbers={dgaStripSelectedNumbers}");
     expect(handlerBlock).toContain("setUserSelectedNumbers(sorted);");
     expect(handlerBlock).toContain("const simulationNumbers = sorted.slice(0, 8);");
+    expect(handlerBlock).toContain("setSimulatedDraw(buildDgaStripSimulationDraw(simulationNumbers));");
   });
 
   it("exposes Scoring System Numbers diagnostic ranks through hover and accessibility text", () => {
@@ -64,18 +67,23 @@ describe("DGA heatmap simulation strip wiring", () => {
   it("updates DGA simulation from shared user selections regardless of which strip changed them", () => {
     const appSource = readAppSource();
     const keyStart = appSource.indexOf("const dgaStripSelectedKey = useMemo");
-    const effectStart = appSource.indexOf("const simulationNumbers = dgaStripSelectedNumbers.slice(0, 8);", keyStart);
+    const refreshStart = appSource.indexOf("lastDgaStripSimulationRefreshKeyRef.current = dgaStripSimulationRefreshKey;", keyStart);
+    const effectStart = appSource.indexOf("const simulationNumbers = dgaStripSelectedNumbers.slice(0, 8);", refreshStart);
     const effectBlock = appSource.slice(effectStart, appSource.indexOf("}, [", effectStart));
 
     expect(keyStart).toBeGreaterThanOrEqual(0);
-    expect(effectStart).toBeGreaterThan(keyStart);
+    expect(refreshStart).toBeGreaterThan(keyStart);
+    expect(effectStart).toBeGreaterThan(refreshStart);
     expect(effectBlock).not.toContain('if (simSource !== "dga-strip") return;');
-    expect(effectBlock).toContain("if (activeSimulatedDgaSelectionKey === dgaStripSelectedKey) return;");
+    expect(effectBlock).toContain("activeSimulatedDgaSelectionKey === dgaStripSelectedKey");
+    expect(effectBlock).toContain("activeSimulatedDgaRoleKey === desiredDgaStripSimulationRoleKey");
     expect(effectBlock).toContain("const simulationNumbers = dgaStripSelectedNumbers.slice(0, 8);");
     expect(effectBlock).toContain("setSimulatedDraw(null);");
     expect(effectBlock).toContain("setSimSource(\"none\");");
-    expect(effectBlock).toContain("main: simulationNumbers.slice(0, 6)");
-    expect(effectBlock).toContain("supp: simulationNumbers.slice(6, 8)");
+    expect(effectBlock).toContain("setSimulatedDraw(buildDgaStripSimulationDraw(simulationNumbers));");
+    expect(appSource).toContain("const dgaSuppSuggestion = useMemo");
+    expect(appSource).toContain("buildDgaSuppSuggestion(dgaStripSelectedNumbers, realFilteredHistory, realHistory)");
+    expect(appSource).toContain("desiredDgaStripSimulationRoleKey");
   });
 
   it("aligns heatmap strip rows to the heatmap canvas row gutter", () => {
@@ -100,5 +108,18 @@ describe("DGA heatmap simulation strip wiring", () => {
     expect(gridBlock).toContain("cellSize={DGA_CELL_SIZE}");
     expect(gridBlock).toContain("topOffsetPx={DGA_CELL_SIZE}");
     expect(gridBlock).toContain("includeHeaderSpacer={false}");
+  });
+
+  it("keeps the DGA return Back button outside the grid card body", () => {
+    const appSource = readAppSource();
+    const dgaGridRefStart = appSource.indexOf("<div ref={dgaGridRef}");
+    const cardStart = appSource.indexOf("<InlineCollapsibleCard", dgaGridRefStart);
+    const beforeCardBlock = appSource.slice(dgaGridRefStart, cardStart);
+
+    expect(dgaGridRefStart).toBeGreaterThanOrEqual(0);
+    expect(cardStart).toBeGreaterThan(dgaGridRefStart);
+    expect(beforeCardBlock).toContain("simScrollOriginY !== null");
+    expect(beforeCardBlock).toContain("scrollBackToOrigin");
+    expect(beforeCardBlock).toContain("↑ Back");
   });
 });

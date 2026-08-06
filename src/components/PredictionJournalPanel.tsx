@@ -5,6 +5,7 @@ import type { Draw } from "../types";
 import type { AppPresetSnapshot } from "../lib/presets";
 import { buildMonthEndCarryOverWeighting } from "../lib/monthEndCarryOver";
 import {
+  PREDICTION_JOURNAL_SELECTION_REASON_LABELS,
   buildPredictionJournalDraftFromSetup,
   buildPredictionJournalEntry,
   canEditPredictionJournalEntry,
@@ -18,6 +19,7 @@ import {
   type PredictionJournalInputs,
   type PredictionJournalProvenance,
   type PredictionJournalReviewStatus,
+  type PredictionJournalSelectionReasonKey,
   type PredictionJournalStatus,
   type PredictionScoreResult,
   type PredictionTargetKind,
@@ -26,6 +28,22 @@ import { computeResearchDiaryNextDrawContext } from "../lib/researchDiary";
 import { computeTrendMap } from "../lib/trend";
 import { buildTrendValueSeries } from "../lib/trendValueSeries";
 import { buildPreviousNeighbourConstraintRows } from "../lib/previousNeighbourTargets";
+import {
+  analyzePredictionTerminalDigitHistory,
+  type PredictionTerminalDigitHistory,
+  type PredictionTerminalDigitHistoryBand,
+} from "../lib/scoringSystemDiagnostics";
+import {
+  analyzeHistoricalPrizeCollision,
+  type HistoricalPrizeCollisionHit,
+  type HistoricalPrizeCollisionResult,
+} from "../lib/historicalPrizeCollision";
+import {
+  buildPredictionJournalFindingsReport,
+  type PredictionJournalFinding,
+  type PredictionJournalFindingSeverity,
+  type PredictionJournalFindingsReport,
+} from "../lib/predictionJournalFindings";
 
 export interface PredictionJournalPanelProps {
   history: Draw[];
@@ -33,12 +51,15 @@ export interface PredictionJournalPanelProps {
   now?: () => string;
   getSetupSnapshot?: () => AppPresetSnapshot | undefined;
   newPredictionDraft?: PredictionJournalDraftRequest | null;
+  viewEntriesRequestId?: number;
 }
 
 export interface PredictionJournalDraftRequest {
   id: number;
   setupSnapshot?: AppPresetSnapshot;
 }
+
+type PredictionJournalViewMode = "entries" | "draft";
 
 type BucketTextState = Record<PredictionBucketKey, string>;
 
@@ -123,6 +144,48 @@ const reviewStatusLabels: Record<PredictionJournalReviewStatus, string> = {
   reviewedByUser: "Reviewed by user",
 };
 
+type PredictionJournalSelectionReasonFormValue = PredictionJournalSelectionReasonKey | "";
+
+const SELECTION_REASON_NOTE_PREFIX = "Selection reason:";
+
+const selectionReasonOptions = Object.entries(PREDICTION_JOURNAL_SELECTION_REASON_LABELS)
+  .map(([key, label]) => ({ key: key as PredictionJournalSelectionReasonKey, label }));
+
+const selectionReasonSummary = (reason: PredictionJournalInputs["selectionReason"]): string => {
+  if (!reason) return "";
+  return reason.detail ? `${reason.label} - ${reason.detail}` : reason.label;
+};
+
+const selectionReasonNoteLine = (
+  key: PredictionJournalSelectionReasonFormValue,
+  detail: string,
+): string | null => {
+  if (!key) return null;
+  const label = PREDICTION_JOURNAL_SELECTION_REASON_LABELS[key];
+  const cleanedDetail = detail.trim();
+  const detailText = cleanedDetail && /[.!?]$/.test(cleanedDetail) ? cleanedDetail : `${cleanedDetail}.`;
+  return cleanedDetail ? `${SELECTION_REASON_NOTE_PREFIX} ${label} - ${detailText}` : `${SELECTION_REASON_NOTE_PREFIX} ${label}.`;
+};
+
+const notesWithoutSelectionReason = (value: string): string => (
+  value
+    .split(/\r?\n/)
+    .filter((line) => !line.trim().startsWith(SELECTION_REASON_NOTE_PREFIX))
+    .join("\n")
+    .trimEnd()
+);
+
+const mergeSelectionReasonIntoNotes = (
+  currentNotes: string,
+  key: PredictionJournalSelectionReasonFormValue,
+  detail: string,
+): string => {
+  const baseNotes = notesWithoutSelectionReason(currentNotes);
+  const reasonLine = selectionReasonNoteLine(key, detail);
+  if (!reasonLine) return baseNotes;
+  return baseNotes ? `${baseNotes}\n${reasonLine}` : reasonLine;
+};
+
 const normalizeReviewStatus = (value: PredictionJournalEntry["reviewStatus"]): PredictionJournalReviewStatus => (
   value === "reviewedByUser" ? "reviewedByUser" : "notReviewed"
 );
@@ -203,6 +266,76 @@ const formatJournalNumbers = (numbers: number[] | undefined): string => (
   numbers?.length ? numbers.join(", ") : "none"
 );
 
+const pickedNumberPillStyle = (role: "main" | "supp" | "extra"): React.CSSProperties => {
+  const palette = {
+    main: { border: "#fecaca", background: "#fff1f2", color: "#b91c1c" },
+    supp: { border: "#bbf7d0", background: "#f0fdf4", color: "#166534" },
+    extra: { border: "#dbe3ec", background: "#f8fafc", color: "#475569" },
+  }[role];
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 22,
+    height: 22,
+    border: `1px solid ${palette.border}`,
+    borderRadius: 999,
+    background: palette.background,
+    color: palette.color,
+    fontSize: 11,
+    fontWeight: 900,
+    fontVariantNumeric: "tabular-nums",
+    lineHeight: 1,
+  };
+};
+
+const renderPickedNumberGroup = (
+  label: string,
+  numbers: number[],
+  role: "main" | "supp" | "extra",
+): React.ReactNode => {
+  if (numbers.length === 0) return null;
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+      <span style={{ color: role === "main" ? "#b91c1c" : role === "supp" ? "#166534" : "#64748b", fontSize: 11, fontWeight: 900 }}>
+        {label}
+      </span>
+      {numbers.map((number) => (
+        <span key={`${role}-${number}`} data-picked-role={role} style={pickedNumberPillStyle(role)}>
+          {number}
+        </span>
+      ))}
+    </span>
+  );
+};
+
+const renderCollapsedPickedNumbers = (numbers: number[] | undefined): React.ReactNode => {
+  if (!numbers?.length) return null;
+  const mainNumbers = numbers.slice(0, 6);
+  const suppNumbers = numbers.slice(6, 8);
+  const extraNumbers = numbers.slice(8);
+  return (
+    <span
+      data-testid="prediction-journal-collapsed-picked-numbers"
+      title="Saved number roles: first six are treated as mains, next two as supps. Extra values are stored as broader shortlist numbers."
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        flexWrap: "wrap",
+        marginTop: 5,
+        color: "#475569",
+        fontSize: 12,
+      }}
+    >
+      <span style={{ fontWeight: 850 }}>User picked numbers:</span>
+      {renderPickedNumberGroup("M", mainNumbers, "main")}
+      {renderPickedNumberGroup("S", suppNumbers, "supp")}
+      {renderPickedNumberGroup("+", extraNumbers, "extra")}
+    </span>
+  );
+};
+
 const provenanceChipStyle = (tone: "neutral" | "good" | "warn" = "neutral"): React.CSSProperties => {
   const palette = {
     neutral: { border: "#dbe3ec", bg: "#fff", fg: "#475569" },
@@ -230,7 +363,21 @@ const renderStructuredProvenance = (provenance: PredictionJournalProvenance) => 
     >
       <div style={{ fontSize: 12, fontWeight: 850, color: "#334155", marginBottom: 8 }}>Structured provenance</div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
-        <span style={provenanceChipStyle()}>Numbers {formatJournalNumbers(provenance.selectedNumbers)}</span>
+        <span
+          style={{
+            ...provenanceChipStyle(),
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            flexWrap: "wrap",
+            borderRadius: 8,
+          }}
+        >
+          <span>User picked numbers</span>
+          {renderPickedNumberGroup("M", provenance.selectedNumbers.slice(0, 6), "main")}
+          {renderPickedNumberGroup("S", provenance.selectedNumbers.slice(6, 8), "supp")}
+          {renderPickedNumberGroup("+", provenance.selectedNumbers.slice(8), "extra")}
+        </span>
         <span style={provenanceChipStyle(provenance.inclusionSources.effectiveGenerationForced.length ? "good" : "neutral")}>
           Forced {formatJournalNumbers(provenance.inclusionSources.effectiveGenerationForced)}
         </span>
@@ -269,6 +416,27 @@ const renderStructuredProvenance = (provenance: PredictionJournalProvenance) => 
           </div>
         )}
       </div>
+      {provenance.selectionInsights ? (
+        <div style={{ borderTop: "1px solid #edf2f7", paddingTop: 8, marginTop: 8 }}>
+          <div style={{ fontSize: 12, fontWeight: 850, color: "#334155", marginBottom: 5 }}>
+            Selection Insights capture
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            <span style={provenanceChipStyle(provenance.selectionInsights.enabled ? "good" : "neutral")}>
+              Panel {provenance.selectionInsights.enabled ? "on" : "off"}
+            </span>
+            <span style={provenanceChipStyle()}>
+              Anchors {formatJournalNumbers(provenance.selectionInsights.selectedNumbers)}
+            </span>
+            <span style={provenanceChipStyle(provenance.selectionInsights.predictedCompanionNumbers.length ? "good" : "neutral")}>
+              Predicted companions {formatJournalNumbers(provenance.selectionInsights.predictedCompanionNumbers)}
+            </span>
+          </div>
+          <div style={{ marginTop: 7, fontSize: 12, color: "#64748b", lineHeight: 1.45 }}>
+            {provenance.selectionInsights.windowLabel}: {provenance.selectionInsights.windowDrawCount} draws · All history: {provenance.selectionInsights.allDrawCount} draws.
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 };
@@ -301,6 +469,200 @@ const scoreResultLabel = (result: PredictionScoreResult): string => (
   result.charAt(0).toUpperCase() + result.slice(1)
 );
 
+const formatFindingPercent = (value: number): string => `${Math.round(value * 100)}%`;
+
+const findingSeverityLabel: Record<PredictionJournalFindingSeverity, string> = {
+  info: "Info",
+  caution: "Caution",
+  useful: "Worth watching",
+};
+
+const findingSeverityStyle = (severity: PredictionJournalFindingSeverity): React.CSSProperties => {
+  const palette: Record<PredictionJournalFindingSeverity, { background: string; border: string; color: string }> = {
+    info: { background: "#eef6ff", border: "#cfe3f7", color: "#155a8a" },
+    caution: { background: "#fff7ed", border: "#fed7aa", color: "#9a3412" },
+    useful: { background: "#ecfdf5", border: "#bbf7d0", color: "#166534" },
+  };
+  const colors = palette[severity];
+  return {
+    border: `1px solid ${colors.border}`,
+    borderRadius: 999,
+    padding: "2px 8px",
+    background: colors.background,
+    color: colors.color,
+    fontSize: 11,
+    fontWeight: 900,
+    whiteSpace: "nowrap",
+  };
+};
+
+const findingsMetricCardStyle: React.CSSProperties = {
+  border: "1px solid #dbe3ec",
+  borderRadius: 8,
+  background: "#fff",
+  padding: "9px 10px",
+  minWidth: 0,
+};
+
+const renderFindingCard = (finding: PredictionJournalFinding): React.ReactNode => (
+  <article
+    key={finding.id}
+    style={{
+      border: "1px solid #e2e8f0",
+      borderRadius: 8,
+      background: "#fff",
+      padding: 10,
+      display: "grid",
+      gap: 6,
+    }}
+  >
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
+      <strong style={{ color: "#26313d", fontSize: 13 }}>{finding.title}</strong>
+      <span style={findingSeverityStyle(finding.severity)}>{findingSeverityLabel[finding.severity]}</span>
+    </div>
+    <div style={{ color: "#475569", fontSize: 12, lineHeight: 1.45 }}>{finding.detail}</div>
+    <div style={{ color: "#334155", fontSize: 12, lineHeight: 1.45, fontWeight: 750 }}>{finding.evidence}</div>
+    <div style={{ color: "#64748b", fontSize: 12, lineHeight: 1.45 }}>{finding.recommendation}</div>
+  </article>
+);
+
+const renderPredictionJournalFindingsReport = (report: PredictionJournalFindingsReport): React.ReactNode => {
+  const enoughGroups = report.groups.slice(0, 4);
+  return (
+    <JournalLegendBox
+      title="Prediction Journal Findings Report"
+      tone="soft"
+      style={{ marginTop: 16 }}
+      help={(
+        <span>
+          PJFR is observe-only. It reads scored journal entries and flags repeated habits or useful-looking signals without changing generation.
+        </span>
+      )}
+    >
+      <section data-testid="prediction-journal-findings-report" aria-label="Prediction Journal Findings Report" style={{ display: "grid", gap: 10 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ color: "#26313d", fontSize: 14, fontWeight: 900 }}>Collective scorecard read</div>
+            <div style={{ color: "#64748b", fontSize: 12, lineHeight: 1.45 }}>
+              {report.scopeLabel}. Version {report.version}. No generation influence.
+            </div>
+          </div>
+          <span style={findingSeverityStyle("info")}>Observe-only V{report.version}</span>
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
+            gap: 8,
+          }}
+        >
+          <div style={findingsMetricCardStyle}>
+            <div style={{ color: "#64748b", fontSize: 11, fontWeight: 850 }}>Eligible entries</div>
+            <div style={{ color: "#26313d", fontSize: 20, fontWeight: 900 }}>{report.eligibleEntries}</div>
+            <div style={{ color: "#64748b", fontSize: 11 }}>of {report.totalEntries} saved</div>
+          </div>
+          <div style={findingsMetricCardStyle}>
+            <div style={{ color: "#64748b", fontSize: 11, fontWeight: 850 }}>Scored checks</div>
+            <div style={{ color: "#26313d", fontSize: 20, fontWeight: 900 }}>{report.scoreCounts.checks}</div>
+            <div style={{ color: "#64748b", fontSize: 11 }}>
+              {report.scoreCounts.hits} hit · {report.scoreCounts.partials} partial · {report.scoreCounts.misses} miss
+            </div>
+          </div>
+          <div style={findingsMetricCardStyle}>
+            <div style={{ color: "#64748b", fontSize: 11, fontWeight: 850 }}>Weighted support</div>
+            <div style={{ color: "#26313d", fontSize: 20, fontWeight: 900 }}>{formatFindingPercent(report.weightedSupportRate)}</div>
+            <div style={{ color: "#64748b", fontSize: 11 }}>hit=1, partial=0.5</div>
+          </div>
+          <div style={findingsMetricCardStyle}>
+            <div style={{ color: "#64748b", fontSize: 11, fontWeight: 850 }}>Excluded from read</div>
+            <div style={{ color: "#26313d", fontSize: 20, fontWeight: 900 }}>
+              {report.excludedUnreviewedEntries + report.excludedUnscoredEntries + report.excludedArchivedEntries}
+            </div>
+            <div style={{ color: "#64748b", fontSize: 11 }}>
+              {report.excludedUnreviewedEntries} unreviewed · {report.excludedUnscoredEntries} unscored · {report.excludedArchivedEntries} archived
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gap: 8 }}>
+          {report.findings.map(renderFindingCard)}
+        </div>
+
+        {enoughGroups.length ? (
+          <details style={{ borderTop: "1px solid #e2e8f0", paddingTop: 8 }}>
+            <summary style={{ cursor: "pointer", color: "#334155", fontSize: 12, fontWeight: 900 }}>
+              Repeated signals currently being watched
+            </summary>
+            <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
+              {enoughGroups.map((group) => (
+                <div
+                  key={group.key}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "minmax(0, 1fr) auto",
+                    gap: 8,
+                    alignItems: "center",
+                    border: "1px solid #edf2f7",
+                    borderRadius: 8,
+                    padding: "7px 8px",
+                    background: "#fff",
+                    fontSize: 12,
+                  }}
+                >
+                  <span style={{ minWidth: 0, color: "#475569", overflowWrap: "anywhere" }}>
+                    <strong style={{ color: "#26313d" }}>{group.category}</strong> · {group.label}
+                  </span>
+                  <span style={{ color: "#64748b", fontWeight: 850, whiteSpace: "nowrap" }}>
+                    {group.entryCount} entries · {formatFindingPercent(group.weightedSupportRate)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </details>
+        ) : null}
+
+        <details>
+          <summary style={{ cursor: "pointer", color: "#334155", fontSize: 12, fontWeight: 900 }}>
+            How to read PJFR
+          </summary>
+          <ul style={{ margin: "8px 0 0 18px", padding: 0, color: "#64748b", fontSize: 12, lineHeight: 1.45 }}>
+            {report.caveats.map((caveat) => <li key={caveat}>{caveat}</li>)}
+          </ul>
+        </details>
+      </section>
+    </JournalLegendBox>
+  );
+};
+
+const terminalDigitHistoryLabels: Record<PredictionTerminalDigitHistoryBand, string> = {
+  common: "Common in history",
+  typical: "Seen in history",
+  rare: "Rare in history",
+  "never-seen": "Never seen",
+};
+
+const terminalDigitHistoryPalette: Record<PredictionTerminalDigitHistoryBand, { background: string; border: string; color: string }> = {
+  common: { background: "#ecfdf5", border: "#bbf7d0", color: "#166534" },
+  typical: { background: "#eef6ff", border: "#cfe3f7", color: "#155a8a" },
+  rare: { background: "#fff7ed", border: "#fed7aa", color: "#9a3412" },
+  "never-seen": { background: "#f8fafc", border: "#cbd5e1", color: "#475569" },
+};
+
+const terminalDigitHistoryPillStyle = (band: PredictionTerminalDigitHistoryBand): React.CSSProperties => {
+  const palette = terminalDigitHistoryPalette[band];
+  return {
+    border: `1px solid ${palette.border}`,
+    borderRadius: 999,
+    padding: "2px 8px",
+    background: palette.background,
+    color: palette.color,
+    fontSize: 12,
+    fontWeight: 850,
+    whiteSpace: "nowrap",
+  };
+};
+
 type ImmediateNextDrawScore = {
   actual: string;
   date: string;
@@ -312,15 +674,236 @@ type ImmediateNextDrawScore = {
   result: Exclude<PredictionScoreResult, "recorded">;
 };
 
+const formatJournalPercent = (value: number | null | undefined): string => (
+  typeof value === "number" && Number.isFinite(value) ? `${value.toFixed(2)}%` : "-"
+);
+
+const formatTerminalDigitExample = (example: PredictionTerminalDigitHistory["latestContainedExample"]): string => (
+  example
+    ? `Draw: ${example.date}\nMains: ${example.main.join(",")}\nSupps: ${example.supp.join(",")}`
+    : ""
+);
+
+const historicalPrizeCollisionPalette = {
+  clear: { background: "#f8fafc", border: "#cbd5e1", color: "#475569" },
+  rare: { background: "#fff7ed", border: "#fed7aa", color: "#9a3412" },
+};
+
+const historicalPrizeCollisionPillStyle = (hasCollision: boolean): React.CSSProperties => {
+  const palette = hasCollision ? historicalPrizeCollisionPalette.rare : historicalPrizeCollisionPalette.clear;
+  return {
+    border: `1px solid ${palette.border}`,
+    borderRadius: 999,
+    padding: "2px 8px",
+    background: palette.background,
+    color: palette.color,
+    fontSize: 12,
+    fontWeight: 850,
+    whiteSpace: "nowrap",
+  };
+};
+
+const formatHistoricalPrizeCollisionHit = (hit: HistoricalPrizeCollisionHit): string => (
+  `${hit.division} on ${hit.date} · ${hit.mainHits} main / ${hit.suppHits} supp`
+);
+
+const renderHistoricalPrizeCollisionHitList = (
+  title: string,
+  hits: HistoricalPrizeCollisionHit[],
+  emptyText: string,
+) => (
+  <div>
+    <div style={{ color: "#64748b", fontWeight: 850, marginBottom: 4 }}>{title}</div>
+    {hits.length ? (
+      <div style={{ display: "grid", gap: 5 }}>
+        {hits.slice(0, 3).map((hit) => (
+          <details key={`${hit.kind}-${hit.date}-${hit.division}`} style={{ color: "#26313d" }}>
+            <summary style={{ cursor: "pointer", fontWeight: 800 }}>
+              {formatHistoricalPrizeCollisionHit(hit)}
+            </summary>
+            <div style={{ marginTop: 4, color: "#64748b", lineHeight: 1.45 }}>
+              Draw: {hit.date}<br />
+              Mains: {hit.drawnMain.join(", ")}<br />
+              Supps: {hit.drawnSupp.join(", ")}
+              {hit.playerMain ? <><br />Stored mains: {hit.playerMain.join(", ")}</> : null}
+              {hit.playerSupp?.length ? <><br />Stored supps: {hit.playerSupp.join(", ")}</> : null}
+            </div>
+          </details>
+        ))}
+        {hits.length > 3 ? (
+          <div style={{ color: "#64748b" }}>+{hits.length - 3} more historical collision{hits.length - 3 === 1 ? "" : "s"}.</div>
+        ) : null}
+      </div>
+    ) : (
+      <div style={{ color: "#64748b" }}>{emptyText}</div>
+    )}
+  </div>
+);
+
+const renderHistoricalPrizeCollision = (
+  result: HistoricalPrizeCollisionResult,
+  variant: "draft" | "entry" = "entry",
+) => {
+  if (result.selectedNumbers.length === 0) return null;
+  const checkedLabel = `${result.checkedDraws} real historical draw${result.checkedDraws === 1 ? "" : "s"}`;
+  return (
+    <section
+      data-testid={variant === "draft" ? "prediction-draft-prize-collision" : "prediction-historical-prize-collision"}
+      aria-label="Historical prize collision check"
+      style={{
+        marginTop: 10,
+        border: `1px solid ${result.hasRarePrizeCollision ? "#fed7aa" : "#dbe3ec"}`,
+        borderRadius: 8,
+        padding: 10,
+        background: result.hasRarePrizeCollision ? "#fffaf5" : "#fff",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontSize: 12, color: "#64748b", fontWeight: 850 }}>Historical prize collision check</div>
+          <div style={{ marginTop: 2, fontSize: 17, color: "#26313d", fontWeight: 850 }}>
+            {result.hasRarePrizeCollision ? "Rare historical D1/D2 collision found" : "No historical D1/D2 collision found"}
+          </div>
+          <div style={{ marginTop: 2, fontSize: 12, color: "#64748b" }}>
+            Checked against {checkedLabel}. Simulated and incomplete rows are excluded.
+          </div>
+        </div>
+        <span style={historicalPrizeCollisionPillStyle(result.hasRarePrizeCollision)}>
+          {result.bestDivision ?? "Clear"}
+        </span>
+      </div>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+          gap: 10,
+          marginTop: 10,
+          fontSize: 12,
+        }}
+      >
+        {renderHistoricalPrizeCollisionHitList(
+          "Stored line check",
+          result.storedLineHits,
+          result.storedLineMain.length < 6
+            ? "Enter at least six numbers to check the stored line."
+            : "No stored-line Division 1 or Division 2 collision found.",
+        )}
+        {renderHistoricalPrizeCollisionHitList(
+          "Selected-set subset check",
+          result.selectedSetHits,
+          result.selectedNumbers.length < 6
+            ? "Enter at least six numbers to check unordered selected-set subsets."
+            : "No unordered selected-set Division 1 or Division 2 collision found.",
+        )}
+      </div>
+      <div style={{ marginTop: 8, color: "#64748b", fontSize: 12, lineHeight: 1.45 }}>
+        Stored line uses the first six saved numbers as mains and the next two as supps when available. Selected-set subset ignores order and asks whether any subset of the selected numbers could have matched historical Division 1 or Division 2. This is an archive rarity check, not a future probability signal.
+        {result.skippedDraws > 0 ? ` ${result.skippedDraws} history row${result.skippedDraws === 1 ? "" : "s"} were skipped as simulated or incomplete.` : ""}
+      </div>
+    </section>
+  );
+};
+
+const renderTerminalDigitHistory = (history: PredictionTerminalDigitHistory) => {
+  const visibleExample = history.latestContainedExample ?? history.latestExactExample;
+  const exampleTitle = history.latestContainedExample ? "Latest contained draw" : "Latest exact draw";
+  return (
+    <section
+      data-testid="prediction-terminal-digit-history"
+      aria-label="Terminal digit history"
+      style={{
+        marginTop: 10,
+        border: "1px solid #dbe3ec",
+        borderRadius: 8,
+        padding: 10,
+        background: "#fff",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontSize: 12, color: "#64748b", fontWeight: 850 }}>Terminal digit history</div>
+          <div style={{ marginTop: 2, fontSize: 17, color: "#26313d", fontWeight: 850 }}>
+            {numberText(history.digits)}
+          </div>
+        </div>
+        <span style={terminalDigitHistoryPillStyle(history.band)}>{terminalDigitHistoryLabels[history.band]}</span>
+      </div>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+          gap: 8,
+          marginTop: 10,
+          fontSize: 12,
+        }}
+      >
+        <div>
+          <div style={{ color: "#64748b", fontWeight: 850, marginBottom: 2 }}>Contained hits</div>
+          <div style={{ color: "#26313d", fontWeight: 800 }}>
+            {history.containedCount} / {history.validDraws} ({formatJournalPercent(history.containedPercent)})
+          </div>
+          <div style={{ color: "#64748b", marginTop: 2 }}>
+            All saved digits appeared in the same recorded draw.
+          </div>
+        </div>
+        <div>
+          <div style={{ color: "#64748b", fontWeight: 850, marginBottom: 2 }}>Exact set hits</div>
+          <div style={{ color: "#26313d", fontWeight: 800 }}>
+            {history.exactCount} / {history.validDraws} ({formatJournalPercent(history.exactPercent)})
+          </div>
+          <div style={{ color: "#64748b", marginTop: 2 }}>
+            The draw's unique terminal digits matched this set exactly.
+          </div>
+        </div>
+        <div>
+          <div style={{ color: "#64748b", fontWeight: 850, marginBottom: 2 }}>Same-length rank</div>
+          <div style={{ color: "#26313d", fontWeight: 800 }}>
+            {history.peerRank && history.peerTotal ? `${history.peerRank} of ${history.peerTotal}` : "-"}
+          </div>
+          <div style={{ color: "#64748b", marginTop: 2 }}>
+            {history.peerPercentile == null
+              ? "No same-length comparison available."
+              : `At least as frequent as ${formatJournalPercent(history.peerPercentile)} of same-length sets.`}
+          </div>
+        </div>
+      </div>
+      {visibleExample ? (
+        <details style={{ marginTop: 9 }}>
+          <summary
+            title={formatTerminalDigitExample(visibleExample)}
+            style={{ cursor: "pointer", color: "#155a8a", fontSize: 12, fontWeight: 850 }}
+          >
+            {exampleTitle}: {visibleExample.date}
+          </summary>
+          <div style={{ marginTop: 5, color: "#475569", fontSize: 12, lineHeight: 1.45 }}>
+            Mains: {visibleExample.main.join(", ")}
+            {visibleExample.supp.length ? <><br />Supps: {visibleExample.supp.join(", ")}</> : null}
+          </div>
+        </details>
+      ) : (
+        <div style={{ marginTop: 8, color: "#64748b", fontSize: 12 }}>
+          No recorded real draw contains all of these terminal digits together.
+        </div>
+      )}
+      {history.skippedDraws > 0 ? (
+        <div style={{ marginTop: 6, color: "#8a4b00", fontSize: 12 }}>
+          {history.skippedDraws} history row{history.skippedDraws === 1 ? "" : "s"} were skipped because they were incomplete or invalid for mains + supps.
+        </div>
+      ) : null}
+    </section>
+  );
+};
+
 const domSafeId = (value: string): string => value.replace(/[^a-zA-Z0-9_-]/g, "-");
 
 const summarizePredictionInputs = (entry: PredictionJournalEntry): string[] => {
   const inputs = entry.inputs;
   const parts: string[] = [];
   if (inputs.oddEvenRatio) parts.push(`O/E ${inputs.oddEvenRatio}`);
-  if (inputs.numbers?.length) parts.push(`Listed numbers: ${inputs.numbers.length}`);
+  if (inputs.numbers?.length) parts.push(`${inputs.numbers.length} picked`);
   if (inputs.terminalDigits?.length) parts.push(`${inputs.terminalDigits.length} terminal digits`);
   if (inputs.monthlyBuckets && Object.keys(inputs.monthlyBuckets).length > 0) parts.push("bucket mix");
+  if (inputs.selectionReason) parts.push(`Reason: ${selectionReasonSummary(inputs.selectionReason)}`);
   if (inputs.singleDouble) parts.push("single/double");
   if (inputs.sumRange) parts.push("sum range");
   if (inputs.trendRatio) parts.push(`U/D/F ${inputs.trendRatio}`);
@@ -459,6 +1042,17 @@ const uniqueValidLotteryNumbers = (value: string): number[] => {
     seen.add(number);
   }
   return [...seen].sort((left, right) => left - right);
+};
+
+const uniqueValidLotteryNumbersInInputOrder = (value: string): number[] => {
+  const seen = new Set<number>();
+  const output: number[] = [];
+  for (const number of splitSignedNumbers(value)) {
+    if (!Number.isInteger(number) || number < 1 || number > 45 || seen.has(number)) continue;
+    seen.add(number);
+    output.push(number);
+  }
+  return output;
 };
 
 const orderedRealDraws = (history: Draw[]): Draw[] => history
@@ -616,9 +1210,13 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
   now = () => new Date().toISOString(),
   getSetupSnapshot,
   newPredictionDraft,
+  viewEntriesRequestId,
 }) => {
   const [entries, setEntries] = useState<PredictionJournalEntry[]>(() => (
     initialEntries ?? (typeof window === "undefined" ? [] : loadPredictionJournalEntries())
+  ));
+  const [journalViewMode, setJournalViewMode] = useState<PredictionJournalViewMode>(() => (
+    newPredictionDraft ? "draft" : "entries"
   ));
   const [editingId, setEditingId] = useState<string | null>(null);
   const [targetKind, setTargetKind] = useState<PredictionTargetKind>("nextDraw");
@@ -637,12 +1235,17 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
   const [carryOverCount, setCarryOverCount] = useState("");
   const [confidence, setConfidence] = useState("");
   const [reviewStatus, setReviewStatus] = useState<PredictionJournalReviewStatus>("notReviewed");
+  const [selectionReasonKey, setSelectionReasonKey] = useState<PredictionJournalSelectionReasonFormValue>("");
+  const [selectionReasonOtherText, setSelectionReasonOtherText] = useState("");
   const [notes, setNotes] = useState("");
   const [message, setMessage] = useState("");
   const [showUnreviewedSaveAlert, setShowUnreviewedSaveAlert] = useState(false);
+  const [showHistoricalPrizeCollisionSaveAlert, setShowHistoricalPrizeCollisionSaveAlert] = useState(false);
   const [showValidationErrors, setShowValidationErrors] = useState(false);
   const [expandedEntryId, setExpandedEntryId] = useState<string | null>(null);
   const [showArchivedEntries, setShowArchivedEntries] = useState(false);
+  const draftRegionRef = useRef<HTMLDivElement | null>(null);
+  const revealDraftRegionRef = useRef(false);
   const lastNumbersAutoFillRef = useRef<PredictionJournalAutoFillSnapshot>(emptyAutoFillSnapshot());
 
   const hasControlledInitialEntries = initialEntries !== undefined;
@@ -666,6 +1269,36 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
   const visibleScoredEntries = useMemo(
     () => showArchivedEntries ? scoredEntries : scoredEntries.filter((entry) => !entry.archivedAt),
     [scoredEntries, showArchivedEntries],
+  );
+  const findingsReport = useMemo(
+    () => buildPredictionJournalFindingsReport(scoredEntries, {
+      reviewedOnly: true,
+      includeArchived: showArchivedEntries,
+    }),
+    [scoredEntries, showArchivedEntries],
+  );
+  const terminalDigitHistoryByEntryId = useMemo(() => {
+    const map = new Map<string, PredictionTerminalDigitHistory>();
+    for (const entry of scoredEntries) {
+      if (!entry.inputs.terminalDigits?.length) continue;
+      const historyResult = analyzePredictionTerminalDigitHistory(history, entry.inputs.terminalDigits, {
+        scope: "mains-plus-supps",
+      });
+      if (historyResult) map.set(entry.id, historyResult);
+    }
+    return map;
+  }, [history, scoredEntries]);
+  const historicalPrizeCollisionByEntryId = useMemo(() => {
+    const map = new Map<string, HistoricalPrizeCollisionResult>();
+    for (const entry of scoredEntries) {
+      if (!entry.inputs.numbers?.length) continue;
+      map.set(entry.id, analyzeHistoricalPrizeCollision(history, entry.inputs.numbers));
+    }
+    return map;
+  }, [history, scoredEntries]);
+  const draftHistoricalPrizeCollision = useMemo(
+    () => analyzeHistoricalPrizeCollision(history, uniqueValidLotteryNumbersInInputOrder(numbersText)),
+    [history, numbersText],
   );
   const editingEntry = useMemo(
     () => entries.find((entry) => entry.id === editingId) ?? null,
@@ -706,6 +1339,7 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
 
   const handleNumbersTextChange = (value: string) => {
     setShowUnreviewedSaveAlert(false);
+    setShowHistoricalPrizeCollisionSaveAlert(false);
     setNumbersText(value);
     applyNumbersAutoFill(value);
   };
@@ -720,6 +1354,20 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
   const handleReviewStatusChange = (value: PredictionJournalReviewStatus) => {
     setReviewStatus(value);
     setShowUnreviewedSaveAlert(false);
+  };
+
+  const handleSelectionReasonChange = (value: PredictionJournalSelectionReasonFormValue) => {
+    const nextDetail = value === "other" ? selectionReasonOtherText : "";
+    setSelectionReasonKey(value);
+    if (value !== "other") setSelectionReasonOtherText("");
+    setNotes((current) => mergeSelectionReasonIntoNotes(current, value, nextDetail));
+  };
+
+  const handleSelectionReasonOtherTextChange = (value: string) => {
+    setSelectionReasonOtherText(value);
+    if (selectionReasonKey === "other") {
+      setNotes((current) => mergeSelectionReasonIntoNotes(current, "other", value));
+    }
   };
 
   useEffect(() => {
@@ -738,6 +1386,7 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
       const value = integerOrUndefined(bucketText[field.key]);
       if (value !== undefined) monthlyBuckets[field.key] = value;
     }
+    const cleanedSelectionReasonOtherText = selectionReasonOtherText.trim();
 
     return normalizePredictionJournalInputs({
       oddEvenRatio,
@@ -758,6 +1407,14 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
       droughtBreakCount: integerOrUndefined(droughtBreakCount),
       carryOverCount: integerOrUndefined(carryOverCount),
       confidence: integerOrUndefined(confidence),
+      selectionReason: selectionReasonKey
+        ? {
+            version: 1,
+            key: selectionReasonKey,
+            label: PREDICTION_JOURNAL_SELECTION_REASON_LABELS[selectionReasonKey],
+            ...(cleanedSelectionReasonOtherText ? { detail: cleanedSelectionReasonOtherText } : {}),
+          }
+        : undefined,
       notes,
     });
   }, [
@@ -771,6 +1428,8 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
     oddEvenRatio,
     previousNeighbourHitCount,
     previousRepeatCount,
+    selectionReasonKey,
+    selectionReasonOtherText,
     singleText,
     sumMaxText,
     sumMinText,
@@ -918,6 +1577,8 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
     setDroughtBreakCount(inputs.droughtBreakCount === undefined ? "" : String(inputs.droughtBreakCount));
     setCarryOverCount(inputs.carryOverCount === undefined ? "" : String(inputs.carryOverCount));
     setConfidence(inputs.confidence === undefined ? "" : String(inputs.confidence));
+    setSelectionReasonKey(inputs.selectionReason?.key ?? "");
+    setSelectionReasonOtherText(inputs.selectionReason?.key === "other" ? inputs.selectionReason.detail ?? "" : "");
     setNotes(inputs.notes ?? "");
   };
 
@@ -927,26 +1588,44 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
     fillFormFromInputs({});
     setReviewStatus("notReviewed");
     setShowUnreviewedSaveAlert(false);
+    setShowHistoricalPrizeCollisionSaveAlert(false);
     setShowValidationErrors(false);
   };
 
   const fillFormFromEntry = (entry: PredictionJournalEntry) => {
     const inputs = entry.inputs;
+    revealDraftRegionRef.current = true;
     setEditingId(entry.id);
+    setJournalViewMode("draft");
+    setExpandedEntryId(null);
     setTargetKind(entry.targetKind);
     setReviewStatus(normalizeReviewStatus(entry.reviewStatus));
     setShowUnreviewedSaveAlert(false);
+    setShowHistoricalPrizeCollisionSaveAlert(false);
     fillFormFromInputs(inputs);
     setMessage(`Editing prediction anchored to ${entry.anchorLatestDrawDate}.`);
   };
 
   useEffect(() => {
+    if (journalViewMode !== "draft" || !revealDraftRegionRef.current) return;
+    revealDraftRegionRef.current = false;
+    if (typeof window === "undefined") return;
+
+    window.requestAnimationFrame(() => {
+      draftRegionRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+      draftRegionRef.current?.focus({ preventScroll: true });
+    });
+  }, [editingId, journalViewMode]);
+
+  useEffect(() => {
     if (!newPredictionDraft) return;
     const draft = buildPredictionJournalDraftFromSetup(newPredictionDraft.setupSnapshot ?? getSetupSnapshot?.());
+    setJournalViewMode("draft");
     setEditingId(null);
     setTargetKind(draft.targetKind);
     setReviewStatus("notReviewed");
     setShowUnreviewedSaveAlert(false);
+    setShowHistoricalPrizeCollisionSaveAlert(false);
     fillFormFromInputs(draft.inputs);
     if (draft.inputs.numbers?.length) {
       applyNumbersAutoFill(numberText(draft.inputs.numbers), draft.targetKind);
@@ -956,7 +1635,13 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
     setMessage(`New prediction draft created from current setup (${draft.sourceSummary.length} context lines). Review before saving.`);
   }, [newPredictionDraft?.id]);
 
-  const handleSave = () => {
+  useEffect(() => {
+    if (viewEntriesRequestId === undefined || viewEntriesRequestId <= 0) return;
+    setJournalViewMode("entries");
+    setExpandedEntryId(null);
+  }, [viewEntriesRequestId]);
+
+  const handleSave = (options: { allowHistoricalPrizeCollision?: boolean } = {}) => {
     if (!latestDraw && !editingEntry) {
       setMessage("A real latest draw is needed before a prediction can be anchored.");
       return;
@@ -972,6 +1657,11 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
     }
     if (editingEntry && !canEditPredictionJournalEntry(editingEntry, history)) {
       setMessage("This entry is locked because its target draw has arrived.");
+      return;
+    }
+    if (draftHistoricalPrizeCollision.hasRarePrizeCollision && !options.allowHistoricalPrizeCollision) {
+      setShowHistoricalPrizeCollisionSaveAlert(true);
+      setMessage("Historical Division 1/2 collision found. Review it before saving, or save anyway if this is intentional.");
       return;
     }
 
@@ -991,6 +1681,9 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
     });
     const savedAsUnreviewed = reviewStatus === "notReviewed";
     resetForm();
+    setJournalViewMode("entries");
+    setExpandedEntryId(null);
+    setShowHistoricalPrizeCollisionSaveAlert(false);
     setShowUnreviewedSaveAlert(savedAsUnreviewed);
     setMessage(editingEntry ? "Prediction updated." : "Prediction saved.");
   };
@@ -1070,6 +1763,13 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
 
   return (
     <section className="windfall-ledger-panel" aria-label="Prediction Journal & Scorecard">
+      {journalViewMode === "draft" ? (
+        <div
+          ref={draftRegionRef}
+          data-testid="prediction-journal-draft-region"
+          tabIndex={-1}
+          style={{ outline: "none" }}
+        >
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
         <div>
           <p style={{ margin: 0, color: "#51606f", maxWidth: 780 }}>
@@ -1192,6 +1892,77 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
           </JournalLegendBox>
         </div>
         <JournalLegendBox
+          title="Selection reason"
+          className="windfall-prediction-journal-text-box windfall-prediction-journal-reason-field"
+          help="Optional. This stores a structured reason and keeps a matching Selection reason line in Notes for later review."
+        >
+          <div
+            role="radiogroup"
+            aria-label="Selection reason"
+            style={{ display: "grid", gap: 6 }}
+          >
+            <label
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 8,
+                minHeight: 30,
+                color: "#475569",
+                fontSize: 12,
+                fontWeight: 800,
+                lineHeight: 1.3,
+                cursor: "pointer",
+              }}
+            >
+              <input
+                type="radio"
+                name="prediction-selection-reason"
+                value=""
+                checked={selectionReasonKey === ""}
+                onChange={() => handleSelectionReasonChange("")}
+              />
+              No shortcut
+            </label>
+            {selectionReasonOptions.map((option) => (
+              <label
+                key={option.key}
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: 8,
+                  minHeight: 30,
+                  color: "#26313d",
+                  fontSize: 12,
+                  fontWeight: 800,
+                  lineHeight: 1.3,
+                  cursor: "pointer",
+                }}
+              >
+                <input
+                  type="radio"
+                  name="prediction-selection-reason"
+                  value={option.key}
+                  checked={selectionReasonKey === option.key}
+                  onChange={() => handleSelectionReasonChange(option.key)}
+                />
+                <span>{option.label}</span>
+              </label>
+            ))}
+          </div>
+          {selectionReasonKey === "other" ? (
+            <HigField label="Other reason">
+              <input
+                value={selectionReasonOtherText}
+                onChange={(event) => handleSelectionReasonOtherTextChange(event.target.value)}
+                placeholder="Describe the reason briefly"
+              />
+            </HigField>
+          ) : null}
+          <div style={{ color: "#64748b", fontSize: 11, lineHeight: 1.35 }}>
+            The selected reason is saved as structured data and mirrored into Notes.
+          </div>
+        </JournalLegendBox>
+        <JournalLegendBox
           title="Notes"
           className="windfall-prediction-journal-text-box windfall-prediction-journal-notes-field"
           help="Optional. Record your reasoning while it is fresh."
@@ -1205,6 +1976,8 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
           />
         </JournalLegendBox>
       </div>
+
+      {renderHistoricalPrizeCollision(draftHistoricalPrizeCollision, "draft")}
 
       <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
         <JournalLegendBox title="Target draw bucket-origin mix">
@@ -1263,13 +2036,44 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
       </div>
 
       <div style={{ marginTop: 12, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <HigButton variant="primary" onClick={handleSave} disabled={!latestDraw && !editingEntry}>
+        <HigButton variant="primary" onClick={() => handleSave()} disabled={!latestDraw && !editingEntry}>
           {editingId ? "Update prediction" : "Save prediction"}
         </HigButton>
         <HigButton variant="quiet" onClick={resetForm}>Clear form</HigButton>
         <HigButton variant="secondary" onClick={() => void handleEmailToAuthor()} disabled={entries.length === 0}>Email to author</HigButton>
         {message ? <span role="status" style={{ fontSize: 12, color: "#51606f" }}>{message}</span> : null}
       </div>
+
+      {showHistoricalPrizeCollisionSaveAlert ? (
+        <div
+          role="alert"
+          data-testid="prediction-historical-prize-collision-save-alert"
+          style={{
+            marginTop: 10,
+            border: "1px solid #fed7aa",
+            borderRadius: 8,
+            background: "#fff7ed",
+            color: "#9a3412",
+            padding: 10,
+            fontSize: 12,
+            fontWeight: 750,
+            display: "grid",
+            gap: 8,
+          }}
+        >
+          <div>
+            Historical Division 1/2 collision found. This is rare in the loaded real history and does not change future draw probability, but it is worth reviewing before saving.
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <HigButton size="compact" variant="secondary" onClick={() => setShowHistoricalPrizeCollisionSaveAlert(false)}>
+              Review
+            </HigButton>
+            <HigButton size="compact" variant="primary" onClick={() => handleSave({ allowHistoricalPrizeCollision: true })}>
+              Save anyway
+            </HigButton>
+          </div>
+        </div>
+      ) : null}
 
       {showUnreviewedSaveAlert ? (
         <div
@@ -1308,6 +2112,34 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
           </ul>
         </div>
       ) : null}
+        </div>
+      ) : null}
+
+      {journalViewMode === "entries" && message ? (
+        <div role="status" style={{ marginBottom: 10, fontSize: 12, color: "#51606f", fontWeight: 750 }}>
+          {message}
+        </div>
+      ) : null}
+
+      {journalViewMode === "entries" && showUnreviewedSaveAlert ? (
+        <div
+          role="alert"
+          style={{
+            marginBottom: 10,
+            border: "1px solid #fed7aa",
+            borderRadius: 8,
+            background: "#fff7ed",
+            color: "#9a3412",
+            padding: 10,
+            fontSize: 12,
+            fontWeight: 750,
+          }}
+        >
+          {UNREVIEWED_SAVE_ALERT}
+        </div>
+      ) : null}
+
+      {journalViewMode === "entries" ? renderPredictionJournalFindingsReport(findingsReport) : null}
 
       <div style={{ marginTop: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
@@ -1320,9 +2152,19 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
         </div>
         {visibleScoredEntries.length === 0 ? (
           <div style={{ padding: 14, border: "1px dashed #cbd5e1", borderRadius: 8, color: "#657385" }}>
-            {entries.length === 0
-              ? "No journal entries yet."
-              : "No active journal entries. Show archived entries to review older cleared predictions."}
+            {entries.length === 0 ? (
+              <div style={{ display: "grid", gap: 8 }}>
+                <p style={{ margin: 0 }}>
+                  Record your own draw hypotheses, then let Windfall score them only after real target draws arrive.
+                  Use New Prediction in the panel heading to draft from the current setup. No prediction fields are required; notes-only entries are allowed.
+                </p>
+                <p style={{ margin: 0, fontWeight: 750 }}>
+                  The user manual is a good source of help for using the prediction feature.
+                </p>
+              </div>
+            ) : (
+              "No active journal entries. Show archived entries to review older cleared predictions."
+            )}
           </div>
         ) : (
           <div style={{ display: "grid", gap: 8, maxHeight: "min(560px, 62vh)", overflowY: "auto", paddingRight: 2 }}>
@@ -1334,6 +2176,8 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
                 const targetDrawDate = summarizeTargetDrawDate(entry);
                 const immediateNextDrawScore = scoreImmediateNextDraw(entry);
                 const normalizedReviewStatus = normalizeReviewStatus(entry.reviewStatus);
+                const terminalDigitHistory = terminalDigitHistoryByEntryId.get(entry.id);
+                const historicalPrizeCollision = historicalPrizeCollisionByEntryId.get(entry.id);
                 return (
                   <article key={entry.id} style={{ border: "1px solid #dbe3ec", borderRadius: 8, background: "#fff", overflow: "hidden" }}>
                     <button
@@ -1374,6 +2218,7 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
                           {inputSummary.length ? ` · ${inputSummary.join(" · ")}` : ""}
                           {entry.canEdit ? " · Editable until first target draw appears" : " · Locked after target draw arrived"}
                         </span>
+                        {renderCollapsedPickedNumbers(entry.inputs.numbers)}
                       </span>
                       <span style={{ color: "#64748b", fontSize: 12, fontWeight: 800 }}>{isExpanded ? "Hide" : "Open"}</span>
                     </button>
@@ -1437,6 +2282,8 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
                           </div>
                         ) : null}
                         {entry.provenance ? renderStructuredProvenance(entry.provenance) : null}
+                        {terminalDigitHistory ? renderTerminalDigitHistory(terminalDigitHistory) : null}
+                        {historicalPrizeCollision ? renderHistoricalPrizeCollision(historicalPrizeCollision, "entry") : null}
                         {entry.reason ? <div style={{ marginTop: 8, color: "#8a4b00", fontSize: 12 }}>{entry.reason}</div> : null}
                         {immediateNextDrawScore ? (
                           <section

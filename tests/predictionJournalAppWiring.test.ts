@@ -13,6 +13,9 @@ describe("Prediction Journal app wiring", () => {
     expect(app.indexOf('id="workflow-validation"')).toBeLessThan(app.indexOf('panelId="prediction-journal"'));
     expect(app.indexOf('panelId="prediction-journal"')).toBeLessThan(app.indexOf('panelId="backtest-validation"'));
     expect(app).toContain("getSetupSnapshot={() => buildSnapshot({ includePanelFavorites: true, includeDerivedPredictionEvidence: true })}");
+    expect(app).toContain("handleViewPredictionEntries");
+    expect(app).toContain("View Entries");
+    expect(app).toContain("viewEntriesRequestId={predictionJournalEntriesRequestId || undefined}");
   });
 
   it("registers the journal as a favoriteable Validation panel", () => {
@@ -40,6 +43,11 @@ describe("Prediction Journal app wiring", () => {
     expect(snapshotBlock).toContain("snapshot.generationForcedNumbers");
     expect(snapshotBlock).toContain("snapshot.generationExcludedNumbers");
     expect(snapshotBlock).toContain("snapshot.allExcludedNumbers");
+    expect(snapshotBlock).toContain("snapshot.dgaSuggestedMainNumbers");
+    expect(snapshotBlock).toContain("snapshot.dgaSuggestedSuppNumbers");
+    expect(snapshotBlock).toContain("snapshot.dgaSuggestedSuppPair");
+    expect(snapshotBlock).toContain("snapshot.dgaSuppPairActiveCoverage");
+    expect(snapshotBlock).toContain("snapshot.dgaSuppPairFullCoverage");
     expect(snapshotBlock).toContain("snapshot.sde1Exclusions");
     expect(snapshotBlock).toContain("snapshot.hc3Exclusions");
     expect(snapshotBlock).toContain("snapshot.droughtBreakStrictShortlistNumbers");

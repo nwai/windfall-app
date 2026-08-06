@@ -1346,9 +1346,17 @@ tbody tr:hover {
   overflow-wrap: anywhere;
 }
 
+.windfall-selection-insights-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(250px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+  align-items: start;
+}
+
 .windfall-prediction-journal-text-grid {
   display: grid;
-  grid-template-columns: minmax(260px, 0.82fr) minmax(340px, 1.28fr);
+  grid-template-columns: minmax(240px, 0.78fr) minmax(260px, 0.84fr) minmax(340px, 1.18fr);
   gap: 10px;
   align-items: stretch;
 }
@@ -1375,14 +1383,42 @@ tbody tr:hover {
   min-width: 0;
 }
 
+.windfall-prediction-journal-reason-field {
+  min-width: 0;
+}
+
 .windfall-prediction-journal-notes-field textarea {
   min-height: 188px;
   resize: vertical;
 }
 
+@media (max-width: 1180px) {
+  .windfall-selection-insights-grid {
+    grid-template-columns: repeat(2, minmax(260px, 1fr));
+  }
+}
+
+@media (max-width: 1120px) {
+  .windfall-prediction-journal-text-grid {
+    grid-template-columns: repeat(2, minmax(260px, 1fr));
+  }
+
+  .windfall-prediction-journal-notes-field {
+    grid-column: 1 / -1;
+  }
+}
+
 @media (max-width: 760px) {
+  .windfall-selection-insights-grid {
+    grid-template-columns: 1fr;
+  }
+
   .windfall-prediction-journal-text-grid {
     grid-template-columns: 1fr;
+  }
+
+  .windfall-prediction-journal-notes-field {
+    grid-column: auto;
   }
 }
 

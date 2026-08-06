@@ -1,6 +1,6 @@
 // NOTE: Step-3 consolidated updates and fixes:
 // - Pass only user exclusions to generator (fix trace "User excluded").
-// - WFMQY: add user exclusion checkboxes (1–45) in a single horizontal line.
+// - WFMQYH: add user exclusion checkboxes (1–45) in a single horizontal line.
 // - Unified status badges (adds OGA + core threshold switches).
 // - Lambda enable/disable toggle (disables slider when off, reflected in badges/trace).
 // - Trace: append a concise block for factors affecting generation.
@@ -23,6 +23,10 @@ import { parseCSVorJSON } from "./parseCSVorJSON";
 import { getSDE1FilteredPool } from "./sde1";
 import { buildDrawGrid, findDiamondsAllRadii, getPredictedNumbers } from "./dga";
 import { normalizeDgaSelectedNumbers } from "./lib/dgaSelectedNumbers";
+import {
+  buildDgaSuppSuggestion,
+  type DgaSuppSuggestion,
+} from "./lib/dgaSuppSuggestion";
 import { DGAVisualizer } from "./components/DGAVisualizer";
 import { computeOGA, getOGAPercentile } from "./utils/oga";
 import { ogaPercentileToSimilarity } from "./lib/ogaQuality";
@@ -98,9 +102,14 @@ import {
 import type { WindowPattern } from "./components/WindowStatsPanel";
 import { applyOddEvenRatioQuotas, generateCandidates, summarizeOddEvenRatios, type GenerateCandidatesResult } from "./generateCandidates";
 import { useGenerateWorker, serializeMonthlyBuckets, serializeTrendMap } from "./hooks/useGenerateWorker";
+import { usePlanningDrawContext } from "./hooks/usePlanningDrawContext";
 import type { GenerateWorkerArgs } from "./workers/generateWorker";
 import { ModulationDiagnosticsPanel } from "./components/ModulationDiagnosticsPanel";
-import { SelectionInsightsPanel } from "./components/SelectionInsightsPanel";
+import { SelectionInsightsPanel, SelectionInsightsPredictionPanel } from "./components/SelectionInsightsPanel";
+import {
+  buildSelectionInsightsAnalytics,
+  buildSelectionInsightsSnapshot,
+} from "./lib/selectionInsights";
 import { OddEvenRatioCadencePanel } from "./components/OddEvenRatioCadencePanel";
 import { ScoringSystemDiagnosticsPanel } from "./components/ScoringSystemDiagnosticsPanel";
 import {
@@ -138,6 +147,12 @@ import { PickSixPanel, type PickSixSource } from "./components/PickSixPanel";
 import { buildWfmqyhNumberCounts } from "./lib/wfmqyhNumberCounts";
 import { DrawBucketPatternPanel } from "./components/DrawBucketPatternPanel";
 import { EndingDigitSequencePanel } from "./components/EndingDigitSequencePanel";
+import {
+  analyzeD1TerminalMomentum,
+  buildEndingDigitMonthOptions,
+  type D1TerminalMomentumStrength,
+} from "./lib/endingDigitSequences";
+import { buildD1TerminalMomentumGenerationProfile } from "./lib/d1TerminalMomentumInfluence";
 import DGAMonthlyBucketStateGrid from "./components/DGAMonthlyBucketStateGrid";
 import { buildMonthlyBucketTimeline } from "./lib/monthlyBucketTimeline";
 import { deriveMainConstraintExclusions } from "./lib/mainConstraintExclusions";
@@ -189,7 +204,7 @@ import {
   SELECTED_MONTH_END_CARRY_OVER_BOOST_FACTOR,
   scoreMonthEndCarryOverCandidate,
 } from "./lib/monthEndCarryOver";
-import { getMostRecentDraw } from "./lib/recentDraws";
+import { getHC3OverlapNumbers, getMostRecentDraw } from "./lib/recentDraws";
 import {
   annotateCandidatesWithPreviousNeighbourShape,
 } from "./lib/previousNeighbourShapeGuard";
@@ -215,6 +230,7 @@ import {
   normalizeFavoritePanelIds,
   saveFavoritePanelIds,
 } from "./lib/panelFavorites";
+import { dateFromMonthLabel } from "./lib/planningDrawContext";
 
 type DgaHeatmapViewMode = "temperature" | "monthlyBucketState";
 
@@ -256,6 +272,10 @@ const normalizeSelectedCarryOverBoostMode = (value: unknown): SelectedCarryOverB
 );
 
 const formatScoringInfluenceLabel = (value: ScoringGenerationInfluence): string => (
+  value === "off" ? "Off" : `${value.slice(0, 1).toUpperCase()}${value.slice(1)}`
+);
+
+const formatD1TerminalMomentumStrength = (value: D1TerminalMomentumStrength): string => (
   value === "off" ? "Off" : `${value.slice(0, 1).toUpperCase()}${value.slice(1)}`
 );
 
@@ -893,6 +913,7 @@ function AppInner(): JSX.Element {
     [history],
   );
   const realHistory = realHistoryResult.history;
+  const planningDrawContext = usePlanningDrawContext(realHistory);
   const baselineHistoryScope = useMemo(() => {
     const rows = realHistory
       .map((draw) => ({ draw, monthLabel: monthLabelForHistoryScope(draw) }))
@@ -982,6 +1003,7 @@ function AppInner(): JSX.Element {
   const [attemptMultiplier, setAttemptMultiplier] = useState<number>(DEFAULT_ATTEMPT_MULTIPLIER);
   const [overgenFactor, setOvergenFactor] = useState<number>(50);
   const [scoringGenerationInfluence, setScoringGenerationInfluence] = useState<ScoringGenerationInfluence>("off");
+  const [d1TerminalMomentumSgiEnabled, setD1TerminalMomentumSgiEnabled] = useState<boolean>(false);
 
   // Sum range filter state used in Candidate Generation Influences
   const [sumFilter, setSumFilter] = useState<{ enabled: boolean; min: number; max: number; includeSupp: boolean }>({
@@ -1364,7 +1386,7 @@ function AppInner(): JSX.Element {
       times6: new Set<number>(), times7: new Set<number>(), times8: new Set<number>(),
     };
     if (!realHistory.length) return empty;
-    const currentMonthKey = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; })();
+    const currentMonthKey = planningDrawContext.targetMonthLabel;
     const counts = new Array<number>(45).fill(0);
     realHistory.forEach((draw) => {
       const t = Date.parse(draw.date || "");
@@ -1390,12 +1412,9 @@ function AppInner(): JSX.Element {
       else sets.times8.add(n);
     }
     return sets;
-  }, [realHistory]);
+  }, [planningDrawContext.targetMonthLabel, realHistory]);
 
-  const dgaCurrentCalendarMonthLabel = useMemo(() => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-  }, []);
+  const dgaPlanningMonthLabel = planningDrawContext.targetMonthLabel;
 
   const dgaEffectiveMonthlyBuckets = useMemo(
     () => monthlyBucketSetsAlways ?? monthlyConstraintPayload?.buckets ?? dgaLiveMonthlyBuckets,
@@ -1624,6 +1643,30 @@ function AppInner(): JSX.Element {
     [realHistory, realFilteredHistory, scoringGenerationInfluence],
   );
   const activeScoringGenerationProfile = scoringGenerationProfile.enabled ? scoringGenerationProfile : undefined;
+  const d1TerminalMomentumGenerationAnalysis = useMemo(() => {
+    if (!realHistory.length || planningDrawContext.completedDrawsInTargetMonth <= 0) return null;
+    const targetMonthOption = buildEndingDigitMonthOptions(realHistory, { includeSupp: true })
+      .find((option) => option.monthKey === planningDrawContext.targetMonthLabel);
+    if (!targetMonthOption) return null;
+    return analyzeD1TerminalMomentum(realHistory, {
+      includeSupp: true,
+      monthKey: targetMonthOption.monthKey,
+      drawCount: planningDrawContext.completedDrawsInTargetMonth,
+      expectedDrawCount: planningDrawContext.targetMonthExpectedDrawCount,
+    });
+  }, [
+    planningDrawContext.completedDrawsInTargetMonth,
+    planningDrawContext.targetMonthExpectedDrawCount,
+    planningDrawContext.targetMonthLabel,
+    realHistory,
+  ]);
+  const d1TerminalMomentumGenerationProfile = useMemo(
+    () => buildD1TerminalMomentumGenerationProfile(
+      d1TerminalMomentumGenerationAnalysis,
+      d1TerminalMomentumSgiEnabled,
+    ),
+    [d1TerminalMomentumGenerationAnalysis, d1TerminalMomentumSgiEnabled],
+  );
   const dgaScoringNumberDiagnostics = useMemo<Record<number, DGAScoringNumberDiagnostic>>(() => {
     const rankedRows = Array.from({ length: 45 }, (_, index) => {
       const number = index + 1;
@@ -1850,7 +1893,6 @@ function AppInner(): JSX.Element {
     () => Array.from(new Set([...effectiveExcludedNumbers, ...mainConstraintAutoExclusions.excludedNumbers])).sort((a, b) => a - b),
     [effectiveExcludedNumbers, mainConstraintAutoExclusions.excludedNumbers]
   );
-  const generationExcludedSet = useMemo(() => new Set(generationExcludedNumbers), [generationExcludedNumbers]);
   const autoSelectionExcludedSet = useMemo(() => new Set(autoExcludedFromSelection), [autoExcludedFromSelection]);
   const bucketAutoExcludedSet = useMemo(
     () => new Set(mainConstraintAutoExclusions.excludedNumbers),
@@ -1997,19 +2039,53 @@ function AppInner(): JSX.Element {
     lastWindowDefaultNumCandidatesRef.current = generatedCandidateCountWindowDefault;
   }, [generatedCandidateCountWindowDefault]);
 
-  const sde1Exclusions = knobs.enableSDE1 ? getSDE1FilteredPool(realFilteredHistory).excludedNumbers : [];
-  let hc3Exclusions: number[] = [];
-  if (knobs.enableHC3 && realFilteredHistory.length >= 2) {
-    const last = realFilteredHistory[realFilteredHistory.length - 1];
-    const prev = realFilteredHistory[realFilteredHistory.length - 2];
-    hc3Exclusions = [...last.main, ...last.supp].filter((n) =>
-      [...prev.main, ...prev.supp].includes(n)
-    );
-  }
-  const allExclusions = useMemo(
-    () => Array.from(new Set([...generationExcludedNumbers, ...sde1Exclusions, ...hc3Exclusions])),
-    [generationExcludedNumbers, knobs.enableSDE1, knobs.enableHC3, realFilteredHistory]
+  const sde1Exclusions = useMemo(
+    () => (knobs.enableSDE1 ? getSDE1FilteredPool(realFilteredHistory).excludedNumbers : []),
+    [knobs.enableSDE1, realFilteredHistory],
   );
+  const hc3Exclusions = useMemo(
+    () => (knobs.enableHC3 ? getHC3OverlapNumbers(realFilteredHistory) : []),
+    [knobs.enableHC3, realFilteredHistory],
+  );
+  const allExclusions = useMemo(
+    () => Array.from(new Set([...generationExcludedNumbers, ...sde1Exclusions, ...hc3Exclusions])).sort((a, b) => a - b),
+    [generationExcludedNumbers, hc3Exclusions, sde1Exclusions]
+  );
+  const selectionUnavailableNumbers = allExclusions;
+  const selectionUnavailableSet = useMemo(
+    () => new Set(selectionUnavailableNumbers),
+    [selectionUnavailableNumbers],
+  );
+  const hotColdExcludedSet = useMemo(
+    () => new Set(hotColdExcludedNumbers),
+    [hotColdExcludedNumbers],
+  );
+  const sde1ExcludedSet = useMemo(
+    () => new Set(sde1Exclusions),
+    [sde1Exclusions],
+  );
+  const hc3ExcludedSet = useMemo(
+    () => new Set(hc3Exclusions),
+    [hc3Exclusions],
+  );
+  const pruneSelectionUnavailableNumbers = useCallback((current: number[], limit?: number): number[] => {
+    const pruned = removeUserExcludedNumbers(current, selectionUnavailableNumbers);
+    const next = typeof limit === "number" ? pruned.slice(0, limit) : pruned;
+    return current.length === next.length && current.every((value, index) => value === next[index])
+      ? current
+      : next;
+  }, [selectionUnavailableNumbers]);
+
+  useEffect(() => {
+    setTrendSelectedNumbers((current) => pruneSelectionUnavailableNumbers(current));
+    setPreviousNeighbourConstraintNumbers((current) => pruneSelectionUnavailableNumbers(current));
+    setHotColdForcedNumbers((current) => pruneSelectionUnavailableNumbers(current));
+    setDroughtBreakSelectedNumbers((current) => pruneSelectionUnavailableNumbers(current, MAX_DROUGHT_BREAK_FORCED_NUMBERS));
+    setPasteWeightedForcedNumbers((current) => pruneSelectionUnavailableNumbers(current));
+    setUserSelectedNumbers((current) => pruneSelectionUnavailableNumbers(current));
+    setManualSimSelected((current) => pruneSelectionUnavailableNumbers(current, 8));
+    setSelectedCarryOverBoostNumbers((current) => pruneSelectionUnavailableNumbers(current));
+  }, [pruneSelectionUnavailableNumbers]);
 
   const temperatureSignal = useMemo(
     () => computeTemperatureSignal(realFilteredHistory, {
@@ -2052,15 +2128,39 @@ function AppInner(): JSX.Element {
   const [simCandidateIdx, setSimCandidateIdx] = useState<number | null>(null);
   const [predictionJournalOpen, setPredictionJournalOpen] = useState<boolean>(false);
   const [predictionJournalDraftRequest, setPredictionJournalDraftRequest] = useState<PredictionJournalDraftRequest | null>(null);
+  const [predictionJournalEntriesRequestId, setPredictionJournalEntriesRequestId] = useState(0);
   const predictionJournalDraftIdRef = useRef(0);
+  const predictionJournalEntriesRequestIdRef = useRef(0);
+
+  const selectionInsightsWindowAnalytics = useMemo(
+    () => buildSelectionInsightsAnalytics(realFilteredHistory, userSelectedNumbers, { topKTriplets: 10 }),
+    [realFilteredHistory, userSelectedNumbers],
+  );
+  const selectionInsightsAllHistoryAnalytics = useMemo(
+    () => buildSelectionInsightsAnalytics(realHistory, userSelectedNumbers, { topKTriplets: 10 }),
+    [realHistory, userSelectedNumbers],
+  );
 
   // DGA grid strips mirror the shared user-selected numbers; DGA simulation uses the first 8.
   const [mirrorDgaStripToPreviousNeighbour, setMirrorDgaStripToPreviousNeighbour] = useState<boolean>(false);
 
   const dgaStripSelectedNumbers = useMemo(
-    () => removeUserExcludedNumbers(normalizeDgaSelectedNumbers(userSelectedNumbers), excludedNumbers),
-    [excludedNumbers, userSelectedNumbers],
+    () => removeUserExcludedNumbers(normalizeDgaSelectedNumbers(userSelectedNumbers), selectionUnavailableNumbers),
+    [selectionUnavailableNumbers, userSelectedNumbers],
   );
+  const dgaSuppSuggestion = useMemo(
+    () => buildDgaSuppSuggestion(dgaStripSelectedNumbers, realFilteredHistory, realHistory),
+    [dgaStripSelectedNumbers, realFilteredHistory, realHistory],
+  );
+  const buildDgaStripSimulationDraw = useCallback((simulationNumbers: number[]): Draw => {
+    const suggestion = buildDgaSuppSuggestion(simulationNumbers, realFilteredHistory, realHistory);
+    return {
+      main: suggestion?.main ?? simulationNumbers.slice(0, 6),
+      supp: suggestion?.supp ?? simulationNumbers.slice(6, 8),
+      date: "DGAStrip",
+      isSimulated: true,
+    };
+  }, [realFilteredHistory, realHistory]);
   const dgaStripSelectedKey = useMemo(
     () => dgaStripSelectedNumbers.slice(0, 8).join(","),
     [dgaStripSelectedNumbers],
@@ -2072,7 +2172,21 @@ function AppInner(): JSX.Element {
       ...(simulatedDraw.supp ?? []),
     ]).slice(0, 8).join(",");
   }, [simulatedDraw]);
-  const lastDgaStripSelectedKeyRef = useRef(dgaStripSelectedKey);
+  const activeSimulatedDgaRoleKey = useMemo(() => {
+    if (!simulatedDraw) return "";
+    return `${(simulatedDraw.main ?? []).join(",")}|${(simulatedDraw.supp ?? []).join(",")}`;
+  }, [simulatedDraw]);
+  const desiredDgaStripSimulationRoleKey = useMemo(() => {
+    const simulationNumbers = dgaStripSelectedNumbers.slice(0, 8);
+    if (simulationNumbers.length === 0) return "";
+    const draw = buildDgaStripSimulationDraw(simulationNumbers);
+    return `${draw.main.join(",")}|${draw.supp.join(",")}`;
+  }, [buildDgaStripSimulationDraw, dgaStripSelectedNumbers]);
+  const dgaStripSimulationRefreshKey = useMemo(
+    () => `${dgaStripSelectedKey}::${desiredDgaStripSimulationRoleKey}`,
+    [desiredDgaStripSimulationRoleKey, dgaStripSelectedKey],
+  );
+  const lastDgaStripSimulationRefreshKeyRef = useRef(dgaStripSimulationRefreshKey);
 
   const dgaStripPreviousNeighbourMatches = useMemo(() => {
     const targetSet = new Set(previousNeighbourConstraintTargetNumbers);
@@ -2111,7 +2225,7 @@ function AppInner(): JSX.Element {
   }, [simScrollOriginY]);
 
   const handleDgaStripChange = useCallback((nums: number[]) => {
-    const sorted = removeUserExcludedNumbers(normalizeDgaSelectedNumbers(nums), excludedNumbers);
+    const sorted = removeUserExcludedNumbers(normalizeDgaSelectedNumbers(nums), selectionUnavailableNumbers);
     const simulationNumbers = sorted.slice(0, 8);
     setUserSelectedNumbers(sorted);
     if (mirrorDgaStripToPreviousNeighbour) {
@@ -2125,19 +2239,14 @@ function AppInner(): JSX.Element {
       return;
     }
 
-    setSimulatedDraw({
-      main: simulationNumbers.slice(0, 6),
-      supp: simulationNumbers.slice(6, 8),
-      date: "DGAStrip",
-      isSimulated: true,
-    } as any);
+    setSimulatedDraw(buildDgaStripSimulationDraw(simulationNumbers));
     setSimSource("dga-strip");
     setSimCandidateIdx(null);
-  }, [applyDgaStripMirrorToPreviousNeighbour, excludedNumbers, mirrorDgaStripToPreviousNeighbour]);
+  }, [applyDgaStripMirrorToPreviousNeighbour, buildDgaStripSimulationDraw, mirrorDgaStripToPreviousNeighbour, selectionUnavailableNumbers]);
 
   useEffect(() => {
-    if (lastDgaStripSelectedKeyRef.current === dgaStripSelectedKey) return;
-    lastDgaStripSelectedKeyRef.current = dgaStripSelectedKey;
+    if (lastDgaStripSimulationRefreshKeyRef.current === dgaStripSimulationRefreshKey) return;
+    lastDgaStripSimulationRefreshKeyRef.current = dgaStripSimulationRefreshKey;
 
     const simulationNumbers = dgaStripSelectedNumbers.slice(0, 8);
     if (simulationNumbers.length === 0) {
@@ -2147,17 +2256,24 @@ function AppInner(): JSX.Element {
       return;
     }
 
-    if (activeSimulatedDgaSelectionKey === dgaStripSelectedKey) return;
+    if (
+      activeSimulatedDgaSelectionKey === dgaStripSelectedKey &&
+      (simSource !== "dga-strip" || activeSimulatedDgaRoleKey === desiredDgaStripSimulationRoleKey)
+    ) return;
 
-    setSimulatedDraw({
-      main: simulationNumbers.slice(0, 6),
-      supp: simulationNumbers.slice(6, 8),
-      date: "DGAStrip",
-      isSimulated: true,
-    } as any);
+    setSimulatedDraw(buildDgaStripSimulationDraw(simulationNumbers));
     setSimSource("dga-strip");
     setSimCandidateIdx(null);
-  }, [activeSimulatedDgaSelectionKey, dgaStripSelectedKey, dgaStripSelectedNumbers]);
+  }, [
+    activeSimulatedDgaRoleKey,
+    activeSimulatedDgaSelectionKey,
+    buildDgaStripSimulationDraw,
+    desiredDgaStripSimulationRoleKey,
+    dgaStripSelectedKey,
+    dgaStripSimulationRefreshKey,
+    dgaStripSelectedNumbers,
+    simSource,
+  ]);
 
   // Manual simulation is a prize-worthiness scratchpad for the generated-candidate table.
   const [manualSimSelected, setManualSimSelected] = useState<number[]>([]);
@@ -2540,33 +2656,14 @@ function AppInner(): JSX.Element {
   /** Monthly Repeat Bias: compute per-number weights for once-drawn numbers this month.
    *
    * mrbEffectiveDate: resolves which calendar month to treat as "current".
-   * - Normally today's date.
-   * - Forwarded to next month when today is still in the same month as the last
-   *   draw AND that month's draw count has already reached maxDrawsPerMonth
-   *   (i.e. the month is complete and the user is planning ahead).
+   * - Uses the shared next-draw planning context rather than max observed month
+   *   length, so completed 12/13-draw months advance correctly even when the
+   *   history also contains 14-draw months.
    */
-  const mrbEffectiveDate = useMemo((): Date => {
-    const today = new Date();
-    if (!realHistory.length) return today;
-    // Count draws per month across full history
-    const monthlyCounts = new Map<string, number>();
-    realHistory.forEach(d => {
-      const t = Date.parse(d.date || '');
-      if (isNaN(t)) return;
-      const dt = new Date(t);
-      const k = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
-      monthlyCounts.set(k, (monthlyCounts.get(k) || 0) + 1);
-    });
-    const maxDraws = Math.max(...Array.from(monthlyCounts.values()));
-    const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
-    const currentCount = monthlyCounts.get(todayKey) ?? 0;
-    // If the current calendar month is complete and has more than one month
-    // of history, forward the reference to the 1st of next month.
-    if (monthlyCounts.size > 1 && currentCount >= maxDraws) {
-      return new Date(today.getFullYear(), today.getMonth() + 1, 1);
-    }
-    return today;
-  }, [realHistory]);
+  const mrbEffectiveDate = useMemo(
+    (): Date => dateFromMonthLabel(planningDrawContext.targetMonthLabel) ?? planningDrawContext.today,
+    [planningDrawContext.targetMonthLabel, planningDrawContext.todayIso, planningDrawContext.today],
+  );
 
   const monthlyRepeatBiasResult = useMemo(() => {
     if (!mrbEnabled || !realFilteredHistory.length) return null;
@@ -2626,7 +2723,7 @@ function AppInner(): JSX.Element {
 
   const toggleSelectedCarryOverBoostNumber = useCallback((number: number) => {
     if (!Number.isInteger(number) || number < 1 || number > 45) return;
-    if (manualExcludedSet.has(number)) return;
+    if (selectionUnavailableSet.has(number)) return;
     monthEndCarryOverBiasTouchedRef.current = true;
     setMonthEndCarryOverBiasEnabled(true);
     setSelectedCarryOverBoostNumbers((previous) => (
@@ -2634,7 +2731,7 @@ function AppInner(): JSX.Element {
         ? previous.filter((item) => item !== number)
         : [...previous, number].sort((left, right) => left - right)
     ));
-  }, [manualExcludedSet]);
+  }, [selectionUnavailableSet]);
 
   const monthEndCarryOverWeightsForGeneration = useMemo(() => {
     if (!monthEndCarryOverBiasEnabled) return undefined;
@@ -3067,6 +3164,9 @@ function AppInner(): JSX.Element {
       if (latestNeighbourSupportEnabled) {
         setTraceMaybe((t) => [...t, "[TRACE] LD±1 is ON but RwR45/PNUaRW45 bypasses evidence filters; LD±1 was not applied to this random-coverage run."]);
       }
+      if (d1TerminalMomentumSgiEnabled) {
+        setTraceMaybe((t) => [...t, "[TRACE] D1 Terminal Momentum SGI is ON but RwR45/PNUaRW45 bypasses evidence weighting; D1 SGI was not applied to this random-coverage run."]);
+      }
       const result = generateRwR45Candidates(Math.random, {
         forcedNumbers: generationForcedNumbers,
         excludedNumbers: rwr45ExcludedNumbers,
@@ -3247,7 +3347,11 @@ function AppInner(): JSX.Element {
       monthlyRepeatBiasWeights: monthlyRepeatBiasResult?.weights,
       monthEndCarryOverWeights,
       scoringGenerationProfile: activeScoringGenerationProfile,
-      latestNeighbourSupportOptions: { enabled: latestNeighbourSupportEnabled },
+      d1TerminalMomentumProfile: d1TerminalMomentumGenerationProfile,
+      latestNeighbourSupportOptions: {
+        enabled: latestNeighbourSupportEnabled,
+        planningLastDrawOverride: planningDrawContext.isPlanningLastDraw,
+      },
     };
 
     // Trace callback: appends messages as they arrive from the worker
@@ -3561,8 +3665,12 @@ function AppInner(): JSX.Element {
       mainDecadeGenerationBiases,
       monthEndCarryOverWeights,
       activeScoringGenerationProfile,
+      d1TerminalMomentumGenerationProfile,
       undefined,
-      { enabled: latestNeighbourSupportEnabled }
+      {
+        enabled: latestNeighbourSupportEnabled,
+        planningLastDrawOverride: planningDrawContext.isPlanningLastDraw,
+      }
     );
 
     const monthlyTrace = buildMonthlyTrace();
@@ -3816,10 +3924,10 @@ function AppInner(): JSX.Element {
   );
   const dgaEffectiveMonthLabel = useMemo(() => {
     if (monthlyBucketSetsAlways || monthlyConstraintPayload?.buckets || simulatedDraw) {
-      return dgaMonthlyBucketTimelineBase[dgaMonthlyBucketTimelineBase.length - 1]?.monthLabel ?? dgaCurrentCalendarMonthLabel;
+      return dgaMonthlyBucketTimelineBase[dgaMonthlyBucketTimelineBase.length - 1]?.monthLabel ?? dgaPlanningMonthLabel;
     }
-    return dgaCurrentCalendarMonthLabel;
-  }, [dgaCurrentCalendarMonthLabel, dgaMonthlyBucketTimelineBase, monthlyBucketSetsAlways, monthlyConstraintPayload, simulatedDraw]);
+    return dgaPlanningMonthLabel;
+  }, [dgaPlanningMonthLabel, dgaMonthlyBucketTimelineBase, monthlyBucketSetsAlways, monthlyConstraintPayload, simulatedDraw]);
   const dgaMonthlyBucketTimeline = useMemo(() => {
     const next = dgaMonthlyBucketTimelineBase.slice();
     const latestTimelineBuckets = simulatedDraw && next.length
@@ -3999,6 +4107,17 @@ function AppInner(): JSX.Element {
     }
   };
 
+  const handleViewPredictionEntries = () => {
+    predictionJournalEntriesRequestIdRef.current += 1;
+    setPredictionJournalEntriesRequestId(predictionJournalEntriesRequestIdRef.current);
+    setPredictionJournalOpen(true);
+    if (typeof window !== "undefined") {
+      window.requestAnimationFrame(() => {
+        document.getElementById("panel-prediction-journal")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    }
+  };
+
   return (
     <PanelFavoritesProvider favoritePanelIds={favoritePanelIds} onToggleFavorite={toggleFavoritePanel}>
     <div className="windfall-app-shell">
@@ -4095,13 +4214,13 @@ function AppInner(): JSX.Element {
         <NumberTrendsTable
           trends={numberTrends}
           onToggle={(n) => {
-            if (manualExcludedSet.has(n)) return;
+            if (selectionUnavailableSet.has(n)) return;
             setTrendSelectedNumbers(prev => prev.includes(n) ? prev.filter(x => x !== n) : [...prev, n]);
           }}
           selected={trendSelectedNumbers}
           externalSelectedNumbers={numberTrendExternalSelectedNumbers}
           externalSelectedLabel="other forced selections"
-          excludedNumbers={excludedNumbers}
+          excludedNumbers={selectionUnavailableNumbers}
         />
         <div style={{ fontSize: 12, color: "#888", marginBottom: 8 }}>
           Colored rows indicate numbers you have selected for forced inclusion.
@@ -4340,15 +4459,31 @@ function AppInner(): JSX.Element {
                   <span style={{ fontWeight: 700 }}>B</span>
                   Main bucket derived
                 </span>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 6px", borderRadius: 999, border: "1px solid #f9a8d4", background: "#fdf2f8", color: "#9d174d" }}>
+                  <span style={{ fontWeight: 700 }}>H</span>
+                  Hot/Cold excluded
+                </span>
                 {autoExcludeUnselected && (
                   <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 6px", borderRadius: 999, border: "1px solid #bdbdbd", background: "#f5f5f5", color: "#616161" }}>
                     <span style={{ fontWeight: 700 }}>A</span>
                     Auto from unselected
                   </span>
                 )}
+                {knobs.enableSDE1 && (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 6px", borderRadius: 999, border: "1px solid #fdba74", background: "#fff7ed", color: "#9a3412" }}>
+                    <span style={{ fontWeight: 700 }}>S</span>
+                    SDE1
+                  </span>
+                )}
+                {knobs.enableHC3 && (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 6px", borderRadius: 999, border: "1px solid #86efac", background: "#f0fdf4", color: "#166534" }}>
+                    <span style={{ fontWeight: 700 }}>C</span>
+                    HC3
+                  </span>
+                )}
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 6px", borderRadius: 999, border: "1px solid #ce93d8", background: "#f3e5f5", color: "#7b1fa2" }}>
                   <span aria-hidden="true">🔒</span>
-                  Bucket-enforced while rule is active
+                  Locked while another exclusion rule is active
                 </span>
               </div>
               <div
@@ -4365,39 +4500,61 @@ function AppInner(): JSX.Element {
               >
                 {Array.from({ length: 45 }, (_, i) => i + 1).map((n) => {
                   const isManualExcluded = manualExcludedSet.has(n);
+                  const isHotColdExcluded = hotColdExcludedSet.has(n);
                   const isBucketDerivedExcluded = bucketAutoExcludedSet.has(n);
                   const isAutoSelectionExcluded = autoSelectionExcludedSet.has(n);
-                  const isBucketLocked = isBucketDerivedExcluded && !isManualExcluded;
-                  const checked = generationExcludedSet.has(n);
+                  const isSde1Excluded = sde1ExcludedSet.has(n);
+                  const isHc3Excluded = hc3ExcludedSet.has(n);
+                  const isLockedByActiveRule = selectionUnavailableSet.has(n) && !isManualExcluded;
+                  const checked = selectionUnavailableSet.has(n);
                   const sourceBadges = [
                     isManualExcluded ? { label: "M", title: "Manual exclusion", color: "#1565c0", background: "#e8f0fe", border: "#90caf9" } : null,
+                    isHotColdExcluded ? { label: "H", title: "Excluded from Hot/Cold row selection", color: "#9d174d", background: "#fdf2f8", border: "#f9a8d4" } : null,
                     isBucketDerivedExcluded ? { label: "B", title: "Derived from main bucket constraints", color: "#8d6e00", background: "#fff8e1", border: "#f9a825" } : null,
                     isAutoSelectionExcluded ? { label: "A", title: "Auto excluded because unselected numbers are being excluded", color: "#616161", background: "#f5f5f5", border: "#bdbdbd" } : null,
+                    isSde1Excluded ? { label: "S", title: "Excluded by active SDE1", color: "#9a3412", background: "#fff7ed", border: "#fdba74" } : null,
+                    isHc3Excluded ? { label: "C", title: "Excluded by active HC3", color: "#166534", background: "#f0fdf4", border: "#86efac" } : null,
                   ].filter((badge): badge is { label: string; title: string; color: string; background: string; border: string } => badge !== null);
-                  const cellBorder = isManualExcluded && isBucketDerivedExcluded
+                  const hasRuleSource = sourceBadges.some((badge) => badge.label !== "M");
+                  const cellBorder = isManualExcluded && hasRuleSource
                     ? "1px solid #8e24aa"
                     : isManualExcluded
                       ? "1px solid #90caf9"
                       : isBucketDerivedExcluded
                         ? "1px dashed #f9a825"
+                        : isSde1Excluded
+                          ? "1px solid #fdba74"
+                          : isHc3Excluded
+                            ? "1px solid #86efac"
+                            : isHotColdExcluded
+                              ? "1px solid #f9a8d4"
                         : isAutoSelectionExcluded
                           ? "1px solid #bdbdbd"
                           : "1px solid transparent";
-                  const cellBackground = isManualExcluded && isBucketDerivedExcluded
+                  const cellBackground = isManualExcluded && hasRuleSource
                     ? "#f3e5f5"
                     : isManualExcluded
                       ? "#e8f0fe"
                       : isBucketDerivedExcluded
                         ? "#fff8e1"
+                        : isSde1Excluded
+                          ? "#fff7ed"
+                          : isHc3Excluded
+                            ? "#f0fdf4"
+                            : isHotColdExcluded
+                              ? "#fdf2f8"
                         : isAutoSelectionExcluded
                           ? "#f5f5f5"
                           : "transparent";
                   const titleParts = [
                     `Exclude ${n}`,
                     isManualExcluded ? "Manual" : null,
+                    isHotColdExcluded ? "Hot/Cold excluded" : null,
                     isBucketDerivedExcluded ? "Main bucket derived" : null,
                     isAutoSelectionExcluded ? "Auto from unselected" : null,
-                    isBucketLocked ? "Locked while active main-bucket rule is enforcing this exclusion" : null,
+                    isSde1Excluded ? "SDE1" : null,
+                    isHc3Excluded ? "HC3" : null,
+                    isLockedByActiveRule ? "Locked while another active exclusion rule is enforcing this number" : null,
                   ].filter(Boolean);
                   return (
                     <label
@@ -4411,19 +4568,19 @@ function AppInner(): JSX.Element {
                         borderRadius: 6,
                         border: cellBorder,
                         background: cellBackground,
-                        cursor: isBucketLocked ? "not-allowed" : "pointer",
-                        opacity: isBucketLocked ? 0.9 : 1,
+                        cursor: isLockedByActiveRule ? "not-allowed" : "pointer",
+                        opacity: isLockedByActiveRule ? 0.9 : 1,
                       }}
                       title={titleParts.join(" • ")}
                     >
                       <input
                         type="checkbox"
                         checked={checked}
-                        disabled={isBucketLocked}
-                        aria-label={isBucketLocked ? `Exclude ${n} (locked by active main bucket rule)` : `Exclude ${n}`}
-                        style={{ accentColor: isBucketDerivedExcluded && !isManualExcluded ? "#f9a825" : "#1976d2", cursor: isBucketLocked ? "not-allowed" : "pointer" }}
+                        disabled={isLockedByActiveRule}
+                        aria-label={isLockedByActiveRule ? `Exclude ${n} (locked by active exclusion rule)` : `Exclude ${n}`}
+                        style={{ accentColor: isBucketDerivedExcluded && !isManualExcluded ? "#f9a825" : "#1976d2", cursor: isLockedByActiveRule ? "not-allowed" : "pointer" }}
                         onChange={() => {
-                          if (isBucketLocked) return;
+                          if (isLockedByActiveRule) return;
                           setExcludedNumbers((prev) =>
                             prev.includes(n) ? prev.filter((x) => x !== n) : [...prev, n]
                           );
@@ -4431,7 +4588,7 @@ function AppInner(): JSX.Element {
                       />
                       <span style={{ fontSize: 11, marginTop: 2, display: "inline-flex", alignItems: "center", gap: 3 }}>
                         {n}
-                        {isBucketLocked && <span aria-hidden="true" title="Locked by active main bucket rule" style={{ fontSize: 10 }}>🔒</span>}
+                        {isLockedByActiveRule && <span aria-hidden="true" title="Locked by active exclusion rule" style={{ fontSize: 10 }}>🔒</span>}
                       </span>
                       {sourceBadges.length > 0 && (
                         <span style={{ display: "flex", gap: 2, marginTop: 2, flexWrap: "wrap", justifyContent: "center" }}>
@@ -4703,7 +4860,7 @@ function AppInner(): JSX.Element {
           title="Drought-break shortlist (mains + supps)"
           bucketLabels={monthlyBucketLabels}
           forcedNumbers={droughtBreakSelectedNumbers}
-          excludedNumbers={excludedNumbers}
+          excludedNumbers={selectionUnavailableNumbers}
           maxForcedSelections={MAX_DROUGHT_BREAK_FORCED_NUMBERS}
           onToggleNumber={toggleDroughtBreakSelectedNumber}
         />
@@ -4729,20 +4886,31 @@ function AppInner(): JSX.Element {
         open={predictionJournalOpen}
         onOpenChange={setPredictionJournalOpen}
         headerActions={
-          <HigButton
-            size="compact"
-            variant="primary"
-            onClick={handleNewPredictionDraft}
-            title="Open the journal and prefill a new prediction from the current app setup"
-          >
-            New Prediction
-          </HigButton>
+          <>
+            <HigButton
+              size="compact"
+              variant="secondary"
+              onClick={handleViewPredictionEntries}
+              title="Open saved prediction journal entries without opening the draft form"
+            >
+              View Entries
+            </HigButton>
+            <HigButton
+              size="compact"
+              variant="primary"
+              onClick={handleNewPredictionDraft}
+              title="Open the journal and prefill a new prediction from the current app setup"
+            >
+              New Prediction
+            </HigButton>
+          </>
         }
       >
         <PredictionJournalPanel
           history={realHistory}
           getSetupSnapshot={() => buildSnapshot({ includePanelFavorites: true, includeDerivedPredictionEvidence: true })}
           newPredictionDraft={predictionJournalDraftRequest}
+          viewEntriesRequestId={predictionJournalEntriesRequestId || undefined}
         />
       </CollapsibleSection>
 
@@ -4801,14 +4969,20 @@ function AppInner(): JSX.Element {
       {/* [ORDER-ANCHOR] 11.25 Draw Bucket Patterns */}
       <CollapsibleSection panelId="draw-bucket-patterns" title={<b>Draw Bucket Patterns</b>} summaryHint="terminal digits, main+supp" defaultOpen={false}>
         <div style={{ marginTop: 8 }}>
-          <DrawBucketPatternPanel draws={realFilteredHistory} allDraws={realHistory} />
+          <DrawBucketPatternPanel
+            draws={realFilteredHistory}
+            allDraws={realHistory}
+            planningMonthLabel={planningDrawContext.targetMonthLabel}
+            planningMonthExpectedDrawCount={planningDrawContext.targetMonthExpectedDrawCount}
+            planningMonthIsReset={planningDrawContext.isPlanningReset}
+          />
         </div>
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 11.35 Ending Digit Sequences */}
       <CollapsibleSection panelId="ending-digit-sequences" title={<b>Ending Digit Sequences</b>} summaryHint="consecutive ending-digit runs" defaultOpen={false}>
         <div style={{ marginTop: 8 }}>
-          <EndingDigitSequencePanel draws={realFilteredHistory} />
+          <EndingDigitSequencePanel draws={realFilteredHistory} allDraws={realHistory} />
         </div>
       </CollapsibleSection>
 
@@ -4818,7 +4992,7 @@ function AppInner(): JSX.Element {
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 12 Window Stats (Low/Mid/High, Odd/Even, Sum) */}
-      <CollapsibleSection panelId="window-stats" title={<b>Window Stats (Low/Mid/High, Odd/Even, Sum)</b>} summaryHint="WFMQY" defaultOpen={false}>
+      <CollapsibleSection panelId="window-stats" title={<b>Window Stats (Low/Mid/High, Odd/Even, Sum)</b>} summaryHint="WFMQYH" defaultOpen={false}>
         <div style={{ marginTop: 8 }}>
           <WindowStatsPanel
             draws={realFilteredHistory}
@@ -4975,7 +5149,7 @@ function AppInner(): JSX.Element {
 
       {/* [ORDER-ANCHOR] 21.5 Monthly Panels (relocated) */}
       <CollapsibleSection panelId="monthly-overlap" title={<b>Monthly Numbers Overlap</b>} defaultOpen={false} summaryHint="Selected draw vs earlier draws each month">
-        <MonthlyOverlapPanel history={realHistory} />
+        <MonthlyOverlapPanel history={realHistory} today={planningDrawContext.today} />
       </CollapsibleSection>
 
       <CollapsibleSection panelId="monthly-first-last-hits" title={<b>Monthly First ↔ Last Draw Hits</b>} defaultOpen={false} summaryHint="Hits between first & last draw within / across months">
@@ -4985,9 +5159,10 @@ function AppInner(): JSX.Element {
       <CollapsibleSection panelId="monthly-draws-summary" title={<b>Monthly Draws Summary</b>} defaultOpen={false} summaryHint="All drawn numbers per month with counts">
         <MonthlyDrawsSummaryPanel
           history={realHistory}
+          today={planningDrawContext.today}
           onConstraintsChange={setMonthlyConstraintPayload}
-          onUseSelectedNumbers={(nums) => setUserSelectedNumbers(nums)}
-          excludedNumbers={excludedNumbers}
+          onUseSelectedNumbers={(nums) => setUserSelectedNumbers(removeUserExcludedNumbers(nums, selectionUnavailableNumbers))}
+          excludedNumbers={selectionUnavailableNumbers}
           constructiveFillEnabled={monthlyConstructiveEnabled}
           onConstructiveFillChange={setMonthlyConstructiveEnabled}
           onBucketInfoChange={(info) => setMonthlyBucketLabels(info.labels)}
@@ -5007,7 +5182,7 @@ function AppInner(): JSX.Element {
         <MonthEndCarryOverBucketsPanel
           history={realHistory}
           selectedBoostNumbers={selectedCarryOverBoostNumbers}
-          excludedNumbers={excludedNumbers}
+          excludedNumbers={selectionUnavailableNumbers}
           onToggleBoostNumber={toggleSelectedCarryOverBoostNumber}
         />
       </CollapsibleSection>
@@ -5022,7 +5197,7 @@ function AppInner(): JSX.Element {
           wfmqyhWindowSize={activeWindowSize}
           forcedNumbers={hotColdForcedNumbers}
           excludedNumbers={hotColdExcludedNumbers}
-          lockedExcludedNumbers={excludedNumbers}
+          lockedExcludedNumbers={selectionUnavailableNumbers}
           onToggleForcedNumber={toggleHotColdForcedNumber}
           onToggleExcludedNumber={toggleHotColdExcludedNumber}
         />
@@ -5039,7 +5214,7 @@ function AppInner(): JSX.Element {
         <UserSelectedNumbersPanel
           userSelectedNumbers={userSelectedNumbers}
           setUserSelectedNumbers={setUserSelectedNumbers}
-          excludedNumbers={excludedNumbers}
+          excludedNumbers={selectionUnavailableNumbers}
           externalSelectedNumbers={droughtBreakSelectedNumbers}
           externalSelectedLabel="Drought-break shortlist"
           autoExcludeUnselected={autoExcludeUnselected}
@@ -5083,22 +5258,19 @@ function AppInner(): JSX.Element {
         </div>
 
         {insightsEnabled && (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 8 }}>
-            {/* Windowed (WFMQY) version */}
+          <div className="windfall-selection-insights-grid">
+            {/* Windowed (WFMQYH) version */}
             <div>
-              <div style={{ fontSize: 12, color: "#1a4fa3", fontWeight: 700, marginBottom: 4 }}>Windowed (WFMQY)</div>
+              <div style={{ fontSize: 12, color: "#1a4fa3", fontWeight: 700, marginBottom: 4 }}>Windowed (WFMQYH)</div>
               <SelectionInsightsPanel
                 history={realFilteredHistory}
                 selected={userSelectedNumbers}
                 topKTriplets={10}
-                historyWindowName={`${historyWindowName} (WFMQY)`}
+                historyWindowName={`${historyWindowName} (WFMQYH)`}
                 ogaHistory={realFilteredHistory}
-                autoComputeOGARaw={true}
+                autoComputeOGARaw={false}
                 lazyThreshold={400}
                 useIdleCallback={true}
-                onComputedOGARaw={(map) => {
-                  setTrace(t => [...t, `[TRACE] OGA raw computed (Windowed) for ${Object.keys(map).length} numbers.`]);
-                }}
               />
             </div>
 
@@ -5111,12 +5283,18 @@ function AppInner(): JSX.Element {
                 topKTriplets={10}
                 historyWindowName={`All History`}
                 ogaHistory={realHistory}
-                autoComputeOGARaw={true}
+                autoComputeOGARaw={false}
                 lazyThreshold={400}
                 useIdleCallback={true}
-                onComputedOGARaw={(map) => {
-                  setTrace(t => [...t, `[TRACE] OGA raw computed (All) for ${Object.keys(map).length} numbers.`]);
-                }}
+              />
+            </div>
+
+            <div>
+              <div style={{ fontSize: 12, color: "#1a4fa3", fontWeight: 700, marginBottom: 4 }}>Predicted</div>
+              <SelectionInsightsPredictionPanel
+                windowAnalytics={selectionInsightsWindowAnalytics}
+                allHistoryAnalytics={selectionInsightsAllHistoryAnalytics}
+                title="Predicted"
               />
             </div>
           </div>
@@ -5134,6 +5312,7 @@ function AppInner(): JSX.Element {
               <span className="windfall-generation-setup-summary-chip">Excluded {allExclusions.length}</span>
               <span className="windfall-generation-setup-summary-chip">Ratios {selectedRatios.length ? selectedRatios.join(" ") : "off"}</span>
               <span className="windfall-generation-setup-summary-chip">Scoring {formatScoringInfluenceLabel(scoringGenerationInfluence)}</span>
+              <span className="windfall-generation-setup-summary-chip">D1 SGI {d1TerminalMomentumSgiEnabled ? formatD1TerminalMomentumStrength(d1TerminalMomentumGenerationProfile.internalStrength) : "off"}</span>
               <span className="windfall-generation-setup-summary-chip">LD±1 {latestNeighbourSupportEnabled ? "on" : "off"}</span>
               <span className="windfall-generation-setup-summary-chip">Rdy filters {readinessHardFilterSummary}</span>
               <span className="windfall-generation-setup-summary-chip">Carry-over {monthEndCarryOverBiasEnabled ? monthEndCarryOverStrengthSettings.label : "off"}</span>
@@ -5144,7 +5323,7 @@ function AppInner(): JSX.Element {
               <InlineCollapsibleCard
                 title="Engine & Ranking"
                 subtitle="Ranking references, OGA forecast bias, diagnostic influence, recency weighting, and GPWF controls."
-                collapsedSummary={`Scoring ${formatScoringInfluenceLabel(scoringGenerationInfluence)} · OGA ${ogaRefMode} · KDE ${enableOGAForecastBias ? "on" : "off"} · λ ${lambdaEnabled ? lambda.toFixed(2) : "off"} · GPWF ${gpwfEnabled ? "on" : "off"}`}
+                collapsedSummary={`Scoring ${formatScoringInfluenceLabel(scoringGenerationInfluence)} · D1 SGI ${d1TerminalMomentumSgiEnabled ? formatD1TerminalMomentumStrength(d1TerminalMomentumGenerationProfile.internalStrength) : "off"} · OGA ${ogaRefMode} · KDE ${enableOGAForecastBias ? "on" : "off"} · λ ${lambdaEnabled ? lambda.toFixed(2) : "off"} · GPWF ${gpwfEnabled ? "on" : "off"}`}
                 defaultExpanded={true}
               >
                 <div className="windfall-influences-grid">
@@ -5301,6 +5480,42 @@ function AppInner(): JSX.Element {
                   <p style={{ margin: 0, color: "#64748b", fontSize: 12, lineHeight: 1.4 }}>
                     Applies the Numbers diagnostic evidence weighting before candidate filters run; selected constraints still decide which candidates survive.
                   </p>
+                  <div style={{ height: 1, background: "#e5e7eb", margin: "2px 0" }} aria-hidden="true" />
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 800 }}>
+                    <input
+                      type="checkbox"
+                      checked={d1TerminalMomentumSgiEnabled}
+                      onChange={(event) => setD1TerminalMomentumSgiEnabled(event.target.checked)}
+                    />
+                    D1 terminal momentum SGI
+                  </label>
+                  <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 8px", alignItems: "center", fontSize: 12, lineHeight: 1.4 }}>
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        borderRadius: 999,
+                        border: `1px solid ${d1TerminalMomentumGenerationProfile.enabled ? "#f0abfc" : "#dbe3ec"}`,
+                        background: d1TerminalMomentumGenerationProfile.enabled ? "#fdf4ff" : "#f8fafc",
+                        color: d1TerminalMomentumGenerationProfile.enabled ? "#86198f" : "#64748b",
+                        fontWeight: 900,
+                        padding: "2px 8px",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      Internal {d1TerminalMomentumSgiEnabled ? formatD1TerminalMomentumStrength(d1TerminalMomentumGenerationProfile.internalStrength) : "Off"}
+                    </span>
+                    <span style={{ color: "#64748b" }}>
+                      {d1TerminalMomentumGenerationProfile.targetDrawNumber
+                        ? `${d1TerminalMomentumGenerationProfile.monthLabel} target D${d1TerminalMomentumGenerationProfile.targetDrawNumber} · ${d1TerminalMomentumGenerationProfile.stageMode === "early-unique" ? "early unique expansion" : d1TerminalMomentumGenerationProfile.stageMode === "terminal-momentum" ? "terminal momentum" : d1TerminalMomentumGenerationProfile.stageMode === "closed-review" ? "closed-month review" : "unavailable"}`
+                        : "No current-month D1 evidence yet. The switch can be on, but generation receives no D1 SGI weighting until D1 exists."}
+                    </span>
+                    <span aria-hidden="true" />
+                    <span style={{ color: "#64748b" }}>
+                      User control is ON/OFF only. Windfall chooses off/light/normal/strong internally from prior-month evidence; this is soft weighting, not a hard filter.
+                    </span>
+                  </div>
                   <div style={{ height: 1, background: "#e5e7eb", margin: "2px 0" }} aria-hidden="true" />
                   <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 800 }}>
                     <input
@@ -5995,8 +6210,7 @@ function AppInner(): JSX.Element {
                     {(() => {
                       const d = mrbEffectiveDate;
                       const label = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-                      const today = new Date();
-                      const todayLabel = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+                      const todayLabel = planningDrawContext.todayMonthLabel;
                       const isForward = label !== todayLabel;
                       return (
                         <span style={{
@@ -6402,7 +6616,7 @@ function AppInner(): JSX.Element {
                           {row.targetOptions.map((target) => {
                             const isSelected = target.value != null && previousNeighbourConstraintNumberSet.has(target.value);
                             const duplicate = target.value != null && row.duplicateTargets.includes(target.value);
-                            const isUserExcluded = target.value != null && manualExcludedSet.has(target.value);
+                            const isUserExcluded = target.value != null && selectionUnavailableSet.has(target.value);
                             const wouldOverflow = target.value != null && !isSelected && !generationForcedNumbers.includes(target.value) && generationForcedNumbers.length >= 8;
                             const disabled = target.value == null || wouldOverflow || isUserExcluded;
                             return (
@@ -6412,8 +6626,8 @@ function AppInner(): JSX.Element {
                                 disabled={disabled}
                                 onClick={() => target.value != null && togglePreviousNeighbourTarget(target.value)}
                                 aria-pressed={isSelected}
-                                aria-label={isUserExcluded ? `Number ${target.value} is excluded by User Exclusions` : undefined}
-                                title={isUserExcluded ? `Clear it in WFMQYH User Exclusions before selecting ${target.value}.` : undefined}
+                                aria-label={isUserExcluded ? `Number ${target.value} is unavailable because it is excluded` : undefined}
+                                title={isUserExcluded ? `Clear the active exclusion or turn off the rule before selecting ${target.value}.` : undefined}
                                 style={{
                                   display: "inline-flex",
                                   alignItems: "center",
@@ -6587,7 +6801,7 @@ function AppInner(): JSX.Element {
                         disabled={!maxLastDrawMatchesEnabled}
                         style={{ marginLeft: 6, opacity: maxLastDrawMatchesEnabled ? 1 : 0.4 }}
                       >
-                        {[1,2,3,4,5,6,7,8].map((v) => (
+                        {[0,1,2,3,4,5,6,7,8].map((v) => (
                           <option key={v} value={v}>{v}</option>
                         ))}
                       </select>
@@ -6904,7 +7118,7 @@ function AppInner(): JSX.Element {
             onExportGenerationSession={handleExportGenerationSession}
             userSelectedNumbers={userSelectedNumbers}
             setUserSelectedNumbers={setUserSelectedNumbers}
-            excludedNumbers={excludedNumbers}
+            excludedNumbers={selectionUnavailableNumbers}
             onSelectCandidate={setSelectedCandidateIdx}
             onSimulateCandidate={handleSimulateCandidate}
             onKeepCandidate={handleKeepGeneratedCandidate}
@@ -7163,12 +7377,14 @@ function AppInner(): JSX.Element {
                       cellSize={DGA_CELL_SIZE}
                       monthlyBuckets={dgaEffectiveMonthlyBuckets}
                       scoringNumberDiagnostics={dgaScoringNumberDiagnostics}
-                      excludedNumbers={excludedNumbers}
+                      suppSuggestion={dgaSuppSuggestion}
+                      excludedNumbers={selectionUnavailableNumbers}
                       hoveredNumber={dgaHoveredNumber}
                       onHoverNumber={(value) => setDgaHoveredNumber(value)}
                       onChange={handleDgaStripChange}
                       includeHeaderSpacer={false}
                       topOffsetPx={DGA_HEATMAP_GUTTER}
+                      testIdPrefix="dga-heatmap-sim-strip"
                     />
                   </div>
                 </div>
@@ -7177,6 +7393,26 @@ function AppInner(): JSX.Element {
           </InlineCollapsibleCard>
 
           <div ref={dgaGridRef} style={{ marginTop: 12 }}>
+            {simScrollOriginY !== null && (
+              <button
+                type="button"
+                onClick={scrollBackToOrigin}
+                style={{
+                  marginBottom: 8,
+                  padding: "4px 10px",
+                  borderRadius: 4,
+                  border: "1px solid #1976d2",
+                  background: "#e3f2fd",
+                  color: "#1976d2",
+                  cursor: "pointer",
+                  fontSize: 12,
+                  fontWeight: 600,
+                }}
+                title="Return to where you pressed Simulate"
+              >
+                ↑ Back
+              </button>
+            )}
             <InlineCollapsibleCard
               title="DGA grid"
               subtitle={dgaGrid.length > 0
@@ -7193,28 +7429,6 @@ function AppInner(): JSX.Element {
                 {highlightMsg && (
                   <div style={{ color: "#c00", marginTop: 2, marginBottom: 12 }}>{highlightMsg}</div>
                 )}
-
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-                  {simScrollOriginY !== null && (
-                    <button
-                      type="button"
-                      onClick={scrollBackToOrigin}
-                      style={{
-                        padding: "4px 10px",
-                        borderRadius: 4,
-                        border: "1px solid #1976d2",
-                        background: "#e3f2fd",
-                        color: "#1976d2",
-                        cursor: "pointer",
-                        fontSize: 12,
-                        fontWeight: 600,
-                      }}
-                      title="Return to where you pressed Simulate"
-                    >
-                      ↑ Back
-                    </button>
-                  )}
-                </div>
 
                 {dgaGrid.length > 0 ? (
                   <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
@@ -7246,12 +7460,14 @@ function AppInner(): JSX.Element {
                         cellSize={DGA_CELL_SIZE}
                         monthlyBuckets={dgaEffectiveMonthlyBuckets}
                         scoringNumberDiagnostics={dgaScoringNumberDiagnostics}
-                        excludedNumbers={excludedNumbers}
+                        suppSuggestion={dgaSuppSuggestion}
+                        excludedNumbers={selectionUnavailableNumbers}
                         hoveredNumber={dgaHoveredNumber}
                         onHoverNumber={(value) => setDgaHoveredNumber(value)}
                         onChange={handleDgaStripChange}
                         includeHeaderSpacer={false}
                         topOffsetPx={DGA_CELL_SIZE}
+                        testIdPrefix="dga-grid-sim-strip"
                       />
                     </div>
                   </div>
@@ -7394,6 +7610,13 @@ function AppInner(): JSX.Element {
       attemptMultiplier,
       overgenFactor,
       scoringGenerationInfluence,
+      d1TerminalMomentumSgiEnabled,
+      d1TerminalMomentumInternalStrength: d1TerminalMomentumGenerationProfile.internalStrength,
+      d1TerminalMomentumStageMode: d1TerminalMomentumGenerationProfile.stageMode,
+      d1TerminalMomentumMonthLabel: d1TerminalMomentumGenerationProfile.monthLabel,
+      d1TerminalMomentumTargetDrawNumber: d1TerminalMomentumGenerationProfile.targetDrawNumber,
+      d1TerminalMomentumTraceLabel: d1TerminalMomentumGenerationProfile.traceLabel,
+      d1TerminalMomentumActiveDigits: d1TerminalMomentumGenerationProfile.digits.map((digit) => digit.digit),
       monthlyConstructiveEnabled,
       acceptanceNeedsEnabled,
       acceptanceNeedsCounts: monthlyConstructiveEnabled && monthlyConstraintPayload
@@ -7461,12 +7684,34 @@ function AppInner(): JSX.Element {
       snapshot.generationForcedNumbers = sortedSnapshotNumbers(generationForcedNumbers);
       snapshot.generationExcludedNumbers = sortedSnapshotNumbers(generationExcludedNumbers);
       snapshot.allExcludedNumbers = sortedSnapshotNumbers(allExclusions);
+      if (dgaSuppSuggestion) {
+        snapshot.dgaSuggestedMainNumbers = sortedSnapshotNumbers(dgaSuppSuggestion.main);
+        snapshot.dgaSuggestedSuppNumbers = sortedSnapshotNumbers(dgaSuppSuggestion.supp);
+        snapshot.dgaSuggestedSuppPair = sortedSnapshotNumbers(dgaSuppSuggestion.selectedPair);
+        snapshot.dgaSuggestedSuppPairActiveCount = dgaSuppSuggestion.selectedPairEvidence.activePairSuppCount;
+        snapshot.dgaSuggestedSuppPairFullCount = dgaSuppSuggestion.selectedPairEvidence.fullPairSuppCount;
+        snapshot.dgaSuggestedSuppPairActiveDrawCount = dgaSuppSuggestion.selectedPairEvidence.activeDrawCount;
+        snapshot.dgaSuggestedSuppPairFullDrawCount = dgaSuppSuggestion.selectedPairEvidence.fullDrawCount;
+        snapshot.dgaSuggestedSuppPairActiveGap = dgaSuppSuggestion.selectedPairEvidence.activeLastPairSuppGap;
+        snapshot.dgaSuggestedSuppPairFullGap = dgaSuppSuggestion.selectedPairEvidence.fullLastPairSuppGap;
+        snapshot.dgaSuppPairActiveCoverage = dgaSuppSuggestion.pairCoverage.activeObservedPairs;
+        snapshot.dgaSuppPairFullCoverage = dgaSuppSuggestion.pairCoverage.fullObservedPairs;
+        snapshot.dgaSuppPairTotalCoverage = dgaSuppSuggestion.pairCoverage.totalPairs;
+      }
       snapshot.sde1Exclusions = sortedSnapshotNumbers(sde1Exclusions);
       snapshot.hc3Exclusions = sortedSnapshotNumbers(hc3Exclusions);
       snapshot.droughtBreakStrictShortlistNumbers = sortedSnapshotNumbers(strictDroughtShortlist);
       snapshot.droughtBreakEmpiricalHazardNumbers = sortedSnapshotNumbers(empiricalDroughtHazardShortlist);
       snapshot.droughtBreakShortlistTop = droughtBreakShortlistTop;
       snapshot.droughtBreakStrictThreshold = STRICT_DROUGHT_DEFAULT_THRESHOLD;
+      snapshot.selectionInsightsSnapshot = buildSelectionInsightsSnapshot({
+        enabled: insightsEnabled,
+        selected: userSelectedNumbers,
+        windowLabel: historyWindowName,
+        windowHistory: realFilteredHistory,
+        allHistory: realHistory,
+        maxRows: 12,
+      });
     }
 
     return snapshot;
@@ -7590,6 +7835,7 @@ function AppInner(): JSX.Element {
         ? s.scoringGenerationInfluence
         : "off",
     );
+    setD1TerminalMomentumSgiEnabled(!!s.d1TerminalMomentumSgiEnabled);
     setAcceptanceNeedsHardExclude(!!(s as any).acceptanceNeedsHardExclude);
     setSelectedBoostEnabled(s.selectedBoostEnabled ?? false);
     setSelectedBoostFactor(s.selectedBoostFactor ?? 2);
@@ -7683,6 +7929,23 @@ const _formatDgaScoringScore = (score: number): string => (
   Number.isFinite(score) ? score.toFixed(1).replace(/\.0$/, "") : "0"
 );
 
+const _formatDgaSuppSuggestionTitle = (suggestion: DgaSuppSuggestion): string => {
+  const suppSet = new Set(suggestion.supp);
+  const rows = suggestion.evidence
+    .filter((row) => suppSet.has(row.number))
+    .map((row) => `${row.number}: WFMQYH supp ${row.activeSuppCount}/${row.activeDrawCount}, all-history supp ${row.fullSuppCount}/${row.fullDrawCount}`);
+  const pair = suggestion.selectedPairEvidence;
+  const activeGap = pair.activeLastPairSuppGap === null ? "never in WFMQYH" : `last exact pair gap ${pair.activeLastPairSuppGap}`;
+  const fullGap = pair.fullLastPairSuppGap === null ? "never in all history" : `last exact pair gap ${pair.fullLastPairSuppGap}`;
+  return [
+    `Suggested supplementary numbers: ${suggestion.supp.join(", ")}`,
+    ...rows,
+    `Exact pair evidence: ${pair.pair.join("-")} · WFMQYH ${pair.activePairSuppCount}/${pair.activeDrawCount} (${activeGap}) · all-history ${pair.fullPairSuppCount}/${pair.fullDrawCount} (${fullGap})`,
+    `Selected-8 pair coverage: WFMQYH ${suggestion.pairCoverage.activeObservedPairs}/${suggestion.pairCoverage.totalPairs}, all-history ${suggestion.pairCoverage.fullObservedPairs}/${suggestion.pairCoverage.totalPairs}.`,
+    suggestion.reason,
+  ].join("\n");
+};
+
 // DGASimulateStrip – select numbers to simulate in the Next column of the DGA grid
 interface DGASimulateStripProps {
   selectedNumbers: number[];
@@ -7690,11 +7953,13 @@ interface DGASimulateStripProps {
   cellSize?: number;
   monthlyBuckets?: MonthlyBucketSets | null;
   scoringNumberDiagnostics?: Record<number, DGAScoringNumberDiagnostic>;
+  suppSuggestion?: DgaSuppSuggestion | null;
   excludedNumbers?: number[];
   hoveredNumber?: number | null;
   onHoverNumber?: (value: number | null) => void;
   includeHeaderSpacer?: boolean;
   topOffsetPx?: number;
+  testIdPrefix?: string;
 }
 const DGASimulateStrip: React.FC<DGASimulateStripProps> = ({
   selectedNumbers,
@@ -7702,11 +7967,13 @@ const DGASimulateStrip: React.FC<DGASimulateStripProps> = ({
   cellSize,
   monthlyBuckets,
   scoringNumberDiagnostics,
+  suppSuggestion,
   excludedNumbers = [],
   hoveredNumber,
   onHoverNumber,
   includeHeaderSpacer = true,
   topOffsetPx = 0,
+  testIdPrefix = "dga-simulate-strip",
 }) => {
   const SIMULATION_NUMBER_LIMIT = 8;
   const userExcludedNumbers = useMemo(() => normalizeUserExclusionLocks(excludedNumbers), [excludedNumbers]);
@@ -7718,6 +7985,7 @@ const DGASimulateStrip: React.FC<DGASimulateStripProps> = ({
   const selectionCountLabel = activeSelectedNumbers.length > SIMULATION_NUMBER_LIMIT
     ? `${activeSelectedNumbers.length} selected · first ${SIMULATION_NUMBER_LIMIT} simulate`
     : `${activeSelectedNumbers.length}/${SIMULATION_NUMBER_LIMIT}`;
+  const suppSuggestionTitle = suppSuggestion ? _formatDgaSuppSuggestionTitle(suppSuggestion) : "";
   const userExclusionReminder = useMemo(
     () => formatUserExclusionReminder(userExcludedNumbers),
     [userExcludedNumbers],
@@ -7735,7 +8003,7 @@ const DGASimulateStrip: React.FC<DGASimulateStripProps> = ({
   };
 
   return (
-    <div style={{ marginTop: 0 }}>
+    <div style={{ marginTop: 0 }} data-testid={testIdPrefix}>
       <div style={{ display: "flex", flexDirection: "column", gap: 0, paddingTop: 0, paddingBottom: 0, alignItems: "flex-start" }}>
         <div style={{ border: 0, background: "transparent", paddingTop: topOffsetPx }}>
           <table style={{ borderCollapse: "collapse", borderSpacing: 0, fontSize: 11 }}>
@@ -7770,7 +8038,7 @@ const DGASimulateStrip: React.FC<DGASimulateStripProps> = ({
                   ? `Numbers diagnostic rank #${diagnostic.rank}/45 · score ${_formatDgaScoringScore(diagnostic.score)} (mains + supps; diagnostic support, not probability).`
                   : "Numbers diagnostic rank unavailable.";
                 const actionTitle = isUserExcluded
-                  ? `Number ${n} is excluded by User Exclusions. Clear it in WFMQYH User Exclusions before selecting it here.`
+                  ? `Number ${n} is unavailable because it is excluded. Clear the active exclusion or turn off the rule before selecting it here.`
                   : checked
                     ? `Remove ${n} from user-selected numbers`
                     : `Add ${n} to user-selected numbers`;
@@ -7808,11 +8076,12 @@ const DGASimulateStrip: React.FC<DGASimulateStripProps> = ({
                         title={`${actionTitle}\n${diagnosticTitle}`}
                       >
                         <input
+                          data-testid={`${testIdPrefix}-number-${n}`}
                           type="checkbox"
                           checked={checked}
                           disabled={disabled}
                           aria-label={isUserExcluded
-                            ? `Number ${n} is excluded by User Exclusions`
+                            ? `Number ${n} is unavailable because it is excluded`
                             : diagnostic
                               ? `${checked ? "Remove" : "Add"} ${n} to user-selected numbers; Numbers diagnostic rank ${diagnostic.rank} of 45`
                               : undefined}
@@ -7858,7 +8127,7 @@ const DGASimulateStrip: React.FC<DGASimulateStripProps> = ({
         {userExclusionReminder && (
           <span
             style={{ marginTop: 4, maxWidth: 92, color: "#64748b", fontSize: 10, lineHeight: 1.25 }}
-            title={`${userExclusionReminder}. Clear these in WFMQYH User Exclusions before selecting them here.`}
+            title={`${userExclusionReminder}. Clear the manual exclusion or turn off the rule that excludes them before selecting them here.`}
           >
             exclusions active
           </span>
@@ -7889,6 +8158,30 @@ const DGASimulateStrip: React.FC<DGASimulateStripProps> = ({
             {selectionCountLabel}
           </span>
         </div>
+        {activeSelectedNumbers.length === SIMULATION_NUMBER_LIMIT && (
+          <div
+            data-testid={`${testIdPrefix}-supp-suggestion`}
+            style={{
+              marginTop: 4,
+              maxWidth: 118,
+              border: `1px solid ${suppSuggestion ? "#b7e4c7" : "#e2e8f0"}`,
+              background: suppSuggestion ? "#f0fdf4" : "#f8fafc",
+              color: suppSuggestion ? "#14532d" : "#64748b",
+              borderRadius: 7,
+              padding: "4px 5px",
+              fontSize: 10,
+              lineHeight: 1.2,
+            }}
+            title={suppSuggestion ? suppSuggestionTitle : "No supplementary-role count signal was found for these eight selected numbers. DGA uses the existing first-six main, next-two supplementary order."}
+          >
+            <b style={{ display: "block", fontSize: 10 }}>
+              {suppSuggestion ? "Auto supps" : "Supps"}
+            </b>
+            {suppSuggestion
+              ? `${suppSuggestion.supp.join(", ")}`
+              : "no count signal"}
+          </div>
+        )}
       </div>
     </div>
   );

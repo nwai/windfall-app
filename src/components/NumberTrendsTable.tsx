@@ -193,7 +193,7 @@ export function NumberTrendsTable({
           className="windfall-number-trends__note"
           style={{ marginBottom: 8, borderColor: "#cbd5e1", background: "#f8fafc" }}
         >
-          {userExclusionReminder}. Clear these in WFMQYH User Exclusions before selecting them here.
+          {userExclusionReminder}. Clear the manual exclusion or turn off the rule that excludes them before selecting them here.
         </div>
       )}
       <div className="windfall-number-trends__grid">
@@ -223,12 +223,12 @@ export function NumberTrendsTable({
                 const directionLabel = dir === "up" ? "Up" : dir === "down" ? "Down" : "Flat";
                 const signedDelta = `${deltaPP >= 0 ? "+" : ""}${deltaPP.toFixed(1)}`;
                 const ariaLabel = isUserExcluded
-                  ? `Number ${trend.number} is excluded by User Exclusions`
+                  ? `Number ${trend.number} is unavailable because it is excluded`
                   : isExternalOnly
                   ? `Number ${trend.number} is forced by ${externalSelectedLabel}`
                   : `Toggle forced inclusion for number ${trend.number}`;
                 const title = isUserExcluded
-                  ? `Clear it in WFMQYH User Exclusions before selecting ${trend.number}.`
+                  ? `Clear the active exclusion or turn off the rule before selecting ${trend.number}.`
                   : isExternalOnly
                     ? `Selected in ${externalSelectedLabel}; deselect it there to release it.`
                     : undefined;

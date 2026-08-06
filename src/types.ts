@@ -63,6 +63,9 @@ export type CandidateSet = {
   previousNeighbourTargetCount?: number;
   scoreEvidence?: number;
   scoreEvidenceTrace?: string[];
+  d1TerminalMomentumHits?: number;
+  d1TerminalMomentumScore?: number;
+  d1TerminalMomentumTrace?: string[];
 };
 
 export interface KeptGeneratedCandidateRow {

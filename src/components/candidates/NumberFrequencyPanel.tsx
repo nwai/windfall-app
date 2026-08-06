@@ -201,7 +201,7 @@ export const NumberFrequencyPanel: React.FC<{ draws: Draw[]; allDraws?: Draw[] }
               Last drawn (ago)
             </th>
             <th style={thRight} title="Average gap in draws between hits across all history (All/H)">Gap (All/H)</th>
-            <th style={thRight} title="Average gap in draws between hits within current window (WFMQY)">Gap (WFMQY)</th>
+            <th style={thRight} title="Average gap in draws between hits within current window (WFMQYH)">Gap (WFMQYH)</th>
           </tr>
         </thead>
         <tbody>

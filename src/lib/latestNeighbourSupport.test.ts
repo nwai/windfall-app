@@ -101,4 +101,35 @@ describe("latestNeighbourSupport", () => {
     expect(analysis.targetNumbers).toContain(27);
     expect(analysis.isPlanningLastDraw).toBe(true);
   });
+
+  it("does not treat a completed source month as the last draw when the next planned draw is a new-month reset", () => {
+    const buckets = emptyBuckets();
+    buckets.undrawn = new Set([7, 17, 27]);
+    const history = [
+      draw("2026-07-01", [1, 2, 3, 4, 5, 6]),
+      draw("2026-07-03", [8, 9, 10, 11, 12, 13]),
+      draw("2026-07-06", [14, 15, 16, 18, 19, 20]),
+      draw("2026-07-08", [21, 22, 23, 24, 25, 26]),
+      draw("2026-07-10", [1, 2, 3, 4, 5, 6]),
+      draw("2026-07-13", [8, 9, 10, 11, 12, 13]),
+      draw("2026-07-15", [14, 15, 16, 18, 19, 20]),
+      draw("2026-07-17", [21, 22, 23, 24, 25, 26]),
+      draw("2026-07-20", [1, 2, 3, 4, 5, 6]),
+      draw("2026-07-22", [8, 9, 10, 11, 12, 13]),
+      draw("2026-07-24", [14, 15, 16, 18, 19, 20]),
+      draw("2026-07-27", [21, 22, 23, 24, 25, 26]),
+      draw("2026-07-29", [1, 2, 3, 4, 5, 6]),
+      draw("2026-07-31", [21, 22, 23, 24, 25, 26]),
+    ];
+
+    const analysis = analyzeLatestNeighbourSupport(history, buckets, {
+      enabled: true,
+      droughtDisqualifyThreshold: 2,
+      planningNow: "2026-08-01",
+    });
+
+    expect(analysis.isPlanningLastDraw).toBe(false);
+    expect(analysis.targetNumbers).not.toContain(27);
+    expect(analysis.disqualified.find((item) => item.number === 27)?.reason).toMatch(/terminal 7/);
+  });
 });

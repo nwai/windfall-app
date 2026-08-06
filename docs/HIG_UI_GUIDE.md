@@ -21,6 +21,7 @@ Windfall is a dense analytical app, so the design goal is not decoration. The de
 - Make controls wrap into rows on narrow screens.
 - Do not use color alone to communicate status.
 - Use one visible title source per panel, usually the `CollapsibleSection` heading. Do not repeat the same panel title inside the panel body.
+- When adding or renaming app-specific acronyms, compact table headings, diagnostic labels, or short controls, update `public/user-manual.html` in the same change. The glossary is the source of truth for terms such as `WFMQYH`, `OGA`, `IDM`, `Rdy`, `SDE1`, `HC3`, `LD±1`, `PNUaRW45`, `SelHits`, and `RecentHits`.
 - For grouped form areas inside a dense panel, prefer a compact bordered group with the group label riding the border, using the Prediction Journal review-status treatment as the reference pattern. This preserves scan clarity without spending an extra title row.
 - Keep generator panels visually findable with `windfall-generator-panel`.
 - Use `WorkflowAnchor` and `AppWorkflowNav` when adding major workflow sections.

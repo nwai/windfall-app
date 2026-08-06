@@ -23,6 +23,7 @@ import {
 import {
   formatUserExclusionReminder,
   normalizeUserExclusionLocks,
+  removeUserExcludedNumbers,
 } from "../../lib/userExclusionLocks";
 import {
   computeIdealMonthlyDraw,
@@ -559,8 +560,8 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
     };
 
     const normalizedUserSelectedNumbers = useMemo(
-      () => normalizeUserSelectedNumbers(userSelectedNumbers),
-      [userSelectedNumbers],
+      () => removeUserExcludedNumbers(normalizeUserSelectedNumbers(userSelectedNumbers), userExcludedNumbers),
+      [userExcludedNumbers, userSelectedNumbers],
     );
     const [manualPrizeCheckFollowsUserSelected, setManualPrizeCheckFollowsUserSelected] = useState(false);
     const syncedManualPrizeCheckNumbers = useMemo(
@@ -588,8 +589,9 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
       [],
     );
     const toggleUserSelection = useCallback((number: number): void => {
+      if (userExcludedSet.has(number)) return;
       setUserSelectedNumbers(toggleUserSelectedNumber(normalizedUserSelectedNumbers, number));
-    }, [normalizedUserSelectedNumbers, setUserSelectedNumbers]);
+    }, [normalizedUserSelectedNumbers, setUserSelectedNumbers, userExcludedSet]);
     const clearUserSelection = useCallback((): void => {
       setUserSelectedNumbers([]);
     }, [setUserSelectedNumbers]);
@@ -2216,6 +2218,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
            {userSelectedNumberOptions.map((number) => {
              const isSelected = selSet.has(number);
              const isForced = forcedSet.has(number);
+             const isUnavailable = userExcludedSet.has(number);
              const bucketDisplay = monthlyBucketDisplayForNumber(monthlyBuckets, number);
              const bucketTitle = bucketDisplay ? ` Monthly bucket: ${bucketDisplay.label}.` : "";
              return (
@@ -2223,14 +2226,19 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                  key={number}
                  type="button"
                  aria-pressed={isSelected}
-                 aria-label={`Toggle user selected number ${number}`}
+                 aria-label={isUnavailable
+                   ? `Number ${number} is unavailable because it is excluded`
+                   : `Toggle user selected number ${number}`}
+                 disabled={isUnavailable}
                  onClick={() => toggleUserSelection(number)}
-                 style={userSelectionNumberButton(isSelected, isForced, bucketDisplay)}
-                 title={isForced
-                   ? `${number} is currently carry-over boosted.${bucketTitle} Click to toggle user selection.`
-                   : isSelected
-                     ? `Remove ${number} from user selected numbers.${bucketTitle}`
-                     : `Add ${number} to user selected numbers.${bucketTitle}`}
+                 style={userSelectionNumberButton(isSelected, isForced, bucketDisplay, isUnavailable)}
+                 title={isUnavailable
+                   ? `Clear the active exclusion or turn off the rule before selecting ${number}.${bucketTitle}`
+                   : isForced
+                     ? `${number} is currently carry-over boosted.${bucketTitle} Click to toggle user selection.`
+                     : isSelected
+                       ? `Remove ${number} from user selected numbers.${bucketTitle}`
+                       : `Add ${number} to user selected numbers.${bucketTitle}`}
                >
                  {number}
                </button>
@@ -2941,6 +2949,9 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                       <div style={actionButtonGroup}>
                         <button
                           type="button"
+                          aria-pressed={isActiveSim}
+                          aria-label={isActiveSim ? `Generated candidate ${i + 1} is simulated` : `Simulate generated candidate ${i + 1}`}
+                          title={isActiveSim ? "This candidate is currently simulated in DGA" : "Simulate this candidate in DGA"}
                           onClick={(e) => {
                             e.stopPropagation();
                             onSimulateCandidate?.(i);
@@ -3712,7 +3723,7 @@ const ManualSim: React.FC<{
       )}
       {userExclusionReminder && (
         <div role="status" style={{ marginBottom: 8, color: "#475569", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "6px 8px", fontSize: 11 }}>
-          {userExclusionReminder}. Clear these in WFMQYH User Exclusions before selecting them here.
+          {userExclusionReminder}. Clear the manual exclusion or turn off the rule that excludes them before selecting them here.
         </div>
       )}
 
@@ -3810,7 +3821,7 @@ const ManualSim: React.FC<{
                 followUserSelected
                   ? "Synced from User Selected numbers. Turn off Use User Selected to edit manually."
                   : isUserExcluded
-                  ? `Clear it in WFMQYH User Exclusions before selecting ${n}.`
+                  ? `Clear the active exclusion or turn off the rule before selecting ${n}.`
                   : picked
                   ? `Slot ${idx + 1}`
                   : atCapacity
@@ -3822,7 +3833,7 @@ const ManualSim: React.FC<{
                 type="checkbox"
                 checked={picked}
                 disabled={disabled}
-                aria-label={isUserExcluded ? `Number ${n} is excluded by User Exclusions` : undefined}
+                aria-label={isUserExcluded ? `Number ${n} is unavailable because it is excluded` : undefined}
                 onChange={() => toggleManualPick(n)}
                 style={{ marginBottom: 2 }}
               />
@@ -3936,49 +3947,59 @@ const userSelectionNumberButton = (
   selected: boolean,
   forced: boolean,
   bucketDisplay: MonthlyBucketNumberDisplay | null,
+  unavailable = false,
 ): React.CSSProperties => {
   const hasBucket = bucketDisplay !== null;
-  const active = selected || forced;
+  const active = !unavailable && (selected || forced);
   return {
     width: 26,
     height: 24,
     padding: 0,
     borderRadius: 4,
-    border: active && hasBucket
-      ? `1px solid ${bucketDisplay.color}`
+    border: unavailable
+      ? "1px solid #cbd5e1"
+      : active && hasBucket
+        ? `1px solid ${bucketDisplay.color}`
+        : selected
+          ? "1px solid #111827"
+          : forced
+            ? "1px solid #b45309"
+            : hasBucket
+              ? `1px solid ${bucketDisplay.color}`
+              : "1px solid #d1d5db",
+    background: unavailable
+      ? bucketDisplay?.softColor ?? "#f8fafc"
+      : active && hasBucket
+        ? bucketDisplay.color
+        : selected
+          ? "#111827"
+          : forced
+            ? "#fffbeb"
+            : bucketDisplay?.softColor ?? "#fff",
+    color: unavailable
+      ? "#64748b"
+      : active && hasBucket
+        ? bucketDisplay.textColor
+        : selected
+          ? "#fff"
+          : forced
+            ? "#92400e"
+            : hasBucket
+              ? "#0f172a"
+              : "#111827",
+    boxShadow: unavailable
+      ? "inset 0 0 0 1px rgba(148,163,184,0.18)"
       : selected
-        ? "1px solid #111827"
-        : forced
-          ? "1px solid #b45309"
-          : hasBucket
-            ? `1px solid ${bucketDisplay.color}`
-            : "1px solid #d1d5db",
-    background: active && hasBucket
-      ? bucketDisplay.color
-      : selected
-        ? "#111827"
-        : forced
-          ? "#fffbeb"
-          : bucketDisplay?.softColor ?? "#fff",
-    color: active && hasBucket
-      ? bucketDisplay.textColor
-      : selected
-        ? "#fff"
-        : forced
-          ? "#92400e"
-          : hasBucket
-            ? "#0f172a"
-            : "#111827",
-    boxShadow: selected
       ? `inset 0 0 0 1px ${bucketDisplay?.textColor === "#111827" ? "rgba(17,24,39,0.35)" : "rgba(255,255,255,0.58)"}`
       : forced
         ? "inset 0 0 0 1px rgba(180,83,9,0.28)"
         : "none",
     fontSize: 11,
-    fontWeight: active ? 800 : 600,
+    fontWeight: active || unavailable ? 800 : 600,
     fontVariantNumeric: "tabular-nums",
-    cursor: "pointer",
+    cursor: unavailable ? "not-allowed" : "pointer",
     lineHeight: 1,
+    opacity: unavailable ? 0.54 : 1,
   };
 };
 const userSelectionClearButton = (disabled: boolean): React.CSSProperties => ({

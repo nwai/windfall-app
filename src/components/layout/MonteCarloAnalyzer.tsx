@@ -49,7 +49,7 @@ function panelTitle(id: string) {
     case 'numberFrequency': return 'Number Frequency';
     case 'candidateControls': return 'Candidate Generation Controls';
     case 'generatedCandidates': return 'Generated Candidates';
-    case 'wfmqy': return 'WFMQY Metrics';
+    case 'wfmqy': return 'WFMQYH Metrics';
     case 'monteCarlo': return 'Monte Carlo Simulation';
     default: return id;
   }

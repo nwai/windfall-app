@@ -25,7 +25,8 @@ export const removeUserExcludedNumbers = (
 
 export const formatUserExclusionReminder = (
   excludedNumbers: readonly unknown[] | null | undefined,
+  label = "Active exclusions",
 ): string => {
   const normalized = normalizeUserExclusionLocks(excludedNumbers);
-  return normalized.length ? `User exclusions active: ${normalized.join(", ")}` : "";
+  return normalized.length ? `${label}: ${normalized.join(", ")}` : "";
 };

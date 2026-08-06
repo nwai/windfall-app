@@ -1,5 +1,6 @@
 import type { Draw } from "../types";
 import type { AppPresetSnapshot } from "./presets";
+import type { SelectionInsightsSnapshot } from "./selectionInsights";
 
 export const PREDICTION_JOURNAL_STORAGE_KEY = "windfall:prediction-journal:v1";
 
@@ -20,6 +21,26 @@ export type PredictionScoreResult = "hit" | "partial" | "miss" | "recorded";
 export type PredictionJournalStatus = "pending" | "locked" | "scored" | "void";
 export type PredictionJournalReviewStatus = "notReviewed" | "reviewedByUser";
 
+export const PREDICTION_JOURNAL_SELECTION_REASON_LABELS = {
+  selectedRandomly: "Selected randomly",
+  dgaPattern: "Observed pattern in DGA grid",
+  monthlyBucketStatePattern: "Observed pattern in Monthly bucket state",
+  idmBuckets: "Adhered to IDM buckets",
+  latestNeighbourMainSix: "Used ± to choose main 6",
+  selectionInsights: "Used Selection insights to choose numbers",
+  officialQuickpickPasteWeighted: "Created official TattsLotto quickpick to generate candidates, then pasted them into Paste-weighted generator",
+  other: "Other",
+} as const;
+
+export type PredictionJournalSelectionReasonKey = keyof typeof PREDICTION_JOURNAL_SELECTION_REASON_LABELS;
+
+export interface PredictionJournalSelectionReason {
+  version: 1;
+  key: PredictionJournalSelectionReasonKey;
+  label: string;
+  detail?: string;
+}
+
 export interface PredictionBucketCounts extends Partial<Record<PredictionBucketKey, number>> {}
 
 export interface PredictionJournalInputs {
@@ -37,6 +58,7 @@ export interface PredictionJournalInputs {
   carryOverCount?: number;
   ogaRange?: { min?: number; max?: number };
   confidence?: number;
+  selectionReason?: PredictionJournalSelectionReason;
   notes?: string;
 }
 
@@ -79,6 +101,19 @@ export interface PredictionJournalDroughtBreakProvenance {
   classifications: PredictionJournalDroughtBreakNumberEvidence[];
 }
 
+export interface PredictionJournalSelectionInsightsProvenance {
+  version: 1;
+  enabled: boolean;
+  selectedNumbers: number[];
+  windowLabel: string;
+  windowDrawCount: number;
+  allDrawCount: number;
+  windowTopCompanionNumbers: number[];
+  allTopCompanionNumbers: number[];
+  predictedCompanionNumbers: number[];
+  predictedCompanions: SelectionInsightsSnapshot["predictedCompanions"];
+}
+
 export interface PredictionJournalProvenance {
   version: 1;
   selectedNumbers: number[];
@@ -102,6 +137,7 @@ export interface PredictionJournalProvenance {
     effectiveGeneration: number[];
   };
   droughtBreakShortlist: PredictionJournalDroughtBreakProvenance;
+  selectionInsights?: PredictionJournalSelectionInsightsProvenance;
 }
 
 export interface PredictionJournalEntry {
@@ -210,6 +246,11 @@ const normalizeInteger = (value: unknown): number | undefined => {
   return Math.max(0, Math.round(parsed));
 };
 
+const normalizeNullableInteger = (value: unknown): number | null | undefined => {
+  if (value === null) return null;
+  return normalizeInteger(value);
+};
+
 const normalizeNumberList = (values: unknown, min: number, max: number): number[] | undefined => {
   if (!Array.isArray(values)) return undefined;
   const seen = new Set<number>();
@@ -219,6 +260,19 @@ const normalizeNumberList = (values: unknown, min: number, max: number): number[
     seen.add(parsed);
   }
   const output = [...seen].sort((a, b) => a - b);
+  return output.length ? output : undefined;
+};
+
+const normalizeNumberListInOrder = (values: unknown, min: number, max: number): number[] | undefined => {
+  if (!Array.isArray(values)) return undefined;
+  const seen = new Set<number>();
+  const output: number[] = [];
+  for (const value of values) {
+    const parsed = typeof value === "number" ? value : Number(value);
+    if (!Number.isInteger(parsed) || parsed < min || parsed > max || seen.has(parsed)) continue;
+    seen.add(parsed);
+    output.push(parsed);
+  }
   return output.length ? output : undefined;
 };
 
@@ -274,6 +328,24 @@ const normalizeRange = (input: unknown): { min?: number; max?: number } | undefi
   if (min === undefined && max === undefined) return undefined;
   if (min !== undefined && max !== undefined && min > max) return { min: max, max: min };
   return { min, max };
+};
+
+const isSelectionReasonKey = (value: unknown): value is PredictionJournalSelectionReasonKey => (
+  typeof value === "string" && Object.prototype.hasOwnProperty.call(PREDICTION_JOURNAL_SELECTION_REASON_LABELS, value)
+);
+
+const normalizeSelectionReason = (input: unknown): PredictionJournalSelectionReason | undefined => {
+  if (!input || typeof input !== "object") return undefined;
+  const key = (input as Record<string, unknown>).key;
+  if (!isSelectionReasonKey(key)) return undefined;
+  const detail = (input as Record<string, unknown>).detail;
+  const trimmedDetail = typeof detail === "string" ? detail.trim() : "";
+  return {
+    version: 1,
+    key,
+    label: PREDICTION_JOURNAL_SELECTION_REASON_LABELS[key],
+    ...(trimmedDetail ? { detail: trimmedDetail } : {}),
+  };
 };
 
 const normalizeReviewStatus = (value: unknown): PredictionJournalReviewStatus => (
@@ -347,9 +419,59 @@ const uniqueDraftNumbers = (...lists: Array<number[] | undefined>): number[] => 
   return output;
 };
 
+const hasExactlySameNumberSet = (left: readonly number[], right: readonly number[]): boolean => {
+  if (left.length !== right.length) return false;
+  const rightSet = new Set(right);
+  return left.every((number) => rightSet.has(number));
+};
+
 const setupNumberList = (setup: Partial<AppPresetSnapshot> & Record<string, any>, key: string): number[] => (
   normalizeNumberList(setup[key], 1, 45) ?? []
 );
+
+const normalizeSelectionInsightsSnapshotForJournal = (
+  value: unknown,
+): PredictionJournalSelectionInsightsProvenance | undefined => {
+  if (!value || typeof value !== "object") return undefined;
+  const snapshot = value as Partial<SelectionInsightsSnapshot>;
+  const selectedNumbers = normalizeNumberList(snapshot.selectedNumbers, 1, 45) ?? [];
+  const windowTopCompanionNumbers = normalizeNumberListInOrder(snapshot.windowTopCompanionNumbers, 1, 45) ?? [];
+  const allTopCompanionNumbers = normalizeNumberListInOrder(snapshot.allTopCompanionNumbers, 1, 45) ?? [];
+  const predictedCompanionNumbers = normalizeNumberListInOrder(snapshot.predictedCompanionNumbers, 1, 45) ?? [];
+  const predictedCompanions = Array.isArray(snapshot.predictedCompanions)
+    ? snapshot.predictedCompanions
+      .map((row) => ({
+        number: Number((row as any).number),
+        supportScore: Number((row as any).supportScore),
+        windowCount: Number((row as any).windowCount),
+        allCount: Number((row as any).allCount),
+      }))
+      .filter((row) => (
+        Number.isInteger(row.number)
+        && row.number >= 1
+        && row.number <= 45
+        && Number.isFinite(row.supportScore)
+        && Number.isFinite(row.windowCount)
+        && Number.isFinite(row.allCount)
+      ))
+      .slice(0, 12)
+    : [];
+
+  return {
+    version: 1,
+    enabled: !!snapshot.enabled,
+    selectedNumbers,
+    windowLabel: typeof snapshot.windowLabel === "string" && snapshot.windowLabel.trim()
+      ? snapshot.windowLabel.trim()
+      : "WFMQYH",
+    windowDrawCount: Math.max(0, Math.floor(Number(snapshot.windowDrawCount) || 0)),
+    allDrawCount: Math.max(0, Math.floor(Number(snapshot.allDrawCount) || 0)),
+    windowTopCompanionNumbers,
+    allTopCompanionNumbers,
+    predictedCompanionNumbers,
+    predictedCompanions,
+  };
+};
 
 const buildDroughtBreakLabel = (category: PredictionJournalDroughtBreakCategory, threshold: number): string => {
   if (category === "strict-and-empirical") return `Strict drought ${threshold}+ and empirical hazard`;
@@ -395,6 +517,7 @@ export function buildPredictionJournalProvenance(
     : 8;
   const strictDroughtShortlistNumbers = setupNumberList(setup, "droughtBreakStrictShortlistNumbers");
   const empiricalHazardShortlistNumbers = setupNumberList(setup, "droughtBreakEmpiricalHazardNumbers");
+  const selectionInsights = normalizeSelectionInsightsSnapshotForJournal(setup.selectionInsightsSnapshot);
   const strictSet = new Set(strictDroughtShortlistNumbers);
   const empiricalSet = new Set(empiricalHazardShortlistNumbers);
 
@@ -461,6 +584,7 @@ export function buildPredictionJournalProvenance(
       allSelectedFromShortlist: selectedNumbers.length > 0 && selectedOutsideShortlistNumbers.length === 0,
       classifications,
     },
+    ...(selectionInsights ? { selectionInsights } : {}),
   };
 }
 
@@ -474,6 +598,25 @@ const formatDroughtBreakProvenanceNote = (provenance: PredictionJournalDroughtBr
     `Strict drought ${provenance.strictThreshold}+: ${formatDraftNumbers(provenance.selectedStrictDroughtNumbers)}`,
     `Empirical hazard: ${formatDraftNumbers(provenance.selectedEmpiricalHazardNumbers)}`,
     `outside shortlist: ${formatDraftNumbers(provenance.selectedOutsideShortlistNumbers)}`,
+  ].join("; ") + ".";
+};
+
+const formatSelectionInsightsProvenanceNote = (
+  selectionInsights: PredictionJournalSelectionInsightsProvenance | undefined,
+): string => {
+  if (!selectionInsights) return "Selection Insights snapshot: not captured.";
+  if (!selectionInsights.enabled) {
+    return "Selection Insights snapshot: panel was off when this prediction was drafted.";
+  }
+  if (selectionInsights.selectedNumbers.length === 0) {
+    return "Selection Insights snapshot: panel was on, but no user-selected anchor numbers were available.";
+  }
+  return [
+    `Selection Insights snapshot: anchors ${formatDraftNumbers(selectionInsights.selectedNumbers)}`,
+    `window ${selectionInsights.windowLabel} (${selectionInsights.windowDrawCount} draws) top companions ${formatDraftNumbers(selectionInsights.windowTopCompanionNumbers)}`,
+    `all-history (${selectionInsights.allDrawCount} draws) top companions ${formatDraftNumbers(selectionInsights.allTopCompanionNumbers)}`,
+    `Predicted companion shortlist ${formatDraftNumbers(selectionInsights.predictedCompanionNumbers)}`,
+    "companion evidence is observe-only and not a calibrated probability",
   ].join("; ") + ".";
 };
 
@@ -494,6 +637,32 @@ const sumBucketCounts = (counts: PredictionBucketCounts | undefined): number => 
 const formatBucketDraft = (counts: PredictionBucketCounts | undefined): string => (
   counts ? formatBucketCounts(counts) : "none"
 );
+
+const formatCapturedCount = (count: number | undefined, total: number | undefined): string => (
+  count === undefined || total === undefined ? "not captured" : `${count}/${total}`
+);
+
+const formatCapturedGap = (gap: number | null | undefined): string => {
+  if (gap === undefined) return "";
+  return gap === null ? " · exact pair not seen" : ` · latest exact-pair gap ${gap}`;
+};
+
+const formatD1TerminalMomentumSetup = (setup: Partial<AppPresetSnapshot> & Record<string, any>): string => {
+  const internal = setup.d1TerminalMomentumInternalStrength === "light"
+    || setup.d1TerminalMomentumInternalStrength === "normal"
+    || setup.d1TerminalMomentumInternalStrength === "strong"
+    ? setup.d1TerminalMomentumInternalStrength
+    : "off";
+  const mode = typeof setup.d1TerminalMomentumStageMode === "string"
+    ? setup.d1TerminalMomentumStageMode
+    : "unavailable";
+  const month = typeof setup.d1TerminalMomentumMonthLabel === "string" && setup.d1TerminalMomentumMonthLabel.trim()
+    ? setup.d1TerminalMomentumMonthLabel.trim()
+    : "no month";
+  const target = normalizeInteger(setup.d1TerminalMomentumTargetDrawNumber);
+  const digits = normalizeNumberList(setup.d1TerminalMomentumActiveDigits, 0, 9) ?? [];
+  return `D1 terminal momentum SGI: ${setup.d1TerminalMomentumSgiEnabled ? "ON" : "OFF"}; internal ${internal}; ${month}${target ? ` target D${target}` : ""}; mode ${mode}; active digits ${digits.length ? digits.join(", ") : "none"}`;
+};
 
 export function buildPredictionJournalDraftFromSetup(snapshot: AppPresetSnapshot | null | undefined): PredictionJournalDraft {
   if (!snapshot) {
@@ -526,10 +695,31 @@ export function buildPredictionJournalDraftFromSetup(snapshot: AppPresetSnapshot
   const sde1Excluded = normalizeNumberList(setup.sde1Exclusions, 1, 45) ?? [];
   const hc3Excluded = normalizeNumberList(setup.hc3Exclusions, 1, 45) ?? [];
   const allExcluded = normalizeNumberList(setup.allExcludedNumbers, 1, 45) ?? uniqueDraftNumbers(generationExcluded, sde1Excluded, hc3Excluded);
+  const dgaSuggestedMain = normalizeNumberList(setup.dgaSuggestedMainNumbers, 1, 45) ?? [];
+  const dgaSuggestedSupp = normalizeNumberList(setup.dgaSuggestedSuppNumbers, 1, 45) ?? [];
+  const dgaSuggestedPair = normalizeNumberList(setup.dgaSuggestedSuppPair, 1, 45) ?? dgaSuggestedSupp;
+  const dgaPairActiveCount = normalizeInteger(setup.dgaSuggestedSuppPairActiveCount);
+  const dgaPairFullCount = normalizeInteger(setup.dgaSuggestedSuppPairFullCount);
+  const dgaPairActiveDrawCount = normalizeInteger(setup.dgaSuggestedSuppPairActiveDrawCount);
+  const dgaPairFullDrawCount = normalizeInteger(setup.dgaSuggestedSuppPairFullDrawCount);
+  const dgaPairActiveGap = normalizeNullableInteger(setup.dgaSuggestedSuppPairActiveGap);
+  const dgaPairFullGap = normalizeNullableInteger(setup.dgaSuggestedSuppPairFullGap);
+  const dgaPairActiveCoverage = normalizeInteger(setup.dgaSuppPairActiveCoverage);
+  const dgaPairFullCoverage = normalizeInteger(setup.dgaSuppPairFullCoverage);
+  const dgaPairTotalCoverage = normalizeInteger(setup.dgaSuppPairTotalCoverage);
   const forcedUnion = uniqueDraftNumbers(trendForced, latestNeighbourForced, hotColdForced, droughtForced, pasteWeightedForced, carryOverBoosted);
   const effectiveForced = normalizeNumberList(setup.generationForcedNumbers, 1, 45) ?? forcedUnion;
   const candidateNumbers = uniqueDraftNumbers(userSelected, forcedUnion);
-  const copiedNumbers = candidateNumbers.slice(0, 8);
+  const dgaSuggestedLine = uniqueDraftNumbers(dgaSuggestedMain, dgaSuggestedSupp);
+  const useDgaSuggestedLine = dgaSuggestedMain.length === 6
+    && dgaSuggestedSupp.length === 2
+    && dgaSuggestedLine.length === 8
+    && hasExactlySameNumberSet(dgaSuggestedLine, userSelected);
+  const copiedNumbers = useDgaSuggestedLine
+    ? [...dgaSuggestedMain, ...dgaSuggestedSupp]
+    : candidateNumbers.slice(0, 8);
+  const copiedNumberSet = new Set(copiedNumbers);
+  const additionalCandidateNumbers = candidateNumbers.filter((number) => !copiedNumberSet.has(number));
   const selectedRatios = Array.isArray(setup.selectedRatios)
     ? setup.selectedRatios.filter((ratio): ratio is string => typeof ratio === "string" && /^\d+\s*:\s*\d+$/.test(ratio))
     : [];
@@ -557,8 +747,17 @@ export function buildPredictionJournalDraftFromSetup(snapshot: AppPresetSnapshot
   if (copiedNumbers.length > 0) {
     inputs.numbers = copiedNumbers;
     notes.push(`Numbers copied into the prediction field: ${formatDraftNumbers(copiedNumbers)}.`);
-    if (candidateNumbers.length > copiedNumbers.length) {
-      notes.push(`Additional selected/forced numbers kept in this note only: ${formatDraftNumbers(candidateNumbers.slice(copiedNumbers.length))}.`);
+    if (useDgaSuggestedLine) {
+      notes.push(`DGA supplementary-role split copied: mains ${formatDraftNumbers(dgaSuggestedMain)}; supps ${formatDraftNumbers(dgaSuggestedSupp)}.`);
+      if (dgaSuggestedPair.length === 2) {
+        const coverage = dgaPairTotalCoverage !== undefined
+          ? `Selected-8 pair coverage: WFMQYH ${formatCapturedCount(dgaPairActiveCoverage, dgaPairTotalCoverage)}, all-history ${formatCapturedCount(dgaPairFullCoverage, dgaPairTotalCoverage)}.`
+          : "Selected-8 pair coverage was not captured.";
+        notes.push(`DGA supplementary-pair tie-break evidence: pair ${formatDraftNumbers(dgaSuggestedPair)}; WFMQYH exact pair ${formatCapturedCount(dgaPairActiveCount, dgaPairActiveDrawCount)}${formatCapturedGap(dgaPairActiveGap)}; all-history exact pair ${formatCapturedCount(dgaPairFullCount, dgaPairFullDrawCount)}${formatCapturedGap(dgaPairFullGap)}. ${coverage} This is diagnostic evidence, not a probability.`);
+      }
+    }
+    if (additionalCandidateNumbers.length > 0) {
+      notes.push(`Additional selected/forced numbers kept in this note only: ${formatDraftNumbers(additionalCandidateNumbers)}.`);
     }
   }
 
@@ -578,8 +777,11 @@ export function buildPredictionJournalDraftFromSetup(snapshot: AppPresetSnapshot
   notes.push(`Effective generation forced numbers: ${formatDraftNumbers(effectiveForced)}.`);
   notes.push(`Exclusion sources: user ${formatDraftNumbers(userExcluded)}; hot/cold ${formatDraftNumbers(hotColdExcluded)}; auto-unselected ${formatDraftNumbers(autoSelectionExcluded)}; main-bucket auto ${formatDraftNumbers(bucketAutoExcluded)}; SDE1 ${formatDraftNumbers(sde1Excluded)}; HC3 ${formatDraftNumbers(hc3Excluded)}.`);
   notes.push(`Effective generation exclusions: ${formatDraftNumbers(allExcluded)}.`);
-  notes.push(formatDroughtBreakProvenanceNote(buildPredictionJournalProvenance(inputs, snapshot).droughtBreakShortlist));
+  const draftProvenance = buildPredictionJournalProvenance(inputs, snapshot);
+  notes.push(formatDroughtBreakProvenanceNote(draftProvenance.droughtBreakShortlist));
+  notes.push(formatSelectionInsightsProvenanceNote(draftProvenance.selectionInsights));
   notes.push(`Scoring influence: ${setup.scoringGenerationInfluence ?? "off"}; selected-number boost: ${setup.selectedBoostEnabled ? `ON x${setup.selectedBoostFactor ?? "-"}` : "OFF"}.`);
+  notes.push(formatD1TerminalMomentumSetup(setup));
   notes.push("Review this draft before saving; copied values are starting points, not predictions made by Windfall.");
 
   inputs.notes = notes.join("\n");
@@ -597,6 +799,7 @@ export function summarizePredictionJournalSetup(snapshot: AppPresetSnapshot | nu
   const knobs = (setup.knobs && typeof setup.knobs === "object" ? setup.knobs : {}) as Record<string, unknown>;
   const generation: string[] = [
     `Scoring influence: ${setup.scoringGenerationInfluence ?? "off"}`,
+    formatD1TerminalMomentumSetup(setup),
     `Latest +/-1 support: ${setup.latestNeighbourSupportEnabled ? "on" : "off"}`,
     `Month-end carry-over: ${setup.monthEndCarryOverBiasEnabled ? (setup.monthEndCarryOverStrength ?? "normal") : "off"}`,
     `Use counts when constructing candidates: ${setup.monthlyConstructiveEnabled ? "on" : "off"}`,
@@ -631,6 +834,10 @@ export function summarizePredictionJournalSetup(snapshot: AppPresetSnapshot | nu
     const count = countList(value);
     if (count > 0) selections.push(`${label}: ${count}`);
   }
+  const selectionInsights = normalizeSelectionInsightsSnapshotForJournal(setup.selectionInsightsSnapshot);
+  if (selectionInsights?.enabled) {
+    selections.push(`Selection insights: predicted companions ${formatDraftNumbers(selectionInsights.predictedCompanionNumbers)}`);
+  }
 
   return {
     window: formatWindowSummary(setup),
@@ -646,7 +853,7 @@ export function summarizePredictionJournalSetup(snapshot: AppPresetSnapshot | nu
 export function normalizePredictionJournalInputs(inputs: PredictionJournalInputs): PredictionJournalInputs {
   const output: PredictionJournalInputs = {};
   const oddEvenRatio = normalizeRatio(inputs.oddEvenRatio);
-  const numbers = normalizeNumberList(inputs.numbers, 1, 45);
+  const numbers = normalizeNumberListInOrder(inputs.numbers, 1, 45);
   const terminalDigits = normalizeTerminalDigits(inputs.terminalDigits);
   const monthlyBuckets = normalizeBucketCounts(inputs.monthlyBuckets);
   const lowMidHigh = normalizeCountObject(inputs.lowMidHigh, ["low", "mid", "high"] as const);
@@ -654,6 +861,7 @@ export function normalizePredictionJournalInputs(inputs: PredictionJournalInputs
   const sumRange = normalizeRange(inputs.sumRange);
   const ogaRange = normalizeRange(inputs.ogaRange);
   const confidence = normalizeInteger(inputs.confidence);
+  const selectionReason = normalizeSelectionReason(inputs.selectionReason);
 
   if (oddEvenRatio) output.oddEvenRatio = oddEvenRatio;
   if (numbers) output.numbers = numbers;
@@ -669,6 +877,7 @@ export function normalizePredictionJournalInputs(inputs: PredictionJournalInputs
   if (normalizeInteger(inputs.carryOverCount) !== undefined) output.carryOverCount = normalizeInteger(inputs.carryOverCount);
   if (ogaRange) output.ogaRange = ogaRange;
   if (confidence !== undefined) output.confidence = Math.min(100, confidence);
+  if (selectionReason) output.selectionReason = selectionReason;
   if (typeof inputs.notes === "string" && inputs.notes.trim()) output.notes = inputs.notes.trim();
 
   return output;

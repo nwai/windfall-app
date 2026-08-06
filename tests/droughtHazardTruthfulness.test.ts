@@ -61,12 +61,12 @@ describe("DGA drought hazard truthfulness wording", () => {
       }),
     );
     const document = new DOMParser().parseFromString(html, "text/html");
-    const excludedButton = document.querySelector("button[aria-label='Number 1 is excluded by User Exclusions']");
+    const excludedButton = document.querySelector("button[aria-label='Number 1 is unavailable because it is excluded']");
 
-    expect(document.body.textContent).toContain("User exclusions active: 1");
+    expect(document.body.textContent).toContain("Active exclusions: 1");
     expect(excludedButton?.getAttribute("aria-pressed")).toBe("false");
     expect(excludedButton?.getAttribute("disabled")).not.toBeNull();
-    expect(excludedButton?.getAttribute("title")).toContain("Clear it in WFMQYH User Exclusions");
+    expect(excludedButton?.getAttribute("title")).toContain("Clear the active exclusion");
   });
 
   it("places the drought-break shortlist under Signals before Most Likely NOT Drawn", () => {

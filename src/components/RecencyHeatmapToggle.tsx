@@ -9,7 +9,7 @@ import {
 // This wrapper computes recency buckets and hands them to your existing TemperatureHeatmap.
 // Adapt the prop names below to match your TemperatureHeatmap API.
 type Props = {
-  history: Draw[];                  // WFMQY-filtered history
+  history: Draw[];                  // WFMQYH-filtered history
   baselineStops: number[];          // your existing bucketStops for the default mode
   baselineLabels: string[];         // your existing bucketLabels for the default mode
   baselineColors: string[];         // your existing bucketColors for the default mode

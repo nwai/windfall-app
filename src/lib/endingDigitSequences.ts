@@ -31,6 +31,112 @@ export interface AnalyzeEndingDigitSequencesOptions {
   includeSupp?: boolean;
 }
 
+export interface EndingDigitMonthOption {
+  monthKey: string;
+  monthLabel: string;
+  drawCount: number;
+  firstDate: string;
+  lastDate: string;
+}
+
+export interface EndingDigitMonthStageContext {
+  priorMonthsWithFirstDrawMultiple: number;
+  priorMonthsWithoutFirstDrawMultiple: number;
+  avgPostD1HitsWhenMultiple: number | null;
+  avgPostD1HitsWhenNotMultiple: number | null;
+  lift: number | null;
+}
+
+export interface EndingDigitMonthStageDigitRow {
+  digit: number;
+  familyNumbers: number[];
+  firstDrawNumbers: number[];
+  firstDrawHits: number;
+  firstDrawMultiple: boolean;
+  stageHits: number;
+  stageUnique: number;
+  stageBucketMix: number[];
+  monthEndHits: number;
+  monthEndUnique: number;
+  monthEndBucketMix: number[];
+  postStageHits: number;
+  numbersAdvancedAfterStage: number;
+  context: EndingDigitMonthStageContext;
+}
+
+export interface EndingDigitMonthStageAnalysis {
+  monthKey: string;
+  monthLabel: string;
+  includeSupp: boolean;
+  selectedDrawCount: number;
+  totalDrawsInMonth: number;
+  firstDrawDate: string;
+  selectedDrawDates: string[];
+  rows: EndingDigitMonthStageDigitRow[];
+  warnings: string[];
+}
+
+export interface AnalyzeEndingDigitMonthStageOptions extends AnalyzeEndingDigitSequencesOptions {
+  monthKey?: string;
+  drawCount?: number;
+  maxNumber?: number;
+  maxBucket?: number;
+}
+
+export type D1TerminalMomentumStrength = "off" | "light" | "normal" | "strong";
+export type D1TerminalMomentumStageMode = "early-unique" | "terminal-momentum" | "closed-review";
+
+export interface D1TerminalMomentumPriorContext {
+  d1MultiTrials: number;
+  baselineTrials: number;
+  nextHitRate: number | null;
+  nextUniqueRate: number | null;
+  baselineNextHitRate: number | null;
+  baselineNextUniqueRate: number | null;
+  hitLift: number | null;
+  uniqueLift: number | null;
+  avgNextHits: number | null;
+  avgNextUniqueAdds: number | null;
+  avgPostStageHits: number | null;
+  avgPostStageUniqueAdds: number | null;
+}
+
+export interface D1TerminalMomentumDigitRow {
+  digit: number;
+  parity: "odd" | "even";
+  familyNumbers: number[];
+  d1Numbers: number[];
+  stageNumbers: number[];
+  d1Hits: number;
+  d1Unique: number;
+  stageHits: number;
+  stageUnique: number;
+  stageNewHits: number;
+  stageNewUnique: number;
+  currentStageMoving: boolean;
+  suggestedStrength: D1TerminalMomentumStrength;
+  reason: string;
+  prior: D1TerminalMomentumPriorContext;
+}
+
+export interface D1TerminalMomentumAnalysis {
+  monthKey: string;
+  monthLabel: string;
+  includeSupp: boolean;
+  completedStageDrawCount: number;
+  targetDrawNumber: number;
+  totalDrawsInMonth: number;
+  stageMode: D1TerminalMomentumStageMode;
+  overallSuggestedStrength: D1TerminalMomentumStrength;
+  activeRows: D1TerminalMomentumDigitRow[];
+  rows: D1TerminalMomentumDigitRow[];
+  warnings: string[];
+}
+
+export interface AnalyzeD1TerminalMomentumOptions extends AnalyzeEndingDigitMonthStageOptions {
+  expectedDrawCount?: number;
+}
+
 export type EndingDigitPredictionLength = 3 | 4 | 5;
 export type EndingDigitPredictionLengthChoice = EndingDigitPredictionLength | "auto";
 
@@ -147,7 +253,10 @@ interface ComboStats {
 
 const VALID_NUMBER_MIN = 1;
 const VALID_NUMBER_MAX = 45;
+const DEFAULT_MAX_BUCKET = 8;
 const ENDING_DIGITS = Array.from({ length: 10 }, (_, index) => index);
+const ISO_DATE_RE = /^\s*(\d{4})-(\d{1,2})-(\d{1,2})/;
+const SLASH_DATE_RE = /^\s*(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s*$/;
 
 const countFrequency = (values: number[]): Record<number, number> => {
   const freq = new Map<number, number>();
@@ -164,6 +273,60 @@ const roundScore = (value: number): number => Math.round(value * 100) / 100;
 const formatDigits = (digits: readonly number[]): string => digits.join("-");
 
 const endingDigit = (number: number): number => ((number % 10) + 10) % 10;
+
+const formatMonthLabel = (monthKey: string): string => {
+  const match = monthKey.match(/^(\d{4})-(\d{2})$/);
+  if (!match) return monthKey;
+  const [, year, month] = match;
+  return new Intl.DateTimeFormat("en-AU", { month: "short", year: "numeric" })
+    .format(new Date(Number(year), Number(month) - 1, 1));
+};
+
+const parseDrawDateForMonthStage = (
+  rawDate: string | undefined,
+  sourceIndex: number,
+): { monthKey: string; timestamp: number } | null => {
+  if (!rawDate) return null;
+
+  const isoMatch = rawDate.match(ISO_DATE_RE);
+  if (isoMatch) {
+    const year = Number(isoMatch[1]);
+    const month = Number(isoMatch[2]);
+    const day = Number(isoMatch[3]);
+    const date = new Date(year, month - 1, day);
+    if (date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day) {
+      return {
+        monthKey: `${year}-${String(month).padStart(2, "0")}`,
+        timestamp: date.getTime() + sourceIndex,
+      };
+    }
+    return null;
+  }
+
+  const slashMatch = rawDate.match(SLASH_DATE_RE);
+  if (slashMatch) {
+    const month = Number(slashMatch[1]);
+    const day = Number(slashMatch[2]);
+    let year = Number(slashMatch[3]);
+    if (year < 100) year += 2000;
+    const date = new Date(year, month - 1, day);
+    if (date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day) {
+      return {
+        monthKey: `${year}-${String(month).padStart(2, "0")}`,
+        timestamp: date.getTime() + sourceIndex,
+      };
+    }
+    return null;
+  }
+
+  const timestamp = Date.parse(rawDate);
+  if (!Number.isFinite(timestamp)) return null;
+  const date = new Date(timestamp);
+  return {
+    monthKey: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`,
+    timestamp: timestamp + sourceIndex,
+  };
+};
 
 const normalizeDrawNumbers = (draw: Draw, includeSupp: boolean): number[] => {
   const source = includeSupp ? [...(draw.main ?? []), ...(draw.supp ?? [])] : [...(draw.main ?? [])];
@@ -195,6 +358,440 @@ const prepareDraws = (draws: Draw[], includeSupp: boolean): PreparedDraw[] => {
     .filter((draw) => draw.numbers.length > 0)
     .sort((left, right) => left.time - right.time || left.sourceIndex - right.sourceIndex)
     .map(({ date, numbers, sourceIndex }) => ({ date, numbers, sourceIndex }));
+};
+
+interface MonthStagePreparedDraw extends PreparedDraw {
+  monthKey: string;
+}
+
+const prepareMonthStageDraws = (draws: Draw[], includeSupp: boolean): MonthStagePreparedDraw[] => {
+  return draws
+    .map((draw, sourceIndex) => {
+      if (draw.isSimulated) return null;
+      const dateInfo = parseDrawDateForMonthStage(draw.date, sourceIndex);
+      if (!dateInfo) return null;
+      const numbers = normalizeDrawNumbers(draw, includeSupp);
+      if (!numbers.length) return null;
+      return {
+        date: draw.date || `(draw ${sourceIndex + 1})`,
+        monthKey: dateInfo.monthKey,
+        timestamp: dateInfo.timestamp,
+        numbers,
+        sourceIndex,
+      };
+    })
+    .filter((draw): draw is MonthStagePreparedDraw & { timestamp: number } => draw !== null)
+    .sort((left, right) => left.timestamp - right.timestamp || left.sourceIndex - right.sourceIndex)
+    .map(({ date, monthKey, numbers, sourceIndex }) => ({ date, monthKey, numbers, sourceIndex }));
+};
+
+const groupMonthStageDraws = (draws: MonthStagePreparedDraw[]): Map<string, MonthStagePreparedDraw[]> => {
+  const grouped = new Map<string, MonthStagePreparedDraw[]>();
+  for (const draw of draws) {
+    const monthDraws = grouped.get(draw.monthKey);
+    if (monthDraws) monthDraws.push(draw);
+    else grouped.set(draw.monthKey, [draw]);
+  }
+  return grouped;
+};
+
+const terminalDigitFamily = (digit: number, maxNumber: number): number[] => {
+  const family: number[] = [];
+  for (let number = VALID_NUMBER_MIN; number <= maxNumber; number += 1) {
+    if (endingDigit(number) === digit) family.push(number);
+  }
+  return family;
+};
+
+const countsForDraws = (draws: MonthStagePreparedDraw[], maxNumber: number): number[] => {
+  const counts = new Array(maxNumber + 1).fill(0);
+  for (const draw of draws) {
+    for (const number of draw.numbers) {
+      if (number >= VALID_NUMBER_MIN && number <= maxNumber) counts[number] += 1;
+    }
+  }
+  return counts;
+};
+
+const bucketMixForFamily = (familyNumbers: number[], counts: number[], maxBucket: number): number[] => {
+  const mix = new Array(maxBucket + 1).fill(0);
+  for (const number of familyNumbers) {
+    const bucket = Math.min(Math.max(0, counts[number] ?? 0), maxBucket);
+    mix[bucket] += 1;
+  }
+  return mix;
+};
+
+const sumCountsForFamily = (familyNumbers: number[], counts: number[]): number => (
+  familyNumbers.reduce((sum, number) => sum + (counts[number] ?? 0), 0)
+);
+
+const uniqueCountForFamily = (familyNumbers: number[], counts: number[]): number => (
+  familyNumbers.filter((number) => (counts[number] ?? 0) > 0).length
+);
+
+const average = (values: number[]): number | null => (
+  values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null
+);
+
+const rate = (values: boolean[]): number | null => (
+  values.length ? values.filter(Boolean).length / values.length : null
+);
+
+const ratioOrNull = (numerator: number | null, denominator: number | null): number | null => {
+  if (numerator === null || denominator === null || denominator <= 0) return null;
+  return numerator / denominator;
+};
+
+const strengthOrder: Record<D1TerminalMomentumStrength, number> = {
+  off: 0,
+  light: 1,
+  normal: 2,
+  strong: 3,
+};
+
+const maxStrength = (strengths: D1TerminalMomentumStrength[]): D1TerminalMomentumStrength => {
+  return strengths.reduce<D1TerminalMomentumStrength>((best, strength) => (
+    strengthOrder[strength] > strengthOrder[best] ? strength : best
+  ), "off");
+};
+
+const chooseD1TerminalMomentumStrength = (
+  args: {
+    d1Hits: number;
+    stageMode: D1TerminalMomentumStageMode;
+    currentStageMoving: boolean;
+    prior: D1TerminalMomentumPriorContext;
+  },
+): { strength: D1TerminalMomentumStrength; reason: string } => {
+  const { d1Hits, stageMode, currentStageMoving, prior } = args;
+  if (stageMode === "closed-review") {
+    return { strength: "off", reason: "selected month stage is complete" };
+  }
+  if (d1Hits < 2) {
+    return { strength: "off", reason: "no D1 multi-hit terminal signal" };
+  }
+
+  if (stageMode === "early-unique") {
+    if (
+      prior.d1MultiTrials >= 3
+      && (prior.nextUniqueRate ?? 0) >= 0.65
+      && (prior.nextHitRate ?? 0) >= 0.85
+      && currentStageMoving
+    ) {
+      return { strength: "strong", reason: "early-stage unique expansion is well supported in prior same-stage months" };
+    }
+    if (
+      prior.d1MultiTrials >= 2
+      && (prior.nextUniqueRate ?? 0) >= 0.45
+      && (prior.nextHitRate ?? 0) >= 0.75
+    ) {
+      return { strength: "normal", reason: "early-stage unique expansion has usable prior support" };
+    }
+    return { strength: "light", reason: "D1 multi-hit exists, but early unique evidence is still thin" };
+  }
+
+  if (
+    prior.d1MultiTrials >= 3
+    && currentStageMoving
+    && (prior.nextHitRate ?? 0) >= 0.75
+    && (prior.avgPostStageHits ?? 0) >= 7
+  ) {
+    return { strength: "strong", reason: "terminal family is still moving and prior same-stage months kept producing hits" };
+  }
+  if (
+    currentStageMoving
+    && ((prior.nextHitRate ?? 0) >= 0.6 || (prior.avgPostStageHits ?? 0) >= 5)
+  ) {
+    return { strength: "normal", reason: "terminal family is still moving with moderate prior same-stage support" };
+  }
+  return { strength: "light", reason: "D1 multi-hit exists, but current-stage momentum is limited" };
+};
+
+const buildD1MultiContext = (
+  grouped: Map<string, MonthStagePreparedDraw[]>,
+  selectedMonthKey: string,
+  digit: number,
+  maxNumber: number,
+): EndingDigitMonthStageContext => {
+  const family = terminalDigitFamily(digit, maxNumber);
+  const whenMultiple: number[] = [];
+  const whenNotMultiple: number[] = [];
+
+  for (const [monthKey, monthDraws] of grouped.entries()) {
+    if (monthKey >= selectedMonthKey || monthDraws.length < 2) continue;
+    const firstDrawCounts = countsForDraws(monthDraws.slice(0, 1), maxNumber);
+    const fullMonthCounts = countsForDraws(monthDraws, maxNumber);
+    const firstDrawHits = sumCountsForFamily(family, firstDrawCounts);
+    const postD1Hits = Math.max(0, sumCountsForFamily(family, fullMonthCounts) - firstDrawHits);
+    if (firstDrawHits >= 2) whenMultiple.push(postD1Hits);
+    else whenNotMultiple.push(postD1Hits);
+  }
+
+  const avgMultiple = average(whenMultiple);
+  const avgNotMultiple = average(whenNotMultiple);
+  const lift = avgMultiple !== null && avgNotMultiple !== null && avgNotMultiple > 0
+    ? avgMultiple / avgNotMultiple
+    : null;
+
+  return {
+    priorMonthsWithFirstDrawMultiple: whenMultiple.length,
+    priorMonthsWithoutFirstDrawMultiple: whenNotMultiple.length,
+    avgPostD1HitsWhenMultiple: avgMultiple,
+    avgPostD1HitsWhenNotMultiple: avgNotMultiple,
+    lift,
+  };
+};
+
+export const buildEndingDigitMonthOptions = (
+  draws: Draw[],
+  options: AnalyzeEndingDigitSequencesOptions = {},
+): EndingDigitMonthOption[] => {
+  const prepared = prepareMonthStageDraws(draws, options.includeSupp ?? true);
+  return [...groupMonthStageDraws(prepared).entries()]
+    .map(([monthKey, monthDraws]) => ({
+      monthKey,
+      monthLabel: formatMonthLabel(monthKey),
+      drawCount: monthDraws.length,
+      firstDate: monthDraws[0]?.date ?? "",
+      lastDate: monthDraws[monthDraws.length - 1]?.date ?? "",
+    }))
+    .sort((left, right) => right.monthKey.localeCompare(left.monthKey));
+};
+
+export const analyzeEndingDigitMonthStage = (
+  draws: Draw[],
+  options: AnalyzeEndingDigitMonthStageOptions = {},
+): EndingDigitMonthStageAnalysis | null => {
+  const includeSupp = options.includeSupp ?? true;
+  const maxNumber = Math.max(VALID_NUMBER_MIN, Math.floor(options.maxNumber ?? VALID_NUMBER_MAX));
+  const maxBucket = Math.max(1, Math.floor(options.maxBucket ?? DEFAULT_MAX_BUCKET));
+  const prepared = prepareMonthStageDraws(draws, includeSupp);
+  const grouped = groupMonthStageDraws(prepared);
+  const monthOptions = buildEndingDigitMonthOptions(draws, { includeSupp });
+  const selectedMonthKey = options.monthKey && grouped.has(options.monthKey)
+    ? options.monthKey
+    : monthOptions[0]?.monthKey ?? "";
+  if (!selectedMonthKey) return null;
+
+  const monthDraws = grouped.get(selectedMonthKey) ?? [];
+  if (!monthDraws.length) return null;
+
+  const requestedDrawCount = Math.floor(options.drawCount ?? 1);
+  const selectedDrawCount = Math.min(
+    monthDraws.length,
+    Math.max(1, Number.isFinite(requestedDrawCount) ? requestedDrawCount : 1),
+  );
+  const selectedDraws = monthDraws.slice(0, selectedDrawCount);
+  const firstDrawCounts = countsForDraws(monthDraws.slice(0, 1), maxNumber);
+  const stageCounts = countsForDraws(selectedDraws, maxNumber);
+  const monthEndCounts = countsForDraws(monthDraws, maxNumber);
+
+  const rows = ENDING_DIGITS.map<EndingDigitMonthStageDigitRow>((digit) => {
+    const familyNumbers = terminalDigitFamily(digit, maxNumber);
+    const firstDrawNumbers = familyNumbers.filter((number) => (firstDrawCounts[number] ?? 0) > 0);
+    const firstDrawHits = sumCountsForFamily(familyNumbers, firstDrawCounts);
+    const stageHits = sumCountsForFamily(familyNumbers, stageCounts);
+    const monthEndHits = sumCountsForFamily(familyNumbers, monthEndCounts);
+    return {
+      digit,
+      familyNumbers,
+      firstDrawNumbers,
+      firstDrawHits,
+      firstDrawMultiple: firstDrawHits >= 2,
+      stageHits,
+      stageUnique: uniqueCountForFamily(familyNumbers, stageCounts),
+      stageBucketMix: bucketMixForFamily(familyNumbers, stageCounts, maxBucket),
+      monthEndHits,
+      monthEndUnique: uniqueCountForFamily(familyNumbers, monthEndCounts),
+      monthEndBucketMix: bucketMixForFamily(familyNumbers, monthEndCounts, maxBucket),
+      postStageHits: Math.max(0, monthEndHits - stageHits),
+      numbersAdvancedAfterStage: familyNumbers.filter((number) => (monthEndCounts[number] ?? 0) > (stageCounts[number] ?? 0)).length,
+      context: buildD1MultiContext(grouped, selectedMonthKey, digit, maxNumber),
+    };
+  });
+
+  const warnings: string[] = [];
+  if (options.drawCount !== undefined && selectedDrawCount !== Math.floor(options.drawCount)) {
+    warnings.push(`Selected draw count was clamped to ${selectedDrawCount} for ${formatMonthLabel(selectedMonthKey)}.`);
+  }
+  if (selectedMonthKey === monthOptions[0]?.monthKey && selectedDrawCount < monthDraws.length) {
+    warnings.push("Month-end buckets use all loaded rows for this month. If newer draws are missing, this is a partial month-end view.");
+  }
+
+  return {
+    monthKey: selectedMonthKey,
+    monthLabel: formatMonthLabel(selectedMonthKey),
+    includeSupp,
+    selectedDrawCount,
+    totalDrawsInMonth: monthDraws.length,
+    firstDrawDate: monthDraws[0]?.date ?? "",
+    selectedDrawDates: selectedDraws.map((draw) => draw.date),
+    rows,
+    warnings,
+  };
+};
+
+export const analyzeD1TerminalMomentum = (
+  draws: Draw[],
+  options: AnalyzeD1TerminalMomentumOptions = {},
+): D1TerminalMomentumAnalysis | null => {
+  const includeSupp = options.includeSupp ?? true;
+  const maxNumber = Math.max(VALID_NUMBER_MIN, Math.floor(options.maxNumber ?? VALID_NUMBER_MAX));
+  const prepared = prepareMonthStageDraws(draws, includeSupp);
+  const grouped = groupMonthStageDraws(prepared);
+  const monthOptions = buildEndingDigitMonthOptions(draws, { includeSupp });
+  const selectedMonthKey = options.monthKey && grouped.has(options.monthKey)
+    ? options.monthKey
+    : monthOptions[0]?.monthKey ?? "";
+  if (!selectedMonthKey) return null;
+
+  const monthDraws = grouped.get(selectedMonthKey) ?? [];
+  if (!monthDraws.length) return null;
+  const expectedDrawCount = Math.max(
+    monthDraws.length,
+    Math.floor(Number.isFinite(options.expectedDrawCount) ? options.expectedDrawCount ?? monthDraws.length : monthDraws.length),
+  );
+
+  const requestedDrawCount = Math.floor(options.drawCount ?? 1);
+  const completedStageDrawCount = Math.min(
+    monthDraws.length,
+    Math.max(1, Number.isFinite(requestedDrawCount) ? requestedDrawCount : 1),
+  );
+  const targetDrawNumber = completedStageDrawCount + 1;
+  const stageMode: D1TerminalMomentumStageMode = targetDrawNumber > expectedDrawCount
+    ? "closed-review"
+    : targetDrawNumber <= 3
+      ? "early-unique"
+      : "terminal-momentum";
+
+  const d1Counts = countsForDraws(monthDraws.slice(0, 1), maxNumber);
+  const stageCounts = countsForDraws(monthDraws.slice(0, completedStageDrawCount), maxNumber);
+
+  const rows = ENDING_DIGITS.map<D1TerminalMomentumDigitRow>((digit) => {
+    const familyNumbers = terminalDigitFamily(digit, maxNumber);
+    const d1Numbers = familyNumbers.filter((number) => (d1Counts[number] ?? 0) > 0);
+    const stageNumbers = familyNumbers.filter((number) => (stageCounts[number] ?? 0) > 0);
+    const d1Hits = sumCountsForFamily(familyNumbers, d1Counts);
+    const d1Unique = uniqueCountForFamily(familyNumbers, d1Counts);
+    const stageHits = sumCountsForFamily(familyNumbers, stageCounts);
+    const stageUnique = uniqueCountForFamily(familyNumbers, stageCounts);
+    const currentStageMoving = completedStageDrawCount <= 1 || stageHits > d1Hits || stageUnique > d1Unique;
+
+    const multiNextHits: number[] = [];
+    const multiNextUniqueAdds: number[] = [];
+    const multiNextHitFlags: boolean[] = [];
+    const multiNextUniqueFlags: boolean[] = [];
+    const multiPostStageHits: number[] = [];
+    const multiPostStageUniqueAdds: number[] = [];
+    const baselineNextHitFlags: boolean[] = [];
+    const baselineNextUniqueFlags: boolean[] = [];
+
+    for (const [monthKey, priorMonthDraws] of grouped.entries()) {
+      if (monthKey >= selectedMonthKey || priorMonthDraws.length <= completedStageDrawCount) continue;
+
+      const priorD1Counts = countsForDraws(priorMonthDraws.slice(0, 1), maxNumber);
+      const priorStageCounts = countsForDraws(priorMonthDraws.slice(0, completedStageDrawCount), maxNumber);
+      const priorNextCounts = countsForDraws(priorMonthDraws.slice(completedStageDrawCount, completedStageDrawCount + 1), maxNumber);
+      const priorFullCounts = countsForDraws(priorMonthDraws, maxNumber);
+      const priorD1Hits = sumCountsForFamily(familyNumbers, priorD1Counts);
+      const nextHits = sumCountsForFamily(familyNumbers, priorNextCounts);
+      const nextUniqueAdds = familyNumbers.filter((number) => (
+        (priorNextCounts[number] ?? 0) > 0 && (priorStageCounts[number] ?? 0) === 0
+      )).length;
+      const postStageHits = Math.max(0, sumCountsForFamily(familyNumbers, priorFullCounts) - sumCountsForFamily(familyNumbers, priorStageCounts));
+      const postStageUniqueAdds = familyNumbers.filter((number) => (
+        (priorFullCounts[number] ?? 0) > (priorStageCounts[number] ?? 0)
+      )).length;
+
+      if (priorD1Hits >= 2) {
+        multiNextHits.push(nextHits);
+        multiNextUniqueAdds.push(nextUniqueAdds);
+        multiNextHitFlags.push(nextHits > 0);
+        multiNextUniqueFlags.push(nextUniqueAdds > 0);
+        multiPostStageHits.push(postStageHits);
+        multiPostStageUniqueAdds.push(postStageUniqueAdds);
+      } else {
+        baselineNextHitFlags.push(nextHits > 0);
+        baselineNextUniqueFlags.push(nextUniqueAdds > 0);
+      }
+    }
+
+    const nextHitRate = rate(multiNextHitFlags);
+    const nextUniqueRate = rate(multiNextUniqueFlags);
+    const baselineNextHitRate = rate(baselineNextHitFlags);
+    const baselineNextUniqueRate = rate(baselineNextUniqueFlags);
+    const prior: D1TerminalMomentumPriorContext = {
+      d1MultiTrials: multiNextHitFlags.length,
+      baselineTrials: baselineNextHitFlags.length,
+      nextHitRate,
+      nextUniqueRate,
+      baselineNextHitRate,
+      baselineNextUniqueRate,
+      hitLift: ratioOrNull(nextHitRate, baselineNextHitRate),
+      uniqueLift: ratioOrNull(nextUniqueRate, baselineNextUniqueRate),
+      avgNextHits: average(multiNextHits),
+      avgNextUniqueAdds: average(multiNextUniqueAdds),
+      avgPostStageHits: average(multiPostStageHits),
+      avgPostStageUniqueAdds: average(multiPostStageUniqueAdds),
+    };
+    const strengthChoice = chooseD1TerminalMomentumStrength({
+      d1Hits,
+      stageMode,
+      currentStageMoving,
+      prior,
+    });
+
+    return {
+      digit,
+      parity: digit % 2 === 0 ? "even" : "odd",
+      familyNumbers,
+      d1Numbers,
+      stageNumbers,
+      d1Hits,
+      d1Unique,
+      stageHits,
+      stageUnique,
+      stageNewHits: Math.max(0, stageHits - d1Hits),
+      stageNewUnique: Math.max(0, stageUnique - d1Unique),
+      currentStageMoving,
+      suggestedStrength: strengthChoice.strength,
+      reason: strengthChoice.reason,
+      prior,
+    };
+  });
+
+  const activeRows = rows
+    .filter((row) => row.d1Hits >= 2)
+    .sort((left, right) => (
+      strengthOrder[right.suggestedStrength] - strengthOrder[left.suggestedStrength]
+      || right.d1Hits - left.d1Hits
+      || (right.prior.nextUniqueRate ?? -1) - (left.prior.nextUniqueRate ?? -1)
+      || (right.prior.nextHitRate ?? -1) - (left.prior.nextHitRate ?? -1)
+      || left.digit - right.digit
+    ));
+
+  const warnings: string[] = [];
+  if (options.drawCount !== undefined && completedStageDrawCount !== Math.floor(options.drawCount)) {
+    warnings.push(`Selected draw count was clamped to ${completedStageDrawCount} for ${formatMonthLabel(selectedMonthKey)}.`);
+  }
+  if (stageMode === "closed-review") {
+    warnings.push("The selected first-draw count reaches the end of the loaded month, so the SGI preview is internally off for the next in-month draw.");
+  }
+
+  return {
+    monthKey: selectedMonthKey,
+    monthLabel: formatMonthLabel(selectedMonthKey),
+    includeSupp,
+    completedStageDrawCount,
+    targetDrawNumber,
+    totalDrawsInMonth: expectedDrawCount,
+    stageMode,
+    overallSuggestedStrength: maxStrength(activeRows.map((row) => row.suggestedStrength)),
+    activeRows,
+    rows,
+    warnings,
+  };
 };
 
 const buildRuns = (endings: number[]): EndingDigitSequenceDrawStats["maxRuns"] => {

@@ -23,6 +23,11 @@ import {
   type ScoringGenerationProfile,
 } from "./lib/scoringGenerationInfluence";
 import {
+  d1TerminalMomentumMultiplier,
+  scoreD1TerminalMomentumCandidate,
+  type D1TerminalMomentumGenerationProfile,
+} from "./lib/d1TerminalMomentumInfluence";
+import {
   analyzeLatestNeighbourSupport,
   candidateSatisfiesLatestNeighbourSupport,
   LATEST_NEIGHBOUR_SUPPORT_TRACE_TAG,
@@ -210,6 +215,8 @@ export function generateCandidates(
   monthEndCarryOverWeights?: Record<number, number>,
   /** Optional diagnostic scoring profile used as evidence weighting during construction. */
   scoringGenerationProfile?: ScoringGenerationProfile,
+  /** User-enabled D1 terminal momentum soft generation influence. */
+  d1TerminalMomentumProfile?: D1TerminalMomentumGenerationProfile,
   /** Optional progress callback used by the worker to expose accepted partial results. */
   progressSetter?: GenerateCandidatesProgressSetter,
   /** Default-off experimental rule requiring at least one eligible latest-draw +/-1 support number. */
@@ -607,6 +614,9 @@ export function generateCandidates(
   if (scoringGenerationProfile?.enabled) {
     traceSetter(`[TRACE] ${scoringGenerationProfile.traceLabel}`);
   }
+  if (d1TerminalMomentumProfile?.userEnabled) {
+    traceSetter(`[TRACE] ${d1TerminalMomentumProfile.traceLabel}`);
+  }
 
   const activeMainDigitBoosts = Object.entries(mainDigitBoosts)
     .flatMap(([digit, boosts]) => {
@@ -698,6 +708,7 @@ export function generateCandidates(
         factor *= carryOverBias;
       }
       factor *= scoringInfluenceMultiplier(n, scoringGenerationProfile);
+      factor *= d1TerminalMomentumMultiplier(n, d1TerminalMomentumProfile);
       if (latestNeighbourSupport.active && latestNeighbourSupportSet.has(n)) {
         factor *= latestNeighbourSupport.supportBoostFactor;
       }
@@ -779,7 +790,8 @@ export function generateCandidates(
       const selectedBias = preferredSet.has(n) ? MONTHLY_SELECTED_NUMBER_BIAS_REPEATS : 1;
       const carryOverBias = Math.max(0.1, monthEndCarryOverWeights?.[n] ?? 1);
       const scoringBias = scoringInfluenceMultiplier(n, scoringGenerationProfile);
-      const reps = Math.max(1, Math.round(selectedBias * carryOverBias * scoringBias));
+      const d1TerminalBias = d1TerminalMomentumMultiplier(n, d1TerminalMomentumProfile);
+      const reps = Math.max(1, Math.round(selectedBias * carryOverBias * scoringBias * d1TerminalBias));
       for (let i = 0; i < reps; i++) weighted.push(n);
     }
     const picked: number[] = [];
@@ -1167,6 +1179,15 @@ if (patternOptions?.constraints?.length && patternOptions?.mode === 'restrict') 
         candidate.trace = [...(candidate.trace ?? []), ...scoringEvidence.trace];
       }
     }
+    if (d1TerminalMomentumProfile?.enabled) {
+      const terminalMomentumEvidence = scoreD1TerminalMomentumCandidate(nums8, d1TerminalMomentumProfile);
+      candidate.d1TerminalMomentumHits = terminalMomentumEvidence.hits;
+      candidate.d1TerminalMomentumScore = terminalMomentumEvidence.normalizedScore;
+      candidate.d1TerminalMomentumTrace = terminalMomentumEvidence.trace;
+      if (terminalMomentumEvidence.trace.length > 0) {
+        candidate.trace = [...(candidate.trace ?? []), ...terminalMomentumEvidence.trace];
+      }
+    }
     candidates.push(candidate);
     if (oddEvenRatio) {
       oddEvenQuotaCounts[oddEvenRatio] = (oddEvenQuotaCounts[oddEvenRatio] ?? 0) + 1;
@@ -1247,6 +1268,18 @@ if (patternOptions?.constraints?.length && patternOptions?.mode === 'restrict') 
     }, { hits: 0, score: 0 });
     traceSetter(
       `[TRACE] Month-end carry-over results: ${carryOverSummary.hits} weighted hit${carryOverSummary.hits === 1 ? '' : 's'} across ${candidates.length} accepted candidates (${(carryOverSummary.hits / acceptedCandidateCount).toFixed(2)} per candidate, avg ranking score ${(carryOverSummary.score / acceptedCandidateCount * 100).toFixed(1)}%)`
+    );
+  }
+  if (d1TerminalMomentumProfile?.enabled) {
+    const acceptedCandidateCount = Math.max(1, candidates.length);
+    const terminalMomentumSummary = candidates.reduce((acc, candidate) => {
+      const evidence = scoreD1TerminalMomentumCandidate([...candidate.main, ...candidate.supp], d1TerminalMomentumProfile);
+      acc.hits += evidence.hits;
+      acc.score += evidence.normalizedScore;
+      return acc;
+    }, { hits: 0, score: 0 });
+    traceSetter(
+      `[TRACE] D1 Terminal Momentum SGI results: ${terminalMomentumSummary.hits} soft-weighted hit${terminalMomentumSummary.hits === 1 ? "" : "s"} across ${candidates.length} accepted candidates (${(terminalMomentumSummary.hits / acceptedCandidateCount).toFixed(2)} per candidate, avg evidence ${(terminalMomentumSummary.score / acceptedCandidateCount * 100).toFixed(1)}%)`
     );
   }
 

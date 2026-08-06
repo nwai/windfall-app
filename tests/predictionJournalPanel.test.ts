@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { PredictionJournalPanel } from "../src/components/PredictionJournalPanel";
-import { buildPredictionJournalEntry } from "../src/lib/predictionJournal";
+import { PREDICTION_JOURNAL_STORAGE_KEY, buildPredictionJournalEntry } from "../src/lib/predictionJournal";
 import type { Draw } from "../src/types";
 
 const draw = (date: string, main: number[], supp: number[] = []): Draw => ({ date, main, supp });
@@ -43,13 +43,36 @@ describe("PredictionJournalPanel", () => {
     window.localStorage.clear();
   });
 
-  it("renders a date-aware journal form without seeded fake prediction rows", () => {
+  it("renders an entries-only empty state by default without seeded fake prediction rows", () => {
     const html = renderToStaticMarkup(
       React.createElement(PredictionJournalPanel, {
         history: [
           draw("6/22/26", [2, 4, 6, 8, 10, 12], [14, 16]),
           draw("6/24/26", [1, 3, 5, 7, 9, 11], [13, 15]),
         ],
+      }),
+    );
+
+    expect(html).toContain("Prediction Journal &amp; Scorecard");
+    expect(html).toContain("Prediction Journal Findings Report");
+    expect(html).toContain("Observe-only V1");
+    expect(html).toContain("Journal entries");
+    expect(html).toContain("Record your own draw hypotheses");
+    expect(html).toContain("The user manual is a good source of help for using the prediction feature.");
+    expect(html).not.toContain("Anchor latest draw");
+    expect(html).not.toContain("Save prediction");
+    expect(html).not.toContain("<h3");
+    expect(html).not.toContain("1,2,3,4,5,6");
+  });
+
+  it("renders a date-aware journal draft after a new prediction request", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(PredictionJournalPanel, {
+        history: [
+          draw("6/22/26", [2, 4, 6, 8, 10, 12], [14, 16]),
+          draw("6/24/26", [1, 3, 5, 7, 9, 11], [13, 15]),
+        ],
+        newPredictionDraft: { id: 1 },
       }),
     );
 
@@ -67,7 +90,7 @@ describe("PredictionJournalPanel", () => {
     expect(html).toContain("Reviewed by user");
     expect(html).toContain("No prediction fields are required");
     expect(html).toContain("Save prediction");
-    expect(html).toContain("No journal entries yet");
+    expect(html).toContain("The user manual is a good source of help for using the prediction feature.");
     expect(html).not.toContain("<h3");
     expect(html).not.toContain("1,2,3,4,5,6");
     expect(html).not.toContain("Mark reviewed only after you have checked the draft. Future scoring can use this flag to include or ignore entries.");
@@ -81,6 +104,7 @@ describe("PredictionJournalPanel", () => {
           draw("6/24/26", [1, 3, 5, 7, 9, 11], [13, 15]),
         ],
         now: () => "2026-06-25T09:00:00.000Z",
+        newPredictionDraft: { id: 1 },
       }),
     );
 
@@ -91,6 +115,76 @@ describe("PredictionJournalPanel", () => {
     expect(targetFieldStart).toBeGreaterThanOrEqual(0);
     expect(nextDrawDateIndex).toBeGreaterThan(targetFieldStart);
     expect(nextDrawDateIndex).toBeLessThan(oddEvenIndex);
+  });
+
+  it("stores selection reason shortcuts as structured data and mirrors them into notes", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(React.createElement(PredictionJournalPanel, {
+        history: [
+          draw("6/22/26", [2, 4, 6, 8, 10, 12], [14, 16]),
+          draw("6/24/26", [1, 3, 5, 7, 9, 11], [13, 15]),
+        ],
+        now: () => "2026-06-24T10:30:00.000Z",
+        newPredictionDraft: { id: 1 },
+      }));
+    });
+
+    const numbersTextArea = container.querySelector("textarea[placeholder='12, 14, 22, 27']") as HTMLTextAreaElement;
+    const notesTextArea = container.querySelector("textarea[placeholder='Why this looked plausible before the draw...']") as HTMLTextAreaElement;
+
+    await act(async () => {
+      setInputValue(numbersTextArea, "1, 10, 12");
+    });
+
+    const dgaReason = container.querySelector("input[value='dgaPattern']") as HTMLInputElement;
+    await act(async () => {
+      dgaReason.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      dgaReason.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    expect(notesTextArea.value).toContain("Selection reason: Observed pattern in DGA grid.");
+
+    const otherReason = container.querySelector("input[value='other']") as HTMLInputElement;
+    await act(async () => {
+      otherReason.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      otherReason.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    const otherReasonInput = controlByLabel<HTMLInputElement>(container, "Other reason");
+    await act(async () => {
+      setInputValue(otherReasonInput, "Testing a split diagonal.");
+    });
+
+    expect(notesTextArea.value).not.toContain("Selection reason: Observed pattern in DGA grid.");
+    expect(notesTextArea.value).toContain("Selection reason: Other - Testing a split diagonal.");
+
+    const saveButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent === "Save prediction") as HTMLButtonElement;
+
+    await act(async () => {
+      saveButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    const saved = JSON.parse(window.localStorage.getItem(PREDICTION_JOURNAL_STORAGE_KEY) ?? "[]");
+    expect(saved[0].inputs.selectionReason).toEqual({
+      version: 1,
+      key: "other",
+      label: "Other",
+      detail: "Testing a split diagonal.",
+    });
+    expect(saved[0].inputs.notes).toContain("Selection reason: Other - Testing a split diagonal.");
+
+    const rowButton = container.querySelector("button[aria-controls^='prediction-journal-entry-']") as HTMLButtonElement;
+    expect(rowButton.textContent).toContain("Reason: Other - Testing a split diagonal.");
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
   });
 
   it("shows scored entry summaries and keeps full details collapsed by default", () => {
@@ -118,6 +212,8 @@ describe("PredictionJournalPanel", () => {
 
     expect(html).toContain("Scored");
     expect(html).toContain("Reviewed by user");
+    expect(html).toContain("Prediction Journal Findings Report");
+    expect(html).toContain("Not enough reviewed scored entries yet");
     expect(html).toContain("Locked after target draw arrived");
     expect(html).toContain("Next draw");
     expect(html).toContain("3 checks");
@@ -150,6 +246,7 @@ describe("PredictionJournalPanel", () => {
           userSelectedNumbers: [1, 2, 3, 4, 5, 6, 7],
         } as any),
         now: () => "2026-06-24T10:30:00.000Z",
+        newPredictionDraft: { id: 1 },
       }));
     });
 
@@ -176,7 +273,13 @@ describe("PredictionJournalPanel", () => {
     });
 
     const rowButton = container.querySelector("button[aria-controls^='prediction-journal-entry-']") as HTMLButtonElement;
-    expect(rowButton.textContent).toContain("Listed numbers: 3");
+    expect(rowButton.textContent).toContain("3 picked");
+    const collapsedPickedNumbers = rowButton.querySelector("[data-testid='prediction-journal-collapsed-picked-numbers']");
+    expect(collapsedPickedNumbers?.textContent).toContain("User picked numbers");
+    expect(collapsedPickedNumbers?.textContent).toContain("M");
+    expect(collapsedPickedNumbers?.textContent).toContain("1");
+    expect(collapsedPickedNumbers?.querySelectorAll("[data-picked-role='main']").length).toBe(3);
+    expect(collapsedPickedNumbers?.querySelectorAll("[data-picked-role='supp']").length).toBe(0);
     expect(rowButton.textContent).toContain("Reviewed by user");
     expect(rowButton.textContent).not.toContain("7 numbers");
 
@@ -204,6 +307,7 @@ describe("PredictionJournalPanel", () => {
           draw("6/22/26", [2, 4, 6, 8, 10, 12], [14, 16]),
           draw("6/24/26", [1, 3, 5, 7, 9, 11], [13, 15]),
         ],
+        newPredictionDraft: { id: 1 },
       }));
     });
 
@@ -235,6 +339,148 @@ describe("PredictionJournalPanel", () => {
     container.remove();
   });
 
+  it("reopens a pending not-reviewed entry for editing", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(React.createElement(PredictionJournalPanel, {
+        history: [
+          draw("6/22/26", [2, 4, 6, 8, 10, 12], [14, 16]),
+          draw("6/24/26", [1, 3, 5, 7, 9, 11], [13, 15]),
+        ],
+        now: () => "2026-06-24T10:30:00.000Z",
+        newPredictionDraft: { id: 1 },
+      }));
+    });
+
+    const notesTextArea = container.querySelector("textarea[placeholder='Why this looked plausible before the draw...']") as HTMLTextAreaElement;
+
+    await act(async () => {
+      setInputValue(notesTextArea, "Keep this editable while it is still pending.");
+    });
+
+    const saveButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent === "Save prediction") as HTMLButtonElement;
+
+    await act(async () => {
+      saveButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    const rowButton = container.querySelector("button[aria-controls^='prediction-journal-entry-']") as HTMLButtonElement;
+    expect(rowButton).toBeTruthy();
+    expect(rowButton.textContent).toContain("Not reviewed");
+    expect(rowButton.textContent).toContain("Editable until first target draw appears");
+
+    await act(async () => {
+      rowButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    const editButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent === "Edit prediction") as HTMLButtonElement;
+    expect(editButton).toBeTruthy();
+
+    await act(async () => {
+      editButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await act(async () => {
+      await new Promise((resolve) => window.requestAnimationFrame(resolve));
+    });
+
+    expect(container.textContent).toContain("Update prediction");
+    expect(container.textContent).toContain("Editing prediction anchored to 6/24/26.");
+    expect(document.activeElement).toBe(container.querySelector("[data-testid='prediction-journal-draft-region']"));
+    expect(container.querySelector("button[aria-expanded='true']")).toBeNull();
+    const reopenedNotes = container.querySelector("textarea[placeholder='Why this looked plausible before the draw...']") as HTMLTextAreaElement;
+    expect(reopenedNotes.value).toBe("Keep this editable while it is still pending.");
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it("can switch from draft view to entries-only view and returns to entries after save", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const props = {
+      history: [
+        draw("6/22/26", [2, 4, 6, 8, 10, 12], [14, 16]),
+        draw("6/24/26", [1, 3, 5, 7, 9, 11], [13, 15]),
+      ],
+      now: () => "2026-06-24T10:30:00.000Z",
+    };
+
+    await act(async () => {
+      root.render(React.createElement(PredictionJournalPanel, {
+        ...props,
+        newPredictionDraft: { id: 1 },
+      }));
+    });
+
+    expect(container.textContent).toContain("Save prediction");
+    expect(container.querySelector("textarea[placeholder='Why this looked plausible before the draw...']")).toBeTruthy();
+
+    await act(async () => {
+      root.render(React.createElement(PredictionJournalPanel, {
+        ...props,
+        newPredictionDraft: { id: 1 },
+        viewEntriesRequestId: 1,
+      }));
+    });
+
+    expect(container.textContent).not.toContain("Save prediction");
+    expect(container.querySelector("textarea[placeholder='Why this looked plausible before the draw...']")).toBeNull();
+    expect(container.textContent).toContain("Record your own draw hypotheses");
+
+    await act(async () => {
+      root.render(React.createElement(PredictionJournalPanel, {
+        ...props,
+        newPredictionDraft: { id: 2 },
+        viewEntriesRequestId: 1,
+      }));
+    });
+
+    const notesTextArea = container.querySelector("textarea[placeholder='Why this looked plausible before the draw...']") as HTMLTextAreaElement;
+    expect(notesTextArea).toBeTruthy();
+
+    await act(async () => {
+      setInputValue(notesTextArea, "Entries view should open after save.");
+    });
+
+    const reviewedRadio = container.querySelector("input[value='reviewedByUser']") as HTMLInputElement;
+    await act(async () => {
+      reviewedRadio.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      reviewedRadio.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    const saveButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent === "Save prediction") as HTMLButtonElement;
+
+    await act(async () => {
+      saveButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(container.textContent).toContain("Prediction saved.");
+    expect(container.textContent).not.toContain("Save prediction");
+    const savedRowButton = container.querySelector("button[aria-controls^='prediction-journal-entry-']") as HTMLButtonElement;
+    expect(savedRowButton).toBeTruthy();
+    expect(savedRowButton.textContent).toContain("notes");
+
+    await act(async () => {
+      savedRowButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(container.textContent).toContain("Entries view should open after save.");
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
   it("autofills diagnostic fields from numbers entered into the Numbers field", async () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
@@ -248,6 +494,7 @@ describe("PredictionJournalPanel", () => {
           draw("7/3/26", [3, 13, 23, 33, 43, 5], [15, 25]),
         ],
         now: () => "2026-07-04T09:00:00.000Z",
+        newPredictionDraft: { id: 1 },
       }));
     });
 
@@ -270,6 +517,83 @@ describe("PredictionJournalPanel", () => {
     expect((controlByLabel<HTMLInputElement>(container, "±1/±2 count")).value).toBe("6");
     expect((controlByLabel<HTMLInputElement>(container, "Drought count")).value).toBe("0");
     expect((controlByLabel<HTMLInputElement>(container, "Carry-over count")).value).toBe("4");
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it("warns before saving a draft whose numbers collide with historical Division 1 or Division 2", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(React.createElement(PredictionJournalPanel, {
+        history: [
+          draw("6/1/26", [1, 2, 3, 4, 5, 6], [7, 8]),
+          draw("6/3/26", [10, 11, 12, 13, 14, 15], [16, 17]),
+          draw("6/5/26", [20, 21, 22, 23, 24, 25], [26, 27]),
+        ],
+        now: () => "2026-06-05T10:30:00.000Z",
+        newPredictionDraft: { id: 1 },
+      }));
+    });
+
+    const numbersTextArea = container.querySelector("textarea[placeholder='12, 14, 22, 27']") as HTMLTextAreaElement;
+
+    await act(async () => {
+      setInputValue(numbersTextArea, "1,2,3,4,5,6,7,8");
+    });
+
+    const draftCollision = container.querySelector("[data-testid='prediction-draft-prize-collision']");
+    expect(draftCollision).toBeTruthy();
+    expect(draftCollision?.textContent).toContain("Rare historical D1/D2 collision found");
+    expect(draftCollision?.textContent).toContain("Stored line check");
+    expect(draftCollision?.textContent).toContain("Div1 on 6/1/26");
+    expect(draftCollision?.textContent).toContain("Selected-set subset check");
+
+    const reviewedRadio = container.querySelector("input[value='reviewedByUser']") as HTMLInputElement;
+    await act(async () => {
+      reviewedRadio.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      reviewedRadio.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    const saveButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent === "Save prediction") as HTMLButtonElement;
+
+    await act(async () => {
+      saveButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    const saveAlert = container.querySelector("[data-testid='prediction-historical-prize-collision-save-alert']");
+    expect(saveAlert).toBeTruthy();
+    expect(saveAlert?.textContent).toContain("Historical Division 1/2 collision found");
+    expect(container.querySelector("button[aria-controls^='prediction-journal-entry-']")).toBeNull();
+
+    const saveAnywayButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent === "Save anyway") as HTMLButtonElement;
+
+    await act(async () => {
+      saveAnywayButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    const rowButton = container.querySelector("button[aria-controls^='prediction-journal-entry-']") as HTMLButtonElement;
+    expect(rowButton).toBeTruthy();
+    expect(rowButton.textContent).toContain("8 picked");
+    expect(rowButton.querySelectorAll("[data-picked-role='main']").length).toBe(6);
+    expect(rowButton.querySelectorAll("[data-picked-role='supp']").length).toBe(2);
+
+    await act(async () => {
+      rowButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    const savedCollision = container.querySelector("[data-testid='prediction-historical-prize-collision']");
+    expect(savedCollision).toBeTruthy();
+    expect(savedCollision?.textContent).toContain("Rare historical D1/D2 collision found");
+    expect(savedCollision?.textContent).toContain("Checked against 3 real historical draws");
+    expect(savedCollision?.textContent).toContain("archive rarity check, not a future probability signal");
 
     await act(async () => {
       root.unmount();
@@ -338,6 +662,7 @@ describe("PredictionJournalPanel", () => {
       inputs: {
         oddEvenRatio: "3:5",
         numbers: [1, 12, 20, 45],
+        terminalDigits: [1, 4],
         notes: "Testing a compact journal row.",
         monthlyBuckets: { undrawn: 7, times1: 1 },
       },
@@ -370,7 +695,7 @@ describe("PredictionJournalPanel", () => {
     expect(rowButton.getAttribute("aria-expanded")).toBe("false");
     expect(container.textContent).toContain("Scored");
     expect(container.textContent).toContain("Reviewed by user");
-    expect(container.textContent).toContain("3 checks");
+    expect(container.textContent).toContain("4 checks");
     expect(container.textContent).toContain("Saved setup");
     expect(container.textContent).not.toContain("Testing a compact journal row.");
     expect(container.textContent).not.toContain("Hits: 1, 12, 45");
@@ -391,7 +716,9 @@ describe("PredictionJournalPanel", () => {
     const provenance = container.querySelector("[data-testid='prediction-structured-provenance']");
     expect(provenance).toBeTruthy();
     expect(provenance?.textContent).toContain("Structured provenance");
-    expect(provenance?.textContent).toContain("Numbers 1, 12, 20, 45");
+    expect(provenance?.textContent).toContain("User picked numbers");
+    expect(provenance?.querySelectorAll("[data-picked-role='main']").length).toBe(4);
+    expect(provenance?.querySelectorAll("[data-picked-role='supp']").length).toBe(0);
     expect(provenance?.textContent).toContain("Forced 1, 12");
     expect(provenance?.textContent).toContain("Excluded 44");
     expect(provenance?.textContent).toContain("Any shortlist yes");
@@ -401,6 +728,15 @@ describe("PredictionJournalPanel", () => {
     expect(provenance?.textContent).toContain("Outside shortlist 1");
     expect(provenance?.textContent).toContain("12: Strict drought 6+");
     expect(provenance?.textContent).toContain("20: Empirical hazard");
+    const terminalHistory = container.querySelector("[data-testid='prediction-terminal-digit-history']");
+    expect(terminalHistory).toBeTruthy();
+    expect(terminalHistory?.textContent).toContain("Terminal digit history");
+    expect(terminalHistory?.textContent).toContain("1, 4");
+    expect(terminalHistory?.textContent).toContain("Contained hits");
+    expect(terminalHistory?.textContent).toContain("2 / 3 (66.67%)");
+    expect(terminalHistory?.textContent).toContain("Exact set hits");
+    expect(terminalHistory?.textContent).toContain("0 / 3 (0.00%)");
+    expect(terminalHistory?.textContent).toContain("Latest contained draw: 6/5/26");
     expect(container.querySelector("table")).toBeNull();
     const immediateTile = container.querySelector("[data-testid='prediction-immediate-next-draw']");
     expect(immediateTile).toBeTruthy();
@@ -411,7 +747,8 @@ describe("PredictionJournalPanel", () => {
     expect(scorecardGrid?.textContent).toContain("Predicted");
     expect(scorecardGrid?.textContent).toContain("Actual");
     expect(scorecardGrid?.textContent).toContain("Result");
-    expect(scorecardGrid?.querySelectorAll("[data-testid='prediction-scorecard-tile']").length).toBe(3);
+    expect(scorecardGrid?.textContent).toContain("Terminal digits");
+    expect(scorecardGrid?.querySelectorAll("[data-testid='prediction-scorecard-tile']").length).toBe(4);
 
     const archiveButton = Array.from(container.querySelectorAll("button"))
       .find((button) => button.textContent === "Archive") as HTMLButtonElement;
@@ -457,6 +794,7 @@ describe("PredictionJournalPanel", () => {
           draw("6/22/26", [2, 4, 6, 8, 10, 12], [14, 16]),
           draw("6/24/26", [1, 3, 5, 7, 9, 11], [13, 15]),
         ],
+        newPredictionDraft: { id: 1 },
       }));
     });
 
@@ -481,7 +819,7 @@ describe("PredictionJournalPanel", () => {
     expect(container.textContent).toContain("Odd/even ratio must total 8");
     expect(container.textContent).toContain("Numbers can include at most 8 unique numbers");
     expect(container.textContent).toContain("Target draw bucket-origin mix cannot total more than 8");
-    expect(container.textContent).toContain("No journal entries yet");
+    expect(container.textContent).toContain("The user manual is a good source of help for using the prediction feature.");
 
     await act(async () => {
       root.unmount();
@@ -569,6 +907,64 @@ describe("PredictionJournalPanel", () => {
     expect(notesTextArea.value).toContain("Exclusion sources: user 44; hot/cold 42; auto-unselected 21; main-bucket auto 35; SDE1 4, 6, 8; HC3 22, 24.");
     expect(notesTextArea.value).toContain("Effective generation exclusions: 4, 6, 8, 21, 22, 24, 35, 42, 44.");
     expect(container.textContent).toContain("New prediction draft created from current setup");
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it("prefills New Prediction numbers with DGA suggested supps kept in the final two positions", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(React.createElement(PredictionJournalPanel, {
+        history: [
+          draw("6/22/26", [2, 4, 6, 8, 10, 12], [14, 16]),
+          draw("6/24/26", [1, 3, 5, 7, 9, 11], [13, 15]),
+        ],
+        now: () => "2026-06-25T09:00:00.000Z",
+        newPredictionDraft: {
+          id: 1,
+          setupSnapshot: {
+            windowEnabled: true,
+            windowMode: "H",
+            customDrawCount: 13,
+            selectedRatios: [],
+            useTrickyRule: false,
+            knobs: {},
+            userSelectedNumbers: [1, 2, 3, 4, 5, 6, 7, 8],
+            trendSelectedNumbers: [],
+            previousNeighbourConstraintNumbers: [],
+            hotColdForcedNumbers: [],
+            droughtBreakSelectedNumbers: [],
+            selectedCarryOverBoostNumbers: [],
+            excludedNumbers: [],
+            dgaSuggestedMainNumbers: [1, 2, 4, 6, 7, 8],
+            dgaSuggestedSuppNumbers: [3, 5],
+            dgaSuggestedSuppPair: [3, 5],
+            dgaSuggestedSuppPairActiveCount: 1,
+            dgaSuggestedSuppPairFullCount: 2,
+            dgaSuggestedSuppPairActiveDrawCount: 13,
+            dgaSuggestedSuppPairFullDrawCount: 344,
+            dgaSuggestedSuppPairActiveGap: 4,
+            dgaSuggestedSuppPairFullGap: 21,
+            dgaSuppPairActiveCoverage: 3,
+            dgaSuppPairFullCoverage: 8,
+            dgaSuppPairTotalCoverage: 28,
+          } as any,
+        },
+      }));
+    });
+
+    const numbersTextArea = container.querySelector("textarea[placeholder='12, 14, 22, 27']") as HTMLTextAreaElement;
+    const notesTextArea = container.querySelector("textarea[placeholder='Why this looked plausible before the draw...']") as HTMLTextAreaElement;
+
+    expect(numbersTextArea.value).toBe("1, 2, 4, 6, 7, 8, 3, 5");
+    expect(notesTextArea.value).toContain("DGA supplementary-role split copied: mains 1, 2, 4, 6, 7, 8; supps 3, 5.");
+    expect(notesTextArea.value).toContain("DGA supplementary-pair tie-break evidence: pair 3, 5; WFMQYH exact pair 1/13");
 
     await act(async () => {
       root.unmount();

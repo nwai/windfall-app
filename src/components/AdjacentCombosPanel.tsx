@@ -319,7 +319,7 @@ export const AdjacentCombosPanel: React.FC<AdjacentCombosPanelProps> = ({ histor
         <label style={{ fontSize: 12 }}>
           History:
           <select value={useAll ? "all" : "window"} onChange={(e) => setUseAll(e.target.value === "all") } style={{ marginLeft: 6 }}>
-            <option value="window">WFMQY</option>
+            <option value="window">WFMQYH</option>
             <option value="all">All history</option>
           </select>
         </label>

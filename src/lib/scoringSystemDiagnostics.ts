@@ -112,6 +112,26 @@ export interface TerminalDigitSetDiagnosticRow extends TerminalDigitSetDefinitio
   rankMovement: number | null;
 }
 
+export type PredictionTerminalDigitHistoryBand = "common" | "typical" | "rare" | "never-seen";
+
+export interface PredictionTerminalDigitHistory {
+  digits: number[];
+  key: string;
+  length: number;
+  validDraws: number;
+  skippedDraws: number;
+  exactCount: number;
+  exactPercent: number;
+  containedCount: number;
+  containedPercent: number;
+  peerRank: number | null;
+  peerTotal: number;
+  peerPercentile: number | null;
+  band: PredictionTerminalDigitHistoryBand;
+  latestExactExample: TerminalDigitSetExample | null;
+  latestContainedExample: TerminalDigitSetExample | null;
+}
+
 export interface ScoringSystemDiagnosticsResult {
   provenance: ScoringDiagnosticsProvenance;
   ratioRows: RatioDiagnosticRow[];
@@ -361,6 +381,105 @@ export const buildTerminalDigitSets = (): TerminalDigitSetDefinition[] => {
     rows.push(...chooseDigitSets(TERMINAL_DIGITS, length));
   }
   return rows;
+};
+
+const normalizeTerminalDigitValues = (values: readonly unknown[]): number[] => {
+  const seen = new Set<number>();
+  for (const value of values) {
+    const parsed = typeof value === "number" ? value : Number(value);
+    if (!Number.isInteger(parsed) || parsed < 0) continue;
+    if (parsed <= 9) seen.add(parsed);
+    else if (parsed <= MAX_NUMBER) seen.add(parsed % 10);
+  }
+  return [...seen].sort((left, right) => left - right);
+};
+
+const digitSetIsContained = (candidate: readonly number[], drawDigits: Set<number>): boolean => (
+  candidate.every((digit) => drawDigits.has(digit))
+);
+
+const terminalDigitHistoryBand = (
+  containedCount: number,
+  peerPercentile: number | null,
+): PredictionTerminalDigitHistoryBand => {
+  if (containedCount <= 0) return "never-seen";
+  if (containedCount < 3 || peerPercentile == null || peerPercentile < 34) return "rare";
+  if (containedCount >= 5 && peerPercentile >= 67) return "common";
+  return "typical";
+};
+
+export const analyzePredictionTerminalDigitHistory = (
+  realHistory: Draw[],
+  terminalDigits: readonly unknown[],
+  options: ScoringDiagnosticsOptions = {},
+): PredictionTerminalDigitHistory | null => {
+  const scope = options.scope ?? "mains-plus-supps";
+  const digits = normalizeTerminalDigitValues(terminalDigits);
+  if (digits.length === 0 || digits.length > 8) return null;
+
+  const history = normalizeHistory(realHistory, scope);
+  const key = keyForDigits(digits);
+  let exactCount = 0;
+  let containedCount = 0;
+  let latestExactExample: TerminalDigitSetExample | null = null;
+  let latestContainedExample: TerminalDigitSetExample | null = null;
+  const peerCounts = new Map<string, number>();
+
+  for (const draw of realHistory) {
+    const normalized = normalizeDrawNumbers(draw, scope);
+    if (!normalized) continue;
+    const drawDigits = [...new Set(normalized.map((number) => terminalDigitForNumber(number)))]
+      .sort((left, right) => left - right);
+    const drawDigitSet = new Set(drawDigits);
+    const drawKey = keyForDigits(drawDigits);
+    const example = {
+      date: draw.date,
+      main: [...draw.main],
+      supp: [...(draw.supp ?? [])],
+    };
+
+    if (drawKey === key) {
+      exactCount += 1;
+      latestExactExample = example;
+    }
+
+    if (digitSetIsContained(digits, drawDigitSet)) {
+      containedCount += 1;
+      latestContainedExample = example;
+    }
+
+    if (digits.length <= drawDigits.length) {
+      for (const set of chooseDigitSets(drawDigits, digits.length)) {
+        peerCounts.set(set.key, (peerCounts.get(set.key) ?? 0) + 1);
+      }
+    }
+  }
+
+  const peerDefinitions = chooseDigitSets(TERMINAL_DIGITS, digits.length);
+  const peerValues = peerDefinitions.map((definition) => peerCounts.get(definition.key) ?? 0);
+  const peerTotal = peerValues.length;
+  const peerRank = peerTotal > 0 ? 1 + peerValues.filter((count) => count > containedCount).length : null;
+  const peerPercentile = peerTotal > 0
+    ? round2((peerValues.filter((count) => count <= containedCount).length / peerTotal) * 100)
+    : null;
+
+  return {
+    digits,
+    key,
+    length: digits.length,
+    validDraws: history.rows.length,
+    skippedDraws: history.skipped,
+    exactCount,
+    exactPercent: percent(exactCount, history.rows.length),
+    containedCount,
+    containedPercent: percent(containedCount, history.rows.length),
+    peerRank,
+    peerTotal,
+    peerPercentile,
+    band: terminalDigitHistoryBand(containedCount, peerPercentile),
+    latestExactExample,
+    latestContainedExample,
+  };
 };
 
 export const isStraightTerminalDigitRun = (digits: readonly number[]): boolean => {

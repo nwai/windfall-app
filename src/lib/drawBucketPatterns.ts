@@ -30,11 +30,13 @@ export interface DrawBucketPatternStats {
   recentHits: number[];
 }
 
-export type DrawBucketPatternSortMode = "label" | "atLeastOne" | "averageHits" | "modeHits";
+export type DrawBucketPatternSortMode = "overall" | "label" | "atLeastOne" | "averageHits" | "modeHits";
 
 export interface DrawBucketPatternLeaderboardRow {
   stat: DrawBucketPatternStats;
   selectedSortPosition: number;
+  overallPosition: number;
+  overallScore: number;
   atLeastOnePosition: number;
   averageHitsPosition: number;
   modeHitsPosition: number;
@@ -281,12 +283,20 @@ const buildPositionMap = (
   return new Map(sorted.map((stat, index) => [stat.key, index + 1]));
 };
 
+const positionToPercentileSupport = (position: number, total: number): number => {
+  if (!Number.isFinite(position) || position < 1) return 0;
+  if (total <= 1) return 100;
+  return Math.max(0, Math.min(100, ((total - position) / (total - 1)) * 100));
+};
+
 export const sortDrawBucketPatternStats = (
   stats: DrawBucketPatternStats[],
   sortMode: DrawBucketPatternSortMode,
 ): DrawBucketPatternStats[] => {
   const next = [...stats];
   switch (sortMode) {
+    case "overall":
+      return buildDrawBucketPatternLeaderboard(stats, "overall").map((row) => row.stat);
     case "atLeastOne":
       return next.sort(compareByAtLeastOneRate);
     case "averageHits":
@@ -303,7 +313,6 @@ export const buildDrawBucketPatternLeaderboard = (
   stats: DrawBucketPatternStats[],
   sortMode: DrawBucketPatternSortMode,
 ): DrawBucketPatternLeaderboardRow[] => {
-  const sorted = sortDrawBucketPatternStats(stats, sortMode);
   const atLeastOnePositions = buildPositionMap(stats, compareByAtLeastOneRate);
   const averageHitsPositions = buildPositionMap(stats, compareByAverageHits);
   const modeHitsPositions = buildPositionMap(stats, compareByModeHits);
@@ -311,18 +320,87 @@ export const buildDrawBucketPatternLeaderboard = (
   const maxObservedHitsPositions = buildPositionMap(stats, compareByMaxObservedHits);
   const totalHitsPositions = buildPositionMap(stats, compareByTotalHits);
   const recentAveragePositions = buildPositionMap(stats, compareByRecentAverageHits);
+  const totalBuckets = stats.length;
 
-  return sorted.map((stat, index) => ({
-    stat,
+  const rowsWithoutOverall = stats.map((stat) => {
+    const atLeastOnePosition = atLeastOnePositions.get(stat.key) ?? totalBuckets;
+    const averageHitsPosition = averageHitsPositions.get(stat.key) ?? totalBuckets;
+    const modeHitsPosition = modeHitsPositions.get(stat.key) ?? totalBuckets;
+    const zeroRatePosition = zeroRatePositions.get(stat.key) ?? totalBuckets;
+    const maxObservedHitsPosition = maxObservedHitsPositions.get(stat.key) ?? totalBuckets;
+    const totalHitsPosition = totalHitsPositions.get(stat.key) ?? totalBuckets;
+    const recentAveragePosition = recentAveragePositions.get(stat.key) ?? totalBuckets;
+    const overallMetricPositions = [
+      atLeastOnePosition,
+      averageHitsPosition,
+      recentAveragePosition,
+      modeHitsPosition,
+      zeroRatePosition,
+      maxObservedHitsPosition,
+      totalHitsPosition,
+    ];
+    const overallScore = overallMetricPositions.reduce(
+      (sum, position) => sum + positionToPercentileSupport(position, totalBuckets),
+      0,
+    ) / overallMetricPositions.length;
+
+    return {
+      stat,
+      selectedSortPosition: 0,
+      overallPosition: 0,
+      overallScore,
+      atLeastOnePosition,
+      averageHitsPosition,
+      modeHitsPosition,
+      zeroRatePosition,
+      maxObservedHitsPosition,
+      totalHitsPosition,
+      recentAverageHits: getRecentAverageHits(stat),
+      recentAveragePosition,
+    };
+  });
+
+  const compareByOverallScore = (
+    a: DrawBucketPatternLeaderboardRow,
+    b: DrawBucketPatternLeaderboardRow,
+  ): number => (
+    b.overallScore - a.overallScore
+    || a.atLeastOnePosition - b.atLeastOnePosition
+    || a.averageHitsPosition - b.averageHitsPosition
+    || a.recentAveragePosition - b.recentAveragePosition
+    || a.stat.label.localeCompare(b.stat.label)
+  );
+
+  const overallPositions = new Map(
+    [...rowsWithoutOverall]
+      .sort(compareByOverallScore)
+      .map((row, index) => [row.stat.key, index + 1]),
+  );
+
+  const rowsWithOverall = rowsWithoutOverall.map((row) => ({
+    ...row,
+    overallPosition: overallPositions.get(row.stat.key) ?? totalBuckets,
+  }));
+
+  const sortedRows = [...rowsWithOverall].sort((a, b) => {
+    switch (sortMode) {
+      case "overall":
+        return compareByOverallScore(a, b);
+      case "atLeastOne":
+        return compareByAtLeastOneRate(a.stat, b.stat);
+      case "averageHits":
+        return compareByAverageHits(a.stat, b.stat);
+      case "modeHits":
+        return compareByModeHits(a.stat, b.stat);
+      case "label":
+      default:
+        return compareByLabel(a.stat, b.stat);
+    }
+  });
+
+  return sortedRows.map((row, index) => ({
+    ...row,
     selectedSortPosition: index + 1,
-    atLeastOnePosition: atLeastOnePositions.get(stat.key) ?? index + 1,
-    averageHitsPosition: averageHitsPositions.get(stat.key) ?? index + 1,
-    modeHitsPosition: modeHitsPositions.get(stat.key) ?? index + 1,
-    zeroRatePosition: zeroRatePositions.get(stat.key) ?? index + 1,
-    maxObservedHitsPosition: maxObservedHitsPositions.get(stat.key) ?? index + 1,
-    totalHitsPosition: totalHitsPositions.get(stat.key) ?? index + 1,
-    recentAverageHits: getRecentAverageHits(stat),
-    recentAveragePosition: recentAveragePositions.get(stat.key) ?? index + 1,
   }));
 };
 
