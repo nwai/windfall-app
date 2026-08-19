@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 
 interface InlineCollapsibleCardProps {
+  id?: string;
   title: React.ReactNode;
   subtitle?: React.ReactNode;
   collapsedSummary?: React.ReactNode;
@@ -14,6 +15,7 @@ interface InlineCollapsibleCardProps {
 }
 
 export const InlineCollapsibleCard: React.FC<InlineCollapsibleCardProps> = ({
+  id,
   title,
   subtitle,
   collapsedSummary,
@@ -39,7 +41,7 @@ export const InlineCollapsibleCard: React.FC<InlineCollapsibleCardProps> = ({
   };
 
   return (
-    <div className="windfall-inline-card">
+    <div id={id} className="windfall-inline-card" tabIndex={id ? -1 : undefined}>
       <button
         type="button"
         onClick={handleToggle}

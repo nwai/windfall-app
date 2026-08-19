@@ -16,18 +16,26 @@ interface DGAMonthlyBucketStateGridProps {
   onCellOpacityChange?: (value: number) => void;
 }
 
-const colorForTimes = (times: number): string => {
-  const palette: Record<number, string> = {
-    0: "rgba(117,117,117,0.70)",
-    1: "rgba(66,165,245,0.70)",
-    2: "rgba(102,187,106,0.70)",
-    3: "rgba(38,198,218,0.70)",
-    4: "rgba(251,192,45,0.70)",
-    5: "rgba(251,140,0,0.72)",
-    6: "rgba(244,81,30,0.72)",
-    7: "rgba(229,57,53,0.74)",
+const bucketPaletteForTimes = (times: number): { rgb: [number, number, number]; alpha: number } => {
+  const palette: Record<number, { rgb: [number, number, number]; alpha: number }> = {
+    0: { rgb: [117, 117, 117], alpha: 0.70 },
+    1: { rgb: [66, 165, 245], alpha: 0.70 },
+    2: { rgb: [102, 187, 106], alpha: 0.70 },
+    3: { rgb: [38, 198, 218], alpha: 0.70 },
+    4: { rgb: [251, 192, 45], alpha: 0.70 },
+    5: { rgb: [251, 140, 0], alpha: 0.72 },
+    6: { rgb: [244, 81, 30], alpha: 0.72 },
+    7: { rgb: [229, 57, 53], alpha: 0.74 },
   };
-  return palette[times] ?? "rgba(142,36,170,0.74)";
+  return palette[times] ?? { rgb: [142, 36, 170], alpha: 0.74 };
+};
+
+const colorForTimes = (times: number, alphaOverride?: number): string => {
+  const { rgb, alpha } = bucketPaletteForTimes(times);
+  const safeAlpha = typeof alphaOverride === "number" && Number.isFinite(alphaOverride)
+    ? Math.max(0, Math.min(1, alphaOverride))
+    : alpha;
+  return `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${safeAlpha})`;
 };
 
 const labelForTimes = (times: number): string => {
@@ -320,10 +328,10 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
               fontSize: 12,
               color: "#334155",
             }}
-            title="Adjust the Monthly bucket state grid cell fill opacity. This does not affect the DGA heatmap above."
+            title="Adjust only the sticky current-month layer opacity. Historical month cells remain fully opaque."
           >
             <span>
-              Grid opacity: <b>{Math.round(normalizedCellOpacity * 100)}%</b>
+              Current-month opacity: <b>{Math.round(normalizedCellOpacity * 100)}%</b>
             </span>
             <HigSlider
               min={0.25}
@@ -775,13 +783,13 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
                             width: columnWidth,
                             minWidth: columnWidth,
                             height: cellSize,
-                            background: state ? colorForTimes(times ?? 0) : "#f8fafc",
+                            background: state ? colorForTimes(times ?? 0, isCurrent ? normalizedCellOpacity : undefined) : "#f8fafc",
                             borderLeft: DRAW_SLOT_COLUMN_BORDER,
                             borderRight: DRAW_SLOT_COLUMN_BORDER,
                             borderBottom: "1px solid #edf2f7",
                             padding: 0,
                             boxSizing: "border-box",
-                            opacity: state ? normalizedCellOpacity : 0.72,
+                            opacity: state ? 1 : 0.72,
                             filter: isHoveredColumn ? "brightness(1.03)" : undefined,
                           }}
                         />

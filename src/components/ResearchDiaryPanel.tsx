@@ -6,6 +6,7 @@ import type { AppPresetSnapshot } from "../lib/presets";
 import {
   buildResearchDiaryEntry,
   computeResearchDiaryNextDrawContext,
+  deriveResearchDiaryRuleTagsFromSetup,
   findResearchDiaryReminders,
   loadResearchDiaryEntries,
   saveResearchDiaryEntries,
@@ -17,12 +18,14 @@ import {
   type ResearchDiaryRuleTag,
   type ResearchDiaryWeekday,
 } from "../lib/researchDiary";
+import type { Sde1Hc3ContextBacktest, Sde1Hc3ContextAdvice } from "../lib/sde1Hc3ContextAdvice";
 
 export interface ResearchDiaryPanelProps {
   history: Draw[];
   initialEntries?: ResearchDiaryEntry[];
   now?: () => string;
   getSetupSnapshot?: () => AppPresetSnapshot | undefined;
+  sde1Hc3Backtest?: Sde1Hc3ContextBacktest | null;
   showTitle?: boolean;
 }
 
@@ -118,6 +121,35 @@ const targetGroupStyle: React.CSSProperties = {
   background: "rgba(248, 250, 252, 0.72)",
 };
 
+const adviceToneStyles: Record<Sde1Hc3ContextAdvice["tone"], React.CSSProperties> = {
+  strong: { background: "#f0fdf4", borderColor: "#86efac" },
+  moderate: { background: "#eff6ff", borderColor: "#bfdbfe" },
+  neutral: { background: "#f8fafc", borderColor: "#dbe3ec" },
+  caution: { background: "#fff7ed", borderColor: "#fed7aa" },
+  insufficient: { background: "#f8fafc", borderColor: "#dbe3ec" },
+};
+
+const formatPercent = (value: number): string => `${(value * 100).toFixed(1)}%`;
+const formatSignedPercentPoint = (value: number): string => `${value >= 0 ? "+" : ""}${(value * 100).toFixed(1)}pp`;
+const formatSignedDecimal = (value: number): string => `${value >= 0 ? "+" : ""}${value.toFixed(2)}`;
+
+const tableHeadStyle: React.CSSProperties = {
+  textAlign: "left",
+  padding: "6px 8px",
+  borderBottom: "1px solid #dbe3ec",
+  color: "#51606f",
+  fontWeight: 900,
+  whiteSpace: "nowrap",
+};
+
+const tableCellStyle: React.CSSProperties = {
+  padding: "6px 8px",
+  borderBottom: "1px solid #eef2f7",
+  color: "#334155",
+  fontVariantNumeric: "tabular-nums",
+  whiteSpace: "nowrap",
+};
+
 const toggleInList = <T,>(values: T[], value: T): T[] => (
   values.includes(value) ? values.filter((item) => item !== value) : [...values, value]
 );
@@ -145,6 +177,7 @@ export const ResearchDiaryPanel: React.FC<ResearchDiaryPanelProps> = ({
   initialEntries,
   now = () => new Date().toISOString(),
   getSetupSnapshot,
+  sde1Hc3Backtest,
   showTitle = true,
 }) => {
   const [entries, setEntries] = useState<ResearchDiaryEntry[]>(() => (
@@ -163,6 +196,7 @@ export const ResearchDiaryPanel: React.FC<ResearchDiaryPanelProps> = ({
   const [reviewAfterMatches, setReviewAfterMatches] = useState("");
   const [outcomeNotes, setOutcomeNotes] = useState("");
   const [message, setMessage] = useState("");
+  const setupRuleTagsPrefilledRef = React.useRef(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const hasControlledInitialEntries = initialEntries !== undefined;
@@ -205,6 +239,7 @@ export const ResearchDiaryPanel: React.FC<ResearchDiaryPanelProps> = ({
     setOutcome("untested");
     setReviewAfterMatches("");
     setOutcomeNotes("");
+    setupRuleTagsPrefilledRef.current = false;
   };
 
   const fillFormFromEntry = (entry: ResearchDiaryEntry) => {
@@ -221,8 +256,17 @@ export const ResearchDiaryPanel: React.FC<ResearchDiaryPanelProps> = ({
     setOutcome(entry.outcome);
     setReviewAfterMatches(entry.reviewAfterMatches === undefined ? "" : String(entry.reviewAfterMatches));
     setOutcomeNotes(entry.outcomeNotes ?? "");
+    setupRuleTagsPrefilledRef.current = true;
     setMessage(`Editing diary note: ${entry.title}`);
   };
+
+  useEffect(() => {
+    if (editingEntry || setupRuleTagsPrefilledRef.current || selectedTags.length > 0) return;
+    const inferredTags = deriveResearchDiaryRuleTagsFromSetup(getSetupSnapshot?.());
+    if (!inferredTags.length) return;
+    setupRuleTagsPrefilledRef.current = true;
+    setSelectedTags(inferredTags);
+  }, [editingEntry, getSetupSnapshot, selectedTags.length]);
 
   const handleSave = () => {
     if (!title.trim() && !observation.trim()) {
@@ -339,6 +383,62 @@ export const ResearchDiaryPanel: React.FC<ResearchDiaryPanelProps> = ({
               </div>
             </div>
           ))}
+        </div>
+      ) : null}
+
+      {sde1Hc3Backtest ? (
+        <div style={{ ...cardStyle, ...adviceToneStyles[sde1Hc3Backtest.advice.tone], marginTop: 12 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+            <div>
+              <div style={{ fontSize: 12, color: "#657385", fontWeight: 800 }}>Current draw-context advice</div>
+              <strong style={{ color: "#17202a" }}>{sde1Hc3Backtest.advice.title}</strong>
+              <p style={{ margin: "5px 0 0", color: "#51606f", maxWidth: 860, lineHeight: 1.45 }}>
+                {sde1Hc3Backtest.advice.message}
+              </p>
+            </div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignContent: "flex-start" }}>
+              {sde1Hc3Backtest.advice.chips.map((chip) => (
+                <span key={chip} style={chipStyle(sde1Hc3Backtest.advice.tone === "strong" ? "green" : sde1Hc3Backtest.advice.tone === "caution" ? "amber" : "neutral")}>{chip}</span>
+              ))}
+            </div>
+          </div>
+          <details style={{ marginTop: 10 }}>
+            <summary style={{ cursor: "pointer", color: "#334155", fontWeight: 800, fontSize: 13 }}>
+              SDE1 + HC3 ordinal backtest ({sde1Hc3Backtest.totalTrials} no-lookahead trials)
+            </summary>
+            <div style={{ overflowX: "auto", marginTop: 8 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead>
+                  <tr>
+                    <th style={tableHeadStyle}>Draw</th>
+                    <th style={tableHeadStyle}>Trials</th>
+                    <th style={tableHeadStyle}>Avoided</th>
+                    <th style={tableHeadStyle}>Baseline</th>
+                    <th style={tableHeadStyle}>Lift</th>
+                    <th style={tableHeadStyle}>Blocked/draw</th>
+                    <th style={tableHeadStyle}>Vs baseline</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sde1Hc3Backtest.rows.length ? sde1Hc3Backtest.rows.map((row) => (
+                    <tr key={row.drawOrdinal}>
+                      <td style={tableCellStyle}>D{row.drawOrdinal}</td>
+                      <td style={tableCellStyle}>{row.trials}</td>
+                      <td style={tableCellStyle}>{formatPercent(row.observedAvoidRate)}</td>
+                      <td style={tableCellStyle}>{formatPercent(row.expectedAvoidRate)}</td>
+                      <td style={{ ...tableCellStyle, color: row.avoidLift >= 0 ? "#166534" : "#b91c1c", fontWeight: 800 }}>{formatSignedPercentPoint(row.avoidLift)}</td>
+                      <td style={tableCellStyle}>{row.observedBlockedPerDraw.toFixed(2)}</td>
+                      <td style={{ ...tableCellStyle, color: row.blockedDelta >= 0 ? "#166534" : "#b91c1c", fontWeight: 800 }}>{formatSignedDecimal(row.blockedDelta)}</td>
+                    </tr>
+                  )) : (
+                    <tr>
+                      <td style={tableCellStyle} colSpan={7}>Not enough historical SDE1+HC3 action trials yet.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </details>
         </div>
       ) : null}
 

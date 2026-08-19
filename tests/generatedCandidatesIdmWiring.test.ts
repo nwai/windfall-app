@@ -10,11 +10,13 @@ describe("Generated Candidates IDM wiring", () => {
 
     expect(appSource).toContain("monthlyIdealDrawState");
     expect(appSource).toContain("setMonthlyIdealDrawState");
-    expect(monthlySummaryCall).toContain("onIdealDrawStateChange={setMonthlyIdealDrawState}");
+    expect(appSource).toContain("handleMonthlyIdealDrawStateChange");
+    expect(monthlySummaryCall).toContain("onIdealDrawStateChange={handleMonthlyIdealDrawStateChange}");
     expect(generatedCandidatesCall).toContain("monthlyIdealDrawState={monthlyIdealDrawState}");
     expect(appSource).toContain("stageIdealDrawState");
     expect(appSource).toContain("setStageIdealDrawState");
-    expect(monthlySummaryCall).toContain("onStageIdealDrawStateChange={setStageIdealDrawState}");
+    expect(appSource).toContain("handleStageIdealDrawStateChange");
+    expect(monthlySummaryCall).toContain("onStageIdealDrawStateChange={handleStageIdealDrawStateChange}");
     expect(generatedCandidatesCall).toContain("stageIdealDrawState={stageIdealDrawState}");
   });
 });

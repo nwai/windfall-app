@@ -11,7 +11,7 @@
  */
 
 import { generateCandidates } from "../generateCandidates";
-import type { GenerateCandidateRatioOption, GenerateCandidatesResult } from "../generateCandidates";
+import type { GenerateCandidateRatioOption, GenerateCandidatesResult, StrictDroughtQuotaGenerationOptions } from "../generateCandidates";
 import type { ScoringGenerationProfile } from "../lib/scoringGenerationInfluence";
 import type { LatestNeighbourSupportOptions } from "../lib/latestNeighbourSupport";
 import type { D1TerminalMomentumGenerationProfile } from "../lib/d1TerminalMomentumInfluence";
@@ -105,6 +105,8 @@ export interface GenerateWorkerArgs {
   d1TerminalMomentumProfile?: D1TerminalMomentumGenerationProfile;
   /** Default-off experimental latest-draw +/-1 support rule. */
   latestNeighbourSupportOptions?: LatestNeighbourSupportOptions;
+  /** Default-off strict drought-break shortlist quota. */
+  strictDroughtQuotaOptions?: StrictDroughtQuotaGenerationOptions;
 }
 
 function deserializeMonthlyBuckets(
@@ -220,7 +222,8 @@ ctx.addEventListener("message", (e: MessageEvent) => {
       args.scoringGenerationProfile,
       args.d1TerminalMomentumProfile,
       progressSetter,
-      args.latestNeighbourSupportOptions
+      args.latestNeighbourSupportOptions,
+      args.strictDroughtQuotaOptions
     );
 
     ctx.postMessage({ type: "result", id, result });

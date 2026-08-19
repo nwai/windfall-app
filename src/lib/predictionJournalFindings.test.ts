@@ -132,4 +132,56 @@ describe("buildPredictionJournalFindingsReport", () => {
       }),
     ]));
   });
+
+  it("groups strict drought quota provenance as a watched signal", () => {
+    const entries = [1, 2, 3].map((index) => scoredEntry(`strict-drought-quota-${index}`, {
+      provenance: {
+        strictDroughtQuota: {
+          version: 1,
+          mode: "advised",
+          manualMin: 1,
+          effectiveMin: 2,
+          active: true,
+          eligibleNumbers: [7, 12, 39],
+          shortlistTop: 8,
+          strictThreshold: 6,
+          advice: {
+            shouldApplyQuota: true,
+            recommendedMinCount: 2,
+            confidence: "moderate",
+            source: "draw-ordinal",
+            sourceLabel: "All D4 rows",
+            reason: "All D4 rows replay had positive support.",
+            traceLabel: "Strict drought quota advice: moderate",
+            trials: 25,
+            averageHits: 1.72,
+            expectedRandomAverageHits: 1.42,
+            oneToThreeHitRate: 0.88,
+            expectedRandomOneToThreeHitRate: 0.797,
+            oneToThreeLift: 0.083,
+            zeroHitRate: 0.04,
+            expectedRandomZeroHitRate: 0.18,
+          },
+        },
+      } as any,
+      scores: [
+        { key: "numbers", label: "Numbers", predicted: "7, 12, 39", actual: "7, 14, 39", result: "partial" },
+      ],
+    }));
+
+    const report = buildPredictionJournalFindingsReport(entries);
+
+    expect(report.groups).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        category: "Watched signal",
+        label: "Strict drought quota SDSR-advised",
+        entryCount: 3,
+      }),
+      expect.objectContaining({
+        category: "Watched signal",
+        label: "Strict drought quota min 2",
+        entryCount: 3,
+      }),
+    ]));
+  });
 });

@@ -270,6 +270,25 @@ export interface AppPresetSnapshot {
   recentMatchBias?: number;
   previousNeighbourConstraintNumbers?: number[];
   latestNeighbourSupportEnabled?: boolean;
+  strictDroughtQuotaMode?: "off" | "manual" | "advised";
+  strictDroughtQuotaManualMin?: number;
+  strictDroughtQuotaEffectiveMin?: number;
+  strictDroughtQuotaEligibleNumbers?: number[];
+  strictDroughtQuotaAdviceShouldApply?: boolean;
+  strictDroughtQuotaAdviceRecommendedMin?: number;
+  strictDroughtQuotaAdviceConfidence?: "low" | "moderate" | "strong";
+  strictDroughtQuotaAdviceSource?: "exact-stage" | "draw-ordinal" | "all-baseline" | "insufficient";
+  strictDroughtQuotaAdviceSourceLabel?: string;
+  strictDroughtQuotaAdviceReason?: string;
+  strictDroughtQuotaAdviceTraceLabel?: string;
+  strictDroughtQuotaAdviceTrials?: number;
+  strictDroughtQuotaAdviceAverageHits?: number;
+  strictDroughtQuotaAdviceExpectedRandomAverageHits?: number;
+  strictDroughtQuotaAdviceOneToThreeHitRate?: number;
+  strictDroughtQuotaAdviceExpectedRandomOneToThreeHitRate?: number;
+  strictDroughtQuotaAdviceOneToThreeLift?: number;
+  strictDroughtQuotaAdviceZeroHitRate?: number;
+  strictDroughtQuotaAdviceExpectedRandomZeroHitRate?: number;
   maxLastDrawMatchesEnabled?: boolean;
   maxLastDrawMatchesValue?: number;
   repeatWindowSizeW?: number;
@@ -283,6 +302,7 @@ export interface AppPresetSnapshot {
   dgaHeatmapView?: "temperature" | "monthlyBucketState";
   tempMetric?: "ema" | "recency" | "hybrid";
   showHeatmapLetters?: boolean;
+  showMbsHoverSparkline?: boolean;
   dgaMonthlyBucketStateOpacity?: number;
   ogaRefMode?: "window" | "all";
   enableOGAForecastBias?: boolean;
@@ -436,6 +456,10 @@ export function normalizeAppPresetSnapshot(snapshot: AppPresetSnapshot): AppPres
     pasteWeightedForcedNumbers: normalizeWeightedTargetNumbers(snapshot.pasteWeightedForcedNumbers),
     previousNeighbourConstraintNumbers: normalizeWeightedTargetNumbers(snapshot.previousNeighbourConstraintNumbers).slice(0, 8),
     latestNeighbourSupportEnabled: !!snapshot.latestNeighbourSupportEnabled,
+    strictDroughtQuotaMode: snapshot.strictDroughtQuotaMode === "manual" || snapshot.strictDroughtQuotaMode === "advised"
+      ? snapshot.strictDroughtQuotaMode
+      : "off",
+    strictDroughtQuotaManualMin: clampInteger(snapshot.strictDroughtQuotaManualMin, 0, 8, 1),
     maxLastDrawMatchesEnabled: !!snapshot.maxLastDrawMatchesEnabled,
     maxLastDrawMatchesValue: clampInteger(snapshot.maxLastDrawMatchesValue, 0, 6, DEFAULT_LAST_DRAW_MATCH_CAP),
     numCandidates: clampInteger(snapshot.numCandidates, 1, 1000, DEFAULT_NUM_CANDIDATES),
@@ -462,6 +486,7 @@ export function normalizeAppPresetSnapshot(snapshot: AppPresetSnapshot): AppPres
       .map((value) => Number(value))
       .filter((value) => Number.isInteger(value) && value >= 0 && value <= 9)))
       .sort((left, right) => left - right),
+    showMbsHoverSparkline: snapshot.showMbsHoverSparkline ?? true,
     pickSixSource: normalizePickSixSource(snapshot.pickSixSource),
     pickSixManual: normalizePickSixManual(snapshot.pickSixManual),
   };

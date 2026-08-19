@@ -1356,7 +1356,7 @@ tbody tr:hover {
 
 .windfall-prediction-journal-text-grid {
   display: grid;
-  grid-template-columns: minmax(240px, 0.78fr) minmax(260px, 0.84fr) minmax(340px, 1.18fr);
+  grid-template-columns: minmax(200px, 0.62fr) minmax(420px, 1.26fr) minmax(320px, 1fr);
   gap: 10px;
   align-items: stretch;
 }
@@ -1387,6 +1387,13 @@ tbody tr:hover {
   min-width: 0;
 }
 
+.windfall-prediction-journal-reason-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(190px, 1fr));
+  gap: 6px 10px;
+  align-items: start;
+}
+
 .windfall-prediction-journal-notes-field textarea {
   min-height: 188px;
   resize: vertical;
@@ -1403,6 +1410,10 @@ tbody tr:hover {
     grid-template-columns: repeat(2, minmax(260px, 1fr));
   }
 
+  .windfall-prediction-journal-reason-field {
+    grid-column: span 1;
+  }
+
   .windfall-prediction-journal-notes-field {
     grid-column: 1 / -1;
   }
@@ -1414,6 +1425,10 @@ tbody tr:hover {
   }
 
   .windfall-prediction-journal-text-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .windfall-prediction-journal-reason-options {
     grid-template-columns: 1fr;
   }
 
@@ -1754,6 +1769,68 @@ tbody tr:hover {
   text-transform: uppercase;
 }
 
+.windfall-influence-provenance__title-button {
+  appearance: none;
+  width: 100%;
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 0 6px;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.windfall-influence-provenance__title-button:hover {
+  color: #174ea6;
+  border-bottom-color: rgba(23, 78, 166, 0.22);
+}
+
+.windfall-influence-provenance__title-button:focus-visible {
+  outline: 2px solid rgba(23, 78, 166, 0.32);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.windfall-influence-provenance__title-arrow {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(148, 163, 184, 0.42);
+  border-radius: 999px;
+  color: #174ea6;
+  font-size: 15px;
+  line-height: 1;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.windfall-provenance-target-pulse {
+  animation: windfall-provenance-target-pulse 1.2s ease-out;
+}
+
+@keyframes windfall-provenance-target-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(23, 78, 166, 0.28);
+  }
+  100% {
+    box-shadow: 0 0 0 12px rgba(23, 78, 166, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .windfall-provenance-target-pulse {
+    animation: none;
+    box-shadow: 0 0 0 3px rgba(23, 78, 166, 0.18);
+  }
+}
+
 .windfall-influence-provenance__items {
   display: grid;
   gap: 4px;
@@ -2053,6 +2130,7 @@ tbody tr:hover {
   display: flex;
   flex-wrap: wrap;
   gap: 8px 10px;
+  margin-bottom: 10px;
   margin-top: 10px;
   padding: 8px 10px;
 }

@@ -92,6 +92,41 @@ describe("analyzeMonthlyBucketTransitions", () => {
       nextDrawOrdinal: 3,
     });
     expect(analysis.currentExpectations.some((row) => row.currentCount > 0)).toBe(true);
+    expect(analysis.markovProjectionRows.length).toBeGreaterThan(0);
+    expect(analysis.markovProjectionRows[0]).toMatchObject({
+      drawOrdinal: 3,
+      distributionBefore: [30, 14, 1, 0, 0, 0, 0, 0, 0],
+    });
+    expect(analysis.markovProjectionRows[0].distributionAfter.reduce((sum, value) => sum + value, 0)).toBeCloseTo(45);
+    expect(analysis.markovProjectionRows[0].expectedAdvances).toBeGreaterThan(0);
+  });
+
+  it("projects from a completed month into the next planning month reset", () => {
+    const analysis = analyzeMonthlyBucketTransitions([
+      draw("2024-05-31", [31, 32, 33, 34, 35, 36], [37, 38]),
+      draw("2026-02-02", [1, 2, 3, 4, 5, 6], [7, 8]),
+      draw("2026-02-04", [1, 9, 10, 11, 12, 13], [14, 15]),
+      draw("2026-02-06", [16, 17, 18, 19, 20, 21], [22, 23]),
+      draw("2026-02-09", [24, 25, 26, 27, 28, 29], [30, 31]),
+      draw("2026-02-11", [32, 33, 34, 35, 36, 37], [38, 39]),
+      draw("2026-02-13", [40, 41, 42, 43, 44, 45], [1, 2]),
+      draw("2026-02-16", [3, 4, 5, 6, 7, 8], [9, 10]),
+      draw("2026-02-18", [11, 12, 13, 14, 15, 16], [17, 18]),
+      draw("2026-02-20", [19, 20, 21, 22, 23, 24], [25, 26]),
+      draw("2026-02-23", [27, 28, 29, 30, 31, 32], [33, 34]),
+      draw("2026-02-25", [35, 36, 37, 38, 39, 40], [41, 42]),
+      draw("2026-02-27", [43, 44, 45, 1, 2, 3], [4, 5]),
+    ], { monthLength: "all", priorStrength: 0 });
+
+    expect(analysis.planningState).toMatchObject({
+      source: "planning-reset",
+      nextDrawOrdinal: 1,
+    });
+    expect(analysis.markovProjectionRows[0]).toMatchObject({
+      drawOrdinal: 1,
+      distributionBefore: [45, 0, 0, 0, 0, 0, 0, 0, 0],
+    });
+    expect(analysis.markovProjectionRows[0].distributionAfter.reduce((sum, value) => sum + value, 0)).toBeCloseTo(45);
   });
 
   it("maps each number to its current monthly transition context", () => {

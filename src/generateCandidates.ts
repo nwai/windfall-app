@@ -47,6 +47,14 @@ export type {
 /** Trend classification union (avoid missing type) */
 export type TrendClass = 'UP' | 'DOWN' | 'FLAT';
 
+export interface StrictDroughtQuotaGenerationOptions {
+  enabled?: boolean;
+  minCount?: number;
+  shortlist?: number[];
+  rankMultipliers?: Record<number, number>;
+  sourceLabel?: string;
+}
+
 export interface GenerateCandidatesResult {
   candidates: CandidateSet[];
   ratioSummary: OddEvenRatioSummary;
@@ -62,6 +70,7 @@ export interface GenerateCandidatesResult {
     recentBias: number;
     repeatUnion: number;
     latestNeighbourSupport: number;
+    strictDroughtQuota: number;
     trendRatio: number;
     sumRange: number;
     patternConstraint: number;
@@ -221,6 +230,8 @@ export function generateCandidates(
   progressSetter?: GenerateCandidatesProgressSetter,
   /** Default-off experimental rule requiring at least one eligible latest-draw +/-1 support number. */
   latestNeighbourSupportOptions?: LatestNeighbourSupportOptions,
+  /** Default-off strict drought-break shortlist quota, optionally advised by SDSR. */
+  strictDroughtQuotaOptions?: StrictDroughtQuotaGenerationOptions,
 ): GenerateCandidatesResult {
 
   if (DEBUG) {
@@ -274,6 +285,7 @@ export function generateCandidates(
     recentBias: 0,
     repeatUnion: 0,
     latestNeighbourSupport: 0,
+    strictDroughtQuota: 0,
     trendRatio: 0,
     sumRange: 0,
     patternConstraint: 0,
@@ -444,6 +456,40 @@ export function generateCandidates(
 
   // Filter mainPool accordingly
   mainPool = mainPool.filter(n => !fullExcludedSet.has(n));
+
+  const strictDroughtQuotaRawMin = Math.max(
+    0,
+    Math.min(8, Math.floor(Number(strictDroughtQuotaOptions?.minCount ?? 0))),
+  );
+  const strictDroughtQuotaNumbers = Array.from(
+    new Set((strictDroughtQuotaOptions?.shortlist ?? [])
+      .map((number) => Math.round(Number(number)))
+      .filter((number) => number >= 1 && number <= 45 && !fullExcludedSet.has(number)))
+  );
+  const strictDroughtQuotaMin = strictDroughtQuotaOptions?.enabled
+    ? Math.min(strictDroughtQuotaRawMin, strictDroughtQuotaNumbers.length, 8)
+    : 0;
+  const strictDroughtQuotaActive = strictDroughtQuotaMin > 0 && strictDroughtQuotaNumbers.length > 0;
+  const strictDroughtQuotaSet = new Set(strictDroughtQuotaNumbers);
+  const strictDroughtQuotaMultiplier = (n: number): number => {
+    if (!strictDroughtQuotaActive) return 1;
+    const raw = strictDroughtQuotaOptions?.rankMultipliers?.[n] ?? 1;
+    return Math.max(0.1, Math.min(4, Number.isFinite(raw) ? raw : 1));
+  };
+  if (strictDroughtQuotaOptions?.enabled) {
+    if (strictDroughtQuotaRawMin > strictDroughtQuotaMin) {
+      traceSetter(
+        `[TRACE] Strict drought quota requested minimum ${strictDroughtQuotaRawMin}, effective minimum ${strictDroughtQuotaMin} after exclusions/current shortlist size.`
+      );
+    }
+    if (strictDroughtQuotaActive) {
+      traceSetter(
+        `[TRACE] Strict drought quota active: minimum ${strictDroughtQuotaMin} from current shortlist ${strictDroughtQuotaNumbers.length}${strictDroughtQuotaOptions.sourceLabel ? ` (${strictDroughtQuotaOptions.sourceLabel})` : ""} [${strictDroughtQuotaNumbers.join(", ")}]`
+      );
+    } else {
+      traceSetter("[TRACE] Strict drought quota enabled but inactive: no eligible shortlist numbers or quota is 0.");
+    }
+  }
 
   const latestNeighbourSupport = analyzeLatestNeighbourSupport(history, monthlyBucketOptions?.buckets, {
     ...latestNeighbourSupportOptions,
@@ -712,6 +758,9 @@ export function generateCandidates(
       if (latestNeighbourSupport.active && latestNeighbourSupportSet.has(n)) {
         factor *= latestNeighbourSupport.supportBoostFactor;
       }
+      if (strictDroughtQuotaActive && strictDroughtQuotaSet.has(n)) {
+        factor *= strictDroughtQuotaMultiplier(n);
+      }
       if (factor < 1) {
         // Probabilistic inclusion: e.g. factor=0.3 → 30 % chance of 1 rep
         if (Math.random() < factor) out.push(n);
@@ -791,7 +840,8 @@ export function generateCandidates(
       const carryOverBias = Math.max(0.1, monthEndCarryOverWeights?.[n] ?? 1);
       const scoringBias = scoringInfluenceMultiplier(n, scoringGenerationProfile);
       const d1TerminalBias = d1TerminalMomentumMultiplier(n, d1TerminalMomentumProfile);
-      const reps = Math.max(1, Math.round(selectedBias * carryOverBias * scoringBias * d1TerminalBias));
+      const strictDroughtBias = strictDroughtQuotaActive && strictDroughtQuotaSet.has(n) ? strictDroughtQuotaMultiplier(n) : 1;
+      const reps = Math.max(1, Math.round(selectedBias * carryOverBias * scoringBias * d1TerminalBias * strictDroughtBias));
       for (let i = 0; i < reps; i++) weighted.push(n);
     }
     const picked: number[] = [];
@@ -850,6 +900,28 @@ export function generateCandidates(
       };
       for (const bucketKey of MONTHLY_BUCKET_KEYS) {
         tryFill(bucketKey, constraints[bucketKey]);
+      }
+    }
+
+    if (strictDroughtQuotaActive) {
+      const seededHits = [...main, ...supp].filter((n) => strictDroughtQuotaSet.has(n)).length;
+      const remainingNeeded = strictDroughtQuotaMin - seededHits;
+      if (remainingNeeded > 0) {
+        const availableSlots = 8 - main.length - supp.length;
+        if (availableSlots < remainingNeeded) {
+          stats.strictDroughtQuota++;
+          continue;
+        }
+        const strictPool = strictDroughtQuotaNumbers.filter((n) => !main.includes(n) && !supp.includes(n));
+        const strictPicks = drawWeightedUnique(strictPool, remainingNeeded, true);
+        if (strictPicks.length < remainingNeeded) {
+          stats.strictDroughtQuota++;
+          continue;
+        }
+        for (const n of strictPicks) {
+          if (main.length < 6) main.push(n);
+          else if (supp.length < 2) supp.push(n);
+        }
       }
     }
 
@@ -959,6 +1031,13 @@ export function generateCandidates(
     if (new Set(nums8).size !== nums8.length) {
       stats.exclusions++;
       continue;
+    }
+    if (strictDroughtQuotaActive) {
+      const strictHits = nums8.filter((n) => strictDroughtQuotaSet.has(n)).length;
+      if (strictHits < strictDroughtQuotaMin) {
+        stats.strictDroughtQuota++;
+        continue;
+      }
     }
 
     // NEW: Sum range constraint (before other filters)
@@ -1242,6 +1321,15 @@ if (patternOptions?.constraints?.length && patternOptions?.mode === 'restrict') 
     }, 0);
     traceSetter(
       `[TRACE] ${LATEST_NEIGHBOUR_SUPPORT_TRACE_TAG} results: eligible=${latestNeighbourSupport.targetNumbers.length} rejects=${stats.latestNeighbourSupport} accepted-hits=${hits} (${(hits / acceptedCandidateCount).toFixed(2)} per accepted candidate)`
+    );
+  }
+  if (strictDroughtQuotaOptions?.enabled) {
+    const acceptedCandidateCount = Math.max(1, candidates.length);
+    const hits = candidates.reduce((sum, candidate) => (
+      sum + [...candidate.main, ...candidate.supp].filter((number) => strictDroughtQuotaSet.has(number)).length
+    ), 0);
+    traceSetter(
+      `[TRACE] Strict drought quota results: effective minimum ${strictDroughtQuotaMin}; eligible=${strictDroughtQuotaNumbers.length}; rejects=${stats.strictDroughtQuota}; accepted-hits=${hits} (${(hits / acceptedCandidateCount).toFixed(2)} per accepted candidate)`
     );
   }
   if (activeMainDigitBoosts.length > 0) {

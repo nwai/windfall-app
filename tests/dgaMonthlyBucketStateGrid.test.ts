@@ -189,9 +189,9 @@ describe("DGAMonthlyBucketStateGrid", () => {
     const rendered = await mountGrid({ cellOpacity: 0.55, selectedNumbers: [21] });
     await expandGrid();
 
-    expect(rendered.textContent).toContain("Grid opacity: 55%");
+    expect(rendered.textContent).toContain("Current-month opacity: 55%");
     const opacitySlider = Array.from(rendered.querySelectorAll("input[type='range']")).find((input) =>
-      input.closest("label")?.textContent?.includes("Grid opacity"),
+      input.closest("label")?.textContent?.includes("Current-month opacity"),
     ) as HTMLInputElement | undefined;
     expect(opacitySlider?.min).toBe("0.25");
     expect(opacitySlider?.max).toBe("1");
@@ -201,7 +201,8 @@ describe("DGAMonthlyBucketStateGrid", () => {
       cell.getAttribute("title")?.includes("21 · 2026-06 · Sim D2"),
     ) as HTMLElement | undefined;
     expect(populatedCell).toBeTruthy();
-    expect(populatedCell?.style.opacity).toBe("0.55");
+    expect(populatedCell?.style.opacity).toBe("1");
+    expect(populatedCell?.style.background).toContain("0.55");
     expect(populatedCell?.getAttribute("title")).toContain("selected in DGA strip");
 
     const yAxisLabel = Array.from(rendered.querySelectorAll("tbody td")).find((cell) =>
@@ -215,8 +216,16 @@ describe("DGAMonthlyBucketStateGrid", () => {
       cell.getAttribute("title")?.includes("22 · 2026-06 · Sim D2"),
     ) as HTMLElement | undefined;
     expect(nonSelectedPopulatedCell).toBeTruthy();
-    expect(nonSelectedPopulatedCell?.style.opacity).toBe("0.55");
+    expect(nonSelectedPopulatedCell?.style.opacity).toBe("1");
+    expect(nonSelectedPopulatedCell?.style.background).toContain("0.55");
     expect(nonSelectedPopulatedCell?.getAttribute("title")).not.toContain("dimmed");
+
+    const historicalPopulatedCell = Array.from(rendered.querySelectorAll("tbody td")).find((cell) =>
+      cell.getAttribute("title")?.includes("17 · 2026-05 · D2"),
+    ) as HTMLElement | undefined;
+    expect(historicalPopulatedCell).toBeTruthy();
+    expect(historicalPopulatedCell?.style.opacity).toBe("1");
+    expect(historicalPopulatedCell?.style.background).not.toContain("0.55");
 
     const nonSelectedRowLabel = Array.from(rendered.querySelectorAll("tbody td")).find((cell) =>
       cell.getAttribute("title")?.startsWith("22 · current strip bucket"),

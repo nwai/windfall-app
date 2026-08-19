@@ -89,7 +89,7 @@ describe("predictionJournal", () => {
     expect(edited.revision).toBe(2);
   });
 
-  it("keeps aggregate odd/even ratios for multi-draw target windows", () => {
+  it("rejects impossible aggregate odd/even ratios for multi-draw target windows", () => {
     const entry = buildPredictionJournalEntry({
       id: "prediction-aggregate-ratio",
       now: "2026-06-24T10:30:00.000Z",
@@ -98,7 +98,35 @@ describe("predictionJournal", () => {
       inputs: { oddEvenRatio: "12:12" },
     });
 
-    expect(entry.inputs.oddEvenRatio).toBe("12:12");
+    expect(entry.inputs.oddEvenRatio).toBeUndefined();
+  });
+
+  it("scores draw-level odd/even ratios inside a Next 2 draws target window", () => {
+    const history = [
+      draw("6/22/26", [2, 4, 6, 8, 10, 12], [14, 16]),
+      draw("6/24/26", [1, 3, 5, 7, 9, 11], [13, 15]),
+      draw("6/26/26", [1, 3, 5, 2, 4, 6], [8, 10]),
+      draw("6/29/26", [1, 3, 5, 7, 2, 4], [6, 8]),
+    ];
+    const entry = buildPredictionJournalEntry({
+      id: "prediction-next-2-draw-level-ratio",
+      now: "2026-06-24T10:30:00.000Z",
+      latestDraw: history[1],
+      targetKind: "next2Draws",
+      inputs: { oddEvenRatio: "3:5" },
+    });
+
+    const scored = scorePredictionJournalEntry(entry, history);
+    const oddEvenScore = scored.scores.find((score) => score.key === "oddEvenRatio");
+
+    expect(scored.status).toBe("scored");
+    expect(scored.targetDraws.map((target) => target.date)).toEqual(["6/26/26", "6/29/26"]);
+    expect(oddEvenScore).toMatchObject({
+      predicted: "3:5",
+      actual: "3:5, 4:4",
+      result: "hit",
+      detail: "Draw-level ratio checked against each target draw in the window.",
+    });
   });
 
   it("stays editable until the first target draw arrives, then locks", () => {
@@ -203,6 +231,25 @@ describe("predictionJournal", () => {
       droughtBreakEmpiricalHazardNumbers: [20, 31, 34],
       droughtBreakShortlistTop: 8,
       droughtBreakStrictThreshold: 6,
+      strictDroughtQuotaMode: "advised",
+      strictDroughtQuotaManualMin: 1,
+      strictDroughtQuotaEffectiveMin: 2,
+      strictDroughtQuotaEligibleNumbers: [31, 33, 34],
+      strictDroughtQuotaAdviceShouldApply: true,
+      strictDroughtQuotaAdviceRecommendedMin: 2,
+      strictDroughtQuotaAdviceConfidence: "moderate",
+      strictDroughtQuotaAdviceSource: "draw-ordinal",
+      strictDroughtQuotaAdviceSourceLabel: "All D4 rows",
+      strictDroughtQuotaAdviceReason: "All D4 rows: 25 no-lookahead trials, 1-3 hit rate 88.0% vs random 79.7% (8.3pp lift).",
+      strictDroughtQuotaAdviceTraceLabel: "Strict drought quota advice: moderate · minimum 2 from current top 3 · All D4 rows",
+      strictDroughtQuotaAdviceTrials: 25,
+      strictDroughtQuotaAdviceAverageHits: 1.72,
+      strictDroughtQuotaAdviceExpectedRandomAverageHits: 1.42,
+      strictDroughtQuotaAdviceOneToThreeHitRate: 0.88,
+      strictDroughtQuotaAdviceExpectedRandomOneToThreeHitRate: 0.797,
+      strictDroughtQuotaAdviceOneToThreeLift: 0.083,
+      strictDroughtQuotaAdviceZeroHitRate: 0.04,
+      strictDroughtQuotaAdviceExpectedRandomZeroHitRate: 0.18,
       selectionInsightsSnapshot: {
         version: 1,
         enabled: true,
@@ -254,6 +301,23 @@ describe("predictionJournal", () => {
         anySelectedFromShortlist: true,
         allSelectedFromShortlist: false,
       },
+      strictDroughtQuota: {
+        mode: "advised",
+        manualMin: 1,
+        effectiveMin: 2,
+        active: true,
+        eligibleNumbers: [31, 33, 34],
+        advice: {
+          shouldApplyQuota: true,
+          recommendedMinCount: 2,
+          confidence: "moderate",
+          source: "draw-ordinal",
+          sourceLabel: "All D4 rows",
+          trials: 25,
+          oneToThreeHitRate: 0.88,
+          expectedRandomOneToThreeHitRate: 0.797,
+        },
+      },
       selectionInsights: {
         enabled: true,
         selectedNumbers: [1, 2, 3],
@@ -275,6 +339,7 @@ describe("predictionJournal", () => {
       oddEvenRatios: "5:3, 4:4",
       generation: expect.arrayContaining([
         "Scoring influence: normal",
+        "Strict drought quota: SDSR-advised min 2 (All D4 rows, 25 trials)",
         "Month-end carry-over: strong",
         "Use counts when constructing candidates: on",
         "Acceptance needs counts: 0x≥2 · 1x≥3 · 3x≥1",
@@ -321,6 +386,25 @@ describe("predictionJournal", () => {
       droughtBreakEmpiricalHazardNumbers: [20, 31, 34],
       droughtBreakShortlistTop: 8,
       droughtBreakStrictThreshold: 6,
+      strictDroughtQuotaMode: "advised",
+      strictDroughtQuotaManualMin: 1,
+      strictDroughtQuotaEffectiveMin: 2,
+      strictDroughtQuotaEligibleNumbers: [31, 33, 34],
+      strictDroughtQuotaAdviceShouldApply: true,
+      strictDroughtQuotaAdviceRecommendedMin: 2,
+      strictDroughtQuotaAdviceConfidence: "moderate",
+      strictDroughtQuotaAdviceSource: "draw-ordinal",
+      strictDroughtQuotaAdviceSourceLabel: "All D4 rows",
+      strictDroughtQuotaAdviceReason: "All D4 rows: 25 no-lookahead trials, 1-3 hit rate 88.0% vs random 79.7% (8.3pp lift).",
+      strictDroughtQuotaAdviceTraceLabel: "Strict drought quota advice: moderate · minimum 2 from current top 3 · All D4 rows",
+      strictDroughtQuotaAdviceTrials: 25,
+      strictDroughtQuotaAdviceAverageHits: 1.72,
+      strictDroughtQuotaAdviceExpectedRandomAverageHits: 1.42,
+      strictDroughtQuotaAdviceOneToThreeHitRate: 0.88,
+      strictDroughtQuotaAdviceExpectedRandomOneToThreeHitRate: 0.797,
+      strictDroughtQuotaAdviceOneToThreeLift: 0.083,
+      strictDroughtQuotaAdviceZeroHitRate: 0.04,
+      strictDroughtQuotaAdviceExpectedRandomZeroHitRate: 0.18,
       selectionInsightsSnapshot: {
         version: 1,
         enabled: true,
@@ -364,6 +448,7 @@ describe("predictionJournal", () => {
     expect(draft.inputs.notes).toContain("HC3: OFF.");
     expect(draft.inputs.notes).toContain("Exclusion sources: user 44; hot/cold 45;");
     expect(draft.inputs.notes).toContain("Drought-break shortlist check: matched 20, 31; all selected from shortlist: no; Strict drought 6+: 31; Empirical hazard: 20, 31; outside shortlist: 1, 2, 3, 10, 12, 14.");
+    expect(draft.inputs.notes).toContain("Strict drought quota watch: mode SDSR-advised; effective min 2; eligible 31, 33, 34; All D4 rows; trials 25; 1-3 hits 88.0% vs random 79.7%; confidence moderate; advice says apply quota.");
     expect(draft.inputs.notes).toContain("Selection Insights snapshot: anchors 1, 2, 3; window Custom 13 (13 draws) top companions 12, 14, 20; all-history (338 draws) top companions 10, 12, 31; Predicted companion shortlist 12, 10, 14; companion evidence is observe-only and not a calibrated probability.");
   });
 

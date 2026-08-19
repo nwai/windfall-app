@@ -15,6 +15,10 @@ describe("Research Diary app wiring", () => {
     expect(app).toContain("<ResearchDiaryPanel");
     expect(app).toContain("history={realHistory}");
     expect(app).toContain("getSetupSnapshot={() => buildSnapshot({ includePanelFavorites: true })}");
+    expect(app).toContain("const sde1Hc3ContextBacktest = useMemo");
+    expect(app).toContain("analyzeSde1Hc3ContextBacktest(realHistory");
+    expect(app).toContain("sde1Hc3Backtest={sde1Hc3ContextBacktest}");
+    expect(app).toContain("sde1Hc3Advice={sde1Hc3ContextBacktest.advice}");
   });
 
   it("registers the research diary as a favoriteable Validation panel", () => {

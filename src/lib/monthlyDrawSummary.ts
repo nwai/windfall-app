@@ -86,6 +86,7 @@ export interface MonthlyBucketTarget extends AvgBucketEntry {
 
 export interface IdealMonthlyDraw {
   bucketCounts: MonthlyFrequencyCount[];
+  projectedDistribution: number[];
   freePicks: number;
   scoreBefore: number;
   scoreAfter: number;
@@ -146,6 +147,34 @@ export interface StageIdealDrawState {
   completedDrawCount: number;
   comparableMonthCount: number;
   expectedDrawCountSource: ExpectedDrawCountSource;
+  warnings: string[];
+}
+
+export interface StageMatchAcceptancePlaybookRow {
+  targetUndrawnCount: number;
+  historicalMonthLabel: string;
+  historicalDistribution: number[];
+  acceptanceNeedsBucketCounts: number[];
+  projectedDistribution: number[];
+  scoreBefore: number;
+  scoreAfter: number;
+  exactBucketHits: number;
+  exact: boolean;
+  supportCount: number;
+  totalComparableCount: number;
+  sameUndrawnMonthLabels: string[];
+}
+
+export interface StageMatchAcceptancePlaybook {
+  bucketSets: MonthlyBucketSets;
+  currentDistribution: number[];
+  workingMonthLabel: string;
+  expectedDrawCount: number;
+  targetStageDrawCount: number;
+  completedDrawCount: number;
+  comparableMonthCount: number;
+  expectedDrawCountSource: ExpectedDrawCountSource;
+  rows: StageMatchAcceptancePlaybookRow[];
   warnings: string[];
 }
 
@@ -611,6 +640,172 @@ export function analyzeStageIdealDrawModel(
   };
 }
 
+export function analyzeStageMatchAcceptancePlaybook(
+  history: Draw[],
+  args: AnalyzeStageIdealDrawArgs = {},
+): StageMatchAcceptancePlaybook | null {
+  const includeSupp = args.includeSupp ?? true;
+  const maxNumber = normalizePositiveInteger(args.maxNumber, DEFAULT_MAX_NUMBER);
+  const maxBucket = normalizePositiveInteger(args.maxBucket, DEFAULT_MAX_BUCKET);
+  const drawSize = normalizePositiveInteger(args.drawSize, DEFAULT_DRAW_SIZE);
+  const parsed = parseHistoryForMonthlyAnalysis(history, { includeSupp, maxNumber });
+  if (!parsed.length) return null;
+
+  const grouped = groupParsedDrawsByMonth(parsed);
+  const maxObservedDrawsPerMonth = Math.max(1, ...[...grouped.values()].map((items) => items.length));
+  const fullRows = buildRowsFromParsedDraws({
+    parsed,
+    drawLimit: maxObservedDrawsPerMonth,
+    maxNumber,
+    maxBucket,
+    drawSize,
+  });
+
+  const todayMonthLabel = monthLabelFromLocalDate(args.today ?? new Date());
+  const resolvedWorkingMonth = resolveEffectiveMonthState({
+    rows: fullRows,
+    todayMonthLabel,
+    maxObservedDrawsPerMonth,
+    maxNumber,
+    maxBucket,
+    expectedDrawCountForMonth: (monthLabel) => expectedDrawCountFromRhythmOrFallback({
+      parsed,
+      monthLabel,
+      fallback: maxObservedDrawsPerMonth,
+    }),
+  }).monthLabel;
+  const workingMonthLabel = args.forceWorkingMonthLabel || resolvedWorkingMonth;
+  if (!workingMonthLabel) return null;
+
+  const workingItems = grouped.get(workingMonthLabel) ?? [];
+  const completedDrawCount = workingItems.length;
+  const override = args.expectedDrawCountOverride;
+  const inferredExpectedDrawCount = override && override !== "auto"
+    ? Math.max(1, Math.floor(override))
+    : expectedDrawCountFromRhythmOrFallback({
+      parsed,
+      monthLabel: workingMonthLabel,
+      fallback: maxObservedDrawsPerMonth,
+    });
+  const expectedDrawCount = Math.max(1, inferredExpectedDrawCount);
+  const expectedDrawCountSource: ExpectedDrawCountSource = override && override !== "auto" ? "override" : "auto";
+  const unclampedTargetStage = completedDrawCount + 1;
+  const targetStageDrawCount = Math.min(unclampedTargetStage, expectedDrawCount);
+  const warnings: string[] = [];
+
+  if (targetStageDrawCount !== unclampedTargetStage) {
+    warnings.push(`Target stage was clamped to the expected ${expectedDrawCount} draws.`);
+  }
+
+  const currentRow = buildMonthRow({
+    monthLabel: workingMonthLabel,
+    draws: workingItems,
+    totalDrawCount: expectedDrawCount,
+    maxNumber,
+    maxBucket,
+    drawSize,
+  });
+
+  const pastRows = fullRows.filter((row) => row.monthLabel < workingMonthLabel);
+  const baselineRows = filterRowsForHistoryBaselines(pastRows, (row) => row.monthLabel);
+  const comparableItems = baselineRows
+    .filter((row) => row.totalDrawCount === expectedDrawCount)
+    .map((row) => ({
+      monthLabel: row.monthLabel,
+      items: grouped.get(row.monthLabel) ?? [],
+    }))
+    .filter(({ items }) => items.length >= targetStageDrawCount);
+
+  if (!comparableItems.length) return null;
+  if (comparableItems.length < 3) {
+    warnings.push("Thin evidence: fewer than 3 comparable months.");
+  }
+
+  const candidates = comparableItems.map(({ monthLabel, items }) => {
+    const historicalStageRow = buildMonthRow({
+      monthLabel,
+      draws: items.slice(0, targetStageDrawCount),
+      totalDrawCount: items.length,
+      maxNumber,
+      maxBucket,
+      drawSize,
+    });
+    const idealDraw = computeIdealMonthlyDraw({
+      currentDistribution: currentRow.distribution,
+      targetDistribution: historicalStageRow.distribution,
+      drawSize,
+    });
+    return {
+      targetUndrawnCount: historicalStageRow.distribution[0] ?? 0,
+      historicalMonthLabel: monthLabel,
+      historicalDistribution: historicalStageRow.distribution,
+      acceptanceNeedsBucketCounts: idealDraw.bucketCounts.map(({ count }) => count),
+      projectedDistribution: idealDraw.projectedDistribution,
+      scoreBefore: idealDraw.scoreBefore,
+      scoreAfter: idealDraw.scoreAfter,
+      exactBucketHits: idealDraw.exactBucketHits,
+      exact: idealDraw.scoreAfter === 0,
+    };
+  });
+
+  const supportByUndrawn = new Map<number, string[]>();
+  for (const candidate of candidates) {
+    const labels = supportByUndrawn.get(candidate.targetUndrawnCount) ?? [];
+    labels.push(candidate.historicalMonthLabel);
+    supportByUndrawn.set(candidate.targetUndrawnCount, labels);
+  }
+
+  const bestByUndrawn = new Map<number, typeof candidates[number]>();
+  for (const candidate of candidates) {
+    const previous = bestByUndrawn.get(candidate.targetUndrawnCount);
+    if (
+      !previous ||
+      candidate.scoreAfter < previous.scoreAfter ||
+      (candidate.scoreAfter === previous.scoreAfter && candidate.exactBucketHits > previous.exactBucketHits) ||
+      (
+        candidate.scoreAfter === previous.scoreAfter &&
+        candidate.exactBucketHits === previous.exactBucketHits &&
+        candidate.historicalMonthLabel.localeCompare(previous.historicalMonthLabel) > 0
+      )
+    ) {
+      bestByUndrawn.set(candidate.targetUndrawnCount, candidate);
+    }
+  }
+
+  const rows: StageMatchAcceptancePlaybookRow[] = [...bestByUndrawn.values()]
+    .map((candidate) => {
+      const labels = supportByUndrawn.get(candidate.targetUndrawnCount) ?? [];
+      return {
+        ...candidate,
+        supportCount: labels.length,
+        totalComparableCount: comparableItems.length,
+        sameUndrawnMonthLabels: [...labels].sort((left, right) => right.localeCompare(left)),
+      };
+    })
+    .sort((left, right) => (
+      left.targetUndrawnCount - right.targetUndrawnCount ||
+      left.scoreAfter - right.scoreAfter ||
+      right.historicalMonthLabel.localeCompare(left.historicalMonthLabel)
+    ));
+
+  if (rows.some((row) => !row.exact)) {
+    warnings.push("Nearest rows appear where the historical stage cannot be matched exactly in one draw from the current bucket state.");
+  }
+
+  return {
+    bucketSets: bucketSetsFromDistribution(currentRow.numbers, currentRow.undrawn, maxBucket),
+    currentDistribution: currentRow.distribution,
+    workingMonthLabel,
+    expectedDrawCount,
+    targetStageDrawCount,
+    completedDrawCount,
+    comparableMonthCount: comparableItems.length,
+    expectedDrawCountSource,
+    rows,
+    warnings,
+  };
+}
+
 export function computeIdealMonthlyDraw(args: ComputeIdealMonthlyDrawArgs): IdealMonthlyDraw {
   const drawSize = normalizePositiveInteger(args.drawSize, DEFAULT_DRAW_SIZE);
   const maxBucket = Math.max(args.currentDistribution.length, args.targetDistribution.length, DEFAULT_MAX_BUCKET + 1) - 1;
@@ -661,6 +856,7 @@ export function computeIdealMonthlyDraw(args: ComputeIdealMonthlyDrawArgs): Idea
 
   return {
     bucketCounts: bestAllocation.map((count, times) => ({ times, count })),
+    projectedDistribution: applyMonthlyDrawAllocation(current, bestAllocation),
     freePicks: bestAllocation[maxBucket] ?? 0,
     scoreBefore: sumSquaredDistance(current, target),
     scoreAfter: bestScore,

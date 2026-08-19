@@ -6,6 +6,7 @@ import {
   MONTHLY_TRANSITION_BUCKET_LABELS,
   type MonthlyBucketExpectationRow,
   type MonthlyBucketFirstReachRow,
+  type MonthlyBucketMarkovProjectionRow,
   type MonthlyHeatBucketRow,
   type MonthlyLengthComparisonRow,
   type MonthlyTransitionLengthFilter,
@@ -178,6 +179,33 @@ const BucketPill: React.FC<{ bucket: number; label?: string }> = ({ bucket, labe
   </span>
 );
 
+const BucketMixStrip: React.FC<{ values: readonly number[]; ariaLabel: string }> = ({ values, ariaLabel }) => (
+  <div aria-label={ariaLabel} style={{ display: "flex", gap: 4, flexWrap: "wrap", minWidth: 280 }}>
+    {values.map((value, bucket) => (
+      <span
+        key={bucket}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 4,
+          border: `1px solid ${bucketColor(bucket)}`,
+          borderRadius: 999,
+          background: "#fff",
+          color: bucketColor(bucket),
+          padding: "2px 7px",
+          fontSize: 11,
+          fontWeight: 900,
+          whiteSpace: "nowrap",
+        }}
+        title={`${MONTHLY_TRANSITION_BUCKET_LABELS[bucket]} projected count ${formatWholeAwareNumber(value)}`}
+      >
+        <span>{bucket === 0 ? "U" : bucket === 8 ? "8+" : `${bucket}x`}</span>
+        <span style={{ color: "#0f172a" }}>{formatWholeAwareNumber(value)}</span>
+      </span>
+    ))}
+  </div>
+);
+
 const SectionHeader: React.FC<{
   title: string;
   helpLabel: string;
@@ -217,6 +245,56 @@ const CurrentExpectationTable: React.FC<{ rows: MonthlyBucketExpectationRow[] }>
             <td style={{ ...tdStyle, textAlign: "right" }}>{fmtPct(row.rawRate)}</td>
             <td style={{ ...tdStyle, textAlign: "right", fontWeight: 800 }}>{fmtPct(row.smoothedRate)}</td>
             <td style={{ ...tdStyle, textAlign: "right", fontWeight: 900 }}>{formatWholeAwareNumber(row.expectedHits)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+);
+
+const MarkovProjectionTable: React.FC<{ rows: MonthlyBucketMarkovProjectionRow[] }> = ({ rows }) => (
+  <div style={tableWrapStyle}>
+    <table style={{ width: "100%", minWidth: 1080, borderCollapse: "collapse" }}>
+      <thead>
+        <tr>
+          <th style={thStyle}>Step</th>
+          <th style={{ ...thStyle, textAlign: "right" }}>Stage months</th>
+          <th style={{ ...thStyle, textAlign: "right" }}>Trials</th>
+          <th style={{ ...thStyle, textAlign: "right" }}>Expected advances</th>
+          <th style={thStyle}>Strongest source</th>
+          <th style={thStyle}>State before</th>
+          <th style={thStyle}>Projected after</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.length === 0 ? (
+          <tr>
+            <td style={tdStyle} colSpan={7}>No Markov projection available until a valid planning month state exists.</td>
+          </tr>
+        ) : rows.map((row) => (
+          <tr key={row.drawOrdinal}>
+            <td style={{ ...tdStyle, fontWeight: 900 }}>D{row.drawOrdinal}</td>
+            <td style={{ ...tdStyle, textAlign: "right" }}>{row.monthsWithStage}</td>
+            <td style={{ ...tdStyle, textAlign: "right" }}>{row.evidenceTrials}</td>
+            <td style={{ ...tdStyle, textAlign: "right", fontWeight: 900 }}>{formatWholeAwareNumber(row.expectedAdvances)}</td>
+            <td style={tdStyle}>
+              {row.strongestSourceBucket === null ? (
+                "n/a"
+              ) : (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                  <BucketPill bucket={row.strongestSourceBucket} label={row.strongestSourceLabel} />
+                  <span style={{ color: "#64748b", fontWeight: 800 }}>
+                    {formatWholeAwareNumber(row.strongestExpectedAdvances)}
+                  </span>
+                </span>
+              )}
+            </td>
+            <td style={tdStyle}>
+              <BucketMixStrip values={row.distributionBefore} ariaLabel={`Projected Markov state before D${row.drawOrdinal}`} />
+            </td>
+            <td style={tdStyle}>
+              <BucketMixStrip values={row.distributionAfter} ariaLabel={`Projected Markov state after D${row.drawOrdinal}`} />
+            </td>
           </tr>
         ))}
       </tbody>
@@ -491,6 +569,17 @@ export const MonthlyBucketTransitionLabPanel: React.FC<MonthlyBucketTransitionLa
           <span>Expected next hits is count now multiplied by the smoothed draw-hit rate. It is an expected count, not a forced target.</span>
         </SectionHeader>
         <CurrentExpectationTable rows={analysis.currentExpectations} />
+      </div>
+
+      <div style={sectionStyle}>
+        <SectionHeader title="Markov Forward Bucket Projection" helpLabel="Markov forward bucket projection help">
+          <span>This is a one-step Markov chain over monthly bucket states. At each future draw stage, a number either stays in its current bucket or advances one bucket if it is drawn.</span>
+          <span>The advance rate is the same smoothed empirical rate used by the transition lab for that draw ordinal and bucket. This is observe-only movement evidence, not a candidate selector.</span>
+        </SectionHeader>
+        <div style={{ ...noteStyle, marginBottom: 8 }}>
+          Starts from the current monthly bucket distribution and projects the remaining draw stages through the working month. Decimal counts are expected values, not literal numbers.
+        </div>
+        <MarkovProjectionTable rows={analysis.markovProjectionRows} />
       </div>
 
       <div style={sectionStyle}>

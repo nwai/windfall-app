@@ -128,6 +128,18 @@ export interface MonthlyHeatBucketRow {
   smoothedRate: number;
 }
 
+export interface MonthlyBucketMarkovProjectionRow {
+  drawOrdinal: number;
+  monthsWithStage: number;
+  evidenceTrials: number;
+  distributionBefore: number[];
+  distributionAfter: number[];
+  expectedAdvances: number;
+  strongestSourceBucket: MonthlyTransitionBucketIndex | null;
+  strongestSourceLabel: string;
+  strongestExpectedAdvances: number;
+}
+
 export type MonthlyTransitionSupport = "above" | "neutral" | "below" | "thin";
 
 export interface MonthlyTransitionNumberContext {
@@ -161,6 +173,7 @@ export interface MonthlyBucketTransitionAnalysis {
   firstReachRows: MonthlyBucketFirstReachRow[];
   monthLengthComparisonRows: MonthlyLengthComparisonRow[];
   heatBucketRows: MonthlyHeatBucketRow[];
+  markovProjectionRows: MonthlyBucketMarkovProjectionRow[];
 }
 
 interface ParsedDraw {
@@ -645,6 +658,76 @@ const buildHeatBucketRows = (
   return output;
 };
 
+const buildMarkovProjectionRows = (
+  months: readonly MonthlyBucketTransitionMonth[],
+  selectedMonthLength: MonthlyTransitionLengthFilter,
+  planningState: MonthlyBucketTransitionPlanningState | null,
+  globalRates: readonly RateCount[],
+  priorStrength: number,
+): MonthlyBucketMarkovProjectionRow[] => {
+  if (!planningState) return [];
+  const selectedMonths = months.filter((month) => monthMatchesLength(month, selectedMonthLength));
+  let distribution = [...planningState.currentDistribution];
+  const rows: MonthlyBucketMarkovProjectionRow[] = [];
+
+  for (
+    let drawOrdinal = planningState.nextDrawOrdinal;
+    drawOrdinal <= planningState.expectedDrawCount;
+    drawOrdinal += 1
+  ) {
+    const stageMonths = selectedMonths.filter((month) => (
+      month.events.some((event) => event.drawOrdinal === drawOrdinal)
+    ));
+    const stageRates = aggregateBucketRates(
+      selectedMonths,
+      (event) => event.drawOrdinal === drawOrdinal,
+    );
+    const nextDistribution = new Array(9).fill(0);
+    const expectedByBucket = new Array(9).fill(0);
+
+    for (let bucket = 0; bucket <= 8; bucket += 1) {
+      const bucketIndex = bucket as MonthlyTransitionBucketIndex;
+      const row = stageRates[bucketIndex];
+      const prior = globalPriorRate(globalRates, bucketIndex);
+      const advanceRate = smoothedRate(row.hits, row.trials, prior, priorStrength);
+      const beforeCount = distribution[bucketIndex] ?? 0;
+      const expectedAdvance = beforeCount * advanceRate;
+      const expectedStay = Math.max(0, beforeCount - expectedAdvance);
+      expectedByBucket[bucketIndex] = expectedAdvance;
+      nextDistribution[bucketIndex] += expectedStay;
+      nextDistribution[Math.min(8, bucketIndex + 1)] += expectedAdvance;
+    }
+
+    const expectedAdvances = expectedByBucket.reduce((sum, value) => sum + value, 0);
+    let strongestSourceBucket: MonthlyTransitionBucketIndex | null = null;
+    let strongestExpectedAdvances = 0;
+    expectedByBucket.forEach((value, bucket) => {
+      if (value > strongestExpectedAdvances) {
+        strongestExpectedAdvances = value;
+        strongestSourceBucket = bucket as MonthlyTransitionBucketIndex;
+      }
+    });
+
+    rows.push({
+      drawOrdinal,
+      monthsWithStage: stageMonths.length,
+      evidenceTrials: stageRates.reduce((sum, row) => sum + row.trials, 0),
+      distributionBefore: distribution,
+      distributionAfter: nextDistribution,
+      expectedAdvances,
+      strongestSourceBucket,
+      strongestSourceLabel: strongestSourceBucket === null
+        ? "n/a"
+        : MONTHLY_TRANSITION_BUCKET_LABELS[strongestSourceBucket],
+      strongestExpectedAdvances,
+    });
+
+    distribution = nextDistribution;
+  }
+
+  return rows;
+};
+
 export const buildMonthlyTransitionNumberContext = (
   analysis: MonthlyBucketTransitionAnalysis,
   maxNumber = DEFAULT_MAX_NUMBER,
@@ -757,6 +840,13 @@ export const analyzeMonthlyBucketTransitions = (
     firstReachRows: buildFirstReachRows(baselineMonths, selectedMonthLength, planningState),
     monthLengthComparisonRows: buildMonthLengthComparisonRows(baselineMonths),
     heatBucketRows: buildHeatBucketRows(baselineMonths, selectedMonthLength, globalRates, priorStrength),
+    markovProjectionRows: buildMarkovProjectionRows(
+      baselineMonths,
+      selectedMonthLength,
+      planningState,
+      globalRates,
+      priorStrength,
+    ),
   };
 };
 

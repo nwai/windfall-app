@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import type { Draw } from "../types";
 import {
+  analyzeStageMatchAcceptancePlaybook,
   analyzeMonthlyDrawSummary,
   analyzeStageIdealDrawModel,
   bucketLabelForTimes,
@@ -20,12 +21,14 @@ import {
   type MonthlyDrawSummary,
   type MonthlyFrequencyCount,
   type MonthlyIdealDrawState,
+  type StageMatchAcceptancePlaybookRow,
   type StageIdealDrawState,
 } from "../lib/monthlyDrawSummary";
 import {
   formatUserExclusionReminder,
   normalizeUserExclusionLocks,
 } from "../lib/userExclusionLocks";
+import type { Sde1Hc3ContextAdvice } from "../lib/sde1Hc3ContextAdvice";
 
 export type {
   AvgBucketEntry,
@@ -51,6 +54,7 @@ interface MonthlyDrawsSummaryPanelProps {
   onStageIdealDrawStateChange?: (state: StageIdealDrawState | null) => void;
   onSimulateNumbers?: (numbers: number[]) => void;
   excludedNumbers?: number[];
+  sde1Hc3Advice?: Sde1Hc3ContextAdvice | null;
 }
 
 type DrawLimit = number | "all";
@@ -67,6 +71,98 @@ const emptySelections = (): SelectedByBucket => ({
   times7: [],
   times8: [],
 });
+
+const numberListSignature = (numbers: readonly number[]): string => numbers.join(",");
+
+const bucketSetsSignature = (sets: MonthlyBucketSets): string => (
+  MONTHLY_BUCKET_KEYS
+    .map((key) => `${key}:${Array.from(sets[key]).sort((a, b) => a - b).join(",")}`)
+    .join("|")
+);
+
+const bucketLabelsSignature = (labels: Record<number, string>): string => (
+  Object.entries(labels)
+    .sort(([left], [right]) => Number(left) - Number(right))
+    .map(([number, label]) => `${number}:${label}`)
+    .join("|")
+);
+
+const avgBucketsSignature = (rows: AvgBucketEntry[]): string => (
+  rows.map((row) => `${row.times}:${row.avg}`).join("|")
+);
+
+const monthlySelectionsSignature = (selections: MonthlyBucketSelections): string => (
+  MONTHLY_BUCKET_KEYS
+    .map((key) => `${key}:${selections[key].join(",")}`)
+    .join("|")
+);
+
+const monthlyConstraintPayloadSignature = (payload: MonthlyConstraintPayload | null): string => (
+  payload
+    ? [
+      MONTHLY_BUCKET_KEYS.map((key) => `${key}:${payload.constraints[key]}`).join("|"),
+      bucketSetsSignature(payload.buckets),
+      monthlySelectionsSignature(payload.selectedNumbersByBucket ?? emptySelections()),
+      payload.selectedNumberBiasEnabled ? "bias-on" : "bias-off",
+    ].join("::")
+    : "null"
+);
+
+const adviceToneStyles: Record<Sde1Hc3ContextAdvice["tone"], React.CSSProperties> = {
+  strong: { background: "#f0fdf4", borderColor: "#86efac", color: "#166534" },
+  moderate: { background: "#eff6ff", borderColor: "#bfdbfe", color: "#155a8a" },
+  neutral: { background: "#f8fafc", borderColor: "#dbe3ec", color: "#334155" },
+  caution: { background: "#fff7ed", borderColor: "#fed7aa", color: "#9a3412" },
+  insufficient: { background: "#f8fafc", borderColor: "#dbe3ec", color: "#334155" },
+};
+
+const monthlyIdealDrawStateSignature = (state: MonthlyIdealDrawState | null): string => (
+  state
+    ? [
+      state.effectiveMonthLabel,
+      state.effectiveMonthIsSynthetic ? "synthetic" : "observed",
+      numberListSignature(state.targetDistribution),
+      numberListSignature(state.idealDrawBucketCounts),
+      bucketSetsSignature(state.bucketSets),
+    ].join("::")
+    : "null"
+);
+
+const stageIdealDrawStateSignature = (state: StageIdealDrawState | null): string => (
+  state
+    ? [
+      state.workingMonthLabel,
+      state.expectedDrawCount,
+      state.targetStageDrawCount,
+      state.completedDrawCount,
+      state.comparableMonthCount,
+      state.expectedDrawCountSource,
+      numberListSignature(state.currentDistribution),
+      numberListSignature(state.targetDistribution),
+      numberListSignature(state.idealDrawBucketCounts),
+      state.warnings.join("|"),
+      bucketSetsSignature(state.bucketSets),
+    ].join("::")
+    : "null"
+);
+
+const stageMatchPlaybookSignature = (rows: readonly StageMatchAcceptancePlaybookRow[] | null | undefined): string => (
+  rows?.length
+    ? rows
+      .map((row) => [
+        row.targetUndrawnCount,
+        row.historicalMonthLabel,
+        row.scoreAfter,
+        numberListSignature(row.acceptanceNeedsBucketCounts),
+        numberListSignature(row.projectedDistribution),
+      ].join(":"))
+      .join("|")
+    : "null"
+);
+
+const stageMatchRowKey = (row: StageMatchAcceptancePlaybookRow): string => (
+  `${row.targetUndrawnCount}-${row.historicalMonthLabel}`
+);
 
 const bucketMeta: { key: MonthlyBucketKey; times: number; label: string }[] = MONTHLY_BUCKET_KEYS.map((key, index) => ({
   key,
@@ -380,6 +476,23 @@ const FrequencyChips: React.FC<{ counts: MonthlyFrequencyCount[]; includeZero?: 
   </div>
 );
 
+const BucketCountChips: React.FC<{ counts: readonly number[]; includeZeroCounts?: boolean }> = ({
+  counts,
+  includeZeroCounts = false,
+}) => {
+  const visible = counts
+    .map((count, times) => ({ times, count }))
+    .filter(({ count }) => includeZeroCounts || count > 0);
+  if (!visible.length) return <span style={{ color: "#94a3b8" }}>none</span>;
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+      {visible.map(({ times, count }) => (
+        <BucketChip key={times} times={times} value={count} muted={count === 0} />
+      ))}
+    </div>
+  );
+};
+
 const TargetGrid: React.FC<{ summary: MonthlyDrawSummary }> = ({ summary }) => (
   <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(112px, 1fr))", gap: 6 }}>
     {summary.bucketTargets.map((bucket) => {
@@ -420,6 +533,7 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
   onStageIdealDrawStateChange,
   onSimulateNumbers,
   excludedNumbers = [],
+  sde1Hc3Advice = null,
   today,
 }) => {
   const [drawLimit, setDrawLimit] = useState<DrawLimit>("all");
@@ -428,9 +542,12 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
   const [selectedByBucket, setSelectedByBucket] = useState<SelectedByBucket>(() => emptySelections());
   const [simulateResult, setSimulateResult] = useState<number[] | null>(null);
   const [selectedNumberBiasEnabled, setSelectedNumberBiasEnabled] = useState<boolean>(false);
+  const [stageMatchApplyMessage, setStageMatchApplyMessage] = useState<string>("");
+  const [stageMatchAppliedKey, setStageMatchAppliedKey] = useState<string>("");
+  const userExcludedKey = normalizeUserExclusionLocks(excludedNumbers).join(",");
   const userExcludedNumbers = useMemo(
-    () => normalizeUserExclusionLocks(excludedNumbers),
-    [excludedNumbers],
+    () => (userExcludedKey ? userExcludedKey.split(",").map(Number) : []),
+    [userExcludedKey],
   );
   const userExcludedSet = useMemo(() => new Set(userExcludedNumbers), [userExcludedNumbers]);
   const userExclusionReminder = useMemo(
@@ -463,6 +580,29 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
     today,
   }), [averageDrawCountFilter, history, stageExpectedDrawCount, today]);
 
+  const stageMatchPlaybook = useMemo(() => analyzeStageMatchAcceptancePlaybook(history, {
+    drawLimitPerMonth: "all",
+    averageDrawCountFilter,
+    expectedDrawCountOverride: stageExpectedDrawCount,
+    today,
+  }), [averageDrawCountFilter, history, stageExpectedDrawCount, today]);
+  const stageMatchPlaybookSignatureValue = useMemo(
+    () => stageMatchPlaybook
+      ? [
+        stageMatchPlaybook.workingMonthLabel,
+        stageMatchPlaybook.expectedDrawCount,
+        stageMatchPlaybook.targetStageDrawCount,
+        stageMatchPlaybookSignature(stageMatchPlaybook.rows),
+      ].join("::")
+      : "null",
+    [stageMatchPlaybook],
+  );
+
+  useEffect(() => {
+    setStageMatchApplyMessage("");
+    setStageMatchAppliedKey("");
+  }, [stageMatchPlaybookSignatureValue]);
+
   const constraints = useMemo(
     () => monthlyFrequencyConstraintsFromSelections(selectedByBucket),
     [selectedByBucket],
@@ -474,6 +614,61 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
   );
   const activeBucketSets = summary.effectiveBucketSets;
   const activeBucketLabels = summary.effectiveBucketLabels;
+  const activeBucketSetsSignature = useMemo(() => bucketSetsSignature(activeBucketSets), [activeBucketSets]);
+  const activeBucketLabelsSignature = useMemo(() => bucketLabelsSignature(activeBucketLabels), [activeBucketLabels]);
+  const avgBucketPayload = summary.eligibleRows.length ? summary.bucketAverages : [];
+  const avgBucketPayloadSignature = useMemo(() => avgBucketsSignature(avgBucketPayload), [avgBucketPayload]);
+  const idealDrawStatePayload = useMemo<MonthlyIdealDrawState | null>(() => {
+    if (!summary.idealDraw || !summary.eligibleRows.length) return null;
+    return {
+      bucketSets: summary.effectiveBucketSets,
+      targetDistribution: [...summary.targetDistribution],
+      idealDrawBucketCounts: summary.idealDraw.bucketCounts.map(({ count }) => count),
+      effectiveMonthLabel: summary.effectiveMonthLabel,
+      effectiveMonthIsSynthetic: summary.effectiveMonthIsSynthetic,
+    };
+  }, [
+    summary.effectiveBucketSets,
+    summary.effectiveMonthIsSynthetic,
+    summary.effectiveMonthLabel,
+    summary.eligibleRows.length,
+    summary.idealDraw,
+    summary.targetDistribution,
+  ]);
+  const idealDrawStatePayloadSignature = useMemo(
+    () => monthlyIdealDrawStateSignature(idealDrawStatePayload),
+    [idealDrawStatePayload],
+  );
+  const monthlyConstraintPayload = useMemo<MonthlyConstraintPayload | null>(() => {
+    if (!constructiveFillEnabled || !summary.latestRow) return null;
+    return {
+      constraints,
+      buckets: activeBucketSets,
+      selectedNumbersByBucket: selectedByBucket,
+      selectedNumberBiasEnabled,
+    };
+  }, [
+    activeBucketSets,
+    constraints,
+    constructiveFillEnabled,
+    selectedByBucket,
+    selectedNumberBiasEnabled,
+    summary.latestRow,
+  ]);
+  const monthlyConstraintPayloadSignatureValue = useMemo(
+    () => monthlyConstraintPayloadSignature(monthlyConstraintPayload),
+    [monthlyConstraintPayload],
+  );
+  const stageIdealDrawStateSignatureValue = useMemo(
+    () => stageIdealDrawStateSignature(stageIdealDrawState),
+    [stageIdealDrawState],
+  );
+  const monthlyConstraintPublishedSignature = useRef<string | null>(null);
+  const bucketInfoPublishedSignature = useRef<string | null>(null);
+  const bucketSetsPublishedSignature = useRef<string | null>(null);
+  const avgBucketsPublishedSignature = useRef<string | null>(null);
+  const stageIdealDrawPublishedSignature = useRef<string | null>(null);
+  const idealDrawPublishedSignature = useRef<string | null>(null);
 
   const projectedBucketCounts = useMemo(
     () => projectMonthlyBucketCounts(activeBucketSets, selectedByBucket),
@@ -497,58 +692,53 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
       }, emptySelections());
       return sameSelections(previous, pruned) ? previous : pruned;
     });
-  }, [activeBucketSets, userExcludedSet]);
+  }, [activeBucketSets, activeBucketSetsSignature, userExcludedKey, userExcludedSet]);
 
   useEffect(() => {
+    if (!onBucketInfoChange) return;
+    if (bucketInfoPublishedSignature.current === activeBucketLabelsSignature) return;
+    bucketInfoPublishedSignature.current = activeBucketLabelsSignature;
     onBucketInfoChange?.({ labels: activeBucketLabels });
-  }, [activeBucketLabels, onBucketInfoChange]);
+  }, [activeBucketLabels, activeBucketLabelsSignature, onBucketInfoChange]);
 
   useEffect(() => {
+    if (!onBucketSetsChange) return;
+    if (bucketSetsPublishedSignature.current === activeBucketSetsSignature) return;
+    bucketSetsPublishedSignature.current = activeBucketSetsSignature;
     onBucketSetsChange?.(activeBucketSets);
-  }, [activeBucketSets, onBucketSetsChange]);
+  }, [activeBucketSets, activeBucketSetsSignature, onBucketSetsChange]);
 
   useEffect(() => {
-    onAvgBucketsChange?.(summary.eligibleRows.length ? summary.bucketAverages : []);
-  }, [onAvgBucketsChange, summary.bucketAverages, summary.eligibleRows.length]);
+    if (!onAvgBucketsChange) return;
+    if (avgBucketsPublishedSignature.current === avgBucketPayloadSignature) return;
+    avgBucketsPublishedSignature.current = avgBucketPayloadSignature;
+    onAvgBucketsChange(avgBucketPayload);
+  }, [avgBucketPayload, avgBucketPayloadSignature, onAvgBucketsChange]);
 
   useEffect(() => {
-    onStageIdealDrawStateChange?.(stageIdealDrawState);
-  }, [onStageIdealDrawStateChange, stageIdealDrawState]);
+    if (!onStageIdealDrawStateChange) return;
+    if (stageIdealDrawPublishedSignature.current === stageIdealDrawStateSignatureValue) return;
+    stageIdealDrawPublishedSignature.current = stageIdealDrawStateSignatureValue;
+    onStageIdealDrawStateChange(stageIdealDrawState);
+  }, [onStageIdealDrawStateChange, stageIdealDrawState, stageIdealDrawStateSignatureValue]);
 
   useEffect(() => {
-    if (!summary.idealDraw || !summary.eligibleRows.length) {
-      onIdealDrawStateChange?.(null);
-      return;
-    }
-    onIdealDrawStateChange?.({
-      bucketSets: summary.effectiveBucketSets,
-      targetDistribution: [...summary.targetDistribution],
-      idealDrawBucketCounts: summary.idealDraw.bucketCounts.map(({ count }) => count),
-      effectiveMonthLabel: summary.effectiveMonthLabel,
-      effectiveMonthIsSynthetic: summary.effectiveMonthIsSynthetic,
-    });
+    if (!onIdealDrawStateChange) return;
+    if (idealDrawPublishedSignature.current === idealDrawStatePayloadSignature) return;
+    idealDrawPublishedSignature.current = idealDrawStatePayloadSignature;
+    onIdealDrawStateChange(idealDrawStatePayload);
+  }, [idealDrawStatePayload, idealDrawStatePayloadSignature, onIdealDrawStateChange]);
+
+  useEffect(() => {
+    if (!onConstraintsChange) return;
+    if (monthlyConstraintPublishedSignature.current === monthlyConstraintPayloadSignatureValue) return;
+    monthlyConstraintPublishedSignature.current = monthlyConstraintPayloadSignatureValue;
+    onConstraintsChange(monthlyConstraintPayload);
   }, [
-    onIdealDrawStateChange,
-    summary.effectiveBucketSets,
-    summary.effectiveMonthIsSynthetic,
-    summary.effectiveMonthLabel,
-    summary.eligibleRows.length,
-    summary.idealDraw,
-    summary.targetDistribution,
+    monthlyConstraintPayload,
+    monthlyConstraintPayloadSignatureValue,
+    onConstraintsChange,
   ]);
-
-  useEffect(() => {
-    if (!constructiveFillEnabled || !summary.latestRow) {
-      onConstraintsChange?.(null);
-      return;
-    }
-    onConstraintsChange?.({
-      constraints,
-      buckets: activeBucketSets,
-      selectedNumbersByBucket: selectedByBucket,
-      selectedNumberBiasEnabled,
-    });
-  }, [activeBucketSets, constraints, constructiveFillEnabled, onConstraintsChange, selectedByBucket, selectedNumberBiasEnabled, summary.latestRow]);
 
   const toggleBucketNumber = (bucketKey: MonthlyBucketKey, n: number) => {
     if (userExcludedSet.has(n)) return;
@@ -562,6 +752,7 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
       };
     });
     setSimulateResult(null);
+    setStageMatchAppliedKey("");
   };
 
   const handleUseSelected = () => {
@@ -577,6 +768,39 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
   const clearSelections = () => {
     setSelectedByBucket(emptySelections());
     setSimulateResult(null);
+    setStageMatchApplyMessage("");
+    setStageMatchAppliedKey("");
+  };
+
+  const applyStageMatchPlaybookRow = (row: StageMatchAcceptancePlaybookRow) => {
+    const next = emptySelections();
+    let requested = 0;
+    let selected = 0;
+    const shortBuckets: string[] = [];
+
+    row.acceptanceNeedsBucketCounts.forEach((count, index) => {
+      const key = MONTHLY_BUCKET_KEYS[index];
+      if (!key || count <= 0) return;
+      requested += count;
+      const available = Array.from(activeBucketSets[key])
+        .filter((number) => !userExcludedSet.has(number))
+        .sort((a, b) => a - b);
+      const picked = available.slice(0, count);
+      next[key] = picked;
+      selected += picked.length;
+      if (picked.length < count) {
+        shortBuckets.push(`${bucketLabelForTimes(index)} ${picked.length}/${count}`);
+      }
+    });
+
+    setSelectedByBucket(next);
+    setSimulateResult(null);
+    setStageMatchAppliedKey(stageMatchRowKey(row));
+    setStageMatchApplyMessage([
+      `Applied ${row.historicalMonthLabel} U${row.targetUndrawnCount} playbook: ${selected}/${requested} bucket placeholders selected.`,
+      shortBuckets.length ? `Short buckets: ${shortBuckets.join(", ")}.` : "",
+      "Swap exact numbers if desired, or turn on Use counts when constructing candidates to enforce the bucket quantities.",
+    ].filter(Boolean).join(" "));
   };
 
   const hasData = summary.rows.length > 0;
@@ -605,6 +829,41 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
           </div>
         </div>
       </div>
+
+      {sde1Hc3Advice ? (
+        <div style={{
+          marginTop: 12,
+          border: `1px solid ${adviceToneStyles[sde1Hc3Advice.tone].borderColor}`,
+          background: adviceToneStyles[sde1Hc3Advice.tone].background,
+          borderRadius: 8,
+          padding: "10px 12px",
+          display: "flex",
+          gap: 10,
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          flexWrap: "wrap",
+        }}>
+          <div style={{ minWidth: 240, flex: "1 1 420px" }}>
+            <div style={{ fontSize: 12, color: "#64748b", fontWeight: 900 }}>Current draw-context advice</div>
+            <strong style={{ color: adviceToneStyles[sde1Hc3Advice.tone].color }}>{sde1Hc3Advice.title}</strong>
+            <div style={{ marginTop: 3, fontSize: 12, color: "#475569", lineHeight: 1.45 }}>{sde1Hc3Advice.message}</div>
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+            {sde1Hc3Advice.chips.map((chip) => (
+              <span key={chip} style={{
+                border: "1px solid rgba(15, 23, 42, 0.14)",
+                borderRadius: 999,
+                padding: "2px 8px",
+                background: "#ffffff",
+                color: "#334155",
+                fontSize: 12,
+                fontWeight: 900,
+                whiteSpace: "nowrap",
+              }}>{chip}</span>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       <div style={toolbarStyle}>
         <label style={controlLabelStyle}>
@@ -669,7 +928,10 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
               </span>
             </div>
             <div style={{ overflowX: "auto", maxHeight: 430 }}>
-              <table style={{ width: "100%", minWidth: 760, borderCollapse: "collapse" }}>
+              <table
+                data-testid="monthly-buckets-table"
+                style={{ width: "100%", minWidth: 760, borderCollapse: "collapse" }}
+              >
                 <thead style={{ position: "sticky", top: 0, background: "#f8fafc", zIndex: 1 }}>
                   <tr>
                     <th style={thStyle}>Month</th>
@@ -759,6 +1021,117 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
               ) : (
                 <div style={{ color: "#64748b", fontSize: 12 }}>
                   Stage IDM unavailable: no comparable months for the resolved draw count and next stage.
+                </div>
+              )}
+            </div>
+
+            <div style={{ marginTop: 12, borderTop: "1px solid #e2e8f0", paddingTop: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "flex-start", flexWrap: "wrap", marginBottom: 8 }}>
+                <div>
+                  <strong style={{ color: "#0f172a" }}>Stage-Match Acceptance Playbook</strong>
+                  <div style={{ color: "#64748b", fontSize: 12, maxWidth: 760, lineHeight: 1.45 }}>
+                    Historical stage paths from prior comparable months. Apply loads editable bucket placeholders into Acceptance Needs; it is a diagnostic shortcut, not a probability claim.
+                  </div>
+                </div>
+                {stageMatchPlaybook && (
+                  <span style={{ color: "#475569", fontSize: 12, fontWeight: 800, textAlign: "right" }}>
+                    {stageMatchPlaybook.workingMonthLabel} · D{stageMatchPlaybook.targetStageDrawCount} of {stageMatchPlaybook.expectedDrawCount} · {stageMatchPlaybook.comparableMonthCount} comparable
+                  </span>
+                )}
+              </div>
+
+              {stageMatchPlaybook ? (
+                <>
+                  <div style={{ overflowX: "auto", maxHeight: 290, border: "1px solid #e2e8f0", borderRadius: 8 }}>
+                    <table style={{ width: "100%", minWidth: 960, borderCollapse: "collapse" }}>
+                      <thead style={{ position: "sticky", top: 0, background: "#f8fafc", zIndex: 1 }}>
+                        <tr>
+                          <th style={thStyle}>Target Undrawn</th>
+                          <th style={thStyle}>Best Historical Stage</th>
+                          <th style={thStyle}>Support</th>
+                          <th style={thStyle}>Needs To Draw Now</th>
+                          <th style={thStyle}>Projected After Draw</th>
+                          <th style={thStyle}>Historical Target</th>
+                          <th style={thStyle}>Fit</th>
+                          <th style={thStyle}>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {stageMatchPlaybook.rows.map((row) => {
+                          const rowKey = stageMatchRowKey(row);
+                          const rowApplied = stageMatchAppliedKey === rowKey;
+                          return (
+                          <tr key={rowKey} style={{ background: rowApplied ? "#f0fdf4" : undefined }}>
+                            <td style={{ ...tdStyle, fontWeight: 900, fontVariantNumeric: "tabular-nums" }}>
+                              U{row.targetUndrawnCount}
+                            </td>
+                            <td style={{ ...tdStyle, fontWeight: 800 }}>
+                              {row.historicalMonthLabel} · D{stageMatchPlaybook.targetStageDrawCount}
+                            </td>
+                            <td style={{ ...tdStyle, color: "#475569", fontVariantNumeric: "tabular-nums" }}>
+                              {row.supportCount}/{row.totalComparableCount}
+                              <div style={{ marginTop: 2, color: "#94a3b8", fontSize: 11 }}>
+                                {row.sameUndrawnMonthLabels.slice(0, 3).join(", ")}
+                                {row.sameUndrawnMonthLabels.length > 3 ? ` +${row.sameUndrawnMonthLabels.length - 3}` : ""}
+                              </div>
+                            </td>
+                            <td style={tdStyle}><BucketCountChips counts={row.acceptanceNeedsBucketCounts} /></td>
+                            <td style={tdStyle}><BucketCountChips counts={row.projectedDistribution} includeZeroCounts /></td>
+                            <td style={tdStyle}><BucketCountChips counts={row.historicalDistribution} includeZeroCounts /></td>
+                            <td style={tdStyle}>
+                              <span style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                minHeight: 24,
+                                borderRadius: 999,
+                                padding: "2px 8px",
+                                background: row.exact ? "#dcfce7" : "#fffbeb",
+                                border: `1px solid ${row.exact ? "#86efac" : "#fde68a"}`,
+                                color: row.exact ? "#166534" : "#92400e",
+                                fontWeight: 900,
+                                fontVariantNumeric: "tabular-nums",
+                                whiteSpace: "nowrap",
+                              }}>
+                                {row.exact ? "Exact" : "Nearest"} · SSD {row.scoreAfter}
+                              </span>
+                            </td>
+                            <td style={tdStyle}>
+                              <button
+                                type="button"
+                                onClick={() => applyStageMatchPlaybookRow(row)}
+                                aria-pressed={rowApplied}
+                                style={{
+                                  minHeight: 30,
+                                  whiteSpace: "nowrap",
+                                  borderColor: rowApplied ? "#16a34a" : undefined,
+                                  background: rowApplied ? "#16a34a" : undefined,
+                                  color: rowApplied ? "#fff" : undefined,
+                                  fontWeight: rowApplied ? 900 : undefined,
+                                }}
+                              >
+                                {rowApplied ? "Applied" : "Apply"}
+                              </button>
+                            </td>
+                          </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  {stageMatchApplyMessage && (
+                    <div role="status" style={{ marginTop: 8, color: "#475569", fontSize: 12, lineHeight: 1.45 }}>
+                      {stageMatchApplyMessage}
+                    </div>
+                  )}
+                  {stageMatchPlaybook.warnings.length > 0 && (
+                    <div style={{ marginTop: 8, color: "#92400e", fontSize: 12, lineHeight: 1.45 }}>
+                      {stageMatchPlaybook.warnings.join(" ")}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div style={{ color: "#64748b", fontSize: 12 }}>
+                  Stage-match playbook unavailable: no prior comparable months reached this planning stage.
                 </div>
               )}
             </div>

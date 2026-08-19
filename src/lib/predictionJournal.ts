@@ -4,7 +4,7 @@ import type { SelectionInsightsSnapshot } from "./selectionInsights";
 
 export const PREDICTION_JOURNAL_STORAGE_KEY = "windfall:prediction-journal:v1";
 
-export type PredictionTargetKind = "nextDraw" | "next3Draws" | "restOfMonth";
+export type PredictionTargetKind = "nextDraw" | "next2Draws" | "next3Draws" | "restOfMonth";
 
 export type PredictionBucketKey =
   | "undrawn"
@@ -24,8 +24,10 @@ export type PredictionJournalReviewStatus = "notReviewed" | "reviewedByUser";
 export const PREDICTION_JOURNAL_SELECTION_REASON_LABELS = {
   selectedRandomly: "Selected randomly",
   dgaPattern: "Observed pattern in DGA grid",
+  dgaConstellationDiagnostic: "Used DGA constellation diagnostic",
   monthlyBucketStatePattern: "Observed pattern in Monthly bucket state",
   idmBuckets: "Adhered to IDM buckets",
+  stageMatchAcceptancePlaybook: "Used Stage-Match Acceptance Playbook",
   latestNeighbourMainSix: "Used ± to choose main 6",
   selectionInsights: "Used Selection insights to choose numbers",
   officialQuickpickPasteWeighted: "Created official TattsLotto quickpick to generate candidates, then pasted them into Paste-weighted generator",
@@ -114,6 +116,40 @@ export interface PredictionJournalSelectionInsightsProvenance {
   predictedCompanions: SelectionInsightsSnapshot["predictedCompanions"];
 }
 
+export type PredictionJournalStrictDroughtQuotaMode = "off" | "manual" | "advised";
+export type PredictionJournalStrictDroughtQuotaConfidence = "low" | "moderate" | "strong";
+export type PredictionJournalStrictDroughtQuotaSource = "exact-stage" | "draw-ordinal" | "all-baseline" | "insufficient";
+
+export interface PredictionJournalStrictDroughtQuotaAdviceWatch {
+  shouldApplyQuota: boolean;
+  recommendedMinCount: number;
+  confidence: PredictionJournalStrictDroughtQuotaConfidence;
+  source: PredictionJournalStrictDroughtQuotaSource;
+  sourceLabel: string;
+  reason: string;
+  traceLabel: string;
+  trials: number;
+  averageHits: number;
+  expectedRandomAverageHits: number;
+  oneToThreeHitRate: number;
+  expectedRandomOneToThreeHitRate: number;
+  oneToThreeLift: number;
+  zeroHitRate: number;
+  expectedRandomZeroHitRate: number;
+}
+
+export interface PredictionJournalStrictDroughtQuotaWatch {
+  version: 1;
+  mode: PredictionJournalStrictDroughtQuotaMode;
+  manualMin: number;
+  effectiveMin: number;
+  active: boolean;
+  eligibleNumbers: number[];
+  shortlistTop: number;
+  strictThreshold: number;
+  advice: PredictionJournalStrictDroughtQuotaAdviceWatch;
+}
+
 export interface PredictionJournalProvenance {
   version: 1;
   selectedNumbers: number[];
@@ -137,6 +173,7 @@ export interface PredictionJournalProvenance {
     effectiveGeneration: number[];
   };
   droughtBreakShortlist: PredictionJournalDroughtBreakProvenance;
+  strictDroughtQuota: PredictionJournalStrictDroughtQuotaWatch;
   selectionInsights?: PredictionJournalSelectionInsightsProvenance;
 }
 
@@ -236,6 +273,7 @@ const BUCKET_LABELS: Record<PredictionBucketKey, string> = {
 
 const TARGET_COMPLETE_COUNTS: Record<PredictionTargetKind, number> = {
   nextDraw: 1,
+  next2Draws: 2,
   next3Draws: 3,
   restOfMonth: Number.POSITIVE_INFINITY,
 };
@@ -295,7 +333,7 @@ const normalizeRatio = (value: unknown): string | undefined => {
   if (!match) return undefined;
   const odd = Number(match[1]);
   const even = Number(match[2]);
-  if (!Number.isInteger(odd) || !Number.isInteger(even) || odd < 0 || even < 0 || odd + even <= 0) {
+  if (!Number.isInteger(odd) || !Number.isInteger(even) || odd < 0 || even < 0 || odd + even !== 8) {
     return undefined;
   }
   return `${odd}:${even}`;
@@ -429,6 +467,73 @@ const setupNumberList = (setup: Partial<AppPresetSnapshot> & Record<string, any>
   normalizeNumberList(setup[key], 1, 45) ?? []
 );
 
+const normalizeFiniteNumber = (value: unknown, fallback = 0): number => {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const normalizeStrictDroughtQuotaMode = (value: unknown): PredictionJournalStrictDroughtQuotaMode => (
+  value === "manual" || value === "advised" ? value : "off"
+);
+
+const normalizeStrictDroughtQuotaConfidence = (value: unknown): PredictionJournalStrictDroughtQuotaConfidence => (
+  value === "moderate" || value === "strong" ? value : "low"
+);
+
+const normalizeStrictDroughtQuotaSource = (value: unknown): PredictionJournalStrictDroughtQuotaSource => (
+  value === "exact-stage" || value === "draw-ordinal" || value === "all-baseline" || value === "insufficient"
+    ? value
+    : "insufficient"
+);
+
+const setupString = (setup: Partial<AppPresetSnapshot> & Record<string, any>, key: string, fallback: string): string => {
+  const value = setup[key];
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+};
+
+const buildStrictDroughtQuotaWatch = (
+  setup: Partial<AppPresetSnapshot> & Record<string, any>,
+  strictThreshold: number,
+  shortlistTop: number,
+): PredictionJournalStrictDroughtQuotaWatch => {
+  const mode = normalizeStrictDroughtQuotaMode(setup.strictDroughtQuotaMode);
+  const manualMin = Math.min(8, normalizeInteger(setup.strictDroughtQuotaManualMin) ?? 0);
+  const eligibleNumbers = setupNumberList(setup, "strictDroughtQuotaEligibleNumbers");
+  const effectiveMin = Math.min(8, eligibleNumbers.length || 8, normalizeInteger(setup.strictDroughtQuotaEffectiveMin) ?? (mode === "manual" ? manualMin : 0));
+  const recommendedMinCount = Math.min(8, normalizeInteger(setup.strictDroughtQuotaAdviceRecommendedMin) ?? 0);
+  const sourceLabel = setupString(setup, "strictDroughtQuotaAdviceSourceLabel", "Not enough strict drought evidence");
+  const reason = setupString(setup, "strictDroughtQuotaAdviceReason", "Strict drought quota advice was not captured for this setup snapshot.");
+  const traceLabel = setupString(setup, "strictDroughtQuotaAdviceTraceLabel", "Strict drought quota advice: unavailable");
+
+  return {
+    version: 1,
+    mode,
+    manualMin,
+    effectiveMin,
+    active: mode !== "off" && effectiveMin > 0,
+    eligibleNumbers,
+    shortlistTop,
+    strictThreshold,
+    advice: {
+      shouldApplyQuota: !!setup.strictDroughtQuotaAdviceShouldApply,
+      recommendedMinCount,
+      confidence: normalizeStrictDroughtQuotaConfidence(setup.strictDroughtQuotaAdviceConfidence),
+      source: normalizeStrictDroughtQuotaSource(setup.strictDroughtQuotaAdviceSource),
+      sourceLabel,
+      reason,
+      traceLabel,
+      trials: normalizeInteger(setup.strictDroughtQuotaAdviceTrials) ?? 0,
+      averageHits: normalizeFiniteNumber(setup.strictDroughtQuotaAdviceAverageHits),
+      expectedRandomAverageHits: normalizeFiniteNumber(setup.strictDroughtQuotaAdviceExpectedRandomAverageHits),
+      oneToThreeHitRate: normalizeFiniteNumber(setup.strictDroughtQuotaAdviceOneToThreeHitRate),
+      expectedRandomOneToThreeHitRate: normalizeFiniteNumber(setup.strictDroughtQuotaAdviceExpectedRandomOneToThreeHitRate),
+      oneToThreeLift: normalizeFiniteNumber(setup.strictDroughtQuotaAdviceOneToThreeLift),
+      zeroHitRate: normalizeFiniteNumber(setup.strictDroughtQuotaAdviceZeroHitRate),
+      expectedRandomZeroHitRate: normalizeFiniteNumber(setup.strictDroughtQuotaAdviceExpectedRandomZeroHitRate),
+    },
+  };
+};
+
 const normalizeSelectionInsightsSnapshotForJournal = (
   value: unknown,
 ): PredictionJournalSelectionInsightsProvenance | undefined => {
@@ -517,6 +622,7 @@ export function buildPredictionJournalProvenance(
     : 8;
   const strictDroughtShortlistNumbers = setupNumberList(setup, "droughtBreakStrictShortlistNumbers");
   const empiricalHazardShortlistNumbers = setupNumberList(setup, "droughtBreakEmpiricalHazardNumbers");
+  const strictDroughtQuota = buildStrictDroughtQuotaWatch(setup, strictThreshold, shortlistTop);
   const selectionInsights = normalizeSelectionInsightsSnapshotForJournal(setup.selectionInsightsSnapshot);
   const strictSet = new Set(strictDroughtShortlistNumbers);
   const empiricalSet = new Set(empiricalHazardShortlistNumbers);
@@ -584,6 +690,7 @@ export function buildPredictionJournalProvenance(
       allSelectedFromShortlist: selectedNumbers.length > 0 && selectedOutsideShortlistNumbers.length === 0,
       classifications,
     },
+    strictDroughtQuota,
     ...(selectionInsights ? { selectionInsights } : {}),
   };
 }
@@ -618,6 +725,30 @@ const formatSelectionInsightsProvenanceNote = (
     `Predicted companion shortlist ${formatDraftNumbers(selectionInsights.predictedCompanionNumbers)}`,
     "companion evidence is observe-only and not a calibrated probability",
   ].join("; ") + ".";
+};
+
+const formatStrictDroughtQuotaWatchNote = (watch: PredictionJournalStrictDroughtQuotaWatch): string => {
+  const mode = watch.mode === "advised" ? "SDSR-advised" : watch.mode;
+  const base = `Strict drought quota watch: mode ${mode}; effective min ${watch.effectiveMin}; eligible ${formatDraftNumbers(watch.eligibleNumbers)}`;
+  if (watch.mode !== "advised") {
+    return `${base}; watch is ${watch.active ? "active" : "observe/off"}.`;
+  }
+  return [
+    base,
+    `${watch.advice.sourceLabel}`,
+    `trials ${watch.advice.trials}`,
+    `1-3 hits ${(watch.advice.oneToThreeHitRate * 100).toFixed(1)}% vs random ${(watch.advice.expectedRandomOneToThreeHitRate * 100).toFixed(1)}%`,
+    `confidence ${watch.advice.confidence}`,
+    watch.advice.shouldApplyQuota ? "advice says apply quota" : "advice is observe-only",
+  ].join("; ") + ".";
+};
+
+const formatStrictDroughtQuotaSetup = (watch: PredictionJournalStrictDroughtQuotaWatch): string => {
+  if (watch.mode === "off") return "Strict drought quota: off";
+  if (watch.mode === "manual") {
+    return `Strict drought quota: manual min ${watch.effectiveMin} from ${watch.eligibleNumbers.length || "unknown"} eligible`;
+  }
+  return `Strict drought quota: SDSR-advised ${watch.active ? `min ${watch.effectiveMin}` : "observe-only"} (${watch.advice.sourceLabel}, ${watch.advice.trials} trials)`;
 };
 
 const positiveBucketCounts = (counts: PredictionBucketCounts | undefined): PredictionBucketCounts | undefined => {
@@ -779,6 +910,7 @@ export function buildPredictionJournalDraftFromSetup(snapshot: AppPresetSnapshot
   notes.push(`Effective generation exclusions: ${formatDraftNumbers(allExcluded)}.`);
   const draftProvenance = buildPredictionJournalProvenance(inputs, snapshot);
   notes.push(formatDroughtBreakProvenanceNote(draftProvenance.droughtBreakShortlist));
+  notes.push(formatStrictDroughtQuotaWatchNote(draftProvenance.strictDroughtQuota));
   notes.push(formatSelectionInsightsProvenanceNote(draftProvenance.selectionInsights));
   notes.push(`Scoring influence: ${setup.scoringGenerationInfluence ?? "off"}; selected-number boost: ${setup.selectedBoostEnabled ? `ON x${setup.selectedBoostFactor ?? "-"}` : "OFF"}.`);
   notes.push(formatD1TerminalMomentumSetup(setup));
@@ -797,10 +929,20 @@ export function summarizePredictionJournalSetup(snapshot: AppPresetSnapshot | nu
   if (!snapshot) return undefined;
   const setup = snapshot as Partial<AppPresetSnapshot> & Record<string, any>;
   const knobs = (setup.knobs && typeof setup.knobs === "object" ? setup.knobs : {}) as Record<string, unknown>;
+  const strictThresholdRaw = Number(setup.droughtBreakStrictThreshold ?? 6);
+  const strictThreshold = Number.isFinite(strictThresholdRaw) && strictThresholdRaw > 0
+    ? Math.round(strictThresholdRaw)
+    : 6;
+  const shortlistTopRaw = Number(setup.droughtBreakShortlistTop ?? 8);
+  const shortlistTop = Number.isFinite(shortlistTopRaw) && shortlistTopRaw > 0
+    ? Math.round(shortlistTopRaw)
+    : 8;
+  const strictDroughtQuota = buildStrictDroughtQuotaWatch(setup, strictThreshold, shortlistTop);
   const generation: string[] = [
     `Scoring influence: ${setup.scoringGenerationInfluence ?? "off"}`,
     formatD1TerminalMomentumSetup(setup),
     `Latest +/-1 support: ${setup.latestNeighbourSupportEnabled ? "on" : "off"}`,
+    formatStrictDroughtQuotaSetup(strictDroughtQuota),
     `Month-end carry-over: ${setup.monthEndCarryOverBiasEnabled ? (setup.monthEndCarryOverStrength ?? "normal") : "off"}`,
     `Use counts when constructing candidates: ${setup.monthlyConstructiveEnabled ? "on" : "off"}`,
     `Acceptance needs counts: ${formatAcceptanceNeedsCounts(setup.acceptanceNeedsCounts)}`,
@@ -959,6 +1101,7 @@ const targetDrawsForEntry = (entry: PredictionJournalEntry, ordered: OrderedDraw
   const anchor = ordered[anchorIndex];
   const future = ordered.slice(anchorIndex + 1);
   if (entry.targetKind === "nextDraw") return future.slice(0, 1).map((row) => row.draw);
+  if (entry.targetKind === "next2Draws") return future.slice(0, 2).map((row) => row.draw);
   if (entry.targetKind === "next3Draws") return future.slice(0, 3).map((row) => row.draw);
   return future.filter((row) => row.monthKey === anchor.monthKey).map((row) => row.draw);
 };
@@ -1085,14 +1228,19 @@ export function scorePredictionJournalEntry(entry: PredictionJournalEntry, histo
   }
 
   if (inputs.oddEvenRatio) {
-    const counts = countOddEven(actualNumbers);
-    const actual = `${counts.odd}:${counts.even}`;
+    const drawLevelRatios = status.targetDraws.map((draw) => {
+      const counts = countOddEven(drawNumbers(draw));
+      return `${counts.odd}:${counts.even}`;
+    });
     scores.push({
       key: "oddEvenRatio",
       label: "Odd/even ratio",
       predicted: inputs.oddEvenRatio,
-      actual,
-      result: inputs.oddEvenRatio === actual ? "hit" : "miss",
+      actual: drawLevelRatios.join(", "),
+      result: drawLevelRatios.includes(inputs.oddEvenRatio) ? "hit" : "miss",
+      detail: status.targetDraws.length > 1
+        ? "Draw-level ratio checked against each target draw in the window."
+        : undefined,
     });
   }
 
@@ -1203,7 +1351,7 @@ const isPredictionJournalEntry = (value: unknown): value is PredictionJournalEnt
     && typeof entry.revision === "number"
     && typeof entry.anchorLatestDrawDate === "string"
     && typeof entry.anchorDrawFingerprint === "string"
-    && ["nextDraw", "next3Draws", "restOfMonth"].includes(entry.targetKind)
+    && ["nextDraw", "next2Draws", "next3Draws", "restOfMonth"].includes(entry.targetKind)
     && !!entry.inputs
     && typeof entry.inputs === "object";
 };

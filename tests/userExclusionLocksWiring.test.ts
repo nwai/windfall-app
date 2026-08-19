@@ -45,15 +45,26 @@ describe("app-wide user exclusion lock wiring", () => {
       "setHotColdForcedNumbers((current) => pruneSelectionUnavailableNumbers(current));",
       "setDroughtBreakSelectedNumbers((current) => pruneSelectionUnavailableNumbers(current, MAX_DROUGHT_BREAK_FORCED_NUMBERS));",
       "setUserSelectedNumbers((current) => pruneSelectionUnavailableNumbers(current));",
-      "setManualSimSelected((current) => pruneSelectionUnavailableNumbers(current, 8));",
+      "setManualSimSelected((current) => normalizeManualPrizeCheckNumbers(current, selectionUnavailableNumbers));",
       "setSelectedCarryOverBoostNumbers((current) => pruneSelectionUnavailableNumbers(current));",
     ];
 
     expect(APP_SOURCE).toContain("const pruneSelectionUnavailableNumbers = useCallback");
+    expect(APP_SOURCE).toContain("import { normalizeManualPrizeCheckNumbers }");
     pruneTargets.forEach((expectedSource) => {
       expect(APP_SOURCE).toContain(expectedSource);
     });
     expect(APP_SOURCE).toContain("() => removeUserExcludedNumbers(normalizeDgaSelectedNumbers(userSelectedNumbers), selectionUnavailableNumbers)");
+  });
+
+  it("blocks generation before running when exclude-unselected leaves fewer than eight eligible numbers", () => {
+    expect(APP_SOURCE).toContain("const FULL_GENERATED_CANDIDATE_NUMBER_COUNT = 8;");
+    expect(APP_SOURCE).toContain("Can't create an 8-number candidate from the user selection.");
+    expect(APP_SOURCE).toContain("const buildAutoExcludeUnselectedBlockMessage = useCallback");
+    expect(APP_SOURCE).toContain("const autoExcludeBlockMessage = buildAutoExcludeUnselectedBlockMessage();");
+    expect(APP_SOURCE).toContain("setCandidates([]);");
+    expect(APP_SOURCE).toContain("setQuotaWarning(autoExcludeBlockMessage);");
+    expect(APP_SOURCE).toContain("return;");
   });
 
   it("builds the global number conflict ledger and passes it into Next Hot Blocks", () => {

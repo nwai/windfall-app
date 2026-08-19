@@ -10,5 +10,10 @@ describe("MonthlyDrawsSummaryPanel Stage IDM wiring", () => {
     expect(source).toContain("onStageIdealDrawStateChange");
     expect(source).toContain("Stage IDM");
     expect(source).toContain("Expected Draw Count");
+    expect(source).toContain("Stage-Match Acceptance Playbook");
+    expect(source).toContain("applyStageMatchPlaybookRow");
+    expect(source).toContain("Apply loads editable bucket placeholders into Acceptance Needs");
+    expect(source).toContain("stageMatchAppliedKey");
+    expect(source).toContain("{rowApplied ? \"Applied\" : \"Apply\"}");
   });
 });

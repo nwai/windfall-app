@@ -98,6 +98,7 @@ describe("ResearchDiaryPanel", () => {
     const observationInput = container.querySelector("textarea[aria-label='Diary observation']") as HTMLTextAreaElement | null;
     const d3Checkbox = container.querySelector("input[aria-label='Applies to D3']") as HTMLInputElement | null;
     const sde1Checkbox = container.querySelector("input[aria-label='Tag SDE1']") as HTMLInputElement | null;
+    const hc3Checkbox = container.querySelector("input[aria-label='Tag HC3']") as HTMLInputElement | null;
     const saveButton = Array.from(container.querySelectorAll("button"))
       .find((button) => button.textContent === "Save diary note");
 
@@ -105,13 +106,15 @@ describe("ResearchDiaryPanel", () => {
     expect(observationInput).toBeTruthy();
     expect(d3Checkbox).toBeTruthy();
     expect(sde1Checkbox).toBeTruthy();
+    expect(hc3Checkbox).toBeTruthy();
+    expect(sde1Checkbox?.checked).toBe(true);
+    expect(hc3Checkbox?.checked).toBe(true);
     expect(saveButton).toBeTruthy();
 
     await act(async () => {
       setFieldValue(titleInput!, "Third draw setup");
       setFieldValue(observationInput!, "Check SDE1 on the third draw of each month.");
       d3Checkbox!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      sde1Checkbox!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
     await act(async () => {
@@ -122,6 +125,8 @@ describe("ResearchDiaryPanel", () => {
     expect(container.textContent).toContain("Saved setup");
     expect(container.textContent).toContain("Diary note saved.");
     expect(window.localStorage.getItem("windfall:research-diary:v1")).toContain("Third draw setup");
+    expect(window.localStorage.getItem("windfall:research-diary:v1")).toContain('"SDE1"');
+    expect(window.localStorage.getItem("windfall:research-diary:v1")).toContain('"HC3"');
 
     await act(async () => {
       root.unmount();

@@ -4,6 +4,7 @@ import type { Draw } from "../types";
 import {
   analyzeMonthlyDrawSummary,
   analyzeStageIdealDrawModel,
+  analyzeStageMatchAcceptancePlaybook,
   computeIdealMonthlyDraw,
   createEmptyMonthlyBucketSets,
   MONTHLY_BUCKET_KEYS,
@@ -367,6 +368,50 @@ describe("analyzeStageIdealDrawModel", () => {
   });
 });
 
+describe("analyzeStageMatchAcceptancePlaybook", () => {
+  it("builds historical stage-path rows without using future or wrong-size months", () => {
+    const history = [
+      ...repeatDraws("2026-01", 13, 1),
+      ...repeatDraws("2026-02", 12, 2),
+      ...repeatDraws("2026-03", 13, 3),
+      ...repeatDraws("2026-06", 5, 4),
+    ];
+
+    const playbook = analyzeStageMatchAcceptancePlaybook(history, {
+      today: new Date("2026-06-11T12:00:00"),
+      expectedDrawCountOverride: 13,
+    });
+
+    expect(playbook).not.toBeNull();
+    expect(playbook?.workingMonthLabel).toBe("2026-06");
+    expect(playbook?.expectedDrawCount).toBe(13);
+    expect(playbook?.targetStageDrawCount).toBe(6);
+    expect(playbook?.comparableMonthCount).toBe(2);
+    expect(playbook?.rows.length).toBeGreaterThan(0);
+    expect(playbook?.rows.every((row) => row.totalComparableCount === 2)).toBe(true);
+    expect(playbook?.rows.every((row) => row.historicalMonthLabel !== "2026-02")).toBe(true);
+    expect(playbook?.rows.every((row) => row.acceptanceNeedsBucketCounts.reduce((sum, count) => sum + count, 0) === 8)).toBe(true);
+    expect(playbook?.rows.every((row) => row.projectedDistribution.reduce((sum, count) => sum + count, 0) === 45)).toBe(true);
+    expect(playbook?.rows.every((row) => row.historicalDistribution.reduce((sum, count) => sum + count, 0) === 45)).toBe(true);
+  });
+
+  it("returns one best row per target undrawn count with support counts", () => {
+    const playbook = analyzeStageMatchAcceptancePlaybook([
+      ...repeatDraws("2026-01", 13, 1),
+      ...repeatDraws("2026-03", 13, 1),
+      ...repeatDraws("2026-06", 5, 4),
+    ], {
+      today: new Date("2026-06-11T12:00:00"),
+      expectedDrawCountOverride: 13,
+    });
+
+    expect(playbook).not.toBeNull();
+    expect(playbook?.rows).toHaveLength(1);
+    expect(playbook?.rows[0].supportCount).toBe(2);
+    expect(playbook?.rows[0].sameUndrawnMonthLabels).toEqual(["2026-03", "2026-01"]);
+  });
+});
+
 describe("computeIdealMonthlyDraw", () => {
   it("exhaustively selects the bucket allocation that best moves the current distribution toward target", () => {
     const result = computeIdealMonthlyDraw({
@@ -386,6 +431,7 @@ describe("computeIdealMonthlyDraw", () => {
       { times: 7, count: 0 },
       { times: 8, count: 0 },
     ]);
+    expect(result.projectedDistribution).toEqual([37, 0, 8, 0, 0, 0, 0, 0, 0]);
     expect(result.freePicks).toBe(0);
     expect(result.scoreAfter).toBe(0);
   });

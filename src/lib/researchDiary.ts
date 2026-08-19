@@ -329,6 +329,18 @@ export function summarizeResearchDiarySetup(snapshot: AppPresetSnapshot | null |
   };
 }
 
+export function deriveResearchDiaryRuleTagsFromSetup(
+  snapshot: AppPresetSnapshot | null | undefined,
+): ResearchDiaryRuleTag[] {
+  if (!snapshot) return [];
+  const setup = snapshot as Partial<AppPresetSnapshot> & Record<string, any>;
+  const knobs = (setup.knobs && typeof setup.knobs === "object" ? setup.knobs : {}) as Record<string, unknown>;
+  const tags: ResearchDiaryRuleTag[] = [];
+  if (knobs.enableSDE1) tags.push("SDE1");
+  if (knobs.enableHC3) tags.push("HC3");
+  return tags;
+}
+
 const normalizeTitle = (title: string, observation: string): string => {
   const trimmed = title.trim();
   if (trimmed) return trimmed.slice(0, 120);

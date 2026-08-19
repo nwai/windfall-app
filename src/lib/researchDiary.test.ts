@@ -4,6 +4,7 @@ import type { Draw } from "../types";
 import {
   buildResearchDiaryEntry,
   computeResearchDiaryNextDrawContext,
+  deriveResearchDiaryRuleTagsFromSetup,
   findResearchDiaryReminders,
   loadResearchDiaryEntries,
   saveResearchDiaryEntries,
@@ -17,6 +18,16 @@ const draw = (date: string, main: number[] = [1, 2, 3, 4, 5, 6], supp: number[] 
 });
 
 describe("researchDiary", () => {
+  it("derives SDE1 and HC3 diary tags from the saved setup snapshot", () => {
+    expect(deriveResearchDiaryRuleTagsFromSetup({
+      knobs: { enableSDE1: true, enableHC3: true },
+    } as any)).toEqual(["SDE1", "HC3"]);
+
+    expect(deriveResearchDiaryRuleTagsFromSetup({
+      knobs: { enableSDE1: false, enableHC3: true },
+    } as any)).toEqual(["HC3"]);
+  });
+
   it("computes the next scheduled draw context from current date and history", () => {
     const context = computeResearchDiaryNextDrawContext(
       [

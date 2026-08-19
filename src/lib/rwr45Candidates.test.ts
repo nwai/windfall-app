@@ -157,6 +157,31 @@ describe("generateRwR45Candidates", () => {
     expect(result.traceLines.join("\n")).toContain("0x≥2 · 1x≥1");
   });
 
+  it("explains when a monthly bucket quota structurally repeats the only eligible number", () => {
+    const buckets = bucketSets({
+      times3: [18],
+      times1: Array.from({ length: 44 }, (_, index) => index + 1).filter((number) => number !== 18),
+    });
+    const result = generateRwR45Candidates(seededRandom(20260812), {
+      debug: true,
+      monthlyAcceptanceNeeds: {
+        constraints: constraints({ times3: 1 }),
+        buckets,
+      },
+    });
+
+    expect(result.candidates).toHaveLength(7);
+    for (const candidate of result.candidates) {
+      expect([...candidate.main, ...candidate.supp]).toContain(18);
+    }
+
+    const trace = result.traceLines.join("\n");
+    expect(trace).toContain("3x≥1 has exactly 1 eligible number [18], so every row must include [18]");
+    expect(trace).toContain("18 x7");
+    expect(trace).toContain("quota pressure, not number strength");
+    expect(trace).toContain("PNUaRW45 row 1:");
+  });
+
   it("blocks impossible monthly Acceptance Needs instead of returning false rows", () => {
     const buckets = bucketSets({
       undrawn: [1, 2, 3, 4, 5],

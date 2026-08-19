@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const readAppSource = () => readFileSync(resolve(process.cwd(), "src/App.tsx"), "utf8");
+const readDgaVisualizerSource = () => readFileSync(resolve(process.cwd(), "src/components/DGAVisualizer.tsx"), "utf8");
 
 describe("DGA heatmap simulation strip wiring", () => {
   it("uses the shared user-selected numbers in every DGA user selection strip", () => {
@@ -62,6 +63,39 @@ describe("DGA heatmap simulation strip wiring", () => {
     expect(gridBlock).toContain("Mirror strip to ±1/±2 builder");
     expect(gridBlock).toContain("aria-pressed={mirrorDgaStripToPreviousNeighbour}");
     expect(gridBlock).toContain("only valid latest-draw ±1/±2 targets");
+  });
+
+  it("keeps the mirror bridge visible above the DGA grid and places constellation before monthly bucket state", () => {
+    const appSource = readAppSource();
+    const gridStart = appSource.indexOf('title="DGA grid"');
+    const monthlyGridStart = appSource.indexOf("<DGAMonthlyBucketStateGrid", gridStart);
+    const gridBlock = appSource.slice(gridStart, monthlyGridStart);
+    const mirrorStart = gridBlock.indexOf("windfall-dga-mirror-control");
+    const visualizerStart = gridBlock.indexOf("<DGAVisualizer");
+    const constellationStart = appSource.indexOf('title="DGA constellation diagnostic"', gridStart);
+
+    expect(mirrorStart).toBeGreaterThanOrEqual(0);
+    expect(visualizerStart).toBeGreaterThan(mirrorStart);
+    expect(gridBlock).toContain('controlsPosition="above"');
+    expect(gridBlock).toContain("gridSidecar={");
+    expect(constellationStart).toBeGreaterThan(gridStart);
+    expect(monthlyGridStart).toBeGreaterThan(constellationStart);
+  });
+
+  it("keeps the DGA geometry tools inside a closed disclosure by default", () => {
+    const source = readDgaVisualizerSource();
+    const toolsStart = source.indexOf('title="DGA tools"');
+    const aimStart = source.indexOf("Aim helper:", toolsStart);
+    const exportStart = source.indexOf("Export / Import Configuration", toolsStart);
+    const sidecarStart = source.indexOf("windfall-dga-visualizer-grid-row", toolsStart);
+
+    expect(toolsStart).toBeGreaterThanOrEqual(0);
+    expect(exportStart).toBeGreaterThan(toolsStart);
+    expect(sidecarStart).toBeGreaterThan(exportStart);
+    expect(source.slice(toolsStart, aimStart)).toContain("defaultExpanded={false}");
+    expect(source.slice(toolsStart, exportStart)).toContain("Manual Diamond (West & North points)");
+    expect(source.slice(toolsStart, exportStart)).toContain("Center from diamond:");
+    expect(source.slice(toolsStart, exportStart)).toContain("Advanced (optional): Slope, Bias, Thickness");
   });
 
   it("updates DGA simulation from shared user selections regardless of which strip changed them", () => {

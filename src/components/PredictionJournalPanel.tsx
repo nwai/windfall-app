@@ -23,21 +23,27 @@ import {
   type PredictionJournalStatus,
   type PredictionScoreResult,
   type PredictionTargetKind,
+  type ScoredPredictionJournalEntry,
 } from "../lib/predictionJournal";
 import { computeResearchDiaryNextDrawContext } from "../lib/researchDiary";
 import { computeTrendMap } from "../lib/trend";
 import { buildTrendValueSeries } from "../lib/trendValueSeries";
 import { buildPreviousNeighbourConstraintRows } from "../lib/previousNeighbourTargets";
 import {
-  analyzePredictionTerminalDigitHistory,
-  type PredictionTerminalDigitHistory,
-  type PredictionTerminalDigitHistoryBand,
+  analyzeJournalTerminalDigitHistory,
+  type JournalTerminalDigitHistory,
+  type JournalTerminalDigitHistoryBand,
 } from "../lib/scoringSystemDiagnostics";
 import {
   analyzeHistoricalPrizeCollision,
   type HistoricalPrizeCollisionHit,
   type HistoricalPrizeCollisionResult,
 } from "../lib/historicalPrizeCollision";
+import {
+  computeWeekdayWindfallPrizeDivision,
+  computeWeekdayWindfallPrizeHits,
+  type WeekdayWindfallPrizeDivision,
+} from "../lib/prizeDivisions";
 import {
   buildPredictionJournalFindingsReport,
   type PredictionJournalFinding,
@@ -128,6 +134,7 @@ const emptyAutoFillSnapshot = (): PredictionJournalAutoFillSnapshot => ({
 
 const targetLabels: Record<PredictionTargetKind, string> = {
   nextDraw: "Next draw",
+  next2Draws: "Next 2 draws",
   next3Draws: "Next 3 draws",
   restOfMonth: "Rest of current month",
 };
@@ -309,6 +316,65 @@ const renderPickedNumberGroup = (
   );
 };
 
+const replayNumberPillStyle = (role: "main" | "supp" | "other"): React.CSSProperties => {
+  const palette = {
+    main: { border: "#fecaca", background: "#fff1f2", color: "#b91c1c" },
+    supp: { border: "#bbf7d0", background: "#f0fdf4", color: "#166534" },
+    other: { border: "#dbe3ec", background: "#f8fafc", color: "#475569" },
+  }[role];
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 22,
+    height: 22,
+    border: `1px solid ${palette.border}`,
+    borderRadius: 999,
+    background: palette.background,
+    color: palette.color,
+    fontSize: 11,
+    fontWeight: 900,
+    fontVariantNumeric: "tabular-nums",
+    lineHeight: 1,
+  };
+};
+
+const latestDrawRoleForNumber = (
+  number: number,
+  latestMainSet: Set<number>,
+  latestSuppSet: Set<number>,
+): "main" | "supp" | "other" => {
+  if (latestMainSet.has(number)) return "main";
+  if (latestSuppSet.has(number)) return "supp";
+  return "other";
+};
+
+const renderReplayNumberPills = (
+  numbers: number[],
+  latestMainSet: Set<number>,
+  latestSuppSet: Set<number>,
+  testIdPrefix: string,
+): React.ReactNode => {
+  if (numbers.length === 0) return "none";
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, flexWrap: "wrap", verticalAlign: "middle" }}>
+      {numbers.map((number) => {
+        const role = latestDrawRoleForNumber(number, latestMainSet, latestSuppSet);
+        return (
+          <span
+            key={`${testIdPrefix}-${number}`}
+            data-testid={`${testIdPrefix}-${number}`}
+            data-latest-draw-role={role}
+            style={replayNumberPillStyle(role)}
+          >
+            {number}
+          </span>
+        );
+      })}
+    </span>
+  );
+};
+
 const renderCollapsedPickedNumbers = (numbers: number[] | undefined): React.ReactNode => {
   if (!numbers?.length) return null;
   const mainNumbers = numbers.slice(0, 6);
@@ -353,8 +419,18 @@ const provenanceChipStyle = (tone: "neutral" | "good" | "warn" = "neutral"): Rea
   };
 };
 
+const formatProvenanceRate = (value: number | null | undefined): string => (
+  typeof value === "number" && Number.isFinite(value) ? `${(value * 100).toFixed(1)}%` : "-"
+);
+
 const renderStructuredProvenance = (provenance: PredictionJournalProvenance) => {
   const drought = provenance.droughtBreakShortlist;
+  const strictQuota = provenance.strictDroughtQuota;
+  const strictQuotaModeLabel = strictQuota?.mode === "advised"
+    ? "SDSR-advised"
+    : strictQuota?.mode === "manual"
+      ? "Manual"
+      : "Off";
   return (
     <section
       data-testid="prediction-structured-provenance"
@@ -416,6 +492,42 @@ const renderStructuredProvenance = (provenance: PredictionJournalProvenance) => 
           </div>
         )}
       </div>
+      {strictQuota ? (
+        <div style={{ borderTop: "1px solid #edf2f7", paddingTop: 8, marginTop: 8 }}>
+          <div style={{ fontSize: 12, fontWeight: 850, color: "#334155", marginBottom: 5 }}>
+            Strict drought quota watch
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            <span style={provenanceChipStyle(strictQuota.active ? "good" : "neutral")}>
+              Mode {strictQuotaModeLabel}
+            </span>
+            <span style={provenanceChipStyle(strictQuota.effectiveMin > 0 ? "good" : "neutral")}>
+              Effective min {strictQuota.effectiveMin}
+            </span>
+            <span style={provenanceChipStyle(strictQuota.eligibleNumbers.length ? "good" : "neutral")}>
+              Eligible {formatJournalNumbers(strictQuota.eligibleNumbers)}
+            </span>
+            <span style={provenanceChipStyle(strictQuota.advice.shouldApplyQuota ? "good" : "neutral")}>
+              Advice {strictQuota.advice.shouldApplyQuota ? "apply" : "observe"}
+            </span>
+            <span style={provenanceChipStyle()}>
+              Source {strictQuota.advice.sourceLabel}
+            </span>
+            <span style={provenanceChipStyle()}>
+              Trials {strictQuota.advice.trials}
+            </span>
+          </div>
+          <div style={{ marginTop: 7, fontSize: 12, color: "#64748b", lineHeight: 1.45 }}>
+            1-3 hits {formatProvenanceRate(strictQuota.advice.oneToThreeHitRate)} vs random {formatProvenanceRate(strictQuota.advice.expectedRandomOneToThreeHitRate)}
+            {" "}· zero-hit {formatProvenanceRate(strictQuota.advice.zeroHitRate)} · confidence {strictQuota.advice.confidence}.
+          </div>
+          {strictQuota.mode === "advised" ? (
+            <div style={{ marginTop: 5, fontSize: 12, color: "#64748b", lineHeight: 1.45 }}>
+              {strictQuota.advice.reason}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       {provenance.selectionInsights ? (
         <div style={{ borderTop: "1px solid #edf2f7", paddingTop: 8, marginTop: 8 }}>
           <div style={{ fontSize: 12, fontWeight: 850, color: "#334155", marginBottom: 5 }}>
@@ -468,6 +580,31 @@ const scoreResultPillStyle = (result: PredictionScoreResult): React.CSSPropertie
 const scoreResultLabel = (result: PredictionScoreResult): string => (
   result.charAt(0).toUpperCase() + result.slice(1)
 );
+
+const replayPrizePillStyle = (division: LatestDrawReplayPrize["division"]): React.CSSProperties => {
+  const major = division === "Div1" || division === "Div2";
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "fit-content",
+    border: `1px solid ${major ? "#f9a8d4" : "#86efac"}`,
+    borderRadius: 999,
+    padding: "2px 8px",
+    background: major ? "#ffe4ec" : "#dcfce7",
+    color: major ? "#9f1239" : "#166534",
+    fontSize: 12,
+    fontWeight: 900,
+    whiteSpace: "nowrap",
+  };
+};
+
+const replayPrizeButtonStyle = (division: LatestDrawReplayPrize["division"]): React.CSSProperties => ({
+  ...replayPrizePillStyle(division),
+  appearance: "none",
+  cursor: "pointer",
+  font: "inherit",
+});
 
 const formatFindingPercent = (value: number): string => `${Math.round(value * 100)}%`;
 
@@ -635,21 +772,133 @@ const renderPredictionJournalFindingsReport = (report: PredictionJournalFindings
   );
 };
 
-const terminalDigitHistoryLabels: Record<PredictionTerminalDigitHistoryBand, string> = {
+const renderLatestDrawReplay = (
+  rows: LatestDrawReplayRow[],
+  latestDraw: Draw | null,
+  omittedNoNumberCount: number,
+  onOpenEntry: (entryId: string) => void,
+): React.ReactNode => {
+  const latestDrawMainNumbers = latestDraw?.main.filter((number) => Number.isFinite(number)) ?? [];
+  const latestDrawSuppNumbers = latestDraw?.supp.filter((number) => Number.isFinite(number)) ?? [];
+  const latestDrawNumbers = [...latestDrawMainNumbers, ...latestDrawSuppNumbers];
+  const latestMainSet = new Set(latestDrawMainNumbers);
+  const latestSuppSet = new Set(latestDrawSuppNumbers);
+  return (
+    <JournalLegendBox
+      title="Compare active entries to latest draw"
+      tone="soft"
+      style={{ marginTop: 16 }}
+      help={(
+        <span>
+          Observe-only replay. It compares unarchived journal entries with saved Numbers against the newest real draw without changing their formal scorecards.
+        </span>
+      )}
+    >
+      <section data-testid="prediction-latest-draw-replay" aria-label="Compare active entries to latest draw" style={{ display: "grid", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ color: "#26313d", fontSize: 14, fontWeight: 900 }}>Latest real draw replay</div>
+            <div style={{ color: "#64748b", fontSize: 12, lineHeight: 1.45 }}>
+              {latestDraw ? (
+                <>
+                  {latestDraw.date} · mains + supps:{" "}
+                  {renderReplayNumberPills(latestDrawNumbers, latestMainSet, latestSuppSet, "latest-draw-replay-number")}
+                </>
+              ) : "No real latest draw is loaded yet."}
+            </div>
+          </div>
+          <span style={findingSeverityStyle("info")}>Observe-only</span>
+        </div>
+
+        {latestDraw && rows.length > 0 ? (
+          <div style={{ display: "grid", gap: 8, maxHeight: "min(300px, 42vh)", overflowY: "auto", paddingRight: 2 }}>
+            {rows.map((row) => (
+              <article
+                key={row.entryId}
+                data-testid="prediction-latest-draw-replay-row"
+                style={{
+                  border: "1px solid #e2e8f0",
+                  borderRadius: 8,
+                  background: "#fff",
+                  padding: 10,
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                  gap: 10,
+                  alignItems: "center",
+                }}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ color: "#26313d", fontSize: 13, fontWeight: 900 }}>
+                    {row.targetLabel}{row.targetDrawDate ? ` · ${row.targetDrawDate}` : ""}
+                  </div>
+                  <div style={{ marginTop: 2, color: "#64748b", fontSize: 12, lineHeight: 1.35 }}>
+                    Anchored after {row.anchorLatestDrawDate} · {statusLabels[row.status]} · {reviewStatusLabels[row.reviewStatus]}
+                  </div>
+                </div>
+                <div style={{ minWidth: 0, color: "#475569", fontSize: 12, lineHeight: 1.45 }}>
+                  <div><strong style={{ color: "#334155" }}>Saved:</strong> {row.predicted}</div>
+                  <div>
+                    <strong style={{ color: "#334155" }}>Hits:</strong>{" "}
+                    {renderReplayNumberPills(row.hits, latestMainSet, latestSuppSet, `latest-draw-replay-hit-${row.entryId}`)}
+                  </div>
+                  {row.prize ? (
+                    <div style={{ marginTop: 5 }}>
+                      <button
+                        type="button"
+                        data-testid={`latest-draw-replay-open-entry-${row.entryId}`}
+                        onClick={() => onOpenEntry(row.entryId)}
+                        aria-label={`Open journal entry for replay prize ${row.prize.division}`}
+                        title="Open this journal entry to inspect how these numbers were chosen."
+                        style={replayPrizeButtonStyle(row.prize.division)}
+                      >
+                        Replay prize {row.prize.division}
+                      </button>
+                      <span style={{ marginLeft: 6, color: "#64748b", fontWeight: 750 }}>
+                        {row.prize.mainHits} main · {row.prize.suppHits} supp
+                      </span>
+                    </div>
+                  ) : null}
+                </div>
+                <div style={{ display: "grid", justifyItems: "end", gap: 4, color: "#334155", fontSize: 12, fontWeight: 850 }}>
+                  <span style={{ whiteSpace: "nowrap" }}>{row.hitCount} of {row.predictedCount}</span>
+                  <span style={scoreResultPillStyle(row.result)}>{scoreResultLabel(row.result)}</span>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div style={{ border: "1px dashed #cbd5e1", borderRadius: 8, padding: 10, color: "#64748b", fontSize: 12, lineHeight: 1.45 }}>
+            {latestDraw
+              ? "No active journal entries with saved Numbers are available for latest-draw replay."
+              : "Load real draw history before using latest-draw replay."}
+          </div>
+        )}
+
+        {omittedNoNumberCount > 0 ? (
+          <div style={{ color: "#64748b", fontSize: 12, lineHeight: 1.45 }}>
+            {omittedNoNumberCount} active entr{omittedNoNumberCount === 1 ? "y has" : "ies have"} no saved Numbers field and {omittedNoNumberCount === 1 ? "was" : "were"} omitted from this replay.
+          </div>
+        ) : null}
+      </section>
+    </JournalLegendBox>
+  );
+};
+
+const terminalDigitHistoryLabels: Record<JournalTerminalDigitHistoryBand, string> = {
   common: "Common in history",
   typical: "Seen in history",
   rare: "Rare in history",
   "never-seen": "Never seen",
 };
 
-const terminalDigitHistoryPalette: Record<PredictionTerminalDigitHistoryBand, { background: string; border: string; color: string }> = {
+const terminalDigitHistoryPalette: Record<JournalTerminalDigitHistoryBand, { background: string; border: string; color: string }> = {
   common: { background: "#ecfdf5", border: "#bbf7d0", color: "#166534" },
   typical: { background: "#eef6ff", border: "#cfe3f7", color: "#155a8a" },
   rare: { background: "#fff7ed", border: "#fed7aa", color: "#9a3412" },
   "never-seen": { background: "#f8fafc", border: "#cbd5e1", color: "#475569" },
 };
 
-const terminalDigitHistoryPillStyle = (band: PredictionTerminalDigitHistoryBand): React.CSSProperties => {
+const terminalDigitHistoryPillStyle = (band: JournalTerminalDigitHistoryBand): React.CSSProperties => {
   const palette = terminalDigitHistoryPalette[band];
   return {
     border: `1px solid ${palette.border}`,
@@ -674,11 +923,29 @@ type ImmediateNextDrawScore = {
   result: Exclude<PredictionScoreResult, "recorded">;
 };
 
+type LatestDrawReplayRow = ImmediateNextDrawScore & {
+  anchorLatestDrawDate: string;
+  entryId: string;
+  prize: LatestDrawReplayPrize | null;
+  reviewStatus: PredictionJournalReviewStatus;
+  status: PredictionJournalStatus;
+  targetLabel: string;
+  targetDrawDate: string | null;
+};
+
+type LatestDrawReplayPrize = {
+  checkedMain: number[];
+  checkedSupp: number[];
+  division: Exclude<WeekdayWindfallPrizeDivision, "—">;
+  mainHits: number;
+  suppHits: number;
+};
+
 const formatJournalPercent = (value: number | null | undefined): string => (
   typeof value === "number" && Number.isFinite(value) ? `${value.toFixed(2)}%` : "-"
 );
 
-const formatTerminalDigitExample = (example: PredictionTerminalDigitHistory["latestContainedExample"]): string => (
+const formatTerminalDigitExample = (example: JournalTerminalDigitHistory["latestContainedExample"]): string => (
   example
     ? `Draw: ${example.date}\nMains: ${example.main.join(",")}\nSupps: ${example.supp.join(",")}`
     : ""
@@ -804,7 +1071,7 @@ const renderHistoricalPrizeCollision = (
   );
 };
 
-const renderTerminalDigitHistory = (history: PredictionTerminalDigitHistory) => {
+const renderTerminalDigitHistory = (history: JournalTerminalDigitHistory) => {
   const visibleExample = history.latestContainedExample ?? history.latestExactExample;
   const exampleTitle = history.latestContainedExample ? "Latest contained draw" : "Latest exact draw";
   return (
@@ -968,6 +1235,76 @@ const scoreImmediateNextDraw = (entry: { inputs: PredictionJournalInputs; target
   };
 };
 
+const scorePredictionAgainstDraw = (
+  predicted: number[],
+  draw: Draw,
+): ImmediateNextDrawScore | null => {
+  if (predicted.length === 0) return null;
+
+  const actualNumbers = [...draw.main, ...draw.supp].filter((number) => Number.isFinite(number));
+  const actualSet = new Set(actualNumbers);
+  const hits = predicted.filter((number) => actualSet.has(number));
+  const result: ImmediateNextDrawScore["result"] = hits.length === predicted.length
+    ? "hit"
+    : hits.length > 0
+      ? "partial"
+      : "miss";
+
+  return {
+    actual: actualNumbers.join(", "),
+    date: draw.date,
+    detail: hits.length ? `Hits: ${hits.join(", ")}` : "No saved numbers appeared in the latest draw.",
+    hitCount: hits.length,
+    hits,
+    predicted: predicted.join(", "),
+    predictedCount: predicted.length,
+    result,
+  };
+};
+
+const scoreLatestDrawReplayPrize = (
+  predicted: number[],
+  draw: Draw,
+): LatestDrawReplayPrize | null => {
+  if (predicted.length < 6) return null;
+
+  const checkedMain = predicted.slice(0, 6);
+  const checkedSupp = predicted.slice(6, 8);
+  const drawnMainSet = new Set(draw.main.filter((number) => Number.isFinite(number)));
+  const drawnSuppSet = new Set(draw.supp.filter((number) => Number.isFinite(number)));
+  const division = computeWeekdayWindfallPrizeDivision(checkedMain, checkedSupp, drawnMainSet, drawnSuppSet);
+  if (division === "—") return null;
+
+  const { mainHits, suppHits } = computeWeekdayWindfallPrizeHits(checkedMain, drawnMainSet, drawnSuppSet, checkedSupp);
+  return {
+    checkedMain,
+    checkedSupp,
+    division,
+    mainHits,
+    suppHits,
+  };
+};
+
+const scoreEntryAgainstLatestDraw = (
+  entry: ScoredPredictionJournalEntry,
+  latestDraw: Draw,
+): LatestDrawReplayRow | null => {
+  const predicted = entry.inputs.numbers ?? [];
+  const replayScore = scorePredictionAgainstDraw(predicted, latestDraw);
+  if (!replayScore) return null;
+
+  return {
+    ...replayScore,
+    anchorLatestDrawDate: entry.anchorLatestDrawDate,
+    entryId: entry.id,
+    prize: scoreLatestDrawReplayPrize(predicted, latestDraw),
+    reviewStatus: normalizeReviewStatus(entry.reviewStatus),
+    status: entry.status,
+    targetLabel: targetLabels[entry.targetKind],
+    targetDrawDate: summarizeTargetDrawDate(entry),
+  };
+};
+
 const splitNumbers = (value: string): number[] => (
   (value.match(/\d+/g) ?? []).map((part) => Number(part)).filter((number) => Number.isFinite(number))
 );
@@ -993,18 +1330,20 @@ const integerOrUndefined = (value: string): number | undefined => {
 };
 
 const targetKindFromValue = (value: string): PredictionTargetKind => {
-  if (value === "next3Draws" || value === "restOfMonth") return value;
+  if (value === "next2Draws" || value === "next3Draws" || value === "restOfMonth") return value;
   return "nextDraw";
 };
 
 const targetNumberLimit = (targetKind: PredictionTargetKind): number | null => {
   if (targetKind === "nextDraw") return 8;
+  if (targetKind === "next2Draws") return 16;
   if (targetKind === "next3Draws") return 24;
   return null;
 };
 
 const targetDrawCount = (targetKind: PredictionTargetKind): number | null => {
   if (targetKind === "nextDraw") return 1;
+  if (targetKind === "next2Draws") return 2;
   if (targetKind === "next3Draws") return 3;
   return null;
 };
@@ -1166,13 +1505,14 @@ const derivePredictionJournalAutoFill = (
 
   const numberLimit = targetNumberLimit(targetKind);
   const shouldFillWholeTargetFields = numberLimit === null || numbers.length === numberLimit;
+  const shouldFillOddEvenRatio = numbers.length === 8 || shouldFillWholeTargetFields;
   const oddEven = countOddEven(numbers);
   const sum = numbers.reduce((total, number) => total + number, 0);
 
   snapshot.terminalDigitsText = [...new Set(numbers.map(normalizeTerminalDigit))]
     .sort((left, right) => left - right)
     .join(", ");
-  snapshot.oddEvenRatio = shouldFillWholeTargetFields ? `${oddEven.odd}:${oddEven.even}` : "";
+  snapshot.oddEvenRatio = shouldFillOddEvenRatio ? `${oddEven.odd}:${oddEven.even}` : "";
   snapshot.singleText = String(numbers.filter((number) => number >= 1 && number <= 9).length);
   snapshot.doubleText = String(numbers.filter((number) => number >= 10 && number <= 45).length);
   snapshot.sumMinText = shouldFillWholeTargetFields ? String(sum) : "";
@@ -1270,6 +1610,22 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
     () => showArchivedEntries ? scoredEntries : scoredEntries.filter((entry) => !entry.archivedAt),
     [scoredEntries, showArchivedEntries],
   );
+  const activeEntriesForLatestReplay = useMemo(
+    () => scoredEntries.filter((entry) => !entry.archivedAt),
+    [scoredEntries],
+  );
+  const latestDrawReplayRows = useMemo(
+    () => latestDraw
+      ? activeEntriesForLatestReplay
+        .map((entry) => scoreEntryAgainstLatestDraw(entry, latestDraw))
+        .filter((row): row is LatestDrawReplayRow => row !== null)
+      : [],
+    [activeEntriesForLatestReplay, latestDraw],
+  );
+  const latestDrawReplayOmittedNoNumberCount = useMemo(
+    () => activeEntriesForLatestReplay.filter((entry) => !(entry.inputs.numbers?.length)).length,
+    [activeEntriesForLatestReplay],
+  );
   const findingsReport = useMemo(
     () => buildPredictionJournalFindingsReport(scoredEntries, {
       reviewedOnly: true,
@@ -1278,10 +1634,10 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
     [scoredEntries, showArchivedEntries],
   );
   const terminalDigitHistoryByEntryId = useMemo(() => {
-    const map = new Map<string, PredictionTerminalDigitHistory>();
+    const map = new Map<string, JournalTerminalDigitHistory>();
     for (const entry of scoredEntries) {
       if (!entry.inputs.terminalDigits?.length) continue;
-      const historyResult = analyzePredictionTerminalDigitHistory(history, entry.inputs.terminalDigits, {
+      const historyResult = analyzeJournalTerminalDigitHistory(history, entry.inputs.terminalDigits, {
         scope: "mains-plus-supps",
       });
       if (historyResult) map.set(entry.id, historyResult);
@@ -1342,6 +1698,16 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
     setShowHistoricalPrizeCollisionSaveAlert(false);
     setNumbersText(value);
     applyNumbersAutoFill(value);
+  };
+
+  const handleOpenLatestReplayEntry = (entryId: string) => {
+    setExpandedEntryId(entryId);
+    if (typeof window === "undefined" || typeof document === "undefined") return;
+
+    const detailId = `prediction-journal-entry-${domSafeId(entryId)}`;
+    window.requestAnimationFrame(() => {
+      document.getElementById(detailId)?.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
+    });
   };
 
   const handleTargetKindChange = (value: string) => {
@@ -1452,8 +1818,8 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
         const odd = Number(match[1]);
         const even = Number(match[2]);
         const total = odd + even;
-        if (numberLimit !== null && total !== numberLimit) {
-          errors.push(`Odd/even ratio must total ${numberLimit}.`);
+        if (numberLimit !== null && total !== 8) {
+          errors.push("Odd/even ratio must total 8.");
         } else if (numberLimit === null && total <= 0) {
           errors.push("Odd/even ratio must include at least one draw number.");
         }
@@ -1842,6 +2208,7 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
         <HigField label="Target window">
           <select value={targetKind} onChange={(event) => handleTargetKindChange(event.target.value)}>
             <option value="nextDraw">Next draw</option>
+            <option value="next2Draws">Next 2 draws</option>
             <option value="next3Draws">Next 3 draws</option>
             <option value="restOfMonth">Rest of current month</option>
           </select>
@@ -1899,7 +2266,7 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
           <div
             role="radiogroup"
             aria-label="Selection reason"
-            style={{ display: "grid", gap: 6 }}
+            className="windfall-prediction-journal-reason-options"
           >
             <label
               style={{
@@ -2140,6 +2507,9 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
       ) : null}
 
       {journalViewMode === "entries" ? renderPredictionJournalFindingsReport(findingsReport) : null}
+      {journalViewMode === "entries"
+        ? renderLatestDrawReplay(latestDrawReplayRows, latestDraw, latestDrawReplayOmittedNoNumberCount, handleOpenLatestReplayEntry)
+        : null}
 
       <div style={{ marginTop: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>

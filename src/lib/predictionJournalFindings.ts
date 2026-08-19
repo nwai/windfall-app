@@ -216,6 +216,19 @@ const collectSignals = (entry: ScoredPredictionJournalEntry): FindingSignal[] =>
   if (drought?.selectedStrictDroughtNumbers.length) addSignal(signals, "Drought provenance", "Picked strict drought 6+ number");
   if (drought?.selectedEmpiricalHazardNumbers.length) addSignal(signals, "Drought provenance", "Picked empirical hazard number");
 
+  const strictDroughtQuota = entry.provenance?.strictDroughtQuota;
+  if (strictDroughtQuota && strictDroughtQuota.mode !== "off") {
+    const modeLabel = strictDroughtQuota.mode === "advised" ? "SDSR-advised" : "manual";
+    addSignal(signals, "Watched signal", `Strict drought quota ${modeLabel}`);
+    if (strictDroughtQuota.effectiveMin > 0) {
+      addSignal(signals, "Watched signal", `Strict drought quota min ${strictDroughtQuota.effectiveMin}`);
+    }
+    if (strictDroughtQuota.mode === "advised") {
+      addSignal(signals, "Watched signal", `Strict drought quota source ${strictDroughtQuota.advice.sourceLabel}`);
+      addSignal(signals, "Watched signal", `Strict drought quota confidence ${strictDroughtQuota.advice.confidence}`);
+    }
+  }
+
   const selectionInsights = entry.provenance?.selectionInsights;
   if (selectionInsights?.enabled && selectionInsights.predictedCompanionNumbers.length) {
     addSignal(signals, "Selection insights", `Captured predicted companions ${selectionInsights.predictedCompanionNumbers.join(",")}`);

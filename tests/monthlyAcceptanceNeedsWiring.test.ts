@@ -10,8 +10,9 @@ describe("Monthly acceptance-needs MiAN wiring", () => {
 
     expect(appSource).toContain("const zeroMonthlyFrequencyConstraints = (): MonthlyFrequencyConstraints =>");
     expect(appSource).toContain("if (!acceptanceNeedsEnabled) {");
-    expect(appSource).toContain("setAcceptanceNeedsCounts(zeroMonthlyFrequencyConstraints());");
-    expect(appSource).toContain("? monthlyConstraintPayload.constraints");
+    expect(appSource).toContain("setAcceptanceNeedsCounts((previous) =>");
+    expect(appSource).toContain("monthlyFrequencyConstraintsSignature(previous)");
+    expect(appSource).toContain(": monthlyConstraintPayload.constraints");
     expect(appSource).toContain("!acceptanceNeedsEnabled");
 
     expect(appSource).not.toContain("const b = monthlyConstraintPayload.buckets");

@@ -40,7 +40,7 @@ const setSelectValue = (select: HTMLSelectElement, value: string) => {
 };
 
 const monthlyBucketRowTexts = (container: HTMLElement): string[] => (
-  Array.from(container.querySelectorAll("tbody tr"))
+  Array.from(container.querySelectorAll('[data-testid="monthly-buckets-table"] tbody tr'))
     .map((row) => row.textContent?.replace(/\s+/g, " ").trim() ?? "")
 );
 
@@ -84,6 +84,59 @@ describe("MonthlyDrawsSummaryPanel planning month rollover", () => {
     expect(container.textContent).toContain("Active buckets: 2026-07 (planning reset)");
     expect(publishedBuckets?.undrawn.size).toBe(45);
     expect(publishedBuckets?.times1.size).toBe(0);
+  });
+
+  it("does not republish equivalent derived state on unrelated parent rerenders", async () => {
+    const history = [
+      ...repeatDraws("2026-01", 13, 1),
+      ...repeatDraws("2026-03", 13, 4),
+      ...repeatDraws("2026-06", 13, 7),
+    ];
+    const calls = {
+      labels: 0,
+      buckets: 0,
+      averages: 0,
+      ideal: 0,
+      stage: 0,
+    };
+
+    const Harness = () => {
+      const [renderCount, setRenderCount] = React.useState(0);
+      return React.createElement(
+        React.Fragment,
+        null,
+        React.createElement(
+          "button",
+          { type: "button", onClick: () => setRenderCount((value) => value + 1) },
+          `Rerender ${renderCount}`,
+        ),
+        React.createElement(MonthlyDrawsSummaryPanel, {
+          history,
+          onBucketInfoChange: () => { calls.labels += 1; },
+          onBucketSetsChange: () => { calls.buckets += 1; },
+          onAvgBucketsChange: () => { calls.averages += 1; },
+          onIdealDrawStateChange: () => { calls.ideal += 1; },
+          onStageIdealDrawStateChange: () => { calls.stage += 1; },
+        }),
+      );
+    };
+
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(React.createElement(Harness));
+    });
+    const callsAfterMount = { ...calls };
+
+    const rerenderButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent?.startsWith("Rerender")) as HTMLButtonElement;
+    await act(async () => {
+      rerenderButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(calls).toEqual(callsAfterMount);
   });
 
   it("sends Simulate 8 acceptance-needs numbers to the DGA simulation callback", async () => {
@@ -166,7 +219,7 @@ describe("MonthlyDrawsSummaryPanel planning month rollover", () => {
       expect.stringContaining("2026-01"),
     ]);
     expect(container.textContent).toContain("Showing 2 of 3 months");
-    expect(container.textContent).not.toContain("2026-02");
+    expect(filteredRows.join(" ")).not.toContain("2026-02");
   });
 
   it("renders the undrawn-in-month count as a centered outlined badge", async () => {
@@ -259,6 +312,6 @@ describe("MonthlyDrawsSummaryPanel planning month rollover", () => {
     ]);
     expect(container.textContent).toContain("Showing 2 of 3 months");
     expect(container.textContent).toContain("Active buckets: 2026-03");
-    expect(container.textContent).not.toContain("2026-02");
+    expect(filteredRows.join(" ")).not.toContain("2026-02");
   });
 });

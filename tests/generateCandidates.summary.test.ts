@@ -105,6 +105,7 @@ function runGenerator(overrides: Partial<{
       undefined,
       undefined,
       undefined,
+      undefined,
       overrides.progressSetter,
     )
   );
@@ -162,6 +163,60 @@ function runRatioGenerator() {
 }
 
 describe("generateCandidates summaries and OGA floor", () => {
+  it("honors exclude-unselected by rejecting every number outside the selected set", () => {
+    const selectedNumbers = [1, 2, 3, 4, 5, 6, 7, 8];
+    const autoExcludedNumbers = Array.from({ length: 45 }, (_, index) => index + 1)
+      .filter((number) => !selectedNumbers.includes(number));
+
+    const result = withSeededRandom(20260810, () =>
+      generateCandidates(
+        1,
+        [],
+        knobs,
+        () => {},
+        autoExcludedNumbers,
+        [],
+        false,
+        0,
+        [],
+        [],
+        selectedNumbers,
+        undefined,
+        0,
+        0,
+        1,
+        0,
+        [],
+        0,
+        0,
+        0,
+        0,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        50,
+      )
+    );
+
+    expect(result.candidates).toHaveLength(1);
+    const generatedNumbers = [...result.candidates[0].main, ...result.candidates[0].supp];
+    expect(generatedNumbers.sort((left, right) => left - right)).toEqual(selectedNumbers);
+    expect(generatedNumbers.some((number) => autoExcludedNumbers.includes(number))).toBe(false);
+  });
+
   it("returns an honest odd/even ratio summary for accepted candidates", () => {
     const result = runGenerator();
 

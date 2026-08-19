@@ -36,6 +36,7 @@ export interface TemperatureHeatmapProps {
 
   // Unified hover + overlay
   showHoverProbability?: boolean; // default true
+  showHoverSparkline?: boolean; // default true
   overlayNumbers?: number[]; // rows (1..45) to mark with white dots near right edge
 
   // Letter overlay
@@ -111,6 +112,7 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
   emaNormalize = "global",
   enforcePeaks = true,
   showHoverProbability = true,
+  showHoverSparkline = true,
   overlayNumbers = [],
   showBucketLetters = false,
   bucketLetters,
@@ -522,7 +524,7 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
                 <div style={{ color: "#777", marginTop: 2, marginBottom: 6 }}>
                   Drought length k={rec.k} • Observed {rec.hitsNext}/{rec.trials} • Baseline {(baseline * 100).toFixed(1)}%
                 </div>
-                {spark && (
+                {showHoverSparkline && spark && (
                   <div>
                     <div style={{ fontSize: 12, marginBottom: 2 }}>Temperature (last {spark.N})</div>
                     <svg width={spark.W} height={spark.H}>

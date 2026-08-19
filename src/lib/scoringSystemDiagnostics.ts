@@ -112,9 +112,9 @@ export interface TerminalDigitSetDiagnosticRow extends TerminalDigitSetDefinitio
   rankMovement: number | null;
 }
 
-export type PredictionTerminalDigitHistoryBand = "common" | "typical" | "rare" | "never-seen";
+export type JournalTerminalDigitHistoryBand = "common" | "typical" | "rare" | "never-seen";
 
-export interface PredictionTerminalDigitHistory {
+export interface JournalTerminalDigitHistory {
   digits: number[];
   key: string;
   length: number;
@@ -127,7 +127,7 @@ export interface PredictionTerminalDigitHistory {
   peerRank: number | null;
   peerTotal: number;
   peerPercentile: number | null;
-  band: PredictionTerminalDigitHistoryBand;
+  band: JournalTerminalDigitHistoryBand;
   latestExactExample: TerminalDigitSetExample | null;
   latestContainedExample: TerminalDigitSetExample | null;
 }
@@ -401,18 +401,18 @@ const digitSetIsContained = (candidate: readonly number[], drawDigits: Set<numbe
 const terminalDigitHistoryBand = (
   containedCount: number,
   peerPercentile: number | null,
-): PredictionTerminalDigitHistoryBand => {
+): JournalTerminalDigitHistoryBand => {
   if (containedCount <= 0) return "never-seen";
   if (containedCount < 3 || peerPercentile == null || peerPercentile < 34) return "rare";
   if (containedCount >= 5 && peerPercentile >= 67) return "common";
   return "typical";
 };
 
-export const analyzePredictionTerminalDigitHistory = (
+export const analyzeJournalTerminalDigitHistory = (
   realHistory: Draw[],
   terminalDigits: readonly unknown[],
   options: ScoringDiagnosticsOptions = {},
-): PredictionTerminalDigitHistory | null => {
+): JournalTerminalDigitHistory | null => {
   const scope = options.scope ?? "mains-plus-supps";
   const digits = normalizeTerminalDigitValues(terminalDigits);
   if (digits.length === 0 || digits.length > 8) return null;

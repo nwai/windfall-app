@@ -217,7 +217,8 @@ export function useGenerateWorker() {
                 (partialResult) => {
                   latestPartialRef.current = partialResult;
                 },
-                args.latestNeighbourSupportOptions
+                args.latestNeighbourSupportOptions,
+                args.strictDroughtQuotaOptions
             );
             latestPartialRef.current = null;
             onResult(result);

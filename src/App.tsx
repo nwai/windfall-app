@@ -28,6 +28,7 @@ import {
   type DgaSuppSuggestion,
 } from "./lib/dgaSuppSuggestion";
 import { DGAVisualizer } from "./components/DGAVisualizer";
+import { DGAConstellationDiagnosticPanel } from "./components/DGAConstellationDiagnosticPanel";
 import { computeOGA, getOGAPercentile } from "./utils/oga";
 import { ogaPercentileToSimilarity } from "./lib/ogaQuality";
 import { Draw, Knobs, CandidateSet, type KeptGeneratedCandidateRow } from "./types";
@@ -54,6 +55,11 @@ import {
   computeDroughtHazard,
   computeStrictDroughtShortlist,
 } from "./lib/droughtHazard";
+import {
+  buildStrictDroughtQuotaAdvice,
+  buildStrictDroughtQuotaShortlist,
+  type StrictDroughtQuotaControlMode,
+} from "./lib/strictDroughtQuotaAdvice";
 import { BatesPanel } from "./components/BatesPanel";
 import { computeTemperatureSignal } from "./lib/temperatureSignal";
 import { buildConditionalProb } from "./lib/conditionalProbability";
@@ -130,6 +136,8 @@ import { NextDrawProbabilitiesPanel } from "./components/NextDrawProbabilitiesPa
 import { forecastOGA } from "./lib/ogaForecast";
 import { MostLikelyNotDrawnPanel } from "./components/MostLikelyNotDrawnPanel";
 import { BacktestPanel } from "./components/BacktestPanel";
+import { DroughtBacktestPanel } from "./components/DroughtBacktestPanel";
+import { SettingsSensitivityReplayPanel } from "./components/SettingsSensitivityReplayPanel";
 import { NextHotBlocksPanel } from "./components/NextHotBlocksPanel";
 import { TattslottoTicketGridReplayPanel } from "./components/TattslottoTicketGridReplayPanel";
 import UndrawnPatternsPanel from "./components/UndrawnPatternsPanel";
@@ -184,6 +192,7 @@ import {
   normalizeUserExclusionLocks,
   removeUserExcludedNumbers,
 } from "./lib/userExclusionLocks";
+import { normalizeManualPrizeCheckNumbers } from "./lib/manualPrizeCheck";
 import { buildNumberConflictLedger } from "./lib/numberConflictLedger";
 import {
   DEFAULT_GENERATED_CANDIDATE_COUNT,
@@ -198,6 +207,7 @@ import {
   buildGenerationSessionMainKeySet,
   filterCandidatesForGenerationSession,
 } from "./lib/generationSession";
+import { analyzeSde1Hc3ContextBacktest } from "./lib/sde1Hc3ContextAdvice";
 import {
   buildEffectiveMonthEndCarryOverWeights,
   buildMonthEndCarryOverWeighting,
@@ -644,6 +654,20 @@ const applyReadinessHardFiltersToCandidates = (
 
 type GenerationRejectionStats = GenerateCandidatesResult["rejectionStats"];
 
+const FULL_GENERATED_CANDIDATE_NUMBER_COUNT = 8;
+const USER_SELECTION_GENERATION_BLOCK_MESSAGE =
+  "Can't create an 8-number candidate from the user selection. Select at least 8 numbers, or turn off Exclude unselected.";
+const ACTIVE_SETUP_PROVENANCE_TARGET_IDS = {
+  historySource: "panel-windowed-draw-filtering",
+  filtersDistance: "windfall-generation-hard-filters",
+  recencyLatestDraw: "windfall-generation-recency-latest-draw",
+  geometryPattern: "windfall-generation-engine-ranking",
+  endingBuckets: "windfall-generation-ending-digits-buckets",
+  monthlyCarryOver: "windfall-generation-monthly-timing-bias",
+} as const;
+type ActiveSetupProvenanceTarget = keyof typeof ACTIVE_SETUP_PROVENANCE_TARGET_IDS;
+const ACTIVE_SETUP_SHAPE_BUCKET_CARD_ID = "windfall-generation-shape-bucket-quotas";
+
 const formatTracePairs = (pairs: Array<[string, number | string]>): string => (
   pairs.map(([label, value]) => `${label}:${value}`).join(" · ")
 );
@@ -711,6 +735,7 @@ const formatGenerationTraceLines = (options: {
       ["tricky", stats.tricky],
       ["repeat", stats.repeatUnion],
       ["ld±1", stats.latestNeighbourSupport],
+      ["strictDrought", stats.strictDroughtQuota],
       ["recMin", stats.minRecent],
       ["recMax", stats.maxLastDraw],
       ["recBias", stats.recentBias],
@@ -758,6 +783,7 @@ const API_URL =
   "https://api.thelott.com/sales/vmax/web/data/lotto/results?companyId=Tatts&productId=WeekdayWindfall&maxDrawCount=50";
 const DEFAULT_ATTEMPT_MULTIPLIER = 400;
 const MAX_DROUGHT_BREAK_FORCED_NUMBERS = 3;
+const STRICT_DROUGHT_QUOTA_TOP_K = 8;
 
 const zeroMonthlyFrequencyConstraints = (): MonthlyFrequencyConstraints => ({
   undrawn: 0,
@@ -770,6 +796,94 @@ const zeroMonthlyFrequencyConstraints = (): MonthlyFrequencyConstraints => ({
   times7: 0,
   times8: 0,
 });
+
+const MONTHLY_FREQUENCY_KEYS: (keyof MonthlyFrequencyConstraints)[] = [
+  "undrawn",
+  "times1",
+  "times2",
+  "times3",
+  "times4",
+  "times5",
+  "times6",
+  "times7",
+  "times8",
+];
+
+const monthlyFrequencyConstraintsSignature = (constraints: MonthlyFrequencyConstraints | null | undefined): string => (
+  constraints ? MONTHLY_FREQUENCY_KEYS.map((key) => `${key}:${constraints[key]}`).join("|") : "null"
+);
+
+const monthlyBucketSetsSignature = (sets: MonthlyBucketSets | null | undefined): string => (
+  sets
+    ? MONTHLY_FREQUENCY_KEYS
+      .map((key) => `${key}:${Array.from(sets[key]).sort((a, b) => a - b).join(",")}`)
+      .join("|")
+    : "null"
+);
+
+const monthlyBucketLabelsSignature = (labels: Record<number, string>): string => (
+  Object.entries(labels)
+    .sort(([left], [right]) => Number(left) - Number(right))
+    .map(([number, label]) => `${number}:${label}`)
+    .join("|")
+);
+
+const monthlyNumberListSignature = (numbers: readonly number[] | null | undefined): string => (
+  numbers ? numbers.join(",") : "null"
+);
+
+const monthlySelectionSignature = (
+  selections: MonthlyConstraintPayload["selectedNumbersByBucket"] | null | undefined,
+): string => (
+  selections
+    ? MONTHLY_FREQUENCY_KEYS.map((key) => `${key}:${selections[key].join(",")}`).join("|")
+    : "null"
+);
+
+const monthlyConstraintPayloadAppSignature = (payload: MonthlyConstraintPayload | null | undefined): string => (
+  payload
+    ? [
+      monthlyFrequencyConstraintsSignature(payload.constraints),
+      monthlyBucketSetsSignature(payload.buckets),
+      monthlySelectionSignature(payload.selectedNumbersByBucket),
+      payload.selectedNumberBiasEnabled ? "bias-on" : "bias-off",
+    ].join("::")
+    : "null"
+);
+
+const monthlyAvgBucketsSignature = (rows: { times: number; avg: number }[] | null | undefined): string => (
+  rows ? rows.map((row) => `${row.times}:${row.avg}`).join("|") : "null"
+);
+
+const monthlyIdealDrawStateAppSignature = (state: MonthlyIdealDrawState | null | undefined): string => (
+  state
+    ? [
+      state.effectiveMonthLabel,
+      state.effectiveMonthIsSynthetic ? "synthetic" : "observed",
+      monthlyNumberListSignature(state.targetDistribution),
+      monthlyNumberListSignature(state.idealDrawBucketCounts),
+      monthlyBucketSetsSignature(state.bucketSets),
+    ].join("::")
+    : "null"
+);
+
+const stageIdealDrawStateAppSignature = (state: StageIdealDrawState | null | undefined): string => (
+  state
+    ? [
+      state.workingMonthLabel,
+      state.expectedDrawCount,
+      state.targetStageDrawCount,
+      state.completedDrawCount,
+      state.comparableMonthCount,
+      state.expectedDrawCountSource,
+      monthlyNumberListSignature(state.currentDistribution),
+      monthlyNumberListSignature(state.targetDistribution),
+      monthlyNumberListSignature(state.idealDrawBucketCounts),
+      state.warnings.join("|"),
+      monthlyBucketSetsSignature(state.bucketSets),
+    ].join("::")
+    : "null"
+);
 
 const generationConstraintNumberBuckets = {
   main0: [10, 20, 30, 40],
@@ -914,6 +1028,12 @@ function AppInner(): JSX.Element {
   );
   const realHistory = realHistoryResult.history;
   const planningDrawContext = usePlanningDrawContext(realHistory);
+  const sde1Hc3ContextBacktest = useMemo(
+    () => analyzeSde1Hc3ContextBacktest(realHistory, {
+      targetDrawOrdinal: planningDrawContext.targetDrawOrdinal,
+    }),
+    [realHistory, planningDrawContext.targetDrawOrdinal],
+  );
   const baselineHistoryScope = useMemo(() => {
     const rows = realHistory
       .map((draw) => ({ draw, monthLabel: monthLabelForHistoryScope(draw) }))
@@ -1326,6 +1446,54 @@ function AppInner(): JSX.Element {
   const [monthlyIdealDrawState, setMonthlyIdealDrawState] = useState<MonthlyIdealDrawState | null>(null);
   const [stageIdealDrawState, setStageIdealDrawState] = useState<StageIdealDrawState | null>(null);
 
+  const handleMonthlyConstraintsChange = useCallback((payload: MonthlyConstraintPayload | null) => {
+    setMonthlyConstraintPayload((previous) => (
+      monthlyConstraintPayloadAppSignature(previous) === monthlyConstraintPayloadAppSignature(payload)
+        ? previous
+        : payload
+    ));
+  }, []);
+
+  const handleMonthlyBucketInfoChange = useCallback((info: { labels: Record<number, string> }) => {
+    setMonthlyBucketLabels((previous) => (
+      monthlyBucketLabelsSignature(previous) === monthlyBucketLabelsSignature(info.labels)
+        ? previous
+        : info.labels
+    ));
+  }, []);
+
+  const handleMonthlyBucketSetsChange = useCallback((sets: MonthlyBucketSets | null) => {
+    setMonthlyBucketSetsAlways((previous) => (
+      monthlyBucketSetsSignature(previous) === monthlyBucketSetsSignature(sets)
+        ? previous
+        : sets
+    ));
+  }, []);
+
+  const handleMonthlyAvgBucketsChange = useCallback((rows: { times: number; avg: number }[]) => {
+    setMonthlyAvgBuckets((previous) => (
+      monthlyAvgBucketsSignature(previous) === monthlyAvgBucketsSignature(rows)
+        ? previous
+        : rows
+    ));
+  }, []);
+
+  const handleMonthlyIdealDrawStateChange = useCallback((state: MonthlyIdealDrawState | null) => {
+    setMonthlyIdealDrawState((previous) => (
+      monthlyIdealDrawStateAppSignature(previous) === monthlyIdealDrawStateAppSignature(state)
+        ? previous
+        : state
+    ));
+  }, []);
+
+  const handleStageIdealDrawStateChange = useCallback((state: StageIdealDrawState | null) => {
+    setStageIdealDrawState((previous) => (
+      stageIdealDrawStateAppSignature(previous) === stageIdealDrawStateAppSignature(state)
+        ? previous
+        : state
+    ));
+  }, []);
+
   // Readiness (Rdy) score weights — user-configurable in Candidate Generation Influences.
   // Defaults are deliberately neutral; users must opt in before Rdy weighting can influence diagnostics.
   const [rdyWeights, setRdyWeights] = useState<ReadinessWeights>(cloneDefaultRdyWeights);
@@ -1360,11 +1528,19 @@ function AppInner(): JSX.Element {
   // off, its hidden counts stay zero so stale bucket demands cannot reject all candidates later.
   useEffect(() => {
     if (!acceptanceNeedsEnabled) {
-      setAcceptanceNeedsCounts(zeroMonthlyFrequencyConstraints());
+      setAcceptanceNeedsCounts((previous) => (
+        monthlyFrequencyConstraintsSignature(previous) === monthlyFrequencyConstraintsSignature(zeroMonthlyFrequencyConstraints())
+          ? previous
+          : zeroMonthlyFrequencyConstraints()
+      ));
       return;
     }
     if (monthlyConstructiveEnabled && monthlyConstraintPayload) {
-      setAcceptanceNeedsCounts(monthlyConstraintPayload.constraints);
+      setAcceptanceNeedsCounts((previous) => (
+        monthlyFrequencyConstraintsSignature(previous) === monthlyFrequencyConstraintsSignature(monthlyConstraintPayload.constraints)
+          ? previous
+          : monthlyConstraintPayload.constraints
+      ));
     }
   }, [acceptanceNeedsEnabled, monthlyConstructiveEnabled, monthlyConstraintPayload]);
 
@@ -1426,11 +1602,17 @@ function AppInner(): JSX.Element {
   const [maxCount, setMaxCount] = useState<number>(0);
   const [focusedDgaCol, setFocusedDgaCol] = useState<number | null>(null);
   const [dgaHoveredNumber, setDgaHoveredNumber] = useState<number | null>(null);
+  const [engineRankingExpanded, setEngineRankingExpanded] = useState<boolean>(true);
+  const [shapeBucketQuotasExpanded, setShapeBucketQuotasExpanded] = useState<boolean>(false);
+  const [recencyLatestDrawExpanded, setRecencyLatestDrawExpanded] = useState<boolean>(false);
+  const [hardFiltersExpanded, setHardFiltersExpanded] = useState<boolean>(false);
   const [minRecentMatches, setMinRecentMatches] = useState<number>(0);
   const [maxLastDrawMatchesEnabled, setMaxLastDrawMatchesEnabled] = useState<boolean>(false);
   const [maxLastDrawMatchesValue, setMaxLastDrawMatchesValue] = useState<number>(3);
   const [previousNeighbourConstraintNumbers, setPreviousNeighbourConstraintNumbers] = useState<number[]>([]);
   const [latestNeighbourSupportEnabled, setLatestNeighbourSupportEnabled] = useState<boolean>(false);
+  const [strictDroughtQuotaMode, setStrictDroughtQuotaMode] = useState<StrictDroughtQuotaControlMode>("off");
+  const [strictDroughtQuotaManualMin, setStrictDroughtQuotaManualMin] = useState<number>(1);
   const [recentMatchBias, setRecentMatchBias] = useState<number>(0);
   const [highlightMsg, setHighlightMsg] = useState<string>("");
   const [highlights, setHighlights] = useState<any[]>([]);
@@ -1446,13 +1628,17 @@ function AppInner(): JSX.Element {
   const [pasteWeightedForcedNumbers, setPasteWeightedForcedNumbers] = useState<number[]>([]);
   const [userSelectedNumbers, setUserSelectedNumbers] = useState<number[]>([]);
   const [autoExcludeUnselected, setAutoExcludeUnselected] = useState<boolean>(false);
+  const normalizedUserSelectedNumbersForGeneration = useMemo(
+    () => normalizeUserExclusionLocks(userSelectedNumbers),
+    [userSelectedNumbers],
+  );
   const autoExcludedFromSelection = useMemo(() => {
     if (!autoExcludeUnselected) return [] as number[];
-    const picked = new Set(userSelectedNumbers);
+    const picked = new Set(normalizedUserSelectedNumbersForGeneration);
     return Array.from({ length: 45 }, (_, i) => i + 1).filter((n) => !picked.has(n));
-  }, [autoExcludeUnselected, userSelectedNumbers]);
+  }, [autoExcludeUnselected, normalizedUserSelectedNumbersForGeneration]);
   const effectiveExcludedNumbers = useMemo(
-    () => normalizeHotColdGenerationNumbers([...excludedNumbers, ...hotColdExcludedNumbers, ...autoExcludedFromSelection]),
+    () => normalizeUserExclusionLocks([...excludedNumbers, ...hotColdExcludedNumbers, ...autoExcludedFromSelection]),
     [excludedNumbers, hotColdExcludedNumbers, autoExcludedFromSelection]
   );
   const userExclusionLocks = useMemo(() => normalizeUserExclusionLocks(excludedNumbers), [excludedNumbers]);
@@ -1470,6 +1656,7 @@ function AppInner(): JSX.Element {
   const [trendSelectedNumbers, setTrendSelectedNumbers] = useState<number[]>([]);
   const [focusNumber, setFocusNumber] = useState<number | null>(null);
   const [showHeatmapLetters, setShowHeatmapLetters] = useState(false);
+  const [showMbsHoverSparkline, setShowMbsHoverSparkline] = useState(true);
   const [tempMetric, setTempMetric] = useState<"ema" | "recency" | "hybrid">("hybrid");
   const [dgaHeatmapView, setDgaHeatmapView] = useState<DgaHeatmapViewMode>("temperature");
   const [dgaMonthlyBucketStateOpacity, setDgaMonthlyBucketStateOpacity] = useState<number>(1);
@@ -1906,7 +2093,7 @@ function AppInner(): JSX.Element {
     setDroughtBreakSelectedNumbers((current) => removeUserExcludedNumbers(current, excludedNumbers).slice(0, MAX_DROUGHT_BREAK_FORCED_NUMBERS));
     setPasteWeightedForcedNumbers((current) => removeUserExcludedNumbers(current, excludedNumbers));
     setUserSelectedNumbers((current) => removeUserExcludedNumbers(current, excludedNumbers));
-    setManualSimSelected((current) => removeUserExcludedNumbers(current, excludedNumbers).slice(0, 8));
+    setManualSimSelected((current) => normalizeManualPrizeCheckNumbers(current, excludedNumbers));
     setSelectedCarryOverBoostNumbers((current) => removeUserExcludedNumbers(current, excludedNumbers));
   }, [excludedNumbers]);
 
@@ -2056,6 +2243,91 @@ function AppInner(): JSX.Element {
     () => new Set(selectionUnavailableNumbers),
     [selectionUnavailableNumbers],
   );
+  const strictDroughtQuotaShortlist = useMemo(
+    () => buildStrictDroughtQuotaShortlist(realFilteredHistory, realHistory, {
+      threshold: STRICT_DROUGHT_DEFAULT_THRESHOLD,
+      topK: STRICT_DROUGHT_QUOTA_TOP_K,
+    }),
+    [realFilteredHistory, realHistory],
+  );
+  const strictDroughtQuotaEligibleNumbers = useMemo(
+    () => strictDroughtQuotaShortlist.numbers.filter((number) => !selectionUnavailableSet.has(number)),
+    [selectionUnavailableSet, strictDroughtQuotaShortlist.numbers],
+  );
+  const strictDroughtQuotaAdvice = useMemo(
+    () => buildStrictDroughtQuotaAdvice(baselineHistory, {
+      targetDrawOrdinal: planningDrawContext.targetDrawOrdinal,
+      targetMonthExpectedDrawCount: planningDrawContext.targetMonthExpectedDrawCount,
+      currentShortlistSize: strictDroughtQuotaEligibleNumbers.length,
+      threshold: strictDroughtQuotaShortlist.threshold,
+      topK: strictDroughtQuotaShortlist.topK,
+    }),
+    [
+      baselineHistory,
+      planningDrawContext.targetDrawOrdinal,
+      planningDrawContext.targetMonthExpectedDrawCount,
+      strictDroughtQuotaEligibleNumbers.length,
+      strictDroughtQuotaShortlist.threshold,
+      strictDroughtQuotaShortlist.topK,
+    ],
+  );
+  const strictDroughtQuotaEffectiveMin = useMemo(() => {
+    if (strictDroughtQuotaMode === "off") return 0;
+    const raw = strictDroughtQuotaMode === "advised"
+      ? strictDroughtQuotaAdvice.recommendedMinCount
+      : strictDroughtQuotaManualMin;
+    return Math.max(0, Math.min(8, strictDroughtQuotaEligibleNumbers.length, Math.floor(raw)));
+  }, [
+    strictDroughtQuotaAdvice.recommendedMinCount,
+    strictDroughtQuotaEligibleNumbers.length,
+    strictDroughtQuotaManualMin,
+    strictDroughtQuotaMode,
+  ]);
+  const strictDroughtQuotaActive = strictDroughtQuotaMode !== "off" && strictDroughtQuotaEffectiveMin > 0;
+  const strictDroughtQuotaSummary = strictDroughtQuotaMode === "off"
+    ? "off"
+    : `${strictDroughtQuotaMode === "advised" ? "SDSR" : "manual"} min ${strictDroughtQuotaEffectiveMin}`;
+  const strictDroughtQuotaGenerationOptions = useMemo<GenerateWorkerArgs["strictDroughtQuotaOptions"] | undefined>(() => {
+    if (strictDroughtQuotaMode === "off") return undefined;
+    return {
+      enabled: true,
+      minCount: strictDroughtQuotaEffectiveMin,
+      shortlist: strictDroughtQuotaShortlist.numbers,
+      rankMultipliers: strictDroughtQuotaShortlist.rankMultipliers,
+      sourceLabel: strictDroughtQuotaMode === "advised"
+        ? `SDSR-advised · ${strictDroughtQuotaAdvice.sourceLabel}`
+        : "manual",
+    };
+  }, [
+    strictDroughtQuotaAdvice.sourceLabel,
+    strictDroughtQuotaEffectiveMin,
+    strictDroughtQuotaMode,
+    strictDroughtQuotaShortlist.numbers,
+    strictDroughtQuotaShortlist.rankMultipliers,
+  ]);
+  const strictDroughtQuotaTraceLine = useCallback((label: string): string | null => {
+    if (strictDroughtQuotaMode === "off") return null;
+    const current = strictDroughtQuotaEligibleNumbers.length
+      ? `current eligible top ${strictDroughtQuotaEligibleNumbers.length}: ${strictDroughtQuotaEligibleNumbers.join(", ")}`
+      : "current eligible top shortlist is empty";
+    if (strictDroughtQuotaMode === "advised") {
+      return `[TRACE] ${label}: Strict drought quota SDSR-advised ${strictDroughtQuotaAdvice.shouldApplyQuota ? "ON" : "observe-only"}; effective minimum ${strictDroughtQuotaEffectiveMin}; ${current}; ${strictDroughtQuotaAdvice.reason}`;
+    }
+    return `[TRACE] ${label}: Strict drought quota manual ON; effective minimum ${strictDroughtQuotaEffectiveMin}; ${current}.`;
+  }, [
+    strictDroughtQuotaAdvice.reason,
+    strictDroughtQuotaAdvice.shouldApplyQuota,
+    strictDroughtQuotaEffectiveMin,
+    strictDroughtQuotaEligibleNumbers,
+    strictDroughtQuotaMode,
+  ]);
+  useEffect(() => {
+    setStrictDroughtQuotaManualMin((previous) => {
+      const safePrevious = Number.isFinite(previous) ? Math.max(0, Math.trunc(previous)) : 0;
+      const next = Math.min(safePrevious, Math.min(8, strictDroughtQuotaEligibleNumbers.length));
+      return next === previous ? previous : next;
+    });
+  }, [strictDroughtQuotaEligibleNumbers.length]);
   const hotColdExcludedSet = useMemo(
     () => new Set(hotColdExcludedNumbers),
     [hotColdExcludedNumbers],
@@ -2083,7 +2355,7 @@ function AppInner(): JSX.Element {
     setDroughtBreakSelectedNumbers((current) => pruneSelectionUnavailableNumbers(current, MAX_DROUGHT_BREAK_FORCED_NUMBERS));
     setPasteWeightedForcedNumbers((current) => pruneSelectionUnavailableNumbers(current));
     setUserSelectedNumbers((current) => pruneSelectionUnavailableNumbers(current));
-    setManualSimSelected((current) => pruneSelectionUnavailableNumbers(current, 8));
+    setManualSimSelected((current) => normalizeManualPrizeCheckNumbers(current, selectionUnavailableNumbers));
     setSelectedCarryOverBoostNumbers((current) => pruneSelectionUnavailableNumbers(current));
   }, [pruneSelectionUnavailableNumbers]);
 
@@ -2223,6 +2495,55 @@ function AppInner(): JSX.Element {
       setSimScrollOriginY(null);
     }
   }, [simScrollOriginY]);
+  const navigateToActiveSetupProvenanceTarget = useCallback((target: ActiveSetupProvenanceTarget) => {
+    const targetId = ACTIVE_SETUP_PROVENANCE_TARGET_IDS[target];
+
+    if (target === "filtersDistance") setHardFiltersExpanded(true);
+    if (target === "recencyLatestDraw") setRecencyLatestDrawExpanded(true);
+    if (target === "geometryPattern") setEngineRankingExpanded(true);
+    if (target === "endingBuckets" || target === "monthlyCarryOver") setShapeBucketQuotasExpanded(true);
+
+    if (typeof window === "undefined") return;
+
+    const openDetailsPanel = (id: string): void => {
+      const panel = document.getElementById(id);
+      if (!(panel instanceof HTMLDetailsElement) || panel.open) return;
+      const summary = panel.querySelector("summary");
+      if (summary instanceof HTMLElement) {
+        summary.click();
+      } else {
+        panel.open = true;
+      }
+    };
+
+    if (target === "historySource") {
+      openDetailsPanel(targetId);
+    }
+
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        const element = document.getElementById(targetId)
+          ?? ((target === "endingBuckets" || target === "monthlyCarryOver")
+            ? document.getElementById(ACTIVE_SETUP_SHAPE_BUCKET_CARD_ID)
+            : null);
+        if (!(element instanceof HTMLElement)) return;
+
+        const details = element.closest("details");
+        if (details instanceof HTMLDetailsElement && !details.open) {
+          const summary = details.querySelector("summary");
+          if (summary instanceof HTMLElement) summary.click();
+          else details.open = true;
+        }
+
+        element.scrollIntoView({ behavior: "smooth", block: "start" });
+        element.focus({ preventScroll: true });
+        element.classList.add("windfall-provenance-target-pulse");
+        window.setTimeout(() => {
+          element.classList.remove("windfall-provenance-target-pulse");
+        }, 1200);
+      });
+    });
+  }, []);
 
   const handleDgaStripChange = useCallback((nums: number[]) => {
     const sorted = removeUserExcludedNumbers(normalizeDgaSelectedNumbers(nums), selectionUnavailableNumbers);
@@ -3144,15 +3465,51 @@ function AppInner(): JSX.Element {
     setTraceMaybe,
   ]);
 
+  const buildAutoExcludeUnselectedTraceLine = useCallback((label: string): string | null => {
+    if (!autoExcludeUnselected) return null;
+    const eligible = normalizedUserSelectedNumbersForGeneration;
+    const insufficient = eligible.length < FULL_GENERATED_CANDIDATE_NUMBER_COUNT
+      ? ` Warning: ${USER_SELECTION_GENERATION_BLOCK_MESSAGE}`
+      : "";
+    return `[TRACE] ${label}: Exclude unselected ON - eligible selected numbers=${eligible.length}${eligible.length ? ` [${eligible.join(", ")}]` : ""}; auto-excluded ${autoExcludedFromSelection.length} unselected numbers.${insufficient}`;
+  }, [autoExcludeUnselected, autoExcludedFromSelection.length, normalizedUserSelectedNumbersForGeneration]);
+
+  const buildAutoExcludeUnselectedBlockMessage = useCallback((): string | null => {
+    if (!autoExcludeUnselected) return null;
+    return normalizedUserSelectedNumbersForGeneration.length < FULL_GENERATED_CANDIDATE_NUMBER_COUNT
+      ? USER_SELECTION_GENERATION_BLOCK_MESSAGE
+      : null;
+  }, [autoExcludeUnselected, normalizedUserSelectedNumbersForGeneration.length]);
+
   const handleGenerate = () => {
     generationStopRequestedRef.current = false;
     setIsGenerating(true);
     setTrace([]);
 
+    const autoExcludeBlockMessage = buildAutoExcludeUnselectedBlockMessage();
+    if (autoExcludeBlockMessage) {
+      const autoExcludeTrace = buildAutoExcludeUnselectedTraceLine("Generation pre-flight");
+      setCandidates([]);
+      setRatioSummary(summarizeOddEvenRatios([], rwr45Enabled ? RWR45_CANDIDATE_COUNT : numCandidates, 0));
+      setQuotaWarning(autoExcludeBlockMessage);
+      setSelectedCandidateIdx(0);
+      setTrace([
+        `[TRACE] ${autoExcludeBlockMessage}`,
+        ...(autoExcludeTrace ? [autoExcludeTrace] : []),
+      ]);
+      generationStopRequestedRef.current = false;
+      setIsGenerating(false);
+      return;
+    }
+
     if (rwr45Enabled) {
       const t0 = performance.now();
       const rwr45MianExcl = getMianHardExclusions();
       const rwr45ExcludedNumbers = Array.from(new Set([...allExclusions, ...rwr45MianExcl])).sort((a, b) => a - b);
+      const autoExcludeTrace = buildAutoExcludeUnselectedTraceLine("RwR45 / PNUaRW45");
+      if (autoExcludeTrace) {
+        setTraceMaybe((t) => [...t, autoExcludeTrace]);
+      }
       if (rwr45MianExcl.length > 0) {
         setTraceMaybe((t) => [...t, `[TRACE] MiAN hard-exclude applied to RwR45: removed ${rwr45MianExcl.length} numbers from zero-count buckets`]);
       }
@@ -3164,12 +3521,16 @@ function AppInner(): JSX.Element {
       if (latestNeighbourSupportEnabled) {
         setTraceMaybe((t) => [...t, "[TRACE] LD±1 is ON but RwR45/PNUaRW45 bypasses evidence filters; LD±1 was not applied to this random-coverage run."]);
       }
+      if (strictDroughtQuotaMode !== "off") {
+        setTraceMaybe((t) => [...t, "[TRACE] Strict drought quota is ON but RwR45/PNUaRW45 bypasses evidence quotas; strict drought quota was not applied to this random-coverage run."]);
+      }
       if (d1TerminalMomentumSgiEnabled) {
         setTraceMaybe((t) => [...t, "[TRACE] D1 Terminal Momentum SGI is ON but RwR45/PNUaRW45 bypasses evidence weighting; D1 SGI was not applied to this random-coverage run."]);
       }
       const result = generateRwR45Candidates(Math.random, {
         forcedNumbers: generationForcedNumbers,
         excludedNumbers: rwr45ExcludedNumbers,
+        debug: traceVerbose,
         monthlyAcceptanceNeeds: monthlyConstructiveEnabled && monthlyConstraintPayload
           ? {
             constraints: monthlyConstraintPayload.constraints,
@@ -3283,6 +3644,14 @@ function AppInner(): JSX.Element {
         `[TRACE] Forced generation numbers active: ${generationForcedNumbers.join(", ")} (trend selections ${trendSelectedNumbers.length}; latest ±1/±2 targets ${previousNeighbourConstraintNumbers.length}; hot/cold row selections ${hotColdForcedNumbers.length}; drought-break selections ${droughtBreakSelectedNumbers.length}; paste-weighted missing selections ${pasteWeightedForcedNumbers.length})`
       ]);
     }
+    const autoExcludeTrace = buildAutoExcludeUnselectedTraceLine("Generation");
+    if (autoExcludeTrace) {
+      setTraceMaybe((t) => [...t, autoExcludeTrace]);
+    }
+    const strictDroughtTrace = strictDroughtQuotaTraceLine("Generation");
+    if (strictDroughtTrace) {
+      setTraceMaybe((t) => [...t, strictDroughtTrace]);
+    }
 
     const t0 = performance.now();
 
@@ -3352,6 +3721,7 @@ function AppInner(): JSX.Element {
         enabled: latestNeighbourSupportEnabled,
         planningLastDrawOverride: planningDrawContext.isPlanningLastDraw,
       },
+      strictDroughtQuotaOptions: strictDroughtQuotaGenerationOptions,
     };
 
     // Trace callback: appends messages as they arrive from the worker
@@ -3601,6 +3971,14 @@ function AppInner(): JSX.Element {
         `[TRACE] ${traceLabel}: forced generation numbers active ${generationForcedNumbers.join(", ")} (trend selections ${trendSelectedNumbers.length}; latest ±1/±2 targets ${previousNeighbourConstraintNumbers.length}; hot/cold row selections ${hotColdForcedNumbers.length}; drought-break selections ${droughtBreakSelectedNumbers.length}; paste-weighted missing selections ${pasteWeightedForcedNumbers.length})`
       ]);
     }
+    const autoExcludeTrace = buildAutoExcludeUnselectedTraceLine(traceLabel);
+    if (autoExcludeTrace) {
+      setTraceMaybe((t) => [...t, autoExcludeTrace]);
+    }
+    const strictDroughtTrace = strictDroughtQuotaTraceLine(traceLabel);
+    if (strictDroughtTrace) {
+      setTraceMaybe((t) => [...t, strictDroughtTrace]);
+    }
 
     const t0 = performance.now();
     const result = generateCandidates(
@@ -3670,7 +4048,8 @@ function AppInner(): JSX.Element {
       {
         enabled: latestNeighbourSupportEnabled,
         planningLastDrawOverride: planningDrawContext.isPlanningLastDraw,
-      }
+      },
+      strictDroughtQuotaGenerationOptions
     );
 
     const monthlyTrace = buildMonthlyTrace();
@@ -4030,10 +4409,14 @@ function AppInner(): JSX.Element {
   ].join(" · ");
   const activeSetupProvenanceGroups: Array<{
     title: string;
+    target: ActiveSetupProvenanceTarget;
+    targetLabel: string;
     items: Array<{ label: string; value: React.ReactNode }>;
   }> = [
     {
       title: "History & Source",
+      target: "historySource",
+      targetLabel: "Go to Windowed Draw Filtering",
       items: [
         { label: "Real window", value: `${realFilteredHistory.length}/${filteredHistory.length} loaded` },
         { label: "Ratios", value: selectedRatios.length ? selectedRatios.join(" ") : "none" },
@@ -4042,6 +4425,8 @@ function AppInner(): JSX.Element {
     },
     {
       title: "Filters & Distance",
+      target: "filtersDistance",
+      targetLabel: "Go to Hard Filters",
       items: [
         { label: "Entropy", value: entropyEnabled ? entropyThreshold : "off" },
         { label: "Hamming", value: hammingEnabled ? hammingThreshold : "off" },
@@ -4052,10 +4437,13 @@ function AppInner(): JSX.Element {
     },
     {
       title: "Recency & Latest Draw",
+      target: "recencyLatestDraw",
+      targetLabel: "Go to Recency & Latest Draw Rules",
       items: [
         { label: "RecMin", value: minRecentMatches },
         { label: "RecBias", value: recentMatchBias },
         { label: "LD±1", value: latestNeighbourSupportEnabled ? "on" : "off" },
+        { label: "Strict drought quota", value: strictDroughtQuotaSummary },
         { label: "Prev ±1/±2", value: previousNeighbourConstraintNumbers.length ? previousNeighbourConstraintNumbers.join(", ") : "off" },
         { label: "Drought-break", value: droughtBreakSelectedNumbers.length ? droughtBreakSelectedNumbers.join(", ") : "off" },
         { label: "Repeat", value: repeatUnionSummary },
@@ -4065,6 +4453,8 @@ function AppInner(): JSX.Element {
     },
     {
       title: "Geometry & Pattern",
+      target: "geometryPattern",
+      targetLabel: "Go to Engine & Ranking",
       items: [
         { label: "Pattern", value: `${patternConstraintMode} · tol ${patternSumTolerance} · boost ${patternBoostFactor}` },
         { label: "OGA bias", value: enableOGAForecastBias ? `${ogaPreferredBand} @ ${ogaBaselineMode}` : "off" },
@@ -4072,6 +4462,8 @@ function AppInner(): JSX.Element {
     },
     {
       title: "Ending Digits & Buckets",
+      target: "endingBuckets",
+      targetLabel: "Go to Shape & Bucket Quotas",
       items: [
         { label: "End limits", value: endDigitSetSummary },
         { label: "Digit width", value: digitWidthConstraintTargets.enabled ? `${digitWidthConstraintTargets.singleDigitPercent}/${digitWidthConstraintTargets.twoDigitPercent} ${formatDigitWidthScopeLabel(digitWidthConstraintTargets.scope)} => ${digitWidthConstraintTargets.singleDigitCount}/${digitWidthConstraintTargets.twoDigitCount}` : "off" },
@@ -4081,6 +4473,8 @@ function AppInner(): JSX.Element {
     },
     {
       title: "Monthly & Carry-over",
+      target: "monthlyCarryOver",
+      targetLabel: "Go to Monthly Timing Bias",
       items: [
         { label: "MRB", value: mrbEnabled ? `on · budget ${MRB_BUCKET_KEYS.reduce((s, k) => s + Math.max(0, (mrbBucketBoosts[k] ?? 1) - 1), 0).toFixed(1)}/${MRB_BUDGET}` : "off" },
         {
@@ -4919,6 +5313,7 @@ function AppInner(): JSX.Element {
         <ResearchDiaryPanel
           history={realHistory}
           getSetupSnapshot={() => buildSnapshot({ includePanelFavorites: true })}
+          sde1Hc3Backtest={sde1Hc3ContextBacktest}
           showTitle={false}
         />
       </CollapsibleSection>
@@ -4926,6 +5321,32 @@ function AppInner(): JSX.Element {
       {/* [ORDER-ANCHOR] 07.2 Backtest Validation Dashboard */}
       <CollapsibleSection panelId="backtest-validation" title={<b>Backtest Validation</b>} defaultOpen={false}>
         <BacktestPanel history={baselineHistory} historyScopeLabel={baselineHistoryScopeLabel} />
+      </CollapsibleSection>
+
+      {/* [ORDER-ANCHOR] 07.21 Strict Drought Shortlist Replay */}
+      <CollapsibleSection
+        panelId="strict-drought-shortlist-replay"
+        title={<b>Strict Drought Shortlist Replay</b>}
+        summaryHint="no-lookahead drought-break validation"
+        defaultOpen={false}
+      >
+        <DroughtBacktestPanel history={baselineHistory} historyScopeLabel={baselineHistoryScopeLabel} />
+      </CollapsibleSection>
+
+      {/* [ORDER-ANCHOR] 07.22 Settings Sensitivity Replay */}
+      <CollapsibleSection
+        panelId="settings-sensitivity-replay"
+        title={<b>Settings Sensitivity Replay</b>}
+        summaryHint="Retrospective target-draw scoring without changing generation"
+        defaultOpen={false}
+      >
+        <SettingsSensitivityReplayPanel
+          history={realHistory}
+          activeHistory={realFilteredHistory}
+          generatedCandidates={candidates}
+          pasteWeightedCandidates={pasteWeightedPortfolioCandidates}
+          historyScopeLabel={`Current WFMQYH window (${realFilteredHistory.length} real draw${realFilteredHistory.length === 1 ? "" : "s"})`}
+        />
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 07.25 Previous ±1 Neighbour Backtest */}
@@ -5160,16 +5581,17 @@ function AppInner(): JSX.Element {
         <MonthlyDrawsSummaryPanel
           history={realHistory}
           today={planningDrawContext.today}
-          onConstraintsChange={setMonthlyConstraintPayload}
+          sde1Hc3Advice={sde1Hc3ContextBacktest.advice}
+          onConstraintsChange={handleMonthlyConstraintsChange}
           onUseSelectedNumbers={(nums) => setUserSelectedNumbers(removeUserExcludedNumbers(nums, selectionUnavailableNumbers))}
           excludedNumbers={selectionUnavailableNumbers}
           constructiveFillEnabled={monthlyConstructiveEnabled}
           onConstructiveFillChange={setMonthlyConstructiveEnabled}
-          onBucketInfoChange={(info) => setMonthlyBucketLabels(info.labels)}
-          onBucketSetsChange={setMonthlyBucketSetsAlways}
-          onAvgBucketsChange={setMonthlyAvgBuckets}
-          onIdealDrawStateChange={setMonthlyIdealDrawState}
-          onStageIdealDrawStateChange={setStageIdealDrawState}
+          onBucketInfoChange={handleMonthlyBucketInfoChange}
+          onBucketSetsChange={handleMonthlyBucketSetsChange}
+          onAvgBucketsChange={handleMonthlyAvgBucketsChange}
+          onIdealDrawStateChange={handleMonthlyIdealDrawStateChange}
+          onStageIdealDrawStateChange={handleStageIdealDrawStateChange}
           onSimulateNumbers={handleSimulateAcceptanceNeeds}
         />
       </CollapsibleSection>
@@ -5321,10 +5743,13 @@ function AppInner(): JSX.Element {
 
             <div className="windfall-generation-setup-stack">
               <InlineCollapsibleCard
+                id={ACTIVE_SETUP_PROVENANCE_TARGET_IDS.geometryPattern}
                 title="Engine & Ranking"
                 subtitle="Ranking references, OGA forecast bias, diagnostic influence, recency weighting, and GPWF controls."
                 collapsedSummary={`Scoring ${formatScoringInfluenceLabel(scoringGenerationInfluence)} · D1 SGI ${d1TerminalMomentumSgiEnabled ? formatD1TerminalMomentumStrength(d1TerminalMomentumGenerationProfile.internalStrength) : "off"} · OGA ${ogaRefMode} · KDE ${enableOGAForecastBias ? "on" : "off"} · λ ${lambdaEnabled ? lambda.toFixed(2) : "off"} · GPWF ${gpwfEnabled ? "on" : "off"}`}
                 defaultExpanded={true}
+                expanded={engineRankingExpanded}
+                onExpandedChange={setEngineRankingExpanded}
               >
                 <div className="windfall-influences-grid">
               <div className="windfall-influence-card windfall-influence-card--wide">
@@ -5725,10 +6150,13 @@ function AppInner(): JSX.Element {
               </InlineCollapsibleCard>
 
               <InlineCollapsibleCard
+                id={ACTIVE_SETUP_SHAPE_BUCKET_CARD_ID}
                 title="Shape & Bucket Quotas"
                 subtitle="Ending-digit, decade, monthly bucket, and carry-over composition controls."
                 collapsedSummary={`Digit width ${digitWidthConstraintTargets.enabled ? `${digitWidthConstraintTargets.singleDigitCount}/${digitWidthConstraintTargets.twoDigitCount}` : "off"} · MiAN ${acceptanceNeedsEnabled ? "on" : "off"} · ending boosts ${activeMainDigitBoostSummary || "off"} · decade ${activeMainDecadeBiasSummary || "off"} · MRB ${mrbEnabled ? "on" : "off"}`}
                 defaultExpanded={false}
+                expanded={shapeBucketQuotasExpanded}
+                onExpandedChange={setShapeBucketQuotasExpanded}
               >
                 <div className="windfall-influences-grid">
               {/* Column 1: Generation Constraints */}
@@ -5739,7 +6167,12 @@ function AppInner(): JSX.Element {
                 </p>
 
                 <div className="windfall-constraint-sections">
-                  <section className="windfall-constraint-section" aria-labelledby="ending-digit-limits-title">
+                  <section
+                    id={ACTIVE_SETUP_PROVENANCE_TARGET_IDS.endingBuckets}
+                    className="windfall-constraint-section"
+                    aria-labelledby="ending-digit-limits-title"
+                    tabIndex={-1}
+                  >
                     <div className="windfall-constraint-section__header">
                       <div id="ending-digit-limits-title" className="windfall-constraint-section__title">Ending Digit Limits</div>
                       <div className="windfall-constraint-section__subtitle">
@@ -6197,7 +6630,12 @@ function AppInner(): JSX.Element {
                   </section>
 
                 {/* Monthly Repeat Bias */}
-                  <section className="windfall-constraint-section windfall-constraint-section--timing" aria-labelledby="monthly-timing-bias-title">
+                  <section
+                    id={ACTIVE_SETUP_PROVENANCE_TARGET_IDS.monthlyCarryOver}
+                    className="windfall-constraint-section windfall-constraint-section--timing"
+                    aria-labelledby="monthly-timing-bias-title"
+                    tabIndex={-1}
+                  >
                     <div className="windfall-constraint-section__header">
                       <div id="monthly-timing-bias-title" className="windfall-constraint-section__title">Monthly Timing Bias</div>
                       <div className="windfall-constraint-section__subtitle">
@@ -6465,10 +6903,13 @@ function AppInner(): JSX.Element {
               </InlineCollapsibleCard>
 
               <InlineCollapsibleCard
+                id={ACTIVE_SETUP_PROVENANCE_TARGET_IDS.recencyLatestDraw}
                 title="Recency & Latest Draw Rules"
                 subtitle="Odd/even, selected/recent survivor weights, last-draw overlap, latest ±1/±2 targets, and repeat-window rules."
-                collapsedSummary={`Recent min ${minRecentMatches} · SelHits ${rankingWeights.selHitsEnabled ? "on" : "off"} · RecentHits ${rankingWeights.recentHitsEnabled ? "on" : "off"} · LD±1 ${latestNeighbourSupportEnabled ? "on" : "off"} · latest ±1/±2 ${previousNeighbourConstraintNumbers.length || "off"} · repeat ${repeatUnionEnabled ? `last ${effectiveRepeatWindowSizeW}/M ${minFromRecentUnionM}` : "off"}`}
+                collapsedSummary={`Recent min ${minRecentMatches} · SelHits ${rankingWeights.selHitsEnabled ? "on" : "off"} · RecentHits ${rankingWeights.recentHitsEnabled ? "on" : "off"} · LD±1 ${latestNeighbourSupportEnabled ? "on" : "off"} · strict drought ${strictDroughtQuotaSummary} · latest ±1/±2 ${previousNeighbourConstraintNumbers.length || "off"} · repeat ${repeatUnionEnabled ? `last ${effectiveRepeatWindowSizeW}/M ${minFromRecentUnionM}` : "off"}`}
                 defaultExpanded={false}
+                expanded={recencyLatestDrawExpanded}
+                onExpandedChange={setRecencyLatestDrawExpanded}
               >
                 <div className="windfall-influences-grid">
 
@@ -6540,6 +6981,72 @@ function AppInner(): JSX.Element {
                   <div style={{ color: "#64748b", fontSize: 11, lineHeight: 1.45 }}>
                     Uses the latest WFMQYH draw, recent 10-draw streak cap &gt;7, current monthly buckets when available, and existing 0/5 ending-digit rules as coordination checks. It is evidence-based filtering, not a probability claim.
                   </div>
+                </div>
+                <div
+                  style={{
+                    marginTop: 8,
+                    padding: "8px 10px",
+                    border: `1px solid ${strictDroughtQuotaMode !== "off" ? "#c4b5fd" : "#e5e7eb"}`,
+                    borderRadius: 6,
+                    background: strictDroughtQuotaMode !== "off" ? "#f5f3ff" : "#fafafa",
+                    display: "grid",
+                    gap: 8,
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                    <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 800 }}>
+                      Strict drought quota
+                      <select
+                        value={strictDroughtQuotaMode}
+                        onChange={(event) => setStrictDroughtQuotaMode(event.target.value as StrictDroughtQuotaControlMode)}
+                        style={{ minHeight: 30, borderRadius: 8, border: "1px solid #cbd5e1", padding: "3px 8px", fontWeight: 800 }}
+                      >
+                        <option value="off">Off</option>
+                        <option value="advised">SDSR-advised</option>
+                        <option value="manual">Manual minimum</option>
+                      </select>
+                    </label>
+                    <InfoHelp label="Strict drought quota help">
+                      Default-off generation rule. Manual mode requires each generated 8-number candidate to contain at least the chosen count from the current strict drought-break shortlist. SDSR-advised mode uses the no-lookahead Strict Drought Shortlist Replay to choose a cautious minimum when the current draw ordinal/month-stage has supportive evidence. This is a quota, not a win probability.
+                    </InfoHelp>
+                  </div>
+                  {strictDroughtQuotaMode === "manual" && (
+                    <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 700 }}>
+                      Minimum from shortlist:
+                      <input
+                        type="number"
+                        min={0}
+                        max={Math.min(8, strictDroughtQuotaEligibleNumbers.length)}
+                        value={strictDroughtQuotaManualMin}
+                        onChange={(event) => {
+                          const value = Number(event.target.value);
+                          const safe = Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
+                          setStrictDroughtQuotaManualMin(Math.min(safe, Math.min(8, strictDroughtQuotaEligibleNumbers.length)));
+                        }}
+                        style={{ width: 60 }}
+                      />
+                      <span style={{ color: "#6b21a8", fontSize: 11, fontWeight: 800 }}>
+                        max {Math.min(8, strictDroughtQuotaEligibleNumbers.length)}
+                      </span>
+                    </label>
+                  )}
+                  <div style={{ color: "#475569", fontSize: 11, lineHeight: 1.45 }}>
+                    {strictDroughtQuotaMode === "off"
+                      ? <>Off. Current strict drought shortlist top {STRICT_DROUGHT_QUOTA_TOP_K}: {strictDroughtQuotaEligibleNumbers.length ? strictDroughtQuotaEligibleNumbers.join(", ") : "none after active exclusions"}.</>
+                      : strictDroughtQuotaMode === "advised"
+                        ? <>{strictDroughtQuotaAdvice.traceLabel}. Effective minimum {strictDroughtQuotaEffectiveMin}. {strictDroughtQuotaAdvice.reason}</>
+                        : <>Manual minimum {strictDroughtQuotaEffectiveMin}. Current eligible strict drought shortlist: {strictDroughtQuotaEligibleNumbers.length ? strictDroughtQuotaEligibleNumbers.join(", ") : "none after active exclusions"}.</>}
+                  </div>
+                  {strictDroughtQuotaMode === "advised" && (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, color: "#334155", fontSize: 11 }}>
+                      <span style={{ fontWeight: 800 }}>Replay slice</span>
+                      <span>{strictDroughtQuotaAdvice.sourceLabel}</span>
+                      <span>Trials {strictDroughtQuotaAdvice.trials}</span>
+                      <span>1-3 hits {(strictDroughtQuotaAdvice.oneToThreeHitRate * 100).toFixed(1)}%</span>
+                      <span>Random {(strictDroughtQuotaAdvice.expectedRandomOneToThreeHitRate * 100).toFixed(1)}%</span>
+                      <span>Zero-hit {(strictDroughtQuotaAdvice.zeroHitRate * 100).toFixed(1)}%</span>
+                    </div>
+                  )}
                 </div>
                 <div
                   style={{
@@ -6872,10 +7379,13 @@ function AppInner(): JSX.Element {
               </InlineCollapsibleCard>
 
               <InlineCollapsibleCard
+                id={ACTIVE_SETUP_PROVENANCE_TARGET_IDS.filtersDistance}
                 title="Hard Filters"
                 subtitle="Strict post-generation filters only."
                 collapsedSummary={`Entropy ${entropyEnabled ? entropyThreshold : "off"} · Hamming ${hammingEnabled ? hammingThreshold : "off"} · Jaccard ${jaccardEnabled ? `${Math.round(jaccardThreshold * 100)}%` : "off"} · Rdy filters ${readinessHardFilterSummary}`}
                 defaultExpanded={false}
+                expanded={hardFiltersExpanded}
+                onExpandedChange={setHardFiltersExpanded}
               >
                 <div className="windfall-influences-grid">
 
@@ -6981,7 +7491,16 @@ function AppInner(): JSX.Element {
               <div className="windfall-influence-provenance__grid">
                 {activeSetupProvenanceGroups.map((group) => (
                   <section key={group.title} className="windfall-influence-provenance__group" aria-label={group.title}>
-                    <div className="windfall-influence-provenance__title">{group.title}</div>
+                    <button
+                      type="button"
+                      className="windfall-influence-provenance__title windfall-influence-provenance__title-button"
+                      onClick={() => navigateToActiveSetupProvenanceTarget(group.target)}
+                      aria-label={`${group.targetLabel} for ${group.title}`}
+                      title={group.targetLabel}
+                    >
+                      <span>{group.title}</span>
+                      <span className="windfall-influence-provenance__title-arrow" aria-hidden="true">›</span>
+                    </button>
                     <dl className="windfall-influence-provenance__items">
                       {group.items.map((item) => (
                         <div key={item.label} className="windfall-influence-provenance__item">
@@ -7333,6 +7852,18 @@ function AppInner(): JSX.Element {
                   Letters:
                   <input type="checkbox" checked={showHeatmapLetters} onChange={e => setShowHeatmapLetters(e.target.checked)} style={{ marginLeft: 6 }} title="Overlay letter codes" />
                 </label>
+                {isMonthlyBucketHeatmapView ? (
+                  <label style={{ fontSize: 13 }}>
+                    Heatmap hover spark-line:
+                    <input
+                      type="checkbox"
+                      checked={showMbsHoverSparkline}
+                      onChange={(e) => setShowMbsHoverSparkline(e.target.checked)}
+                      style={{ marginLeft: 6 }}
+                      title="Show or hide the small spark-line inside the Monthly Bucket State Heatmap hover card. This does not affect the lower Monthly Bucket State grid."
+                    />
+                  </label>
+                ) : null}
                 <span style={{ fontSize: 12, color: "#64748b" }}>{dgaHeatmapSubtitle}</span>
               </div>
 
@@ -7368,6 +7899,7 @@ function AppInner(): JSX.Element {
                       showBucketLetters={showHeatmapLetters}
                       bucketLetters={dgaHeatmapBucketLetters}
                       showDrawSlotAxis={isMonthlyBucketHeatmapView}
+                      showHoverSparkline={!isMonthlyBucketHeatmapView || showMbsHoverSparkline}
                     />
                   </div>
                   {/* Vertical simulation selections aligned to heatmap rows */}
@@ -7430,50 +7962,6 @@ function AppInner(): JSX.Element {
                   <div style={{ color: "#c00", marginTop: 2, marginBottom: 12 }}>{highlightMsg}</div>
                 )}
 
-                {dgaGrid.length > 0 ? (
-                  <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-                    {/* Grid takes all available width */}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <DGAVisualizer
-                        grid={dgaGrid}
-                        diamonds={dgaDiamonds}
-                        predictions={dgaPredictions}
-                        drawLabels={dgaDrawLabels}
-                        numberLabels={Array.from({ length: 45 }, (_, i) => String(i + 1))}
-                        numberCounts={numberCounts}
-                        minCount={minCount}
-                        maxCount={maxCount}
-                        highlights={highlights}
-                        setHighlights={setHighlights}
-                        controlsPosition="below"
-                        focusNumber={focusNumber}
-                        focusedCol={focusedDgaCol}
-                        onColumnClick={(col) => setFocusedDgaCol((prev) => (prev === col ? null : col))}
-                        wfmqyhStart={dgaWfmqyhStart}
-                        cellSize={DGA_CELL_SIZE}
-                      />
-                    </div>
-                    {/* Simulate strip sits to the right of the grid — no overlap */}
-                    <div style={{ flexShrink: 0 }}>
-                      <DGASimulateStrip
-                        selectedNumbers={dgaStripSelectedNumbers}
-                        cellSize={DGA_CELL_SIZE}
-                        monthlyBuckets={dgaEffectiveMonthlyBuckets}
-                        scoringNumberDiagnostics={dgaScoringNumberDiagnostics}
-                        suppSuggestion={dgaSuppSuggestion}
-                        excludedNumbers={selectionUnavailableNumbers}
-                        hoveredNumber={dgaHoveredNumber}
-                        onHoverNumber={(value) => setDgaHoveredNumber(value)}
-                        onChange={handleDgaStripChange}
-                        includeHeaderSpacer={false}
-                        topOffsetPx={DGA_CELL_SIZE}
-                        testIdPrefix="dga-grid-sim-strip"
-                      />
-                    </div>
-                  </div>
-                ) : (
-                  <i>No grid data available.</i>
-                )}
                 <div className="windfall-dga-mirror-control" aria-label="DGA strip to Latest Draw ±1/±2 mirror">
                   <button
                     type="button"
@@ -7495,6 +7983,60 @@ function AppInner(): JSX.Element {
                       : "DGA strip simulates only. Turn on to copy only valid latest-draw ±1/±2 targets into the constraint builder."}
                   </div>
                 </div>
+
+                {dgaGrid.length > 0 ? (
+                  <DGAVisualizer
+                    grid={dgaGrid}
+                    diamonds={dgaDiamonds}
+                    predictions={dgaPredictions}
+                    drawLabels={dgaDrawLabels}
+                    numberLabels={Array.from({ length: 45 }, (_, i) => String(i + 1))}
+                    numberCounts={numberCounts}
+                    minCount={minCount}
+                    maxCount={maxCount}
+                    highlights={highlights}
+                    setHighlights={setHighlights}
+                    controlsPosition="above"
+                    focusNumber={focusNumber}
+                    focusedCol={focusedDgaCol}
+                    onColumnClick={(col) => setFocusedDgaCol((prev) => (prev === col ? null : col))}
+                    wfmqyhStart={dgaWfmqyhStart}
+                    cellSize={DGA_CELL_SIZE}
+                    gridSidecar={(
+                      <DGASimulateStrip
+                        selectedNumbers={dgaStripSelectedNumbers}
+                        cellSize={DGA_CELL_SIZE}
+                        monthlyBuckets={dgaEffectiveMonthlyBuckets}
+                        scoringNumberDiagnostics={dgaScoringNumberDiagnostics}
+                        suppSuggestion={dgaSuppSuggestion}
+                        excludedNumbers={selectionUnavailableNumbers}
+                        hoveredNumber={dgaHoveredNumber}
+                        onHoverNumber={(value) => setDgaHoveredNumber(value)}
+                        onChange={handleDgaStripChange}
+                        includeHeaderSpacer={false}
+                        topOffsetPx={DGA_CELL_SIZE}
+                        testIdPrefix="dga-grid-sim-strip"
+                      />
+                    )}
+                  />
+                ) : (
+                  <i>No grid data available.</i>
+                )}
+              </div>
+            </InlineCollapsibleCard>
+          </div>
+
+          <div style={{ marginTop: 12 }}>
+            <InlineCollapsibleCard
+              title="DGA constellation diagnostic"
+              subtitle="Observe-only local diagonal and orbit-cell density check"
+              collapsedSummary="Measures whether a chosen DGA centre cell has unusually dense exact diagonals or nearby local cells against historical number baselines."
+              defaultExpanded={false}
+              keepMounted={true}
+              collapsedLabel="Show constellation diagnostic ▼"
+            >
+              <div style={{ padding: "10px 12px 12px" }}>
+                <DGAConstellationDiagnosticPanel history={realHistory} />
               </div>
             </InlineCollapsibleCard>
           </div>
@@ -7634,6 +8176,8 @@ function AppInner(): JSX.Element {
       recentMatchBias,
       previousNeighbourConstraintNumbers: [...previousNeighbourConstraintNumbers],
       latestNeighbourSupportEnabled,
+      strictDroughtQuotaMode,
+      strictDroughtQuotaManualMin,
       repeatWindowSizeW,
       minFromRecentUnionM,
       sumFilter: { ...sumFilter },
@@ -7645,6 +8189,7 @@ function AppInner(): JSX.Element {
       dgaHeatmapView,
       tempMetric,
       showHeatmapLetters,
+      showMbsHoverSparkline,
       dgaMonthlyBucketStateOpacity,
       ogaRefMode,
       enableOGAForecastBias,
@@ -7704,6 +8249,23 @@ function AppInner(): JSX.Element {
       snapshot.droughtBreakEmpiricalHazardNumbers = sortedSnapshotNumbers(empiricalDroughtHazardShortlist);
       snapshot.droughtBreakShortlistTop = droughtBreakShortlistTop;
       snapshot.droughtBreakStrictThreshold = STRICT_DROUGHT_DEFAULT_THRESHOLD;
+      snapshot.strictDroughtQuotaEffectiveMin = strictDroughtQuotaEffectiveMin;
+      snapshot.strictDroughtQuotaEligibleNumbers = sortedSnapshotNumbers(strictDroughtQuotaEligibleNumbers);
+      snapshot.strictDroughtQuotaAdviceShouldApply = strictDroughtQuotaAdvice.shouldApplyQuota;
+      snapshot.strictDroughtQuotaAdviceRecommendedMin = strictDroughtQuotaAdvice.recommendedMinCount;
+      snapshot.strictDroughtQuotaAdviceConfidence = strictDroughtQuotaAdvice.confidence;
+      snapshot.strictDroughtQuotaAdviceSource = strictDroughtQuotaAdvice.source;
+      snapshot.strictDroughtQuotaAdviceSourceLabel = strictDroughtQuotaAdvice.sourceLabel;
+      snapshot.strictDroughtQuotaAdviceReason = strictDroughtQuotaAdvice.reason;
+      snapshot.strictDroughtQuotaAdviceTraceLabel = strictDroughtQuotaAdvice.traceLabel;
+      snapshot.strictDroughtQuotaAdviceTrials = strictDroughtQuotaAdvice.trials;
+      snapshot.strictDroughtQuotaAdviceAverageHits = strictDroughtQuotaAdvice.averageHits;
+      snapshot.strictDroughtQuotaAdviceExpectedRandomAverageHits = strictDroughtQuotaAdvice.expectedRandomAverageHits;
+      snapshot.strictDroughtQuotaAdviceOneToThreeHitRate = strictDroughtQuotaAdvice.oneToThreeHitRate;
+      snapshot.strictDroughtQuotaAdviceExpectedRandomOneToThreeHitRate = strictDroughtQuotaAdvice.expectedRandomOneToThreeHitRate;
+      snapshot.strictDroughtQuotaAdviceOneToThreeLift = strictDroughtQuotaAdvice.oneToThreeLift;
+      snapshot.strictDroughtQuotaAdviceZeroHitRate = strictDroughtQuotaAdvice.zeroHitRate;
+      snapshot.strictDroughtQuotaAdviceExpectedRandomZeroHitRate = strictDroughtQuotaAdvice.expectedRandomZeroHitRate;
       snapshot.selectionInsightsSnapshot = buildSelectionInsightsSnapshot({
         enabled: insightsEnabled,
         selected: userSelectedNumbers,
@@ -7855,6 +8417,12 @@ function AppInner(): JSX.Element {
     setAllowedTrendRatios(Array.from(new Set((s.allowedTrendRatios ?? []).filter((tag) => /^\d+-\d+-\d+$/.test(tag)))));
     setPreviousNeighbourConstraintNumbers(normalizePreviousNeighbourConstraintNumbers(s.previousNeighbourConstraintNumbers ?? []));
     setLatestNeighbourSupportEnabled(!!s.latestNeighbourSupportEnabled);
+    setStrictDroughtQuotaMode(
+      s.strictDroughtQuotaMode === "manual" || s.strictDroughtQuotaMode === "advised"
+        ? s.strictDroughtQuotaMode
+        : "off",
+    );
+    setStrictDroughtQuotaManualMin(Math.max(0, Math.min(8, Math.round(s.strictDroughtQuotaManualMin ?? 1))));
     setRepeatWindowSizeW(s.repeatWindowSizeW ?? 12);
     setMinFromRecentUnionM(s.minFromRecentUnionM ?? 0);
     setSumFilter(s.sumFilter ?? { enabled: false, min: 0, max: 0, includeSupp: true });
@@ -7866,6 +8434,7 @@ function AppInner(): JSX.Element {
     setDgaHeatmapView(s.dgaHeatmapView === 'monthlyBucketState' ? 'monthlyBucketState' : 'temperature');
     setTempMetric(s.tempMetric ?? 'hybrid');
     setShowHeatmapLetters(s.showHeatmapLetters ?? false);
+    setShowMbsHoverSparkline(s.showMbsHoverSparkline ?? true);
     setDgaMonthlyBucketStateOpacity(clampDgaMonthlyBucketStateOpacity(s.dgaMonthlyBucketStateOpacity ?? 1));
     setOgaRefMode(s.ogaRefMode ?? 'window');
     setEnableOGAForecastBias(s.enableOGAForecastBias ?? false);

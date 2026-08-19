@@ -3,6 +3,7 @@ import type { DiamondShape } from '../types/Diamond';
 import { isCellInShape } from '../lib/diamondShapes';
 import type { Diamond as DGADiamond } from '../dga';
 import { DiamondShapeSelector } from './controls/DiamondShapeSelector';
+import InlineCollapsibleCard from './shared/InlineCollapsibleCard';
 
 /* -------------------------------------------------------------------------- */
 /* Types                                                                      */
@@ -81,6 +82,7 @@ export interface DGAVisualizerProps {
    */
   wfmqyhStart?: number;
   cellSize?: number;
+  gridSidecar?: React.ReactNode;
 }
 
 type SolveMode = 'center-and-targets' | 'targets-only';
@@ -222,6 +224,7 @@ export const DGAVisualizer: React.FC<DGAVisualizerProps> = ({
   onColumnClick,
   wfmqyhStart = 0,
   cellSize = 20,
+  gridSidecar,
 }) => {
   // Defensive defaults
   grid = grid || [];
@@ -985,11 +988,18 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
   /* ------------------------------- Rendering ------------------------------ */
 
   const renderControls = () => (
-    <>
+    <InlineCollapsibleCard
+      title="DGA tools"
+      subtitle="Aim helper, manual diamonds, centre presets, advanced geometry, and import/export"
+      collapsedSummary="Open only when drawing or loading geometry overlays. The DGA grid remains usable without opening these tools."
+      defaultExpanded={false}
+      collapsedLabel="Show tools ▼"
+      expandedLabel="Hide tools ▲"
+    >
+      <div style={{ padding: '10px 12px 12px' }}>
       {/* Aim Helper */}
       <div
         style={{
-          marginTop: 10,
           marginBottom: 10,
           display: 'flex',
           flexWrap: 'wrap',
@@ -1632,7 +1642,8 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
           />
         </div>
       </details>
-    </>
+      </div>
+    </InlineCollapsibleCard>
   );
 
   const renderGrid = () => (
@@ -1992,10 +2003,25 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
     </div>
   );
 
+  const renderGridWithSidecar = () => {
+    if (!gridSidecar) return renderGrid();
+
+    return (
+      <div className="windfall-dga-visualizer-grid-row" style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+        <div className="windfall-dga-visualizer-grid-row__grid" style={{ flex: 1, minWidth: 0 }}>
+          {renderGrid()}
+        </div>
+        <div className="windfall-dga-visualizer-grid-row__sidecar" style={{ flexShrink: 0 }}>
+          {gridSidecar}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <section style={{ width: '100%' }}>
       {controlsPosition === 'above' && renderControls()}
-      {renderGrid()}
+      {renderGridWithSidecar()}
       {controlsPosition === 'below' && renderControls()}
     </section>
   );

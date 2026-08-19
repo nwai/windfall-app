@@ -359,7 +359,7 @@ describe("GeneratedCandidatesPanel", () => {
     }
   });
 
-  it("can sync Manual Prize Check from normalized User Selected numbers when enabled", async () => {
+  it("can sync Manual Prize Check from User Selected order when enabled", async () => {
     const setManualSimSelected = vi.fn();
     const onManualSimulationChanged = vi.fn();
     const container = document.createElement("div");
@@ -385,9 +385,9 @@ describe("GeneratedCandidatesPanel", () => {
         syncToggle?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       });
 
-      expect(setManualSimSelected).toHaveBeenLastCalledWith([1, 2, 5, 8, 9, 10, 11, 12]);
-      expect(onManualSimulationChanged).toHaveBeenLastCalledWith([1, 2, 5, 8, 9, 10, 11, 12]);
-      expect(container.textContent).toContain("Using normalized User Selected order");
+      expect(setManualSimSelected).toHaveBeenLastCalledWith([12, 1, 5, 2, 9, 10, 11, 8]);
+      expect(onManualSimulationChanged).toHaveBeenLastCalledWith([12, 1, 5, 2, 9, 10, 11, 8]);
+      expect(container.textContent).toContain("Using User Selected order");
 
       setManualSimSelected.mockClear();
       onManualSimulationChanged.mockClear();
@@ -395,7 +395,7 @@ describe("GeneratedCandidatesPanel", () => {
       await act(async () => {
         root.render(React.createElement(GeneratedCandidatesPanel, buildProps({
           userSelectedNumbers: [6, 7, 8, 9, 10, 11, 12, 13],
-          manualSimSelected: [1, 2, 5, 8, 9, 10, 11, 12],
+          manualSimSelected: [12, 1, 5, 2, 9, 10, 11, 8],
           setManualSimSelected,
           onManualSimulationChanged,
         })));

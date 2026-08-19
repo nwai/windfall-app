@@ -19,6 +19,7 @@ export interface RwR45GenerationResult {
 export interface RwR45GenerationOptions {
   forcedNumbers?: readonly number[];
   excludedNumbers?: readonly number[];
+  debug?: boolean;
   monthlyAcceptanceNeeds?: {
     constraints: MonthlyFrequencyConstraints;
     buckets: MonthlyBucketSets;
@@ -148,6 +149,12 @@ const formatMonthlyConstraints = (constraints: MonthlyFrequencyConstraints): str
     .join(" · ") || "none"
 );
 
+const formatMonthlyCounts = (counts: MonthlyCounts): string => (
+  MONTHLY_BUCKET_KEYS
+    .map((key) => `${MONTHLY_BUCKET_LABELS[key]}:${counts[key]}`)
+    .join(" ")
+);
+
 const monthlyBucketForNumber = (
   number: number,
   buckets: MonthlyBucketSets,
@@ -221,6 +228,38 @@ const buildMainUseCounts = (candidates: readonly CandidateSet[]): Map<number, nu
   return counts;
 };
 
+const buildNumberUseCounts = (candidates: readonly CandidateSet[]): Map<number, number> => {
+  const counts = new Map<number, number>();
+  for (const candidate of candidates) {
+    for (const number of [...candidate.main, ...candidate.supp]) {
+      counts.set(number, (counts.get(number) ?? 0) + 1);
+    }
+  }
+  return counts;
+};
+
+const decrementNumberUse = (numberUseCounts: Map<number, number>, number: number): void => {
+  const next = (numberUseCounts.get(number) ?? 0) - 1;
+  if (next <= 0) numberUseCounts.delete(number);
+  else numberUseCounts.set(number, next);
+};
+
+const incrementNumberUse = (numberUseCounts: Map<number, number>, number: number): void => {
+  numberUseCounts.set(number, (numberUseCounts.get(number) ?? 0) + 1);
+};
+
+const chooseLeastUsedFromPool = (
+  pool: readonly number[],
+  rng: RandomSource,
+  numberUseCounts: Map<number, number>,
+): number | undefined => {
+  if (!pool.length) return undefined;
+  let lowest = Infinity;
+  for (const number of pool) lowest = Math.min(lowest, numberUseCounts.get(number) ?? 0);
+  const leastUsed = pool.filter((number) => (numberUseCounts.get(number) ?? 0) === lowest);
+  return chooseFromPool(leastUsed, 1, rng)[0];
+};
+
 const replacementTargets = (
   main: readonly number[],
   supp: readonly number[],
@@ -255,6 +294,7 @@ const repairCandidateForMonthlyAcceptanceNeeds = (
     eligibleNumbers: readonly number[];
     forcedSet: ReadonlySet<number>;
     mainUseCounts: Map<number, number>;
+    numberUseCounts: Map<number, number>;
     monthlyAcceptanceNeeds: NonNullable<RwR45GenerationOptions["monthlyAcceptanceNeeds"]>;
   },
 ): MonthlyRepairResult | null => {
@@ -305,14 +345,18 @@ const repairCandidateForMonthlyAcceptanceNeeds = (
     const target = targets[0];
     if (target.section === "main") {
       const preferred = basePool.filter((number) => (context.mainUseCounts.get(number) ?? 0) === 0);
-      const replacement = chooseFromPool(preferred.length ? preferred : basePool, 1, rng)[0];
+      const replacement = chooseLeastUsedFromPool(preferred.length ? preferred : basePool, rng, context.numberUseCounts);
       if (!replacement) return null;
       decrementMainUse(context.mainUseCounts, target.number);
       incrementMainUse(context.mainUseCounts, replacement);
+      decrementNumberUse(context.numberUseCounts, target.number);
+      incrementNumberUse(context.numberUseCounts, replacement);
       main[target.index] = replacement;
     } else {
-      const replacement = chooseFromPool(basePool, 1, rng)[0];
+      const replacement = chooseLeastUsedFromPool(basePool, rng, context.numberUseCounts);
       if (!replacement) return null;
+      decrementNumberUse(context.numberUseCounts, target.number);
+      incrementNumberUse(context.numberUseCounts, replacement);
       supp[target.index] = replacement;
     }
     repaired = true;
@@ -320,6 +364,92 @@ const repairCandidateForMonthlyAcceptanceNeeds = (
 
   return null;
 };
+
+const buildMonthlyQuotaPressureTraceLines = (
+  eligibleNumbers: readonly number[],
+  monthlyAcceptanceNeeds: NonNullable<RwR45GenerationOptions["monthlyAcceptanceNeeds"]>,
+): string[] => {
+  const constraints = normalizeMonthlyConstraints(monthlyAcceptanceNeeds.constraints);
+  const lines: string[] = [];
+
+  for (const key of MONTHLY_BUCKET_KEYS) {
+    const required = constraints[key];
+    if (required <= 0) continue;
+
+    const eligibleInBucket = ascendingNumbers(
+      eligibleNumbers.filter((number) => monthlyAcceptanceNeeds.buckets[key].has(number)),
+    );
+    const demand = required * RWR45_CANDIDATE_COUNT;
+    const label = MONTHLY_BUCKET_LABELS[key];
+    lines.push(
+      `[TRACE] PNUaRW45 monthly bucket inventory: ${label}≥${required}; eligible=${eligibleInBucket.length} ${formatNumbers(eligibleInBucket)}; 7-row demand=${demand}.`,
+    );
+
+    if (eligibleInBucket.length === required) {
+      lines.push(
+        `[TRACE] PNUaRW45 monthly quota pressure: ${label}≥${required} has exactly ${eligibleInBucket.length} eligible number${eligibleInBucket.length === 1 ? "" : "s"} ${formatNumbers(eligibleInBucket)}, so every row must include ${formatNumbers(eligibleInBucket)}. This is quota pressure, not number strength.`,
+      );
+    } else if (eligibleInBucket.length < demand) {
+      lines.push(
+        `[TRACE] PNUaRW45 monthly quota pressure: ${label}≥${required} needs ${demand} placements across 7 rows but only ${eligibleInBucket.length} eligible numbers ${formatNumbers(eligibleInBucket)}; repeated use is mathematically unavoidable.`,
+      );
+    }
+  }
+
+  return lines;
+};
+
+const buildGeneratedPoolConcentrationTraceLines = (
+  candidates: readonly CandidateSet[],
+  buckets?: MonthlyBucketSets,
+): string[] => {
+  const counts = new Map<number, { main: number; supp: number }>();
+  for (const candidate of candidates) {
+    for (const number of candidate.main) {
+      const current = counts.get(number) ?? { main: 0, supp: 0 };
+      current.main += 1;
+      counts.set(number, current);
+    }
+    for (const number of candidate.supp) {
+      const current = counts.get(number) ?? { main: 0, supp: 0 };
+      current.supp += 1;
+      counts.set(number, current);
+    }
+  }
+
+  const repeated = Array.from(counts.entries())
+    .map(([number, value]) => ({
+      number,
+      main: value.main,
+      supp: value.supp,
+      total: value.main + value.supp,
+      bucket: buckets ? monthlyBucketForNumber(number, buckets) : null,
+    }))
+    .filter((entry) => entry.total >= 4)
+    .sort((left, right) => right.total - left.total || left.number - right.number);
+
+  if (!repeated.length) return [];
+
+  const summary = repeated.map((entry) => {
+    const bucket = entry.bucket ? `, ${MONTHLY_BUCKET_LABELS[entry.bucket]}` : "";
+    return `${entry.number} x${entry.total} (main ${entry.main}, supp ${entry.supp}${bucket})`;
+  }).join(" · ");
+
+  return [
+    `[TRACE] PNUaRW45 generated-pool concentration: ${summary}. These are displayed-row counts, not evidence scores.`,
+  ];
+};
+
+const buildDebugRowTraceLines = (
+  candidates: readonly CandidateSet[],
+  monthlyAcceptanceNeeds?: NonNullable<RwR45GenerationOptions["monthlyAcceptanceNeeds"]>,
+): string[] => candidates.map((candidate, index) => {
+  const bucketSummary = monthlyAcceptanceNeeds
+    ? ` · buckets ${formatMonthlyCounts(countMonthlyBuckets([...candidate.main, ...candidate.supp], monthlyAcceptanceNeeds.buckets))}`
+    : "";
+  const rowTrace = candidate.trace?.length ? ` · row trace: ${candidate.trace.join(" | ")}` : "";
+  return `[TRACE] PNUaRW45 row ${index + 1}: main ${formatNumbers(candidate.main)} · supp ${formatNumbers(candidate.supp)}${bucketSummary}${rowTrace}`;
+});
 
 export function generateRwR45Candidates(
   rng: RandomSource = Math.random,
@@ -380,6 +510,7 @@ export function generateRwR45Candidates(
   const supplementaryPool = ascendingNumbers(shuffledFillable.slice(globalMainFillPool.length));
   let globalMainFillCursor = 0;
   let usedRowSafeFallback = globalMainFillPool.length < totalMainFillSlots;
+  let partitionFallbackUsed = usedRowSafeFallback;
 
   let candidates = Array.from({ length: RWR45_CANDIDATE_COUNT }, (): CandidateSet => {
     const main: number[] = [...forcedMain];
@@ -394,6 +525,7 @@ export function generateRwR45Candidates(
 
     if (main.length < RWR45_MAIN_COUNT) {
       usedRowSafeFallback = true;
+      partitionFallbackUsed = true;
       const rowSafeMainPool = eligibleNumbers.filter((number) => !main.includes(number) && !supp.includes(number));
       main.push(...chooseFromPool(rowSafeMainPool, RWR45_MAIN_COUNT - main.length, rng));
     }
@@ -407,6 +539,7 @@ export function generateRwR45Candidates(
 
       if (supp.length < RWR45_SUPP_COUNT) {
         usedRowSafeFallback = true;
+        partitionFallbackUsed = true;
         const rowSafeSuppPool = eligibleNumbers.filter((number) => !main.includes(number) && !supp.includes(number));
         supp.push(...chooseFromPool(rowSafeSuppPool, RWR45_SUPP_COUNT - supp.length, rng));
       }
@@ -426,12 +559,14 @@ export function generateRwR45Candidates(
   let monthlyAcceptanceRepairCount = 0;
   if (monthlyAcceptanceNeeds && hasMonthlyConstraints(monthlyAcceptanceNeeds.constraints)) {
     const mainUseCounts = buildMainUseCounts(candidates);
+    const numberUseCounts = buildNumberUseCounts(candidates);
     const repairedCandidates: CandidateSet[] = [];
     for (const candidate of candidates) {
       const repaired = repairCandidateForMonthlyAcceptanceNeeds(candidate, rng, {
         eligibleNumbers,
         forcedSet,
         mainUseCounts,
+        numberUseCounts,
         monthlyAcceptanceNeeds,
       });
       if (!repaired) {
@@ -474,6 +609,7 @@ export function generateRwR45Candidates(
     traceLines.push(
       `[TRACE] PNUaRW45 monthly Acceptance Needs honored: ${formatMonthlyConstraints(monthlyAcceptanceNeeds.constraints)} checked against all 8 numbers in every row.`,
     );
+    traceLines.push(...buildMonthlyQuotaPressureTraceLines(eligibleNumbers, monthlyAcceptanceNeeds));
     if (monthlyAcceptanceRepairCount > 0) {
       traceLines.push(
         `[TRACE] PNUaRW45 monthly Acceptance Needs repair: ${monthlyAcceptanceRepairCount} row${monthlyAcceptanceRepairCount === 1 ? "" : "s"} needed row-safe swaps, so strict global main coverage may be reduced where the bucket minimums required it.`,
@@ -487,9 +623,21 @@ export function generateRwR45Candidates(
   traceLines.push(partitionDescription);
 
   if (usedRowSafeFallback) {
+    const fallbackReasons = [
+      partitionFallbackUsed ? "active exclusions/forced numbers limited the strict 42-main partition or preferred supplementary pool" : "",
+      monthlyAcceptanceRepairCount > 0 ? "monthly Acceptance Needs repair changed one or more row slots" : "",
+    ].filter(Boolean);
     traceLines.push(
-      "[TRACE] PNUaRW45 row-safe fallback used: active exclusions/forced numbers made the original strict 42-main partition or preferred supplementary pool too small, so remaining row slots were filled from eligible non-excluded numbers without duplicating within a row.",
+      `[TRACE] PNUaRW45 row-safe fallback/adjustment used: ${fallbackReasons.join("; ") || "row-safe filling was required"}; row uniqueness was preserved, but global repeat counts may increase.`,
     );
+  }
+
+  traceLines.push(...buildGeneratedPoolConcentrationTraceLines(
+    candidates,
+    monthlyAcceptanceNeeds?.buckets,
+  ));
+  if (options.debug) {
+    traceLines.push(...buildDebugRowTraceLines(candidates, monthlyAcceptanceNeeds));
   }
 
   traceLines.push(

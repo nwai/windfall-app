@@ -25,6 +25,7 @@ import {
   normalizeUserExclusionLocks,
   removeUserExcludedNumbers,
 } from "../../lib/userExclusionLocks";
+import { normalizeManualPrizeCheckNumbers } from "../../lib/manualPrizeCheck";
 import {
   computeIdealMonthlyDraw,
   monthlyBucketDisplayForNumber,
@@ -565,8 +566,8 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
     );
     const [manualPrizeCheckFollowsUserSelected, setManualPrizeCheckFollowsUserSelected] = useState(false);
     const syncedManualPrizeCheckNumbers = useMemo(
-      () => normalizedUserSelectedNumbers.slice(0, 8),
-      [normalizedUserSelectedNumbers],
+      () => normalizeManualPrizeCheckNumbers(userSelectedNumbers, userExcludedNumbers),
+      [userExcludedNumbers, userSelectedNumbers],
     );
     useEffect(() => {
       if (!manualPrizeCheckFollowsUserSelected) return;
@@ -2274,8 +2275,11 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
        {numberFreq.length > 0 ? (
          <details style={numberCountDisclosure}>
            <summary style={{ cursor: "pointer", fontWeight: 600, color: "#374151" }}>
-             Number counts across generated pool
+             Number counts across displayed candidates
            </summary>
+           <div style={{ color: "#6b7280", fontSize: 11, lineHeight: 1.35, marginTop: 6 }}>
+             Counts show how often a number appears in the displayed rows. In RwR45/PNUaRW45 they can reflect quota pressure, not predictive strength.
+           </div>
            <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, fontSize: 12, marginTop: 8 }}>
              {numberFreq.map(([n, c]) => renderNumberWithCount(n, c))}
            </div>
@@ -3705,7 +3709,7 @@ const ManualSim: React.FC<{
               cursor: "pointer",
               userSelect: "none",
             }}
-            title="When on, Manual Prize Check mirrors the normalized User Selected strip. Turn off to edit Manual Prize Check directly."
+            title="When on, Manual Prize Check mirrors User Selected numbers in their selection order. Turn off to edit Manual Prize Check directly."
           >
             <input
               type="checkbox"
@@ -3718,7 +3722,7 @@ const ManualSim: React.FC<{
       </div>
       {followUserSelected && (
         <div role="status" style={{ marginBottom: 8, color: "#475569", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "6px 8px", fontSize: 11 }}>
-          Using normalized User Selected order: {syncedUserSelectedNumbers.length}/8 copied. The first six synced values are treated as mains and the next two as supps; turn this off to choose Manual Prize Check slots directly.
+          Using User Selected order: {syncedUserSelectedNumbers.length}/8 copied. The first six synced values are treated as mains and the last two synced values are treated as supps; turn this off to choose Manual Prize Check slots directly.
         </div>
       )}
       {userExclusionReminder && (
