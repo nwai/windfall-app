@@ -320,27 +320,6 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
           </div>
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", justifyContent: "flex-end" }}>
-          <label
-            style={{
-              display: "inline-grid",
-              gap: 3,
-              minWidth: 180,
-              fontSize: 12,
-              color: "#334155",
-            }}
-            title="Adjust only the sticky current-month layer opacity. Historical month cells remain fully opaque."
-          >
-            <span>
-              Current-month opacity: <b>{Math.round(normalizedCellOpacity * 100)}%</b>
-            </span>
-            <HigSlider
-              min={0.25}
-              max={1}
-              step={0.05}
-              value={normalizedCellOpacity}
-              onCommit={(value) => onCellOpacityChange?.(normalizeGridCellOpacity(value))}
-            />
-          </label>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
             {legendTimes.map((times) => (
               <span
@@ -532,6 +511,43 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
             )}
           </div>
         </div>
+      </div>
+
+      <div
+        aria-label="Current month grid opacity control"
+        style={{
+          margin: "0 12px 10px",
+          padding: 10,
+          border: "1px solid #cfe3ff",
+          borderRadius: 8,
+          background: "linear-gradient(180deg, #f8fbff 0%, #ffffff 100%)",
+          boxShadow: "inset 0 1px 0 rgba(255,255,255,0.72)",
+        }}
+      >
+        <label
+          style={{
+            display: "grid",
+            gap: 6,
+            fontSize: 12,
+            color: "#334155",
+          }}
+          title="Adjust only the sticky current-month layer opacity. Historical month cells remain fully opaque."
+        >
+          <span style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
+            <strong style={{ color: "#0d47a1" }}>Current-month opacity:</strong>
+            <b style={{ fontVariantNumeric: "tabular-nums" }}> {Math.round(normalizedCellOpacity * 100)}%</b>
+          </span>
+          <HigSlider
+            min={0.25}
+            max={1}
+            step={0.05}
+            value={normalizedCellOpacity}
+            onCommit={(value) => onCellOpacityChange?.(normalizeGridCellOpacity(value))}
+          />
+          <span style={{ color: "#64748b", fontSize: 11 }}>
+            Adjusts only the sticky current-month cell fills; historical month cells stay unchanged.
+          </span>
+        </label>
       </div>
 
       {normalizedSelectedNumbers.length > 0 ? (

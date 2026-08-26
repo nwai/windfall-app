@@ -197,13 +197,13 @@
     <a href="#portfolio-backtest-v1">Portfolio Backtest V1</a>
     <a href="#settings-sensitivity-replay">Settings Sensitivity Replay</a>
     <a href="#columns">Column Reference</a>
-    <a href="#ns-column">NS Column Styling</a>
-    <a href="#winscore">Win Column &amp; WinScore</a>
-    <a href="#nrr-column">Nrr Column</a>
+    <a href="#ns-column">NS Diagnostic</a>
+    <a href="#winscore">WinScore Diagnostic</a>
+    <a href="#nrr-column">Nrr Diagnostic</a>
     <a href="#conv-column">Conv Column</a>
-    <a href="#idm-column">IDM Column</a>
+    <a href="#idm-column">IDM Diagnostic</a>
     <a href="#stage-idm-column">Stage IDM Column</a>
-    <a href="#rdy-column">Rdy Column</a>
+    <a href="#rdy-column">Rdy Diagnostic</a>
     <a href="#bucket-columns">Bucket Columns (0x–8x+)</a>
     <a href="#sorting">Sorting</a>
     <a href="#rec-button">⭐ Rec — Recommended Ranking</a>
@@ -252,7 +252,7 @@
     <a href="#score-summary">Score Summary Table</a>
     <a href="#prediction-journal">Prediction Journal</a>
     <a href="#research-diary">Research Diary</a>
-    <a href="#previous-neighbour-backtest">Previous ±1 Neighbour Backtest</a>
+    <a href="#previous-neighbour-backtest">Previous ±1/±2 Neighbour Diagnostics</a>
     <a href="#analysis-findings">Analysis Findings</a>
 
     <a class="section" href="#glossary">Glossary &amp; Label Reference</a>
@@ -792,74 +792,32 @@
       <tr><td><strong>#</strong></td><td>Row number in the current sort order.</td></tr>
       <tr><td><strong>Main (6)</strong></td><td>The six main numbers in the candidate set.</td></tr>
       <tr><td><strong>Supp (2)</strong></td><td>The two supplementary numbers.</td></tr>
-      <tr><td><strong>M/S</strong></td><td>Prize-hit dots from the full 8-number candidate row. Red dots count checked-draw main hits. Green dots count checked-draw supplementary hits. This is a containment/eligibility diagnostic, so numbers in the candidate's Supp (2) cells still count as part of the candidate row.</td></tr>
+      <tr><td><strong>Manual (M/S)</strong></td><td>Prize-hit dots from the full 8-number candidate row. Red dots count checked-draw main hits. Green dots count checked-draw supplementary hits. This is a containment/eligibility diagnostic, so numbers in the candidate's Supp (2) cells still count as part of the candidate row.</td></tr>
       <tr><td><strong>Prize</strong></td><td>Best prize division achieved by the full 8-number candidate row if the Manual Prize Check numbers are treated as the winning draw. Only meaningful when 8 numbers are selected in Manual Prize Check. Div6 is treated inclusively: 1 or 2 main hits plus both supplementaries still qualifies as Div6.</td></tr>
       <tr><td><strong>Odd:Even</strong></td><td>Ratio of odd to even numbers across all 8 numbers.</td></tr>
-      <tr><td><strong>Comp%</strong></td><td>Composite score from the OGA algorithm, expressed as a percentage. Higher = stronger composite alignment.</td></tr>
-      <tr><td><strong>OGA Raw</strong></td><td>Raw OGA (Octagonal Grid Analysis) score.</td></tr>
-      <tr><td><strong>OGA%</strong></td><td>OGA percentile rank against the generation window history.</td></tr>
-      <tr><td><strong>SelHits</strong></td><td>Count of candidate numbers that overlap with the user-selected and forced numbers.</td></tr>
-      <tr><td><strong>RcntHits</strong></td><td>Count of candidate numbers that appeared in the most recent draw.</td></tr>
+      <tr><td><strong>SelHits / Sel/Forced Hits</strong></td><td>Count of candidate numbers that overlap with user-selected numbers and hard-forced numbers. If forced numbers are active, the header expands to <strong>Sel/Forced Hits</strong>.</td></tr>
+      <tr><td><strong>RecentHits</strong></td><td>Count of candidate numbers that appeared in the most recent active WFMQYH draw.</td></tr>
+      <tr><td><strong>Prev±2</strong></td><td>Total unique candidate numbers that are ±1 or ±2 from numbers in the latest active WFMQYH draw. Observe-only unless the user manually selects ±1/±2 targets elsewhere.</td></tr>
+      <tr><td><strong>Dup±2</strong></td><td>Count of candidate numbers that are duplicated or ambiguous ±1/±2 neighbour targets because more than one latest-draw source or offset points to the same target.</td></tr>
+      <tr><td><strong>Dir±2</strong></td><td>Directional fingerprint in <code>-2/-1/+1/+2</code> order. Example: <code>2/3/1/0</code> means two candidate numbers are exactly 2 below a latest-draw number, three are exactly 1 below, one is exactly 1 above, and none are exactly 2 above.</td></tr>
       <tr><td><strong>0x – 8x+</strong></td><td>Bucket columns — how many of the 8 candidate numbers fall into each monthly frequency bucket. See <a href="#bucket-columns">Bucket Columns</a>.</td></tr>
       <tr><td><strong>Conv</strong></td><td>Convergence score. See <a href="#conv-column">Conv Column</a>.</td></tr>
-      <tr><td><strong>IDM%</strong></td><td>Ideal Draw Match percentage. See <a href="#idm-column">IDM Column</a>.</td></tr>
       <tr><td><strong>Stage IDM</strong></td><td>Next-stage Ideal Draw Match percentage from comparable same-size months. See <a href="#stage-idm-column">Stage IDM Column</a>.</td></tr>
-      <tr><td><strong>Rdy%</strong></td><td>Readiness score — composite of IDM, Conv and OGA. See <a href="#rdy-column">Rdy Column</a>.</td></tr>
-      <tr><td><strong>Win</strong></td><td>WinScore — tier-gated candidate-pool diagnostic. See <a href="#winscore">Win Column</a>.</td></tr>
-      <tr><td><strong>Nrr</strong></td><td>Number Rarity Rank. See <a href="#nrr-column">Nrr Column</a>.</td></tr>
-      <tr><td><strong>NS</strong></td><td>NumSum Score — percentile rank of the candidate's number sum. See <a href="#ns-column">NS Column</a>.</td></tr>
-      <tr><td><strong>Simulate</strong></td><td>Runs this candidate through the app simulation flow, updates the shared simulation strips, and scrolls to the DGA grid. It does not overwrite Manual Prize Check.</td></tr>
+      <tr><td><strong>Actions</strong></td><td><strong>Simulate</strong> sends the row to the app simulation flow, updates the shared simulation strips, and scrolls to the DGA grid without overwriting Manual Prize Check. <strong>Keep</strong> appends the row to Portfolio Compression and Paste-Weighted rows until those panels are cleared.</td></tr>
     </tbody>
   </table>
+
+  <div class="note">
+    <strong>Hidden / export diagnostics:</strong> to preserve screen space, <strong>Comp%</strong>, <strong>OGA Raw</strong>, <strong>OGA%</strong>, <strong>IDM%</strong>, <strong>Rdy%</strong>, <strong>Win</strong>, <strong>Nrr</strong>, and <strong>NS</strong> are no longer displayed as main table columns. Some are still computed for CSV export, filter fields, Recommended sorting, or internal trace explanations when the required source data is available.
+  </div>
 
   <!-- ───────────────────────────────────────── -->
-  <h3 id="ns-column">NS Column — Styling Guide</h3>
+  <h3 id="ns-column">NS Diagnostic — CSV / Filter Reference</h3>
 
-  <p>The <strong>NS (NumSum Score)</strong> column shows a percentile rank (0–100) of the candidate's total number sum compared against all historical draws. A score of 50 represents the median historical sum.</p>
+  <p><strong>NS (NumSum Score)</strong> is still computed for export and filtering, but it is not currently shown as a visible Generated Candidates table column. It gives a percentile rank (0–100) of the candidate's total number sum compared against all historical draws. A score of 50 represents the median historical sum.</p>
 
-  <p>The column uses colour and font weight to communicate signal strength at a glance:</p>
-
-  <table>
-    <thead>
-      <tr><th>Style</th><th>Condition</th><th>Meaning</th></tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td><span class="color-teal">⭐ bold teal</span> on teal tint background</td>
-        <td>Highest NS in the current table</td>
-        <td>Best number-sum candidate in the pool</td>
-      </tr>
-      <tr>
-        <td><span class="color-teal">semi-bold teal</span> on light teal tint</td>
-        <td>NS ≥ 65 (not the single best)</td>
-        <td>Top-tier: sum is significantly above the historical median — historically associated with prize winners</td>
-      </tr>
-      <tr>
-        <td><span class="color-teal">Teal text</span></td>
-        <td>NS ≥ 72</td>
-        <td>Very high percentile — sum is in the upper ~28% of all historical draws</td>
-      </tr>
-      <tr>
-        <td><span class="color-blue">Blue text</span></td>
-        <td>60 ≤ NS &lt; 72</td>
-        <td>High — above median, in the upper 40%</td>
-      </tr>
-      <tr>
-        <td><span class="color-green">Green text</span></td>
-        <td>48 ≤ NS &lt; 60</td>
-        <td>Near-median — roughly average range</td>
-      </tr>
-      <tr>
-        <td><span class="color-grey">Grey text</span></td>
-        <td>NS &lt; 48</td>
-        <td>Below median — lower-valued numbers relative to history</td>
-      </tr>
-    </tbody>
-  </table>
-
-  <div class="tip">
-    <strong>In plain English:</strong> Teal / bold → the candidate's numbers add up to a total that is higher than most historical draws → historically this is where prize winners tend to cluster. Blue → above average total, good signal. Green → around the median, neutral. Grey → below-average number sum relative to history.<br><br>
-    The colour ramp goes: grey → green → blue → teal, where teal is the strongest positive signal.
+  <div class="warn-box">
+    <strong>Honesty note:</strong> NS is a descriptive number-sum percentile, not a calibrated win probability. Treat high or low NS as a shape/context clue only.
   </div>
 
   <h4>How NS is calculated</h4>
@@ -872,9 +830,9 @@
   <p>NS is wholly independent of Conv, IDM, Rdy and Nrr — it adds a pure "number-value gravity" axis derived from the actual draw history.</p>
 
   <!-- ───────────────────────────────────────── -->
-  <h3 id="winscore">Win Column &amp; WinScore</h3>
+  <h3 id="winscore">WinScore Diagnostic — CSV / Filter Reference</h3>
 
-  <p>The <strong>Win</strong> column displays a tier letter (A / B / C / D) and a numeric score. It ranks generated rows by candidate-pool diagnostics <em>without</em> needing Manual Prize Check.</p>
+  <p><strong>WinScore</strong> is still computed for export, filter fields, and the <strong>Recommended</strong> diagnostic sort, but it is not currently shown as a visible Generated Candidates table column. It ranks generated rows by candidate-pool diagnostics <em>without</em> needing Manual Prize Check.</p>
 
   <h4>Recalibrated model (April 2026)</h4>
   <p>Internal analysis of 71,000 generated candidates found that the <strong>2x bucket count</strong> (numbers drawn exactly twice in the current month) had the strongest observed association in that candidate sample. Treat the lift values below as sample diagnostics, not calibrated next-draw probabilities.</p>
@@ -891,14 +849,14 @@
     </tbody>
   </table>
 
-  <p>Within each tier, the score is refined by <strong>|Conv| magnitude</strong> (how much the candidate would move the monthly distribution). Sort the Win column <strong>descending (▼)</strong> to bring the highest diagnostic rows to the top.</p>
+  <p>Within each tier, the score is refined by <strong>|Conv| magnitude</strong> (how much the candidate would move the monthly distribution). Use the <strong>Recommended</strong> button or the filter/sort controls when you want this diagnostic to influence row ordering.</p>
 
   <div class="note">For the strongest combined signal, use the <a href="#rec-button">⭐ Rec button</a> which adds Nrr as a secondary tiebreaker.</div>
 
   <!-- ───────────────────────────────────────── -->
-  <h3 id="nrr-column">Nrr Column — Number Rarity Rank</h3>
+  <h3 id="nrr-column">Nrr Diagnostic — Number Rarity Rank</h3>
 
-  <p><strong>Nrr</strong> scores candidates by how <em>rare</em> their numbers are within the generated candidate pool.</p>
+  <p><strong>Nrr</strong> is still computed for export, filtering, and the <strong>Recommended</strong> diagnostic sort, but it is not currently shown as a visible Generated Candidates table column. It scores candidates by how <em>rare</em> their numbers are within the generated candidate pool.</p>
   <p>Numbers that barely survive constraint filtering — "contrarian picks" — were overrepresented in one internal candidate-sample analysis. Treat any lift figure as sample-specific and uncalibrated unless confirmed by fresh walk-forward testing.</p>
 
   <h4>Algorithm</h4>
@@ -908,19 +866,7 @@
     <li>Nrr for a candidate = sum of Rarity scores for all 8 numbers, normalised to 0–100.</li>
   </ol>
 
-  <p>Higher Nrr = rarer numbers in the generated pool. Sort descending (▼) when you want a rarity-based tiebreaker, not a guaranteed predictive signal.</p>
-
-  <h4>Colour scale</h4>
-  <table>
-    <thead><tr><th>Style</th><th>Nrr range</th></tr></thead>
-    <tbody>
-      <tr><td>Purple (bold, tinted background)</td><td>Best Nrr in the pool</td></tr>
-      <tr><td>Purple text</td><td>Nrr ≥ 80</td></tr>
-      <tr><td>Blue text</td><td>60 ≤ Nrr &lt; 80</td></tr>
-      <tr><td>Green text</td><td>40 ≤ Nrr &lt; 60</td></tr>
-      <tr><td>Grey text</td><td>Nrr &lt; 40</td></tr>
-    </tbody>
-  </table>
+  <p>Higher Nrr = rarer numbers in the generated pool. Use it as a rarity-based tiebreaker, not a guaranteed predictive signal.</p>
 
   <!-- ───────────────────────────────────────── -->
   <h3 id="conv-column">Conv Column — Convergence Score</h3>
@@ -937,9 +883,9 @@
   </div>
 
   <!-- ───────────────────────────────────────── -->
-  <h3 id="idm-column">IDM% Column — Ideal Draw Match</h3>
+  <h3 id="idm-column">IDM% Diagnostic — Ideal Draw Match</h3>
 
-  <p><strong>IDM%</strong> measures how closely the candidate's bucket composition matches the <em>Ideal pick mix</em> emitted by Monthly Draws Summary. That ideal mix is computed by exhaustive SSD (Sum of Squared Deviations) search against the panel's robust, reconciled monthly bucket target. IDM is a descriptive alignment score, not a probability or guarantee.</p>
+  <p><strong>IDM%</strong> measures how closely the candidate's bucket composition matches the <em>Ideal pick mix</em> emitted by Monthly Draws Summary. It is currently available through export/filter diagnostics and hard-filter controls rather than as a visible main table column. That ideal mix is computed by exhaustive SSD (Sum of Squared Deviations) search against the panel's robust, reconciled monthly bucket target. IDM is a descriptive alignment score, not a probability or guarantee.</p>
   <ul>
     <li>100% = perfect match to the ideal composition</li>
     <li>Blue text (≥ 87.5%) = excellent alignment</li>
@@ -967,13 +913,13 @@
   </div>
 
   <!-- ───────────────────────────────────────── -->
-  <h3 id="rdy-column">Rdy% Column — Readiness Score</h3>
+  <h3 id="rdy-column">Rdy% Diagnostic — Readiness Score</h3>
 
-  <p><strong>Rdy%</strong> is a user-configurable composite of IDM, |Conv|, and OGA%:</p>
+  <p><strong>Rdy%</strong> is a user-configurable composite of IDM, |Conv|, and OGA%. It is currently available through export/filter diagnostics and Readiness hard filters rather than as a visible main table column:</p>
 
   <pre><code>Rdy = (IDM_weight × IDM) + (Conv_weight × |Conv|_normalised) + (OGA_weight × OGA%_normalised)</code></pre>
 
-  <p>Default weights: IDM 70%, Conv 10%, OGA 20%. Adjust in <strong>Candidate Generation Influences → Readiness Score Weights</strong>.</p>
+  <p>Default state: all Rdy components are <strong>Off / 0%</strong>. Turn on and raise IDM, Conv, or OGA in <strong>Candidate Generation Setup → Engine &amp; Ranking → Readiness (Rdy) Scoring</strong>. If OGA is off in the generation setup, the OGA component contributes 0 and the remaining active weights are normalised.</p>
 
   <ul>
     <li>Gold text (≥ 70%) = excellent readiness</li>
@@ -1027,12 +973,12 @@
   <h4>Exact-match fields</h4>
   <ul>
     <li><strong>Odd/Even</strong> — dropdown; select a ratio such as <code>5:3</code> to show only candidates with exactly that ratio.</li>
-    <li><strong>SelHits</strong> — integer; exact count of selected-number overlaps.</li>
-    <li><strong>RcntHits</strong> — integer; exact count of most-recent-draw overlaps.</li>
+    <li><strong>SelHits</strong> — integer; exact count of user-selected / forced-number overlaps.</li>
+    <li><strong>RecentHits</strong> — integer; exact count of overlaps with the most recent active WFMQYH draw.</li>
   </ul>
 
   <h4>Range (min – max) fields</h4>
-  <p>The following fields accept a minimum and/or maximum value. Leave either blank for an open-ended range:</p>
+  <p>The following fields accept a minimum and/or maximum value. Leave either blank for an open-ended range. Some of these metrics are now hidden/export diagnostics rather than visible table columns:</p>
   <p><em>Comp%, OGA Raw, OGA%, Conv, IDM%, Rdy%, Win, Nrr, NS</em></p>
 
   <p><strong>Examples:</strong></p>
@@ -1159,7 +1105,7 @@
   <h4>Latest Draw ±1/±2 Constraint Builder</h4>
   <p>This control lives in <strong>Candidate Generation Influences → Composition &amp; Recency</strong>. It shows the most recent draw in the active WFMQYH window and offers each valid nearby target: <code>source - 2</code>, <code>source - 1</code>, <code>source + 1</code>, and <code>source + 2</code>.</p>
 
-  <p>When you select a target number, it joins the generator's forced-number list together with any Number Trends forced numbers. The table columns <strong>Prev±1</strong>, <strong>Dup±1</strong>, and <strong>Sing±1</strong> remain observe-only diagnostics that show how generated rows relate to the latest draw's adjacent-neighbour targets.</p>
+  <p>When you select a target number, it joins the generator's forced-number list together with any Number Trends forced numbers. The table columns <strong>Prev±2</strong>, <strong>Dup±2</strong>, and <strong>Dir±2</strong> remain observe-only diagnostics that show how generated rows relate to the latest draw's <code>-2</code>, <code>-1</code>, <code>+1</code>, and <code>+2</code> neighbour targets.</p>
 
   <h5>Colour and status legend</h5>
   <ul>
@@ -1328,7 +1274,9 @@
 
   <p><strong>Look back over newest draws</strong> is separate from the single last-draw controls. It builds a wider pool from the newest W draws inside the active WFMQYH history. Its default value follows the <strong>latest observed month's completed draw count</strong>, not the total WFMQYH size. If the active WFMQYH window is smaller than that month count, Windfall caps the effective W to the available active draws.</p>
 
-  <p>The control shows the count of <strong>unique numbers</strong> found in that newest-draw pool. The <strong>Minimum candidate numbers from that pool</strong> field is capped at the usable maximum: the smaller of that unique count and the candidate's eight total number slots.</p>
+  <p>The control shows the count of <strong>unique numbers</strong> found in that newest-draw pool. The <strong>Minimum candidate numbers from that pool</strong> field is capped at the usable maximum: the smaller of the raw unique count, the candidate's eight total number slots, and any stricter maximum created by active Monthly Draws Summary / Stage-Match bucket requirements.</p>
+
+  <p>Example: if Stage-Match requires <code>0x>=2</code> and the newest-draw pool covers the current month's completed draws, then current-month <code>0x</code> numbers are outside that newest-draw pool by definition. In that setup, at least two candidate numbers must come from outside the repeat pool, so the repeat-pool minimum cannot be higher than <code>6</code>. Windfall reports this as a repeat + monthly bucket compatibility warning in Trace.</p>
 
   <p>Example: with WFMQYH set to the latest <code>9</code> draws, <strong>Look back over newest draws</strong> set to <code>9</code>, and <strong>Minimum candidate numbers from that pool</strong> set to <code>6</code>, Windfall builds one union pool from every number seen in those nine active draws and accepts only candidates containing at least six numbers from that pool. That is different from <strong>Minimum matches to last draw</strong>, which checks only the immediate previous draw.</p>
 
@@ -1957,17 +1905,20 @@
     <tbody>
       <tr><td><strong>Centre draw</strong></td><td>The chronological DGA draw number. This matches the DGA column labels, not the raw CSV row order.</td></tr>
       <tr><td><strong>Centre number</strong></td><td>The number row used as the centre of the local map.</td></tr>
-      <tr><td><strong>Radius</strong></td><td>How far from the centre to inspect in both draw direction and number direction. Radius 3 around D348/N17 maps D345-D350 and N14-N20 when those cells exist.</td></tr>
+      <tr><td><strong>Radius</strong></td><td>How far from the centre to inspect in both draw direction and number direction. Radius 3 around D348/N17 maps D345-D350 and N14-N20 when those cells exist. Radius is capped at 8 so the panel remains readable and computationally bounded.</td></tr>
+      <tr><td><strong>Band horizon</strong></td><td>How many earlier and later draw columns to include in the lead-in and follow-through band metrics. The mapped-cell table uses the larger of Radius and Band horizon for draw width, so widening the horizon can expose more draw columns while keeping the same number radius.</td></tr>
       <tr><td><strong>Local window</strong></td><td>All cells inside the square/rectangle around the centre.</td></tr>
       <tr><td><strong>Diagonal cross</strong></td><td>The two exact +/-1 diagonals that pass through the centre cell.</td></tr>
-      <tr><td><strong>Lead-in band</strong></td><td>Cells before the centre draw within the selected number radius.</td></tr>
-      <tr><td><strong>Follow-through band</strong></td><td>Cells after the centre draw within the selected number radius. For historical centres this is retrospective evidence; for the latest draws it may be incomplete.</td></tr>
+      <tr><td><strong>Lead-in band</strong></td><td>Cells before the centre draw within the selected number radius and selected Band horizon.</td></tr>
+      <tr><td><strong>Follow-through band</strong></td><td>Cells after the centre draw within the selected number radius and selected Band horizon. For historical centres this is retrospective evidence; for the latest draws it may be incomplete.</td></tr>
     </tbody>
   </table>
 
   <p>The metric cards show observed hits, expected hits, lift, z, and an upper-tail p value. The expected value uses a local historical baseline for only the numbers inside the measured shape, so a naturally frequent number band is not judged against an unfair generic baseline.</p>
 
-  <p>The <strong>Mapped cells</strong> table uses the same basic orientation as the DGA grid: numbers run down the left axis and draw numbers run across the top axis. This makes it easier to compare the diagnostic map with the visual grid.</p>
+  <p>The <strong>Mapped cells</strong> table uses the same basic orientation as the DGA grid: numbers run down the left axis and draw numbers run across the top axis. This makes it easier to compare the diagnostic map with the visual grid. When the next unrecorded draw falls inside the selected radius or Band horizon, Windfall shows it as a blank <strong>D next</strong> column for planning context only; that future column is not included in density, lift, z, or p-value calculations. If the centre is the latest recorded draw, increasing Band horizon mainly changes the lead-in evidence because no later real draws exist yet.</p>
+
+  <p>Click any recorded cell in <strong>Mapped cells</strong> to make that cell the new centre. The blank <strong>D next</strong> planning cells are not selectable because they are not recorded draw evidence yet.</p>
 
   <div class="warn-box">
     <strong>Truthfulness note:</strong> a dense constellation is a measured historical shape, not a prediction. The p value is a binomial-style density diagnostic with independence assumptions that are not perfectly true for lottery draws. Treat it as a way to decide which visual patterns deserve replay testing, not as proof that nearby numbers will appear next.
@@ -2225,6 +2176,7 @@
     <li>A maximum of 8 numbers can be selected. A warning banner appears when the limit is reached.</li>
     <li>When exactly 8 numbers are selected, DGA checks those 8 numbers against the active WFMQYH supplementary-number counts. The two selected numbers with the strongest supplementary-role evidence become the simulated supplementary numbers (<span style="color:#2e7d32;">◯</span>); the remaining 6 become simulated mains (<span style="color:#c62828;">⬢</span>).</li>
     <li>Full real-history supplementary counts are used only to break ties inside the selected 8. This is diagnostic role evidence, not a claim that those numbers are more likely to be drawn as supplementaries.</li>
+    <li>If you press <strong>New Prediction</strong> while exactly 8 DGA strip numbers have an Auto supps split, the Prediction Journal captures that split as structured provenance. After the real target draw is entered, the scorecard adds a <strong>DGA Auto supps</strong> row: 2/2 supplementary hits is a Hit, 1/2 is Partial, and 0/2 is Miss.</li>
     <li>If fewer than 8 numbers are selected, or if the selected 8 have no supplementary-role count signal, DGA falls back to the existing sorted first-6 main, next-2 supplementary behaviour.</li>
     <li>Hover over a strip number to see that number's <strong>Scoring System Diagnostics → Numbers</strong> rank and score using mains + supps. Lower rank means stronger diagnostic support in that table. It is not a calibrated probability or guarantee.</li>
     <li>Press <strong>Clear</strong> (appears below the list when numbers are selected) to remove all simulated selections at once.</li>
@@ -2265,19 +2217,26 @@
 
   <table>
     <thead>
-      <tr><th>Score</th><th>Range</th><th>Best direction</th><th>Empirical lift</th><th>Primary signal</th></tr>
+      <tr><th>Metric</th><th>Current visibility</th><th>Range</th><th>How to read it</th><th>Truthfulness note</th></tr>
     </thead>
     <tbody>
-      <tr><td><strong>Win (2x tier)</strong></td><td>100–499</td><td>↓ High</td><td>~6× at Tier A</td><td>2x bucket count</td></tr>
-      <tr><td><strong>Nrr</strong></td><td>0–100</td><td>↓ High</td><td>15× at top-50</td><td>Number rarity in pool</td></tr>
-      <tr><td><strong>NS</strong></td><td>0–100</td><td>↓ High</td><td>Moderate</td><td>Number sum vs history</td></tr>
-      <tr><td><strong>Conv</strong></td><td>−∞ to +∞</td><td>|Conv| high</td><td>2.25× (magnitude only)</td><td>Distribution convergence</td></tr>
-      <tr><td><strong>IDM%</strong></td><td>0–100%</td><td>↓ High</td><td>5× (correlated with Rdy)</td><td>Ideal draw composition match</td></tr>
-      <tr><td><strong>Stage IDM</strong></td><td>0–100%</td><td>↓ High</td><td>Not yet calibrated</td><td>Stage-conditioned ideal draw match</td></tr>
-      <tr><td><strong>Rdy%</strong></td><td>0–100%</td><td>↓ High</td><td>5× (same cluster as IDM)</td><td>Weighted IDM+Conv+OGA</td></tr>
-      <tr><td><strong>OGA%</strong></td><td>0–100%</td><td>↓ High</td><td>Signal when window ≥ 10</td><td>Octagonal grid alignment</td></tr>
+      <tr><td><strong>Prize</strong></td><td>Visible</td><td>Div1–Div6 / blank</td><td>Manual Prize Check replay only.</td><td>Evaluation against selected manual numbers, not a generation signal.</td></tr>
+      <tr><td><strong>SelHits / Sel/Forced Hits</strong></td><td>Visible</td><td>0–8</td><td>Overlap with user-selected and hard-forced numbers.</td><td>Can affect survivor ranking only when the SelHits survivor switch is ON.</td></tr>
+      <tr><td><strong>RecentHits</strong></td><td>Visible</td><td>0–8</td><td>Overlap with the most recent active WFMQYH draw.</td><td>Can affect survivor ranking only when the RecentHits survivor switch is ON.</td></tr>
+      <tr><td><strong>Prev±2 / Dup±2 / Dir±2</strong></td><td>Visible</td><td>Counts / directional pattern</td><td>Adjacent-neighbour diagnostics from the latest active WFMQYH draw.</td><td>Observe-only unless the user manually selects ±1/±2 targets as forced numbers.</td></tr>
+      <tr><td><strong>0x–8x+</strong></td><td>Visible</td><td>0–8</td><td>Candidate bucket-origin mix for the current month.</td><td>Descriptive bucket state; only a hard rule when Acceptance Needs / MiAN is enabled.</td></tr>
+      <tr><td><strong>Conv</strong></td><td>Visible</td><td>−∞ to +∞</td><td>Distribution impact toward (+) or away from (−) the Monthly Draws Summary target.</td><td>Direction is informational only; magnitude is the safer diagnostic.</td></tr>
+      <tr><td><strong>Stage IDM</strong></td><td>Visible</td><td>0–100%</td><td>Similarity to the next-stage ideal bucket mix from comparable same-size months.</td><td>Descriptive stage alignment, not a calibrated probability.</td></tr>
+      <tr><td><strong>Comp%, OGA Raw, OGA%</strong></td><td>Hidden / export / filter</td><td>varies / 0–100%</td><td>Geometry and composite diagnostics used where OGA/scoring paths are enabled.</td><td>Fragile on small windows; not a guarantee.</td></tr>
+      <tr><td><strong>IDM%</strong></td><td>Hidden / export / filter</td><td>0–100%</td><td>Similarity to the shared Monthly Draws Summary ideal composition.</td><td>Correlated with bucket-shape diagnostics; not independent evidence.</td></tr>
+      <tr><td><strong>Rdy%</strong></td><td>Hidden / export / filter / hard-filter controls</td><td>0–100%</td><td>User-weighted IDM + |Conv| + OGA composite.</td><td>Defaults to Off / 0%; only meaningful after the user enables components.</td></tr>
+      <tr><td><strong>Win / Nrr / NS</strong></td><td>Hidden / export / filter / Recommended sort</td><td>100–499 / 0–100 / 0–100</td><td>Candidate-sample diagnostics for 2x tiering, pool rarity, and number-sum percentile.</td><td>Uncalibrated support diagnostics; useful for sorting/review, not probabilities.</td></tr>
     </tbody>
   </table>
+
+  <div class="warn-box">
+    <strong>Score summary honesty note:</strong> this table describes what Windfall currently displays or computes. It deliberately avoids presenting internal candidate-sample lifts as future draw probabilities. Treat every row as evidence, context, or replay scoring unless a panel explicitly says a setting is an active hard generator rule.
+  </div>
 
   <h3 id="prediction-journal">Prediction Journal &amp; Scorecard</h3>
 
@@ -2298,7 +2257,9 @@
 
   <p>The draft also writes a context note listing important setup values such as WFMQYH, selected ratios, user-selected numbers, forced inclusion sources, forced exclusions, scoring influence, and selected-number boost state. When SDE1, HC3, auto-unselected numbers, main-bucket auto-exclusions, Hot/Cold exclusions, or user exclusions are active, the note records the actual numbers excluded at the moment the draft was created. It also records the effective generation forced-number list and effective generation exclusion list so later review can see the setup that candidates were generated under. Review the draft before saving. The button is a time-saver, not an automatic prediction.</p>
 
-  <p>Saved journal entries also include a structured provenance block separate from the free-text notes. This block is designed for later analysis and export. It stores selected prediction numbers, inclusion sources, exclusion sources, effective forced numbers, effective excluded numbers, a drought-break shortlist check, and any Selection Insights companion evidence captured when the draft was created.</p>
+  <p>Saved journal entries also include a structured provenance block separate from the free-text notes. This block is designed for later analysis and export. It stores selected prediction numbers, inclusion sources, exclusion sources, effective forced numbers, effective excluded numbers, a drought-break shortlist check, any DGA Auto supps split captured from the DGA strip, and any Selection Insights companion evidence captured when the draft was created.</p>
+
+  <p>If the draft captured <strong>DGA Auto supps</strong>, the saved entry records the two suggested supplementary-role numbers, the remaining six main-role numbers, exact-pair evidence, and selected-8 pair coverage. Once the first target draw is available, the scorecard compares only those two suggested supps with the actual supplementary numbers from that first target draw. This creates a clean hit / partial / miss record for testing the Auto supp algorithm over time.</p>
 
   <p>If <strong>Selection Insights</strong> was enabled when <strong>New Prediction</strong> was pressed, the draft records the current selected anchor numbers, Windowed top companions, All History top companions, and the Predicted companion shortlist. This evidence is observe-only provenance. It helps future reporting test whether paying attention to companion evidence was useful, but it does not prove the listed companions are future winners.</p>
 
@@ -2371,6 +2332,15 @@
 
   <div class="note">
     <strong>Data integrity note:</strong> replay prize details are calculated live for review. They are not written back into the historical prediction entry and do not alter the formal scorecard. This keeps the original prediction audit trail intact while still making useful replay evidence visible.
+  </div>
+
+  <h4>Target-window prize replay inside journal entries</h4>
+  <p>When a saved journal entry has enough Numbers to be checked against its own target draw window, Windfall now shows a <strong>Prize DivN</strong> pill on that journal row if the saved line would have qualified for a Weekday Windfall prize. Opening the entry reveals a <strong>Target-draw prize replay</strong> card with the target draw date, division, main-hit count, supplementary-hit count, and checked main/supp role split.</p>
+
+  <p>This is different from <strong>Compare active entries to latest draw</strong>. Latest draw replay asks how active entries compare with the newest real draw now loaded. Target-window prize replay asks how that specific entry performed against the draw or draws it originally targeted.</p>
+
+  <div class="note">
+    <strong>Truthfulness note:</strong> target-window prize replay is post-draw disclosure, not a claim that the same setup will keep winning. Future journal analysis should count non-winning entries as well as winning entries before using this evidence as guidance.
   </div>
 
   <h4>Prediction Journal Findings Report</h4>
@@ -2486,21 +2456,51 @@
     <strong>Honesty note:</strong> a scored journal entry is evidence about your prediction process, not proof that the same pattern will repeat. Treat the scorecard as a calibration record.
   </div>
 
-  <h3 id="previous-neighbour-backtest">Previous ±1 Neighbour Backtest</h3>
+  <h3 id="previous-neighbour-backtest">Previous ±1/±2 Neighbour Diagnostics</h3>
 
-  <p>The <strong>Previous ±1 Neighbour Backtest</strong> panel tests whether a draw tends to include numbers that are exactly one step above or below numbers from the preceding draw. The panel itself is an <strong>observe-only</strong> diagnostic and does not alter candidate generation; the separate default-off <strong>Latest Draw ±1 Constraint Builder</strong> in Candidate Generation Influences is where you can deliberately force selected adjacent target numbers into generation.</p>
+  <p>The <strong>Previous ±1/±2 Neighbour Diagnostics</strong> panel tests whether a draw tends to include numbers that are one or two steps above or below numbers from the preceding draw. The panel itself is an <strong>observe-only</strong> diagnostic and does not alter candidate generation; the separate default-off <strong>Latest Draw ±1/±2 Constraint Builder</strong> in Candidate Generation Influences is where you can deliberately force selected adjacent target numbers into generation.</p>
 
   <h4>How the neighbour set is built</h4>
-  <p>For each number in the previous draw, the app creates up to two adjacent targets: <code>n - 1</code> and <code>n + 1</code>. Boundary numbers only produce one target, so <code>1</code> produces <code>2</code> and <code>45</code> produces <code>44</code>.</p>
+  <p>For each number in the previous draw, the app creates up to four nearby targets: <code>n - 2</code>, <code>n - 1</code>, <code>n + 1</code>, and <code>n + 2</code>. Boundary numbers produce fewer targets, so <code>1</code> can produce <code>2</code> and <code>3</code>, while <code>45</code> can produce <code>44</code> and <code>43</code>.</p>
 
-  <p>If two previous-draw numbers nominate the same adjacent target, that target is marked as a <strong>duplicated neighbour</strong>. For example, previous numbers <code>33</code> and <code>35</code> both nominate <code>34</code>.</p>
+  <p>If more than one previous-draw source or offset nominates the same target, that target is marked as a <strong>duplicated / ambiguous neighbour</strong>; in short, a <strong>duplicated neighbour</strong>. For example, previous numbers <code>33</code> and <code>35</code> both nominate <code>34</code>. A number can also count in more than one directional bucket if it is, for example, <code>+1</code> from one source and <code>-1</code> from another.</p>
 
   <h4>What the panel reports</h4>
   <ul>
-    <li><strong>Observed vs random</strong> compares the average number of ±1 hits per next draw with the exact random expectation for the available neighbour target count.</li>
-    <li><strong>Duplicated neighbours</strong> compares the duplicated-target hit rate with the ordinary random single-number hit rate.</li>
+    <li><strong>Previous Draw ±1/±2 Directional Pattern Lab</strong> records each transition as a directional fingerprint, such as <code>-2:2 -1:3 +1:3 +2:2</code>.</li>
+    <li><strong>Current selection helper target cloud</strong> shows the live <code>-2</code>, <code>-1</code>, <code>+1</code>, and <code>+2</code> numbers generated from the newest active WFMQYH draw or the previous two draws if that lookback is selected.</li>
+    <li><strong>Avg unique vs random</strong> compares the average count of unique next-draw numbers found inside the neighbour target cloud with the random expectation for the available target count.</li>
+    <li><strong>Duplicated / ambiguous targets</strong> highlight numbers reached from more than one source or offset. These are useful selection-inspection clues, not proof of future appearance.</li>
+    <li><strong>Live hand-off read + latest ±1/±2 targets</strong> displays the current clean hand-off comparison, such as <code>81 / 267 / 2</code>, as <strong>hit-side wins / miss-side wins / ties</strong>. The same card also shows the newest draw&apos;s <code>-2</code>, <code>-1</code>, <code>+1</code>, and <code>+2</code> target cloud for immediate inspection. Those target numbers are selectable; clicking one updates the shared <strong>User Selected Numbers</strong> state everywhere in the app.</li>
+    <li><strong>Hit vs missed neighbour hand-off test</strong> uses each three-draw chain <code>A → B → C</code>. First it builds A&apos;s <code>±1/±2</code> cloud, then splits that cloud into numbers that hit in B and numbers that missed B. It then treats both groups as fresh <code>±1/±2</code> sources and checks which side better explains C. The <strong>clean exclusive comparison</strong> is the fairer read because it ignores C targets that both sides could claim.</li>
+    <li><strong>Current missed-side helper</strong> turns that hand-off idea into a live inspection aid. It uses only the latest two real draws: the previous draw creates an old <code>±1/±2</code> cloud, the latest draw splits that cloud into hit numbers and missed numbers, and then the missed numbers receive fresh <code>±1/±2</code> treatment for next-draw planning.</li>
     <li><strong>Soft-rule candidate check</strong> samples candidate pools and asks whether candidates ranked by historical neighbour-shape fit score better than random candidates.</li>
   </ul>
+
+  <p><strong>Hand-off caution:</strong> the missed side often contains more source numbers, so raw miss-side hits can look stronger just because that side covers more of the 1-45 field. Read the exposure-adjusted rates, clean exclusive comparison, and sign-test p-value before treating the pattern as useful evidence.</p>
+
+  <p><strong>How to use the live hand-off card:</strong> read the three numbers as <code>hit-side wins / miss-side wins / ties</code>, then look at the latest-draw target cloud underneath. If the miss-side result remains materially stronger, the cloud gives you a practical list of numbers to inspect or carry into other selection tools. Clicking a target selects or deselects it in the shared user-selected number set, so DGA strips and other user-selection surfaces update together. The hand-off evidence remains diagnostic; generation is affected only through the normal settings that already use User Selected Numbers.</p>
+
+  <p><strong>How to use the missed-side helper:</strong> start with the <strong>missed sources to treat</strong>, then inspect the fresh <code>-2</code>, <code>-1</code>, <code>+1</code>, and <code>+2</code> target lists. Duplicated / ambiguous targets are useful visual clues because more than one missed source points to them. The helper is observe-only; it does not force generation unless you manually select or use those numbers elsewhere.</p>
+
+  <h4>Advanced soft-rule replay settings</h4>
+  <p>The <strong>Warm-up pairs</strong>, <strong>Candidate pool</strong>, and <strong>Selected per draw</strong> controls are intentionally tucked into an advanced collapsed section. They only tune the older observe-only replay that compares random candidate samples with a neighbour-shape soft ranking. They do not change the <strong>Previous Draw ±1/±2 Directional Pattern Lab</strong> and they do not alter candidate generation.</p>
+  <ul>
+    <li><strong>Warm-up pairs</strong> is the number of historical transitions used for calibration before a target draw is tested.</li>
+    <li><strong>Candidate pool</strong> is how many random candidates are sampled for each historical target draw.</li>
+    <li><strong>Selected per draw</strong> is how many candidates are retained from that pool for the random baseline and soft-rule comparison.</li>
+  </ul>
+
+  <p>The <strong>±1 History Table</strong> is scrollable and lists active WFMQYH transitions newest first, so users can inspect the history without the table taking over the panel.</p>
+
+  <h4>Generated Candidates columns</h4>
+  <ul>
+    <li><strong>Prev±2</strong> counts unique candidate numbers that are <code>±1</code> or <code>±2</code> from the latest active WFMQYH draw.</li>
+    <li><strong>Dup±2</strong> counts candidate numbers that are duplicated or ambiguous <code>±1/±2</code> targets.</li>
+    <li><strong>Dir±2</strong> displays the compact directional fingerprint in the order <code>-2/-1/+1/+2</code>. Example: <code>2/3/3/2</code> means <code>-2:2</code>, <code>-1:3</code>, <code>+1:3</code>, and <code>+2:2</code>.</li>
+  </ul>
+
+  <p><strong>Dir±2 in plain terms:</strong> if the latest draw included <code>15</code>, then <code>13</code> counts as <code>-2</code>, <code>14</code> counts as <code>-1</code>, <code>16</code> counts as <code>+1</code>, and <code>17</code> counts as <code>+2</code>. The column is different from <strong>Prev±2</strong>: <strong>Prev±2</strong> counts unique candidate numbers, while <strong>Dir±2</strong> counts directional relationships. A candidate number can count in more than one direction if it is reachable from multiple latest-draw numbers, so the Dir±2 total can be higher than Prev±2.</p>
 
   <h4>Anti-lookahead rule</h4>
   <p>For each historical target draw, the soft-rule model is calibrated only from transitions that occurred before that target draw. The target draw and all later draws are hidden from the calibration step.</p>
@@ -2553,8 +2553,10 @@
       <tr><td><strong>D1 SGI</strong></td><td>D1 Terminal Momentum Soft Generation Influence — default-off terminal-digit influence derived from early-month terminal-family behaviour. The app chooses the internal strength tier when the switch is enabled.</td></tr>
       <tr><td><strong>Decade bias</strong></td><td>Generation weighting for decade groups such as 1–9, 10–19, 20–29, 30–39, and 40–45. A bias changes sampling weight; it is not a guarantee of inclusion unless paired with a hard rule.</td></tr>
       <tr><td><strong>DGA</strong></td><td>Draw-Grid Analysis — heat-map visualisation of number frequency across the draw history.</td></tr>
+      <tr><td><strong>DGA Auto supps</strong></td><td>Diagnostic supplementary-role split for exactly 8 selected DGA strip numbers. The app chooses two suggested supps from supplementary-count evidence and pair tie-breakers, then the Prediction Journal can score that saved pair against the first target draw's actual supps.</td></tr>
       <tr><td><strong>Drought-break</strong></td><td>A forced-inclusion source created by selecting numbers from the Drought-break shortlist. The shortlist itself is diagnostic; selected numbers become hard generation inclusions.</td></tr>
-      <tr><td><strong>Dup±1</strong></td><td>Generated Candidates column counting candidate numbers that are duplicated adjacent-neighbour targets because more than one latest-draw source points to the same target.</td></tr>
+      <tr><td><strong>Dir±2</strong></td><td>Generated Candidates column showing the directional previous-neighbour fingerprint in <code>-2/-1/+1/+2</code> order. Example: <code>2/3/1/0</code> means two candidate numbers are exactly 2 below a latest-draw number, three are exactly 1 below, one is exactly 1 above, and none are exactly 2 above. Ambiguous numbers can count in more than one direction, so this is a directional relationship count rather than a unique-number count.</td></tr>
+      <tr><td><strong>Dup±2</strong></td><td>Generated Candidates column counting candidate numbers that are duplicated or ambiguous <code>±1/±2</code> neighbour targets because more than one latest-draw source or offset points to the same target.</td></tr>
       <tr><td><strong>Empirical hazard</strong></td><td>A drought-return estimate from observed historical drought lengths and next-draw hits, stabilised by shrinkage toward a neutral baseline.</td></tr>
       <tr><td><strong>End boosts</strong></td><td>Soft generation weighting for numbers with selected terminal digits. Boosts influence sampling but do not override hard exclusions.</td></tr>
       <tr><td><strong>End limits</strong></td><td>Hard limits on how many generated numbers may use each terminal digit, such as ending in 0, 1, 2, and so on.</td></tr>
@@ -2590,11 +2592,11 @@
       <tr><td><strong>PJFR</strong></td><td>Prediction Journal Findings Report — observe-only aggregate reporting over saved, scored journal entries.</td></tr>
       <tr><td><strong>PNUaRW45</strong></td><td>Pick Numbers Uniformly at Random Without Replacement over 45. In the UI the same mode is toggled by <strong>RwR45</strong>.</td></tr>
       <tr><td><strong>Predicted</strong></td><td>In Selection Insights, a blended companion-evidence shortlist from Windowed and All History rates. It is not a calibrated prediction.</td></tr>
-      <tr><td><strong>Prev±1</strong></td><td>Generated Candidates column counting candidate numbers that are ±1 from the latest draw's numbers.</td></tr>
+      <tr><td><strong>Prev±2</strong></td><td>Generated Candidates column counting unique candidate numbers that are <code>±1</code> or <code>±2</code> from the latest active WFMQYH draw's numbers.</td></tr>
       <tr><td><strong>Quota filter</strong></td><td>A generation mode that uses learned profile percentages as accept/reject quotas. It changes which rows survive; observe-only modes do not.</td></tr>
       <tr><td><strong>Quota pressure</strong></td><td>Trace phrase meaning selected rules force repeated use of a small eligible number set. Example: if a bucket requires 1 number per row and only 1 eligible number exists, that number must appear in every row.</td></tr>
       <tr><td><strong>Rdy</strong></td><td>Readiness Score — user-weighted composite of IDM, |Conv|, and OGA.</td></tr>
-      <tr><td><strong>RecentHits</strong></td><td>Generated Candidates column counting candidate numbers that overlap the recent repeat-union pool from the newest active draws.</td></tr>
+      <tr><td><strong>RecentHits</strong></td><td>Generated Candidates column counting candidate numbers that overlap the most recent active WFMQYH draw.</td></tr>
       <tr><td><strong>RecBias</strong></td><td>Soft recent-match bias strength. It influences sampling/ranking locally and is separate from hard latest-draw match filters.</td></tr>
       <tr><td><strong>RecMin</strong></td><td>Minimum count required from the repeat-union pool when that local generation rule is active.</td></tr>
       <tr><td><strong>Repeat</strong></td><td>The repeat-union pool built from numbers seen in the newest W active WFMQYH draws. It is separate from the immediate last-draw-only controls.</td></tr>
@@ -2602,7 +2604,6 @@
       <tr><td><strong>Same-date conflict</strong></td><td>Two rows that share the same draw date but contain different numbers. Usually indicates a manual-entry or copy/paste mistake.</td></tr>
       <tr><td><strong>SDE1</strong></td><td>A default-off hard exclusion rule. When enabled, the app disables and excludes the numbers identified by that rule; check Trace and the active exclusion badges for the actual affected numbers.</td></tr>
       <tr><td><strong>SelHits</strong></td><td>Generated Candidates column counting candidate numbers that overlap user-selected and hard-forced numbers.</td></tr>
-      <tr><td><strong>Sing±1</strong></td><td>Generated Candidates column counting candidate numbers that are singleton adjacent-neighbour targets, meaning the ±1 target is produced by only one latest-draw source.</td></tr>
       <tr><td><strong>SDSR</strong></td><td>Strict Drought Shortlist Replay — the no-lookahead validation panel used by the SDSR-advised strict drought quota mode.</td></tr>
       <tr><td><strong>SGI</strong></td><td>Soft Generation Influence — a weighting layer applied before hard filters. It can nudge sampling, but exclusions, forced inclusions, quotas, and other hard rules still decide what survives.</td></tr>
       <tr><td><strong>SSD</strong></td><td>Sum of Squared Deviations — metric used to measure how far a distribution is from the Monthly Draws Summary target.</td></tr>
@@ -2629,7 +2630,7 @@
 
   <hr style="margin: 40px 0; border: none; border-top: 1px solid var(--border);" />
   <p style="color: var(--muted); font-size: 0.88em; text-align: center;">
-    Windfall App User Manual · Last updated August 2026 (label and acronym coverage audit) ·
+    Windfall App User Manual · Last updated August 2026 (score summary, label, and acronym coverage audit) ·
     <a href="user-manual.html" download="Windfall_User_Manual.html" style="color: var(--primary);">Download this page</a>
   </p>
 

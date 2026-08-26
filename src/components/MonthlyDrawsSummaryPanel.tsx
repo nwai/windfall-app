@@ -1103,7 +1103,7 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
                                 style={{
                                   minHeight: 30,
                                   whiteSpace: "nowrap",
-                                  borderColor: rowApplied ? "#16a34a" : undefined,
+                                  borderColor: rowApplied ? "#626e66" : undefined,
                                   background: rowApplied ? "#16a34a" : undefined,
                                   color: rowApplied ? "#fff" : undefined,
                                   fontWeight: rowApplied ? 900 : undefined,

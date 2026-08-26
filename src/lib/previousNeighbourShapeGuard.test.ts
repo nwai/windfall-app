@@ -11,18 +11,24 @@ import {
 const draw = (date: string, main: number[], supp: number[] = []): Draw => ({ date, main, supp });
 
 describe("previousNeighbourShapeGuard", () => {
-  it("classifies total, duplicated, and singleton previous-draw ±1 neighbour hits", () => {
+  it("classifies total, duplicated, singleton, and directional previous-draw ±1/±2 neighbour hits", () => {
     const previous = [11, 33, 37, 15, 31, 1, 20, 35];
     const candidate = [20, 5, 34, 22, 13, 14, 12, 29];
 
     const profile = buildPreviousNeighbourShapeProfile(previous, candidate);
 
-    expect(profile.totalHits).toBe(3);
-    expect(profile.duplicateHits).toBe(1);
-    expect(profile.singletonHits).toBe(2);
-    expect(profile.duplicateHitNumbers).toEqual([34]);
-    expect(profile.singletonHitNumbers).toEqual([12, 14]);
-    expect(profile.targetCount).toBe(12);
+    expect(profile.totalHits).toBe(6);
+    expect(profile.duplicateHits).toBe(2);
+    expect(profile.singletonHits).toBe(4);
+    expect(profile.duplicateHitNumbers).toEqual([13, 34]);
+    expect(profile.singletonHitNumbers).toEqual([12, 14, 22, 29]);
+    expect(profile.targetCount).toBe(24);
+    expect(profile.directionalHitTotal).toBe(8);
+    expect(profile.directionalPattern).toBe("-2:2 -1:2 +1:2 +2:2");
+    expect(profile.minusTwoHitNumbers).toEqual([13, 29]);
+    expect(profile.minusOneHitNumbers).toEqual([14, 34]);
+    expect(profile.plusOneHitNumbers).toEqual([12, 34]);
+    expect(profile.plusTwoHitNumbers).toEqual([13, 22]);
   });
 
   it("annotates candidates without changing their numbers or order", () => {
@@ -33,9 +39,15 @@ describe("previousNeighbourShapeGuard", () => {
 
     expect(annotated.main).toEqual(candidate.main);
     expect(annotated.supp).toEqual(candidate.supp);
-    expect(annotated.previousNeighbourHits).toBe(3);
-    expect(annotated.previousNeighbourDuplicateHits).toBe(1);
-    expect(annotated.previousNeighbourSingletonHits).toBe(2);
+    expect(annotated.previousNeighbourHits).toBe(6);
+    expect(annotated.previousNeighbourDuplicateHits).toBe(2);
+    expect(annotated.previousNeighbourSingletonHits).toBe(4);
+    expect(annotated.previousNeighbourDirectionalHits).toBe(8);
+    expect(annotated.previousNeighbourDirectionalPattern).toBe("-2:2 -1:2 +1:2 +2:2");
+    expect(annotated.previousNeighbourMinusTwoHits).toBe(2);
+    expect(annotated.previousNeighbourMinusOneHits).toBe(2);
+    expect(annotated.previousNeighbourPlusOneHits).toBe(2);
+    expect(annotated.previousNeighbourPlusTwoHits).toBe(2);
   });
 
   it("allocates exact quota counts from empirical hit distributions", () => {

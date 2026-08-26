@@ -192,6 +192,7 @@ import {
   normalizeUserExclusionLocks,
   removeUserExcludedNumbers,
 } from "./lib/userExclusionLocks";
+import { toggleUserSelectedNumber } from "./lib/userSelectedNumbers";
 import { normalizeManualPrizeCheckNumbers } from "./lib/manualPrizeCheck";
 import { buildNumberConflictLedger } from "./lib/numberConflictLedger";
 import {
@@ -223,6 +224,7 @@ import {
   normalizePreviousNeighbourConstraintNumbers,
   togglePreviousNeighbourConstraintNumber as togglePreviousNeighbourConstraintTarget,
 } from "./lib/previousNeighbourTargets";
+import { buildLatestNeighbourStageMatchCompatibilityTrace } from "./lib/latestNeighbourStageMatchCompatibility";
 import { analyzeHotColdRanking } from "./lib/hotColdRanking";
 import { buildPortfolioWindowShapeEvidence } from "./lib/portfolioWindowShape";
 import { summarizeDrawHistoryProvenance } from "./lib/drawHistoryProvenance";
@@ -672,6 +674,17 @@ const formatTracePairs = (pairs: Array<[string, number | string]>): string => (
   pairs.map(([label, value]) => `${label}:${value}`).join(" · ")
 );
 
+const formatTraceNumberPreview = (numbers: readonly number[], limit = 18): string => {
+  if (!numbers.length) return "none";
+  const sorted = Array.from(new Set(numbers)).sort((a, b) => a - b);
+  const preview = sorted.slice(0, limit).join(", ");
+  return sorted.length > limit ? `${preview}, +${sorted.length - limit} more` : preview;
+};
+
+const formatMonthlyConstraintCountsForTrace = (counts: MonthlyFrequencyConstraints): string => (
+  `0x>=${counts.undrawn} 1x>=${counts.times1} 2x>=${counts.times2} 3x>=${counts.times3} 4x>=${counts.times4} 5x>=${counts.times5} 6x>=${counts.times6} 7x>=${counts.times7} 8x+>=${counts.times8}`
+);
+
 const formatGenerationTraceLines = (options: {
   label: string;
   requested: number;
@@ -809,6 +822,31 @@ const MONTHLY_FREQUENCY_KEYS: (keyof MonthlyFrequencyConstraints)[] = [
   "times8",
 ];
 
+const MONTHLY_FREQUENCY_SHORT_LABELS: Record<keyof MonthlyFrequencyConstraints, string> = {
+  undrawn: "0x",
+  times1: "1x",
+  times2: "2x",
+  times3: "3x",
+  times4: "4x",
+  times5: "5x",
+  times6: "6x",
+  times7: "7x",
+  times8: "8x+",
+};
+
+const maxMonthlyFrequencyConstraints = (
+  ...constraints: (MonthlyFrequencyConstraints | null | undefined)[]
+): MonthlyFrequencyConstraints => {
+  const merged = zeroMonthlyFrequencyConstraints();
+  for (const constraint of constraints) {
+    if (!constraint) continue;
+    for (const key of MONTHLY_FREQUENCY_KEYS) {
+      merged[key] = Math.max(merged[key], Math.max(0, constraint[key] ?? 0));
+    }
+  }
+  return merged;
+};
+
 const monthlyFrequencyConstraintsSignature = (constraints: MonthlyFrequencyConstraints | null | undefined): string => (
   constraints ? MONTHLY_FREQUENCY_KEYS.map((key) => `${key}:${constraints[key]}`).join("|") : "null"
 );
@@ -819,6 +857,29 @@ const monthlyBucketSetsSignature = (sets: MonthlyBucketSets | null | undefined):
       .map((key) => `${key}:${Array.from(sets[key]).sort((a, b) => a - b).join(",")}`)
       .join("|")
     : "null"
+);
+
+const sameNumberList = (
+  left: readonly number[] | null | undefined,
+  right: readonly number[] | null | undefined,
+): boolean => {
+  const leftValues = left ?? [];
+  const rightValues = right ?? [];
+  return leftValues.length === rightValues.length && leftValues.every((value, index) => value === rightValues[index]);
+};
+
+const keepExistingNumberListWhenEqual = (current: number[], next: number[]): number[] => (
+  sameNumberList(current, next) ? current : next
+);
+
+const hasActiveTerminalCoordinationRuleForTrace = (
+  options?: { maxCount?: number; boost?: number; singleDigitBoost?: number; twoDigitBoost?: number },
+): boolean => (
+  typeof options?.maxCount === "number" ||
+  [options?.boost, options?.singleDigitBoost, options?.twoDigitBoost].some((value) => {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) && numeric > 0;
+  })
 );
 
 const monthlyBucketLabelsSignature = (labels: Record<number, string>): string => (
@@ -1155,7 +1216,7 @@ function AppInner(): JSX.Element {
     }));
   }, []);
 
-  const exactConstraintRows = [
+  const exactConstraintRows = useMemo(() => [
     {
       key: "main0",
       label: "0-ending numbers max allowed",
@@ -1326,9 +1387,32 @@ function AppInner(): JSX.Element {
       title: "Allow at most this many candidate numbers from the set 9, 19, 29, 39 across main and supplementary picks.",
       bucketKey: "main9" as const,
     },
-  ] as const;
+  ] as const, [
+    mainBucketBoosts,
+    mainEightSetEnabled,
+    mainFiveSetEnabled,
+    mainFourSetEnabled,
+    mainNineSetEnabled,
+    mainOneSetEnabled,
+    mainSevenSetEnabled,
+    mainSixSetEnabled,
+    mainThreeSetEnabled,
+    mainTwoSetEnabled,
+    mainZeroSetEnabled,
+    maxMainEightSetCount,
+    maxMainFiveSetCount,
+    maxMainFourSetCount,
+    maxMainNineSetCount,
+    maxMainOneSetCount,
+    maxMainSevenSetCount,
+    maxMainSixSetCount,
+    maxMainThreeSetCount,
+    maxMainTwoSetCount,
+    maxMainZeroSetCount,
+    updateMainBucketBoost,
+  ]);
 
-  const mainDecadeConstraintRows = [
+  const mainDecadeConstraintRows = useMemo(() => [
     {
       key: "decade0x",
       label: "0x decade (1–9)",
@@ -1379,7 +1463,7 @@ function AppInner(): JSX.Element {
       title: "Adjust generation weighting for candidate numbers 40 through 45 across main and supplementary picks.",
       bucketKey: "decade4x" as const,
     },
-  ] as const;
+  ] as const, [mainDecadeBiases, updateMainDecadeBias]);
 
   const [selectedNumbers, setSelectedNumbers] = useState<number[]>([]);
   const [candidates, setCandidates] = useState<CandidateSet[]>([]);
@@ -1543,6 +1627,17 @@ function AppInner(): JSX.Element {
       ));
     }
   }, [acceptanceNeedsEnabled, monthlyConstructiveEnabled, monthlyConstraintPayload]);
+
+  /** Effective MiAN counts — disabled MiAN is always zero. When Monthly Draws Summary
+   *  constructive counts are active, MiAN mirrors the selected Acceptance needs, not
+   *  the full bucket sizes. */
+  const effectiveMianCounts: MonthlyFrequencyConstraints = useMemo(() => (
+    !acceptanceNeedsEnabled
+      ? zeroMonthlyFrequencyConstraints()
+      : (monthlyConstructiveEnabled && monthlyConstraintPayload)
+        ? monthlyConstraintPayload.constraints
+        : acceptanceNeedsCounts
+  ), [acceptanceNeedsCounts, acceptanceNeedsEnabled, monthlyConstructiveEnabled, monthlyConstraintPayload]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -2086,16 +2181,25 @@ function AppInner(): JSX.Element {
     [mainConstraintAutoExclusions.excludedNumbers]
   );
 
-  useEffect(() => {
-    setTrendSelectedNumbers((current) => removeUserExcludedNumbers(current, excludedNumbers));
-    setPreviousNeighbourConstraintNumbers((current) => removeUserExcludedNumbers(current, excludedNumbers));
-    setHotColdForcedNumbers((current) => removeUserExcludedNumbers(current, excludedNumbers));
-    setDroughtBreakSelectedNumbers((current) => removeUserExcludedNumbers(current, excludedNumbers).slice(0, MAX_DROUGHT_BREAK_FORCED_NUMBERS));
-    setPasteWeightedForcedNumbers((current) => removeUserExcludedNumbers(current, excludedNumbers));
-    setUserSelectedNumbers((current) => removeUserExcludedNumbers(current, excludedNumbers));
-    setManualSimSelected((current) => normalizeManualPrizeCheckNumbers(current, excludedNumbers));
-    setSelectedCarryOverBoostNumbers((current) => removeUserExcludedNumbers(current, excludedNumbers));
+  const pruneManualExcludedNumbers = useCallback((current: number[], limit?: number): number[] => {
+    const pruned = removeUserExcludedNumbers(current, excludedNumbers);
+    const next = typeof limit === "number" ? pruned.slice(0, limit) : pruned;
+    return keepExistingNumberListWhenEqual(current, next);
   }, [excludedNumbers]);
+
+  useEffect(() => {
+    setTrendSelectedNumbers((current) => pruneManualExcludedNumbers(current));
+    setPreviousNeighbourConstraintNumbers((current) => pruneManualExcludedNumbers(current));
+    setHotColdForcedNumbers((current) => pruneManualExcludedNumbers(current));
+    setDroughtBreakSelectedNumbers((current) => pruneManualExcludedNumbers(current, MAX_DROUGHT_BREAK_FORCED_NUMBERS));
+    setPasteWeightedForcedNumbers((current) => pruneManualExcludedNumbers(current));
+    setUserSelectedNumbers((current) => pruneManualExcludedNumbers(current));
+    setManualSimSelected((current) => keepExistingNumberListWhenEqual(
+      current,
+      normalizeManualPrizeCheckNumbers(current, excludedNumbers),
+    ));
+    setSelectedCarryOverBoostNumbers((current) => pruneManualExcludedNumbers(current));
+  }, [excludedNumbers, pruneManualExcludedNumbers]);
 
   const mainConstraintAutoExcludedLabel = useMemo(() => {
     if (!mainConstraintAutoExclusions.shouldApply) return "";
@@ -2176,19 +2280,82 @@ function AppInner(): JSX.Element {
     ? Math.min(latestObservedMonthDrawCount.drawCount, activeWindowSize || latestObservedMonthDrawCount.drawCount)
     : activeWindowSize;
   const effectiveRepeatWindowSizeW = Math.min(Math.max(0, repeatWindowSizeW), activeWindowSize);
-  const repeatUnionUniqueCount = useMemo(() => {
-    if (effectiveRepeatWindowSizeW <= 0) return 0;
+  const repeatUnionNumbers = useMemo(() => {
     const union = new Set<number>();
+    if (effectiveRepeatWindowSizeW <= 0) return union;
     realFilteredHistory.slice(realFilteredHistory.length - effectiveRepeatWindowSizeW).forEach((draw) => {
       [...draw.main, ...draw.supp].forEach((number) => union.add(number));
     });
-    return union.size;
+    return union;
   }, [effectiveRepeatWindowSizeW, realFilteredHistory]);
-  const repeatUnionCandidateMax = Math.min(8, repeatUnionUniqueCount);
+  const repeatUnionUniqueCount = repeatUnionNumbers.size;
+  const activeRepeatMonthlyConstraints = useMemo(() => (
+    maxMonthlyFrequencyConstraints(
+      monthlyConstraintPayload?.constraints,
+      acceptanceNeedsEnabled ? effectiveMianCounts : null,
+    )
+  ), [acceptanceNeedsEnabled, effectiveMianCounts, monthlyConstraintPayload]);
+  const activeRepeatMonthlyBuckets = monthlyConstraintPayload?.buckets ?? monthlyBucketSetsAlways ?? null;
+  const repeatUnionMonthlyFeasibility = useMemo(() => {
+    if (repeatUnionNumbers.size === 0 || !activeRepeatMonthlyBuckets) return null;
+    const activeRequirements = MONTHLY_FREQUENCY_KEYS
+      .map((key) => ({ key, required: Math.max(0, Math.trunc(activeRepeatMonthlyConstraints[key] ?? 0)) }))
+      .filter((entry) => entry.required > 0);
+    if (activeRequirements.length === 0) return null;
+
+    let requiredOutsideRepeat = 0;
+    let totalRequired = 0;
+    const shortageDetails: string[] = [];
+    const impossibleDetails: string[] = [];
+
+    for (const { key, required } of activeRequirements) {
+      totalRequired += required;
+      const bucket = activeRepeatMonthlyBuckets[key];
+      const inRepeatPool = Array.from(bucket).filter((number) => repeatUnionNumbers.has(number)).length;
+      const shortage = Math.max(0, required - inRepeatPool);
+      if (shortage > 0) {
+        requiredOutsideRepeat += shortage;
+        shortageDetails.push(`${MONTHLY_FREQUENCY_SHORT_LABELS[key]} needs ${required}, repeat-pool has ${inRepeatPool}`);
+      }
+      if (bucket.size < required) {
+        impossibleDetails.push(`${MONTHLY_FREQUENCY_SHORT_LABELS[key]} needs ${required}, bucket has ${bucket.size}`);
+      }
+    }
+
+    return {
+      maxFeasibleHits: Math.max(0, Math.min(8, 8 - requiredOutsideRepeat)),
+      requiredOutsideRepeat,
+      totalRequired,
+      shortageDetails,
+      impossibleDetails,
+    };
+  }, [activeRepeatMonthlyBuckets, activeRepeatMonthlyConstraints, repeatUnionNumbers]);
+  const repeatUnionRawCandidateMax = Math.min(8, repeatUnionUniqueCount);
+  const repeatUnionCandidateMax = Math.min(
+    repeatUnionRawCandidateMax,
+    repeatUnionMonthlyFeasibility?.maxFeasibleHits ?? repeatUnionRawCandidateMax,
+  );
   const repeatUnionEnabled = repeatWindowSizeW > 0 && minFromRecentUnionM > 0 && activeWindowSize > 0;
   const repeatUnionSummary = repeatUnionEnabled
     ? `W ${repeatWindowSizeW}${effectiveRepeatWindowSizeW !== repeatWindowSizeW ? ` (${effectiveRepeatWindowSizeW} effective)` : ""} · M ${minFromRecentUnionM}`
     : `off (W ${repeatWindowSizeW} · M ${minFromRecentUnionM})`;
+  const repeatUnionMonthlyCompatibilityTrace = repeatUnionEnabled && repeatUnionMonthlyFeasibility
+    ? [
+      `Repeat + monthly bucket compatibility: M=${minFromRecentUnionM}, feasible repeat-pool max=${repeatUnionMonthlyFeasibility.maxFeasibleHits}`,
+      repeatUnionMonthlyFeasibility.requiredOutsideRepeat > 0
+        ? `because at least ${repeatUnionMonthlyFeasibility.requiredOutsideRepeat} required bucket number${repeatUnionMonthlyFeasibility.requiredOutsideRepeat === 1 ? "" : "s"} must come from outside the newest-draw pool (${repeatUnionMonthlyFeasibility.shortageDetails.join("; ")})`
+        : "all active bucket minimums can be satisfied inside the repeat pool",
+      repeatUnionMonthlyFeasibility.totalRequired > 8
+        ? `total active bucket minimums sum to ${repeatUnionMonthlyFeasibility.totalRequired}, above the 8-number candidate size`
+        : null,
+      repeatUnionMonthlyFeasibility.impossibleDetails.length > 0
+        ? `bucket-size conflict: ${repeatUnionMonthlyFeasibility.impossibleDetails.join("; ")}`
+        : null,
+      minFromRecentUnionM > repeatUnionMonthlyFeasibility.maxFeasibleHits
+        ? "INCOMPATIBLE: lower the repeat-pool minimum or loosen the monthly/stage bucket counts."
+        : "compatible.",
+    ].filter(Boolean).join(" · ")
+    : null;
   const generatedCandidateCountWindowDefault = useMemo(
     () => getGeneratedCandidateCountWindowDefault(activeWindowSize, DEFAULT_GENERATED_CANDIDATE_COUNT),
     [activeWindowSize],
@@ -2243,6 +2410,11 @@ function AppInner(): JSX.Element {
     () => new Set(selectionUnavailableNumbers),
     [selectionUnavailableNumbers],
   );
+  const toggleSharedUserSelectedNumber = useCallback((number: number) => {
+    if (!Number.isInteger(number) || number < 1 || number > 45) return;
+    if (selectionUnavailableSet.has(number)) return;
+    setUserSelectedNumbers((current) => toggleUserSelectedNumber(current, number));
+  }, [selectionUnavailableSet]);
   const strictDroughtQuotaShortlist = useMemo(
     () => buildStrictDroughtQuotaShortlist(realFilteredHistory, realHistory, {
       threshold: STRICT_DROUGHT_DEFAULT_THRESHOLD,
@@ -2355,7 +2527,10 @@ function AppInner(): JSX.Element {
     setDroughtBreakSelectedNumbers((current) => pruneSelectionUnavailableNumbers(current, MAX_DROUGHT_BREAK_FORCED_NUMBERS));
     setPasteWeightedForcedNumbers((current) => pruneSelectionUnavailableNumbers(current));
     setUserSelectedNumbers((current) => pruneSelectionUnavailableNumbers(current));
-    setManualSimSelected((current) => normalizeManualPrizeCheckNumbers(current, selectionUnavailableNumbers));
+    setManualSimSelected((current) => keepExistingNumberListWhenEqual(
+      current,
+      normalizeManualPrizeCheckNumbers(current, selectionUnavailableNumbers),
+    ));
     setSelectedCarryOverBoostNumbers((current) => pruneSelectionUnavailableNumbers(current));
   }, [pruneSelectionUnavailableNumbers]);
 
@@ -2664,12 +2839,17 @@ function AppInner(): JSX.Element {
     };
   }, []);
 
+  const syncUserSelectionForExternalSimulation = useCallback((numbers: number[]) => {
+    if (autoExcludeUnselected) return;
+    setUserSelectedNumbers(numbers);
+  }, [autoExcludeUnselected]);
+
   const handleSimulateCandidate = (idx: number) => {
     const cand = candidates[idx];
     if (!cand) return;
     const simulatedNumbers = [...cand.main, ...cand.supp].slice(0, 8);
     setSelectedCandidateIdx(idx);
-    setUserSelectedNumbers(simulatedNumbers);
+    syncUserSelectionForExternalSimulation(simulatedNumbers);
     setSimulatedDraw({
       main: cand.main.slice(),
       supp: cand.supp.slice(),
@@ -2758,7 +2938,7 @@ function AppInner(): JSX.Element {
     const simulatedNumbers = nums.slice(0, 8);
     const main = simulatedNumbers.slice(0, 6).sort((a, b) => a - b);
     const supp = simulatedNumbers.slice(6, 8).sort((a, b) => a - b);
-    setUserSelectedNumbers(simulatedNumbers);
+    syncUserSelectionForExternalSimulation(simulatedNumbers);
     setSimulatedDraw({ main, supp, date: "PickSixManual", isSimulated: true } as any);
     setSimSource('user');
     setSimCandidateIdx(null);
@@ -2803,13 +2983,13 @@ function AppInner(): JSX.Element {
     const main = simulatedNumbers.slice(0, 6).sort((a, b) => a - b);
     const supp = simulatedNumbers.slice(6, 8).sort((a, b) => a - b);
 
-    setUserSelectedNumbers(simulatedNumbers);
+    syncUserSelectionForExternalSimulation(simulatedNumbers);
     setSelectedCandidateIdx(-1);
     setSimulatedDraw({ main, supp, date: "AcceptanceNeeds", isSimulated: true } as any);
     setSimSource('user');
     setSimCandidateIdx(null);
     scrollToDGA();
-  }, [scrollToDGA]);
+  }, [scrollToDGA, syncUserSelectionForExternalSimulation]);
 
   const handleSimulatePasteWeightedCandidate = useCallback((numbers: number[]) => {
     const main = numbers
@@ -2820,12 +3000,12 @@ function AppInner(): JSX.Element {
     if (main.length < 6) return;
 
     setSelectedCandidateIdx(-1);
-    setUserSelectedNumbers(main);
+    syncUserSelectionForExternalSimulation(main);
     setSimulatedDraw({ main, supp: [], date: "PasteWeighted", isSimulated: true } as any);
     setSimSource('candidate');
     setSimCandidateIdx(null);
     scrollToDGA();
-  }, [scrollToDGA]);
+  }, [scrollToDGA, syncUserSelectionForExternalSimulation]);
 
   const handleSimulatePortfolioCore = useCallback((numbers: number[]) => {
     const main = numbers
@@ -3345,15 +3525,6 @@ function AppInner(): JSX.Element {
     );
   }
 
-  /** Effective MiAN counts — disabled MiAN is always zero. When Monthly Draws Summary
-   *  constructive counts are active, MiAN mirrors the selected Acceptance needs, not
-   *  the full bucket sizes. */
-  const effectiveMianCounts: MonthlyFrequencyConstraints = !acceptanceNeedsEnabled
-    ? zeroMonthlyFrequencyConstraints()
-    : (monthlyConstructiveEnabled && monthlyConstraintPayload)
-      ? monthlyConstraintPayload.constraints
-      : acceptanceNeedsCounts;
-
   function meetsAcceptanceNeeds(candidate: CandidateSet): boolean {
     if (!acceptanceNeedsEnabled) return true;
     const buckets = monthlyBucketSetsAlways ?? monthlyConstraintPayload?.buckets ?? null;
@@ -3400,6 +3571,46 @@ function AppInner(): JSX.Element {
     return excluded;
   }
 
+  function buildLatestNeighbourStageMatchCompatibilityLine(excludedForRun: readonly number[]): string | null {
+    if (!latestNeighbourSupportEnabled) return null;
+    const hasMonthlyDrawSummaryCounts = !!monthlyConstraintPayload;
+    const hasMianCounts = acceptanceNeedsEnabled;
+    if (!hasMonthlyDrawSummaryCounts && !hasMianCounts) return null;
+
+    const counts = maxMonthlyFrequencyConstraints(
+      monthlyConstraintPayload?.constraints,
+      hasMianCounts ? effectiveMianCounts : null,
+    );
+    const countSourceLabel = [
+      hasMonthlyDrawSummaryCounts
+        ? monthlyConstructiveEnabled
+          ? "Stage-Match constructive + Monthly Draws Summary post-filter counts"
+          : "Monthly Draws Summary post-filter counts"
+        : null,
+      hasMianCounts ? "MiAN post-filter counts" : null,
+    ].filter(Boolean).join(" + ");
+    const analysisBuckets = monthlyConstructiveEnabled && monthlyConstraintPayload
+      ? monthlyConstraintPayload!.buckets
+      : monthlyBucketSetsAlways ?? monthlyConstraintPayload?.buckets ?? dgaLiveMonthlyBuckets;
+    const compatibilityBuckets = monthlyConstraintPayload?.buckets
+      ?? (hasMianCounts ? monthlyBucketSetsAlways ?? null : null);
+
+    return buildLatestNeighbourStageMatchCompatibilityTrace({
+      enabled: latestNeighbourSupportEnabled,
+      history: realFilteredHistory,
+      analysisBuckets,
+      compatibilityBuckets,
+      counts,
+      countSourceLabel,
+      excludedNumbers: excludedForRun,
+      planningLastDrawOverride: planningDrawContext.isPlanningLastDraw,
+      terminalRuleActive: {
+        0: hasActiveTerminalCoordinationRuleForTrace(mainDigitGenerationOptions.main0),
+        5: hasActiveTerminalCoordinationRuleForTrace(mainDigitGenerationOptions.main5),
+      },
+    }).traceLine;
+  }
+
   const buildMonthlyTrace = () => {
     if (!monthlyConstraintPayload) return null;
     const { buckets, constraints } = monthlyConstraintPayload;
@@ -3417,6 +3628,93 @@ function AppInner(): JSX.Element {
     const req = constraints;
     return `Monthly buckets — sizes und:${sizes.undrawn} 1x:${sizes.times1} 2x:${sizes.times2} 3x:${sizes.times3} 4x:${sizes.times4} 5x:${sizes.times5} 6x:${sizes.times6} 7x:${sizes.times7} 8x+:${sizes.times8}; required ≥ und:${req.undrawn} 1x:${req.times1} 2x:${req.times2} 3x:${req.times3} 4x:${req.times4} 5x:${req.times5} 6x:${req.times6} 7x:${req.times7} 8x+:${req.times8}`;
   };
+
+  function buildGenerationActiveSetupTraceLines(options: {
+    label: string;
+    mode: "standard" | "rwr45" | "batch";
+    requested: number;
+    poolSize?: number;
+    overgen?: number;
+    attemptBudget?: number;
+    emitFullSnapshot?: boolean;
+  }): string[] {
+    const modeLabel = options.mode === "rwr45"
+      ? "RwR45 / PNUaRW45"
+      : options.mode === "batch"
+        ? "batch"
+        : "standard";
+    const requestParts = [
+      `mode ${modeLabel}`,
+      `requested ${options.requested}`,
+      options.poolSize !== undefined ? `pool ${options.poolSize}` : null,
+      options.overgen !== undefined ? `overgen ${options.overgen}x` : null,
+      options.attemptBudget !== undefined ? `budget ${options.attemptBudget}` : null,
+    ].filter(Boolean).join(" · ");
+    const ratioSummaryForTrace = selectedRatios.length
+      ? selectedRatios.map((ratio) => {
+        const option = ratioOptions.find((row) => row.ratio === ratio);
+        return option ? `${ratio} ${option.percent}%` : ratio;
+      }).join(", ")
+      : "off";
+    const survivorSignalsForTrace = [
+      knobs.enableOGA && rankingWeights.oga > 0 ? `OGA ${rankingWeights.oga}` : null,
+      rankingWeights.selHitsEnabled && rankingWeights.sel > 0 ? `SelHits ${rankingWeights.sel}` : null,
+      rankingWeights.recentHitsEnabled && rankingWeights.recent > 0 ? `RecentHits ${rankingWeights.recent}` : null,
+      monthEndCarryOverBiasEnabled ? `carry-over ${monthEndCarryOverStrengthSettings.label}` : null,
+      activeScoringGenerationProfile ? `Numbers diagnostic ${formatScoringInfluenceLabel(scoringGenerationInfluence)}` : null,
+    ].filter(Boolean).join(", ") || "none";
+    const hardFilterSummaryForTrace = [
+      entropyEnabled ? `Entropy>=${entropyThreshold}` : null,
+      hammingEnabled ? `Hamming>=${hammingThreshold}` : null,
+      jaccardEnabled ? `Jaccard<=${Math.round(jaccardThreshold * 100)}%` : null,
+      readinessHardFiltersActive ? `Rdy ${readinessHardFilterSummary}` : null,
+      sumFilter.enabled ? `Sum ${sumFilter.min}-${sumFilter.max}${sumFilter.includeSupp ? "+supp" : ""}` : null,
+      maxLastDrawMatchesEnabled ? `last-draw max ${maxLastDrawMatchesValue}` : null,
+      minRecentMatches > 0 ? `last-draw min ${minRecentMatches}` : null,
+      repeatUnionEnabled ? `repeat pool ${repeatUnionSummary}` : null,
+    ].filter(Boolean).join(", ") || "none";
+    const weightingSummaryForTrace = [
+      lambdaEnabled ? `lambda ${lambda.toFixed(2)}` : "lambda off",
+      gpwfEnabled ? "GPWF on" : "GPWF off",
+      selectedBoostEnabled ? `selected boost x${selectedBoostFactor}` : "selected boost off",
+      recentMatchBias > 0 ? `last-draw bias ${recentMatchBias}` : "last-draw bias off",
+      d1TerminalMomentumSgiEnabled ? `D1 SGI ${formatD1TerminalMomentumStrength(d1TerminalMomentumGenerationProfile.internalStrength)}` : "D1 SGI off",
+      activeMainDigitBoostSummary ? `ending boosts ${activeMainDigitBoostSummary}` : null,
+      activeMainDecadeBiasSummary ? `decade bias ${activeMainDecadeBiasSummary}` : null,
+      digitWidthConstraintTargets.enabled ? `digit-width ${digitWidthConstraintTargets.singleDigitPercent}/${digitWidthConstraintTargets.twoDigitPercent}` : null,
+      enableOGAForecastBias ? `OGA KDE ${ogaPreferredBand}@${ogaBaselineMode}` : null,
+      mrbEnabled ? "MRB on" : null,
+    ].filter(Boolean).join(" · ");
+    const monthlySummaryForTrace = [
+      monthlyConstraintPayload ? `Stage-Match ON` : "Stage-Match off",
+      monthlyConstructiveEnabled ? "constructive fill ON" : "constructive fill off",
+      acceptanceNeedsEnabled ? `MiAN ON ${formatMonthlyConstraintCountsForTrace(effectiveMianCounts)}${acceptanceNeedsHardExclude ? " hard-exclude" : ""}` : "MiAN off",
+    ].join(" · ");
+    const forcedAndExcludedSummary = [
+      `forced ${generationForcedNumbers.length} [${formatTraceNumberPreview(generationForcedNumbers)}]`,
+      `excluded ${allExclusions.length} [${formatTraceNumberPreview(allExclusions)}]`,
+      knobs.enableSDE1 ? `SDE1 ${sde1Exclusions.length}` : "SDE1 off",
+      knobs.enableHC3 ? `HC3 ${hc3Exclusions.length}` : "HC3 off",
+      autoExcludeUnselected ? `exclude-unselected ON (${autoExcludedFromSelection.length})` : "exclude-unselected off",
+    ].join(" · ");
+
+    const lines = [
+      `[TRACE] ${options.label} active setup · ${requestParts} · WFMQYH real ${realFilteredHistory.length}/${filteredHistory.length} · all real ${realHistory.length} · latest ${mostRecentDrawDateLabel}`,
+      `[TRACE] ${options.label} active filters · hard ${hardFilterSummaryForTrace} · odd/even ${useTrickyRule ? "Tricky ON; ratio choices ignored" : ratioSummaryForTrace} · trend ${allowedTrendRatios.length ? allowedTrendRatios.join(", ") : "off"}`,
+      `[TRACE] ${options.label} active recency · LD±1 ${latestNeighbourSupportEnabled ? "ON" : "off"} · latest ±1/±2 forced ${previousNeighbourConstraintNumbers.length ? previousNeighbourConstraintNumbers.join(", ") : "off"} · strict drought ${strictDroughtQuotaSummary}`,
+      `[TRACE] ${options.label} active weighting · ${weightingSummaryForTrace} · survivor ranking ${survivorSignalsForTrace}`,
+      `[TRACE] ${options.label} active monthly/provenance · ${monthlySummaryForTrace} · ${forcedAndExcludedSummary}`,
+    ];
+
+	    if (options.emitFullSnapshot) {
+	      lines.push(`[TRACE] ${options.label} active setup detail · user selected ${userSelectedNumbers.length} [${formatTraceNumberPreview(userSelectedNumbers)}] · manual exclusions ${excludedNumbers.length} [${formatTraceNumberPreview(excludedNumbers)}] · hot/cold exclusions ${hotColdExcludedNumbers.length} [${formatTraceNumberPreview(hotColdExcludedNumbers)}]`);
+	    }
+	    if (repeatUnionMonthlyCompatibilityTrace) {
+	      lines.push(`[TRACE] ${repeatUnionMonthlyCompatibilityTrace}`);
+	    }
+
+	    return lines;
+	  }
 
   useEffect(() => {
     setCandidates(prev => {
@@ -3494,6 +3792,12 @@ function AppInner(): JSX.Element {
       setQuotaWarning(autoExcludeBlockMessage);
       setSelectedCandidateIdx(0);
       setTrace([
+        ...buildGenerationActiveSetupTraceLines({
+          label: "Generation pre-flight",
+          mode: rwr45Enabled ? "rwr45" : "standard",
+          requested: rwr45Enabled ? RWR45_CANDIDATE_COUNT : numCandidates,
+          emitFullSnapshot: true,
+        }),
         `[TRACE] ${autoExcludeBlockMessage}`,
         ...(autoExcludeTrace ? [autoExcludeTrace] : []),
       ]);
@@ -3506,6 +3810,15 @@ function AppInner(): JSX.Element {
       const t0 = performance.now();
       const rwr45MianExcl = getMianHardExclusions();
       const rwr45ExcludedNumbers = Array.from(new Set([...allExclusions, ...rwr45MianExcl])).sort((a, b) => a - b);
+      setTraceMaybe((t) => [
+        ...t,
+        ...buildGenerationActiveSetupTraceLines({
+          label: "Generation pre-flight",
+          mode: "rwr45",
+          requested: RWR45_CANDIDATE_COUNT,
+          emitFullSnapshot: true,
+        }),
+      ]);
       const autoExcludeTrace = buildAutoExcludeUnselectedTraceLine("RwR45 / PNUaRW45");
       if (autoExcludeTrace) {
         setTraceMaybe((t) => [...t, autoExcludeTrace]);
@@ -3604,6 +3917,18 @@ function AppInner(): JSX.Element {
     // Over-generate: request a larger pool so post-generation filters (MiAN, monthly, prize, OGA)
     // have more candidates to work with. Controlled by user-configurable overgenFactor.
     const poolSize = numCandidates * Math.max(1, overgenFactor);
+    setTraceMaybe((t) => [
+      ...t,
+      ...buildGenerationActiveSetupTraceLines({
+        label: "Generation pre-flight",
+        mode: "standard",
+        requested: numCandidates,
+        poolSize,
+        overgen: overgenFactor,
+        attemptBudget: poolSize * attemptMultiplier,
+        emitFullSnapshot: true,
+      }),
+    ]);
 
     // MiAN hard exclusions: exclude numbers from zero-count MiAN buckets
     const mianExcl = getMianHardExclusions();
@@ -3651,6 +3976,12 @@ function AppInner(): JSX.Element {
     const strictDroughtTrace = strictDroughtQuotaTraceLine("Generation");
     if (strictDroughtTrace) {
       setTraceMaybe((t) => [...t, strictDroughtTrace]);
+    }
+    const latestNeighbourStageMatchTrace = buildLatestNeighbourStageMatchCompatibilityLine(
+      Array.from(new Set([...excludedWithMiAN, ...sde1Exclusions, ...hc3Exclusions])).sort((a, b) => a - b),
+    );
+    if (latestNeighbourStageMatchTrace) {
+      setTraceMaybe((t) => [...t, latestNeighbourStageMatchTrace]);
     }
 
     const t0 = performance.now();
@@ -3902,7 +4233,8 @@ function AppInner(): JSX.Element {
     }
   };
 
-  const runBatch = (target: number, traceLabel: string) => {
+  const runBatch = (target: number, traceLabel: string, options: { emitPreflight?: boolean } = {}) => {
+    const emitPreflight = options.emitPreflight ?? true;
     const entropyThresholdEff = entropyEnabled ? entropyThreshold : 0;
     const hammingThresholdEff = hammingEnabled ? hammingThreshold : 0;
     const jaccardThresholdEff = jaccardEnabled ? jaccardThreshold : 1;
@@ -3931,6 +4263,18 @@ function AppInner(): JSX.Element {
       allowShortfall: true,
       boostPenalize: false,
     } : undefined;
+
+    if (emitPreflight) {
+      setTraceMaybe((t) => [
+        ...t,
+        ...buildGenerationActiveSetupTraceLines({
+          label: `${traceLabel} pre-flight`,
+          mode: "batch",
+          requested: target,
+          emitFullSnapshot: false,
+        }),
+      ]);
+    }
 
     // MiAN hard exclusions for batch
     const mianExclBatch = getMianHardExclusions();
@@ -3978,6 +4322,12 @@ function AppInner(): JSX.Element {
     const strictDroughtTrace = strictDroughtQuotaTraceLine(traceLabel);
     if (strictDroughtTrace) {
       setTraceMaybe((t) => [...t, strictDroughtTrace]);
+    }
+    const latestNeighbourStageMatchTrace = buildLatestNeighbourStageMatchCompatibilityLine(
+      Array.from(new Set([...excludedWithMiANBatch, ...sde1Exclusions, ...hc3Exclusions])).sort((a, b) => a - b),
+    );
+    if (latestNeighbourStageMatchTrace) {
+      setTraceMaybe((t) => [...t, latestNeighbourStageMatchTrace]);
     }
 
     const t0 = performance.now();
@@ -4184,11 +4534,21 @@ function AppInner(): JSX.Element {
      setBatchSessionTopSeries([]);
      setBatchSessionAggregate([]);
 
-     try {
-       const agg = new Map<number, number>();
-       for (let i = 0; i < runs; i++) {
-         const { freqArr } = runBatch(Math.max(1, Math.min(1_000_000, batchSize)), `BatchSession run ${i + 1}/${runs}`);
-         const tops = freqArr.slice(0, 8).map(({ n, count }) => ({ n, count }));
+	     try {
+	       const agg = new Map<number, number>();
+	       setTraceMaybe((t) => [
+	         ...t,
+	         ...buildGenerationActiveSetupTraceLines({
+	           label: "BatchSession pre-flight",
+	           mode: "batch",
+	           requested: Math.max(1, Math.min(1_000_000, batchSize)),
+	           emitFullSnapshot: false,
+	         }),
+	         `[TRACE] BatchSession will run ${runs} batch replay${runs === 1 ? "" : "s"}; per-run setup lines are suppressed to keep Trace readable.`,
+	       ]);
+	       for (let i = 0; i < runs; i++) {
+	         const { freqArr } = runBatch(Math.max(1, Math.min(1_000_000, batchSize)), `BatchSession run ${i + 1}/${runs}`, { emitPreflight: false });
+	         const tops = freqArr.slice(0, 8).map(({ n, count }) => ({ n, count }));
          tops.forEach(({ n, count }) => agg.set(n, (agg.get(n) || 0) + count));
          setBatchSessionTopSeries((prev) => [...prev, { run: i + 1, tops }]);
          const aggArr = Array.from(agg.entries()).sort((a, b) => b[1] - a[1] || a[0] - b[0]).slice(0, 8).map(([n, count]) => ({ n, count }));
@@ -5271,43 +5631,6 @@ function AppInner(): JSX.Element {
         summary="Use backtests and diagnostics to separate promising evidence from pattern noise before trusting a workflow."
       />
 
-      {/* [ORDER-ANCHOR] 07.15 Prediction Journal & Scorecard */}
-      <CollapsibleSection
-        panelId="prediction-journal"
-        title={<b>Prediction Journal & Scorecard</b>}
-        summaryHint="observe-only saved hypotheses and post-draw scorecard"
-        defaultOpen={false}
-        open={predictionJournalOpen}
-        onOpenChange={setPredictionJournalOpen}
-        headerActions={
-          <>
-            <HigButton
-              size="compact"
-              variant="secondary"
-              onClick={handleViewPredictionEntries}
-              title="Open saved prediction journal entries without opening the draft form"
-            >
-              View Entries
-            </HigButton>
-            <HigButton
-              size="compact"
-              variant="primary"
-              onClick={handleNewPredictionDraft}
-              title="Open the journal and prefill a new prediction from the current app setup"
-            >
-              New Prediction
-            </HigButton>
-          </>
-        }
-      >
-        <PredictionJournalPanel
-          history={realHistory}
-          getSetupSnapshot={() => buildSnapshot({ includePanelFavorites: true, includeDerivedPredictionEvidence: true })}
-          newPredictionDraft={predictionJournalDraftRequest}
-          viewEntriesRequestId={predictionJournalEntriesRequestId || undefined}
-        />
-      </CollapsibleSection>
-
       {/* [ORDER-ANCHOR] 07.16 Research Diary & Draw Reminders */}
       <CollapsibleSection panelId="research-diary" title={<b>Research Diary & Draw Reminders</b>} summaryHint="observe-only recurring draw-context reminders" defaultOpen={false}>
         <ResearchDiaryPanel
@@ -5349,9 +5672,14 @@ function AppInner(): JSX.Element {
         />
       </CollapsibleSection>
 
-      {/* [ORDER-ANCHOR] 07.25 Previous ±1 Neighbour Backtest */}
-      <CollapsibleSection panelId="previous-neighbour-backtest" title={<b>Previous ±1 Neighbour Backtest</b>} summaryHint="observe-only adjacent-neighbour diagnostics" defaultOpen={false}>
-        <PreviousNeighbourBacktestPanel draws={realFilteredHistory} />
+      {/* [ORDER-ANCHOR] 07.25 Previous ±1/±2 Neighbour Diagnostics */}
+      <CollapsibleSection panelId="previous-neighbour-backtest" title={<b>Previous ±1/±2 Neighbour Diagnostics</b>} summaryHint="observe-only adjacent-neighbour diagnostics" defaultOpen={false}>
+        <PreviousNeighbourBacktestPanel
+          draws={realFilteredHistory}
+          userSelectedNumbers={userSelectedNumbers}
+          excludedNumbers={selectionUnavailableNumbers}
+          onToggleUserSelectedNumber={toggleSharedUserSelectedNumber}
+        />
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 08 Trend Ratio Diagnostics */}
@@ -5625,6 +5953,43 @@ function AppInner(): JSX.Element {
         />
       </CollapsibleSection>
 
+      {/* [ORDER-ANCHOR] 21.95 Prediction Journal & Scorecard */}
+      <CollapsibleSection
+        panelId="prediction-journal"
+        title={<b>Prediction Journal & Scorecard</b>}
+        summaryHint="observe-only saved hypotheses and post-draw scorecard"
+        defaultOpen={false}
+        open={predictionJournalOpen}
+        onOpenChange={setPredictionJournalOpen}
+        headerActions={
+          <>
+            <HigButton
+              size="compact"
+              variant="secondary"
+              onClick={handleViewPredictionEntries}
+              title="Open saved prediction journal entries without opening the draft form"
+            >
+              View Entries
+            </HigButton>
+            <HigButton
+              size="compact"
+              variant="primary"
+              onClick={handleNewPredictionDraft}
+              title="Open the journal and prefill a new prediction from the current app setup"
+            >
+              New Prediction
+            </HigButton>
+          </>
+        }
+      >
+        <PredictionJournalPanel
+          history={realHistory}
+          getSetupSnapshot={() => buildSnapshot({ includePanelFavorites: true, includeDerivedPredictionEvidence: true })}
+          newPredictionDraft={predictionJournalDraftRequest}
+          viewEntriesRequestId={predictionJournalEntriesRequestId || undefined}
+        />
+      </CollapsibleSection>
+
       <WorkflowAnchor
         id="workflow-generation"
         title="Generation"
@@ -5682,8 +6047,8 @@ function AppInner(): JSX.Element {
         {insightsEnabled && (
           <div className="windfall-selection-insights-grid">
             {/* Windowed (WFMQYH) version */}
-            <div>
-              <div style={{ fontSize: 12, color: "#1a4fa3", fontWeight: 700, marginBottom: 4 }}>Windowed (WFMQYH)</div>
+            <div className="windfall-selection-insights-card">
+              <div className="windfall-selection-insights-card__title">Windowed (WFMQYH)</div>
               <SelectionInsightsPanel
                 history={realFilteredHistory}
                 selected={userSelectedNumbers}
@@ -5697,8 +6062,8 @@ function AppInner(): JSX.Element {
             </div>
 
             {/* All History version */}
-            <div>
-              <div style={{ fontSize: 12, color: "#1a4fa3", fontWeight: 700, marginBottom: 4 }}>All History</div>
+            <div className="windfall-selection-insights-card">
+              <div className="windfall-selection-insights-card__title">All History</div>
               <SelectionInsightsPanel
                 history={realHistory}
                 selected={userSelectedNumbers}
@@ -5711,8 +6076,8 @@ function AppInner(): JSX.Element {
               />
             </div>
 
-            <div>
-              <div style={{ fontSize: 12, color: "#1a4fa3", fontWeight: 700, marginBottom: 4 }}>Predicted</div>
+            <div className="windfall-selection-insights-card">
+              <div className="windfall-selection-insights-card__title">Predicted</div>
               <SelectionInsightsPredictionPanel
                 windowAnalytics={selectionInsightsWindowAnalytics}
                 allHistoryAnalytics={selectionInsightsAllHistoryAnalytics}
@@ -7349,18 +7714,23 @@ function AppInner(): JSX.Element {
                         style={{ width: 60, marginLeft: 6 }}
                       />
                     </label>
-                    <span style={{ color: "#991b1b", fontSize: 11, fontWeight: 800 }}>
-                      max {repeatUnionCandidateMax}
-                    </span>
-                    <div style={{ marginTop: 4, color: "#475569", fontSize: 11, lineHeight: 1.45 }}>
+	                    <span style={{ color: "#991b1b", fontSize: 11, fontWeight: 800 }}>
+	                      max {repeatUnionCandidateMax}
+	                    </span>
+	                    <div style={{ marginTop: 4, color: "#475569", fontSize: 11, lineHeight: 1.45 }}>
                       Default follows the latest observed month: {latestObservedMonthDrawCount
                         ? <>{latestObservedMonthDrawCount.monthLabel} has {latestObservedMonthDrawCount.drawCount} completed draw{latestObservedMonthDrawCount.drawCount === 1 ? "" : "s"}{repeatWindowDefaultFromLatestMonth !== latestObservedMonthDrawCount.drawCount ? `; active WFMQYH caps this to ${repeatWindowDefaultFromLatestMonth}` : ""}.</>
                         : <>no dated real month is available, so the active WFMQYH size is used.</>}
-                    </div>
-                    <div style={{ marginTop: 4, color: "#475569", fontSize: 11, lineHeight: 1.45 }}>
-                      Unique numbers in this newest-draw pool: <strong>{repeatUnionUniqueCount}</strong>. Usable minimum range is <strong>0-{repeatUnionCandidateMax}</strong> because a candidate has 8 total number slots.
-                    </div>
-                    <div style={{ marginTop: 4, color: "#64748b", fontSize: 11, lineHeight: 1.45 }}>
+	                    </div>
+	                    <div style={{ marginTop: 4, color: "#475569", fontSize: 11, lineHeight: 1.45 }}>
+	                      Unique numbers in this newest-draw pool: <strong>{repeatUnionUniqueCount}</strong>. Raw usable range is <strong>0-{repeatUnionRawCandidateMax}</strong>; current monthly bucket requirements make the safe range <strong>0-{repeatUnionCandidateMax}</strong>.
+	                    </div>
+	                    {repeatUnionMonthlyFeasibility && repeatUnionMonthlyFeasibility.maxFeasibleHits < repeatUnionRawCandidateMax && (
+	                      <div style={{ marginTop: 4, color: "#991b1b", fontSize: 11, fontWeight: 800, lineHeight: 1.45 }}>
+	                        Monthly/stage bucket counts require at least {repeatUnionMonthlyFeasibility.requiredOutsideRepeat} number{repeatUnionMonthlyFeasibility.requiredOutsideRepeat === 1 ? "" : "s"} outside this newest-draw pool, so the repeat-pool minimum cannot be higher than {repeatUnionMonthlyFeasibility.maxFeasibleHits}.
+	                      </div>
+	                    )}
+	                    <div style={{ marginTop: 4, color: "#64748b", fontSize: 11, lineHeight: 1.45 }}>
                       {repeatUnionEnabled
                         ? <>Builds a pool from every number seen in the newest {effectiveRepeatWindowSizeW} active WFMQYH draw{effectiveRepeatWindowSizeW === 1 ? "" : "s"}. Each candidate must contain at least {minFromRecentUnionM} number{minFromRecentUnionM === 1 ? "" : "s"} from that pool.</>
                         : <>Off because the minimum is 0. If the minimum is raised above 0, the pool will use the newest {effectiveRepeatWindowSizeW} active WFMQYH draw{effectiveRepeatWindowSizeW === 1 ? "" : "s"}.</>}
@@ -7925,26 +8295,6 @@ function AppInner(): JSX.Element {
           </InlineCollapsibleCard>
 
           <div ref={dgaGridRef} style={{ marginTop: 12 }}>
-            {simScrollOriginY !== null && (
-              <button
-                type="button"
-                onClick={scrollBackToOrigin}
-                style={{
-                  marginBottom: 8,
-                  padding: "4px 10px",
-                  borderRadius: 4,
-                  border: "1px solid #1976d2",
-                  background: "#e3f2fd",
-                  color: "#1976d2",
-                  cursor: "pointer",
-                  fontSize: 12,
-                  fontWeight: 600,
-                }}
-                title="Return to where you pressed Simulate"
-              >
-                ↑ Back
-              </button>
-            )}
             <InlineCollapsibleCard
               title="DGA grid"
               subtitle={dgaGrid.length > 0
@@ -8002,6 +8352,16 @@ function AppInner(): JSX.Element {
                     onColumnClick={(col) => setFocusedDgaCol((prev) => (prev === col ? null : col))}
                     wfmqyhStart={dgaWfmqyhStart}
                     cellSize={DGA_CELL_SIZE}
+                    gridToolbar={simScrollOriginY !== null ? (
+                      <HigButton
+                        size="compact"
+                        variant="secondary"
+                        onClick={scrollBackToOrigin}
+                        title="Return to where you pressed Simulate"
+                      >
+                        ↑ Back
+                      </HigButton>
+                    ) : null}
                     gridSidecar={(
                       <DGASimulateStrip
                         selectedNumbers={dgaStripSelectedNumbers}

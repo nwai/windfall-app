@@ -20,7 +20,7 @@ const panelStyle: React.CSSProperties = {
 
 const controlsStyle: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
   gap: 10,
   alignItems: "end",
 };
@@ -64,6 +64,15 @@ const formatPValue = (value: number | null | undefined): string => {
   return value.toFixed(3);
 };
 
+const centerDrawInputStyle: React.CSSProperties = {
+  width: "12ch",
+  minWidth: "12ch",
+  maxWidth: "100%",
+  fontVariantNumeric: "tabular-nums",
+};
+
+const MAX_CONSTELLATION_RADIUS = 8;
+
 const roleLabel = (role: DgaConstellationCellRole): string => (
   role === "main" ? "main" : role === "supp" ? "supplementary" : "not drawn"
 );
@@ -91,7 +100,12 @@ const MetricCard: React.FC<{ metric: DgaConstellationMetric; title: string }> = 
   </div>
 );
 
-const cellStyle = (cell: DgaConstellationCell, centerDrawNumber: number, centerNumber: number): React.CSSProperties => {
+const cellStyle = (
+  cell: DgaConstellationCell,
+  centerDrawNumber: number,
+  centerNumber: number,
+  interactive = false,
+): React.CSSProperties => {
   const palette = rolePalette[cell.role];
   const isCenter = cell.drawNumber === centerDrawNumber && cell.number === centerNumber;
   const isRising = cell.offsetDraw === cell.offsetNumber;
@@ -114,6 +128,9 @@ const cellStyle = (cell: DgaConstellationCell, centerDrawNumber: number, centerN
     justifyContent: "center",
     fontVariantNumeric: "tabular-nums",
     boxShadow: isCenter ? "0 0 0 2px rgba(15, 23, 42, 0.08)" : undefined,
+    appearance: interactive ? "none" : undefined,
+    cursor: interactive ? "pointer" : "default",
+    padding: 0,
   };
 };
 
@@ -135,11 +152,18 @@ export const DGAConstellationDiagnosticPanel: React.FC<DGAConstellationDiagnosti
   );
   const activeRadiusSummary = diagnostic.radiusSummaries[diagnostic.radiusSummaries.length - 1];
   const matrixNumbers = diagnostic.matrixRows[0]?.cells.map((cell) => cell.number) ?? [];
+  const recordedFollowThroughDraws = Math.max(0, Math.min(diagnostic.forwardHorizon, diagnostic.drawCount - diagnostic.centerDrawNumber));
 
   const useExample = (drawNumber: number, number: number) => {
     setCenterDrawNumber(Math.min(Math.max(drawNumber, 1), latestDrawNumber));
     setCenterNumber(number);
     setRadius(3);
+  };
+
+  const setCenterFromCell = (cell: DgaConstellationCell) => {
+    if (cell.isFuture) return;
+    setCenterDrawNumber(cell.drawNumber);
+    setCenterNumber(cell.number);
   };
 
   return (
@@ -166,9 +190,11 @@ export const DGAConstellationDiagnosticPanel: React.FC<DGAConstellationDiagnosti
           <input
             type="number"
             min={1}
-            max={latestDrawNumber}
+            max={999999}
+            inputMode="numeric"
             value={centerDrawNumber}
             onChange={(event) => setCenterDrawNumber(Number(event.target.value))}
+            style={centerDrawInputStyle}
           />
         </HigField>
         <HigField label="Centre number">
@@ -181,15 +207,37 @@ export const DGAConstellationDiagnosticPanel: React.FC<DGAConstellationDiagnosti
           />
         </HigField>
         <HigField label="Radius">
-          <select value={radius} onChange={(event) => setRadius(Number(event.target.value))}>
-            {[1, 2, 3, 4, 5].map((value) => <option key={value} value={value}>r{value}</option>)}
-          </select>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <input
+              type="number"
+              min={1}
+              max={MAX_CONSTELLATION_RADIUS}
+              value={radius}
+              onChange={(event) => {
+                const value = Number(event.target.value);
+                if (!Number.isFinite(value)) return;
+                setRadius(Math.min(MAX_CONSTELLATION_RADIUS, Math.max(1, Math.round(value))));
+              }}
+              style={{ width: "7ch", fontVariantNumeric: "tabular-nums" }}
+            />
+            <span style={{ color: "#64748b", fontSize: 11, fontWeight: 800 }}>max {MAX_CONSTELLATION_RADIUS}</span>
+          </div>
         </HigField>
-        <HigField label="Forward horizon">
+        <HigField label="Band horizon">
           <select value={forwardHorizon} onChange={(event) => setForwardHorizon(Number(event.target.value))}>
             {[1, 2, 3, 4, 5].map((value) => <option key={value} value={value}>{value} draw{value === 1 ? "" : "s"}</option>)}
           </select>
         </HigField>
+      </div>
+
+      <div style={{ ...cardStyle, ...mutedStyle }}>
+        <strong style={{ color: "#334155" }}>Band horizon h{diagnostic.forwardHorizon}:</strong>{" "}
+        lead-in checks up to {diagnostic.forwardHorizon} earlier draw{diagnostic.forwardHorizon === 1 ? "" : "s"} and follow-through checks up to {diagnostic.forwardHorizon} later recorded draw{diagnostic.forwardHorizon === 1 ? "" : "s"}.{" "}
+        This centre has {recordedFollowThroughDraws}/{diagnostic.forwardHorizon} recorded follow-through draw{diagnostic.forwardHorizon === 1 ? "" : "s"} available; unrecorded future draw columns are shown only as blank planning context.
+      </div>
+      <div style={{ ...cardStyle, ...mutedStyle }}>
+        <strong style={{ color: "#334155" }}>Mapped-cell navigation:</strong>{" "}
+        click any recorded mapped cell to make it the new centre. Future <strong>D next</strong> cells are shown for planning context only and cannot be selected as the centre until that draw is recorded.
       </div>
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -226,15 +274,15 @@ export const DGAConstellationDiagnosticPanel: React.FC<DGAConstellationDiagnosti
         <div style={metricGridStyle}>
           <MetricCard title={`Local window r${activeRadiusSummary.radius}`} metric={activeRadiusSummary.localWindow} />
           <MetricCard title={`Diagonal cross r${activeRadiusSummary.radius}`} metric={activeRadiusSummary.diagonalCross} />
-          <MetricCard title={`Lead-in band r${activeRadiusSummary.radius}`} metric={activeRadiusSummary.leadIn} />
-          <MetricCard title={`Follow-through band r${activeRadiusSummary.radius}`} metric={activeRadiusSummary.followThrough} />
+          <MetricCard title={`Lead-in band r${activeRadiusSummary.radius} / h${diagnostic.forwardHorizon}`} metric={activeRadiusSummary.leadIn} />
+          <MetricCard title={`Follow-through band r${activeRadiusSummary.radius} / h${diagnostic.forwardHorizon}`} metric={activeRadiusSummary.followThrough} />
         </div>
       ) : null}
 
       <div style={cardStyle}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline", flexWrap: "wrap", marginBottom: 8 }}>
           <strong style={{ color: "#0f172a", fontSize: 13 }}>Mapped cells</strong>
-          <span style={mutedStyle}>M = main · S = supplementary · bordered cells sit on one of the exact diagonals</span>
+          <span style={mutedStyle}>M = main · S = supplementary · mapped draw width follows the larger of radius and band horizon</span>
         </div>
         <div style={{ overflowX: "auto" }}>
           <table style={{ borderCollapse: "separate", borderSpacing: 4, fontSize: 12 }}>
@@ -245,9 +293,13 @@ export const DGAConstellationDiagnosticPanel: React.FC<DGAConstellationDiagnosti
                   <th
                     key={row.drawNumber}
                     title={`${row.drawDate} · D${row.drawNumber}`}
-                    style={{ color: "#334155", fontWeight: 900, minWidth: 30 }}
+                    style={{
+                      color: row.isFuture ? "#64748b" : "#334155",
+                      fontWeight: 900,
+                      minWidth: row.isFuture ? 46 : 30,
+                    }}
                   >
-                    D{row.drawNumber}
+                    D{row.drawNumber}{row.isFuture ? " next" : ""}
                   </th>
                 ))}
               </tr>
@@ -261,10 +313,24 @@ export const DGAConstellationDiagnosticPanel: React.FC<DGAConstellationDiagnosti
                   {diagnostic.matrixRows.map((row) => {
                     const cell = row.cells.find((candidate) => candidate.number === number);
                     return cell ? (
-                      <td key={`${cell.drawNumber}-${cell.number}`} title={`D${cell.drawNumber} · ${row.drawDate} · N${cell.number} · ${roleLabel(cell.role)}`}>
-                        <span style={cellStyle(cell, diagnostic.centerDrawNumber, diagnostic.centerNumber)}>
-                          {rolePalette[cell.role].label}
-                        </span>
+                      <td
+                        key={`${cell.drawNumber}-${cell.number}`}
+                        title={`D${cell.drawNumber} · ${row.drawDate} · N${cell.number} · ${cell.isFuture ? "not yet recorded" : roleLabel(cell.role)}`}
+                      >
+                        {cell.isFuture ? (
+                          <span style={cellStyle(cell, diagnostic.centerDrawNumber, diagnostic.centerNumber)}>
+                            {rolePalette[cell.role].label}
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setCenterFromCell(cell)}
+                            style={cellStyle(cell, diagnostic.centerDrawNumber, diagnostic.centerNumber, true)}
+                            aria-label={`Use D${cell.drawNumber} number ${cell.number} as constellation centre`}
+                          >
+                            {rolePalette[cell.role].label}
+                          </button>
+                        )}
                       </td>
                     ) : (
                       <td key={`${row.drawNumber}-${number}`} />

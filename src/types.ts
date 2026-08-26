@@ -61,6 +61,12 @@ export type CandidateSet = {
   previousNeighbourDuplicateHits?: number;
   previousNeighbourSingletonHits?: number;
   previousNeighbourTargetCount?: number;
+  previousNeighbourDirectionalHits?: number;
+  previousNeighbourDirectionalPattern?: string;
+  previousNeighbourMinusTwoHits?: number;
+  previousNeighbourMinusOneHits?: number;
+  previousNeighbourPlusOneHits?: number;
+  previousNeighbourPlusTwoHits?: number;
   scoreEvidence?: number;
   scoreEvidenceTrace?: string[];
   d1TerminalMomentumHits?: number;

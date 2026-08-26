@@ -11,7 +11,7 @@ describe("Previous ±1 neighbour backtest app wiring", () => {
     expect(appSource.indexOf('id="workflow-validation"')).toBeLessThan(
       appSource.indexOf('panelId="previous-neighbour-backtest"'),
     );
-    expect(appSource).toContain("<PreviousNeighbourBacktestPanel draws={realFilteredHistory} />");
+    expect(appSource).toContain("onToggleUserSelectedNumber={toggleSharedUserSelectedNumber}");
   });
 
   it("documents the observe-only neighbour backtest in the user manual", () => {

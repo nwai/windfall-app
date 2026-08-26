@@ -28,6 +28,15 @@ describe("DGAConstellationDiagnosticPanel", () => {
     expect(headerHtml).toContain("D1");
     expect(headerHtml).toContain("D2");
     expect(headerHtml).toContain("D3");
+    expect(headerHtml).toContain("D4");
+    expect(headerHtml).toContain("next");
+    expect(html).toContain("Band horizon h3");
+    expect(html).toContain("Lead-in band r3 / h3");
+    expect(html).toContain("Follow-through band r3 / h3");
+    expect(html).toContain("max 8");
+    expect(html).toContain("Mapped-cell navigation");
+    expect(html).toContain("Use D1 number 20 as constellation centre");
+    expect(html).not.toContain("Use D4 number 20 as constellation centre");
     expect(firstBodyRowHtml).not.toContain("D1</th>");
   });
 });

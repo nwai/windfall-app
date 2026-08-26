@@ -173,12 +173,21 @@ export const SelectionInsightsPanel: React.FC<SelectionInsightsPanelProps> = ({
   if (!info) return null;
 
   const { selectedNumbers, pairRows, tripletRows, companionRows, neverWithCount, neverWithNumbers, cappedTriplets } = info;
+  const visibleDataRows =
+    pairRows.length +
+    tripletRows.length +
+    companionRows.length +
+    countWrappedChipRows(neverWithNumbers.length);
+  const isCardScrollable = visibleDataRows > CARD_SCROLL_ROW_THRESHOLD;
+  const cardBodyStyle = getCardBodyStyle(visibleDataRows);
+  const companionListStyle = isCardScrollable ? unboundedListStyle : scrollListStyle;
+  const neverChipListStyle = isCardScrollable ? unboundedChipListStyle : chipScrollStyle;
 
   const fmtOGARaw = (n: number) =>
     ogaRawMap[n] !== undefined ? ogaRawMap[n].toFixed(2) : "—";
 
   return (
-    <section style={sectionStyle}>
+    <section style={cardBodyStyle} data-scrollable={isCardScrollable || undefined}>
       <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
         {historyWindowName && (
           <span style={scopePillStyle}>
@@ -299,7 +308,7 @@ export const SelectionInsightsPanel: React.FC<SelectionInsightsPanelProps> = ({
         <div style={{ minWidth: 0 }}>
           <h4 style={subheadStyle}>Companions ranked ({companionRows.length})</h4>
           {companionRows.length ? (
-            <div style={scrollListStyle} aria-label="All observed companions ranked">
+            <div style={companionListStyle} aria-label="All observed companions ranked">
               {companionRows.map((x, index) => (
                 <div key={x.n} style={rankRowStyle}>
                   <span style={rankStyle}>{index + 1}</span>
@@ -316,7 +325,7 @@ export const SelectionInsightsPanel: React.FC<SelectionInsightsPanelProps> = ({
         <div style={{ minWidth: 0 }}>
           <h4 style={subheadStyle}>Never co-drawn ({neverWithCount})</h4>
           {neverWithNumbers.length ? (
-            <div style={chipScrollStyle} aria-label="All numbers never co-drawn with the current selection">
+            <div style={neverChipListStyle} aria-label="All numbers never co-drawn with the current selection">
               {neverWithNumbers.map((number) => (
                 <span key={number} style={numberChipStyle}>{number}</span>
               ))}
@@ -339,9 +348,12 @@ export const SelectionInsightsPredictionPanel: React.FC<SelectionInsightsPredict
     () => buildSelectionInsightPredictedCompanions(windowAnalytics, allHistoryAnalytics),
     [windowAnalytics, allHistoryAnalytics],
   );
+  const isCardScrollable = rows.length > CARD_SCROLL_ROW_THRESHOLD;
+  const cardBodyStyle = getCardBodyStyle(rows.length);
+  const predictedListStyle = isCardScrollable ? unboundedListStyle : scrollListStyle;
 
   return (
-    <section style={sectionStyle}>
+    <section style={cardBodyStyle} data-scrollable={isCardScrollable || undefined}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", marginBottom: 8 }}>
         <span style={scopePillStyle}>{title}</span>
         <span style={mutedTextStyle}>{rows.length} ranked</span>
@@ -350,7 +362,7 @@ export const SelectionInsightsPredictionPanel: React.FC<SelectionInsightsPredict
         Blends Windowed and All History companion rates. This is a shortlist diagnostic, not a calibrated probability.
       </div>
       {rows.length ? (
-        <div style={scrollListStyle} aria-label="Predicted companion shortlist">
+        <div style={predictedListStyle} aria-label="Predicted companion shortlist">
           {rows.map((row, index) => (
             <div key={row.n} style={rankRowStyle}>
               <span style={rankStyle}>{index + 1}</span>
@@ -368,13 +380,32 @@ export const SelectionInsightsPredictionPanel: React.FC<SelectionInsightsPredict
 };
 
 /* Styles */
-const sectionStyle: React.CSSProperties = {
-  border: "1px solid #e0e0e0",
-  borderRadius: 8,
-  padding: 10,
-  background: "#fdfdfd",
-  marginTop: 4,
+const CARD_SCROLL_ROW_THRESHOLD = 12;
+const CARD_SCROLL_MAX_HEIGHT = 520;
+
+const countWrappedChipRows = (chipCount: number): number => {
+  if (chipCount <= 0) return 0;
+  return Math.ceil(chipCount / 8);
 };
+
+const sectionStyle: React.CSSProperties = {
+  border: "none",
+  borderRadius: 0,
+  padding: 10,
+  background: "transparent",
+  marginTop: 0,
+};
+const scrollableSectionStyle: React.CSSProperties = {
+  ...sectionStyle,
+  maxHeight: CARD_SCROLL_MAX_HEIGHT,
+  overflowY: "auto",
+  overscrollBehavior: "contain",
+  scrollbarGutter: "stable",
+};
+
+const getCardBodyStyle = (rowCount: number): React.CSSProperties =>
+  rowCount > CARD_SCROLL_ROW_THRESHOLD ? scrollableSectionStyle : sectionStyle;
+
 const scopePillStyle: React.CSSProperties = {
   fontSize: 12,
   color: "#155a8a",
@@ -420,6 +451,11 @@ const scrollListStyle: React.CSSProperties = {
   borderRadius: 8,
   background: "#fff",
 };
+const unboundedListStyle: React.CSSProperties = {
+  border: "1px solid #edf2f7",
+  borderRadius: 8,
+  background: "#fff",
+};
 const rankRowStyle: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
@@ -442,6 +478,15 @@ const chipScrollStyle: React.CSSProperties = {
   gap: 5,
   maxHeight: 114,
   overflowY: "auto",
+  border: "1px solid #edf2f7",
+  borderRadius: 8,
+  background: "#fff",
+  padding: 6,
+};
+const unboundedChipListStyle: React.CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 5,
   border: "1px solid #edf2f7",
   borderRadius: 8,
   background: "#fff",

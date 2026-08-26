@@ -39,6 +39,11 @@ describe("buildDgaConstellationDiagnostic", () => {
     expect(radiusThree.diagonalCross.hitCount).toBe(5);
     expect(radiusThree.diagonalCross.mainHits).toBe(3);
     expect(radiusThree.diagonalCross.suppHits).toBe(2);
+    expect(diagnostic.matrixRows.at(-1)).toMatchObject({
+      drawNumber: 351,
+      drawDate: "Next draw (not yet recorded)",
+      isFuture: true,
+    });
   });
 
   it("captures the D346/N43 upper-number local diagonal cluster", () => {
@@ -58,5 +63,40 @@ describe("buildDgaConstellationDiagnostic", () => {
     expect(radiusThree.risingDiagonal.hitCount).toBe(2);
     expect(radiusThree.fallingDiagonal.hitCount).toBe(4);
     expect(radiusThree.diagonalCross.hitCount).toBe(5);
+  });
+
+  it("uses the band horizon for lead-in, follow-through, and mapped draw width", () => {
+    const narrow = buildDgaConstellationDiagnostic(buildHistory(), {
+      centerDrawNumber: 346,
+      centerNumber: 23,
+      forwardHorizon: 1,
+      radius: 1,
+    });
+    const wide = buildDgaConstellationDiagnostic(buildHistory(), {
+      centerDrawNumber: 346,
+      centerNumber: 23,
+      forwardHorizon: 5,
+      radius: 1,
+    });
+
+    expect(wide.forwardHorizon).toBe(5);
+    expect(wide.radiusSummaries[0].leadIn.possibleCells).toBeGreaterThan(narrow.radiusSummaries[0].leadIn.possibleCells);
+    expect(wide.radiusSummaries[0].followThrough.possibleCells).toBeGreaterThan(narrow.radiusSummaries[0].followThrough.possibleCells);
+    expect(wide.matrixRows[0].drawNumber).toBe(341);
+    expect(wide.matrixRows.at(-1)).toMatchObject({
+      drawNumber: 351,
+      isFuture: true,
+    });
+  });
+
+  it("caps oversized radius values at 8", () => {
+    const diagnostic = buildDgaConstellationDiagnostic(buildHistory(), {
+      centerDrawNumber: 346,
+      centerNumber: 23,
+      radius: 99,
+    });
+
+    expect(diagnostic.radius).toBe(8);
+    expect(diagnostic.radiusSummaries).toHaveLength(8);
   });
 });

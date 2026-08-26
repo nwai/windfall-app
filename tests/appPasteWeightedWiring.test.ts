@@ -30,15 +30,16 @@ describe("App paste-weighted panel wiring", () => {
     expect(appSource).toContain("setPasteWeightedForcedNumbers(normalizeHotColdGenerationNumbers(s.pasteWeightedForcedNumbers));");
   });
 
-  it("replaces the shared user-selected strip when simulating a paste-weighted candidate", () => {
+  it("routes paste-weighted simulation through protected user-selection sync", () => {
     const appSource = readFileSync(resolve(process.cwd(), "src/App.tsx"), "utf8");
     const handlerStart = appSource.indexOf("const handleSimulatePasteWeightedCandidate");
     const handlerEnd = appSource.indexOf("const handleSimulatePortfolioCore", handlerStart);
     const handlerBlock = appSource.slice(handlerStart, handlerEnd);
 
     expect(handlerStart).toBeGreaterThanOrEqual(0);
-    expect(handlerBlock).toContain("setUserSelectedNumbers(main);");
-    expect(handlerBlock.indexOf("setUserSelectedNumbers(main);")).toBeLessThan(handlerBlock.indexOf("setSimulatedDraw("));
+    expect(handlerBlock).toContain("syncUserSelectionForExternalSimulation(main);");
+    expect(handlerBlock).not.toContain("setUserSelectedNumbers(main);");
+    expect(handlerBlock.indexOf("syncUserSelectionForExternalSimulation(main);")).toBeLessThan(handlerBlock.indexOf("setSimulatedDraw("));
   });
 
   it("keeps the portfolio compression panel imported and rendered in App", () => {

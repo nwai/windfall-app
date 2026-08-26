@@ -116,6 +116,23 @@ export interface PredictionJournalSelectionInsightsProvenance {
   predictedCompanions: SelectionInsightsSnapshot["predictedCompanions"];
 }
 
+export interface PredictionJournalDgaAutoSuppProvenance {
+  version: 1;
+  selectedNumbers: number[];
+  mainNumbers: number[];
+  suppNumbers: number[];
+  pair: number[];
+  activePairSuppCount?: number;
+  fullPairSuppCount?: number;
+  activePairSuppDrawCount?: number;
+  fullPairSuppDrawCount?: number;
+  activePairSuppGap?: number | null;
+  fullPairSuppGap?: number | null;
+  activePairCoverage?: number;
+  fullPairCoverage?: number;
+  totalPairCoverage?: number;
+}
+
 export type PredictionJournalStrictDroughtQuotaMode = "off" | "manual" | "advised";
 export type PredictionJournalStrictDroughtQuotaConfidence = "low" | "moderate" | "strong";
 export type PredictionJournalStrictDroughtQuotaSource = "exact-stage" | "draw-ordinal" | "all-baseline" | "insufficient";
@@ -174,6 +191,7 @@ export interface PredictionJournalProvenance {
   };
   droughtBreakShortlist: PredictionJournalDroughtBreakProvenance;
   strictDroughtQuota: PredictionJournalStrictDroughtQuotaWatch;
+  dgaAutoSupps?: PredictionJournalDgaAutoSuppProvenance;
   selectionInsights?: PredictionJournalSelectionInsightsProvenance;
 }
 
@@ -578,6 +596,35 @@ const normalizeSelectionInsightsSnapshotForJournal = (
   };
 };
 
+const normalizeDgaAutoSuppProvenanceForJournal = (
+  setup: Partial<AppPresetSnapshot> & Record<string, any>,
+): PredictionJournalDgaAutoSuppProvenance | undefined => {
+  const mainNumbers = normalizeNumberList(setup.dgaSuggestedMainNumbers, 1, 45) ?? [];
+  const suppNumbers = normalizeNumberList(setup.dgaSuggestedSuppNumbers, 1, 45) ?? [];
+  const pair = normalizeNumberList(setup.dgaSuggestedSuppPair, 1, 45) ?? suppNumbers;
+  const selectedNumbers = uniqueDraftNumbers(mainNumbers, suppNumbers);
+  if (mainNumbers.length !== 6 || suppNumbers.length !== 2 || pair.length !== 2 || selectedNumbers.length !== 8) {
+    return undefined;
+  }
+
+  return {
+    version: 1,
+    selectedNumbers,
+    mainNumbers,
+    suppNumbers,
+    pair,
+    activePairSuppCount: normalizeInteger(setup.dgaSuggestedSuppPairActiveCount),
+    fullPairSuppCount: normalizeInteger(setup.dgaSuggestedSuppPairFullCount),
+    activePairSuppDrawCount: normalizeInteger(setup.dgaSuggestedSuppPairActiveDrawCount),
+    fullPairSuppDrawCount: normalizeInteger(setup.dgaSuggestedSuppPairFullDrawCount),
+    activePairSuppGap: normalizeNullableInteger(setup.dgaSuggestedSuppPairActiveGap),
+    fullPairSuppGap: normalizeNullableInteger(setup.dgaSuggestedSuppPairFullGap),
+    activePairCoverage: normalizeInteger(setup.dgaSuppPairActiveCoverage),
+    fullPairCoverage: normalizeInteger(setup.dgaSuppPairFullCoverage),
+    totalPairCoverage: normalizeInteger(setup.dgaSuppPairTotalCoverage),
+  };
+};
+
 const buildDroughtBreakLabel = (category: PredictionJournalDroughtBreakCategory, threshold: number): string => {
   if (category === "strict-and-empirical") return `Strict drought ${threshold}+ and empirical hazard`;
   if (category === "strict-drought") return `Strict drought ${threshold}+`;
@@ -624,6 +671,7 @@ export function buildPredictionJournalProvenance(
   const empiricalHazardShortlistNumbers = setupNumberList(setup, "droughtBreakEmpiricalHazardNumbers");
   const strictDroughtQuota = buildStrictDroughtQuotaWatch(setup, strictThreshold, shortlistTop);
   const selectionInsights = normalizeSelectionInsightsSnapshotForJournal(setup.selectionInsightsSnapshot);
+  const dgaAutoSupps = normalizeDgaAutoSuppProvenanceForJournal(setup);
   const strictSet = new Set(strictDroughtShortlistNumbers);
   const empiricalSet = new Set(empiricalHazardShortlistNumbers);
 
@@ -691,6 +739,7 @@ export function buildPredictionJournalProvenance(
       classifications,
     },
     strictDroughtQuota,
+    ...(dgaAutoSupps ? { dgaAutoSupps } : {}),
     ...(selectionInsights ? { selectionInsights } : {}),
   };
 }
@@ -1153,6 +1202,10 @@ const drawNumbers = (draw: Draw): number[] => [
   ...(normalizeNumberList(draw.supp, 1, 45) ?? []),
 ];
 
+const drawSuppNumbers = (draw: Draw): number[] => (
+  normalizeNumberList(draw.supp, 1, 45) ?? []
+);
+
 const targetNumbers = (draws: Draw[]): number[] => draws.flatMap(drawNumbers);
 
 const countOddEven = (numbers: number[]): { odd: number; even: number } => numbers.reduce((acc, number) => {
@@ -1256,6 +1309,26 @@ export function scorePredictionJournalEntry(entry: PredictionJournalEntry, histo
       hitCount: hits.length,
       predictedCount: inputs.numbers.length,
       actualCount: actualNumberSet.size,
+    });
+  }
+
+  const dgaAutoSupps = entry.provenance?.dgaAutoSupps
+    ?? buildPredictionJournalProvenance(inputs, entry.setupSnapshot).dgaAutoSupps;
+  if (dgaAutoSupps?.suppNumbers.length === 2) {
+    const firstTargetDraw = status.targetDraws[0];
+    const actualSupps = drawSuppNumbers(firstTargetDraw);
+    const actualSuppSet = new Set(actualSupps);
+    const suppHits = dgaAutoSupps.suppNumbers.filter((number) => actualSuppSet.has(number));
+    scores.push({
+      key: "dgaAutoSupps",
+      label: "DGA Auto supps",
+      predicted: formatNumberList(dgaAutoSupps.suppNumbers),
+      actual: actualSupps.length ? formatNumberList(actualSupps) : "No supplementary numbers recorded",
+      result: suppHits.length === 2 ? "hit" : suppHits.length === 1 ? "partial" : "miss",
+      detail: `${suppHits.length}/2 Auto-suggested supp${suppHits.length === 1 ? "" : "s"} matched the first target draw${firstTargetDraw.date ? ` (${firstTargetDraw.date})` : ""}${suppHits.length ? `: ${formatNumberList(suppHits)}` : "."}`,
+      hitCount: suppHits.length,
+      predictedCount: 2,
+      actualCount: actualSupps.length,
     });
   }
 

@@ -27,7 +27,8 @@ describe("Monthly acceptance-needs MiAN wiring", () => {
     const handlerBlock = appSource.slice(handlerStart, handlerEnd);
 
     expect(monthlySummaryCall).toContain("onSimulateNumbers={handleSimulateAcceptanceNeeds}");
-    expect(handlerBlock).toContain("setUserSelectedNumbers(simulatedNumbers);");
+    expect(handlerBlock).toContain("syncUserSelectionForExternalSimulation(simulatedNumbers);");
+    expect(handlerBlock).not.toContain("setUserSelectedNumbers(simulatedNumbers);");
     expect(handlerBlock).toContain("setSimulatedDraw({ main, supp, date: \"AcceptanceNeeds\", isSimulated: true }");
     expect(handlerBlock).toContain("scrollToDGA();");
   });

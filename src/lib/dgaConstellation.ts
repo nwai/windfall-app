@@ -5,6 +5,7 @@ export type DgaConstellationCellRole = "main" | "supp" | "none";
 export interface DgaConstellationCell {
   drawDate: string;
   drawNumber: number;
+  isFuture?: boolean;
   number: number;
   offsetDraw: number;
   offsetNumber: number;
@@ -41,8 +42,9 @@ export interface DgaConstellationDiagnostic {
   centerDrawNumber: number;
   centerNumber: number;
   drawCount: number;
+  forwardHorizon: number;
   historyScopeLabel: string;
-  matrixRows: Array<{ drawDate: string; drawNumber: number; cells: DgaConstellationCell[] }>;
+  matrixRows: Array<{ drawDate: string; drawNumber: number; isFuture?: boolean; cells: DgaConstellationCell[] }>;
   radius: number;
   radiusSummaries: DgaConstellationRadiusSummary[];
   warnings: string[];
@@ -78,9 +80,22 @@ const buildCell = (
   centerNumber: number,
   drawNumber: number,
   number: number,
+  includeNextDrawColumn = false,
 ): DgaConstellationCell | null => {
-  if (drawNumber < 1 || drawNumber > history.length) return null;
+  if (drawNumber < 1) return null;
   if (number < MIN_NUMBER || number > MAX_NUMBER) return null;
+  if (includeNextDrawColumn && drawNumber === history.length + 1) {
+    return {
+      drawDate: "Next draw (not yet recorded)",
+      drawNumber,
+      isFuture: true,
+      number,
+      offsetDraw: drawNumber - centerDrawNumber,
+      offsetNumber: number - centerNumber,
+      role: "none",
+    };
+  }
+  if (drawNumber > history.length) return null;
   const draw = history[drawNumber - 1];
   if (!draw) return null;
   return {
@@ -249,18 +264,26 @@ const buildMatrixRows = (
   centerDrawNumber: number,
   centerNumber: number,
   radius: number,
+  forwardHorizon: number,
 ): DgaConstellationDiagnostic["matrixRows"] => {
   const rows: DgaConstellationDiagnostic["matrixRows"] = [];
-  const startDraw = Math.max(1, centerDrawNumber - radius);
-  const endDraw = Math.min(history.length, centerDrawNumber + radius);
+  const drawHorizon = Math.max(radius, forwardHorizon);
+  const startDraw = Math.max(1, centerDrawNumber - drawHorizon);
+  const endDraw = Math.min(history.length + 1, centerDrawNumber + drawHorizon);
   for (let drawNumber = startDraw; drawNumber <= endDraw; drawNumber += 1) {
     const draw = history[drawNumber - 1];
+    const isFuture = drawNumber === history.length + 1;
     const cells: DgaConstellationCell[] = [];
     for (let number = Math.max(MIN_NUMBER, centerNumber - radius); number <= Math.min(MAX_NUMBER, centerNumber + radius); number += 1) {
-      const cell = buildCell(history, centerDrawNumber, centerNumber, drawNumber, number);
+      const cell = buildCell(history, centerDrawNumber, centerNumber, drawNumber, number, true);
       if (cell) cells.push(cell);
     }
-    rows.push({ drawDate: draw.date, drawNumber, cells });
+    rows.push({
+      drawDate: isFuture ? "Next draw (not yet recorded)" : draw.date,
+      drawNumber,
+      isFuture,
+      cells,
+    });
   }
   return rows;
 };
@@ -336,8 +359,9 @@ export function buildDgaConstellationDiagnostic(
     centerDrawNumber,
     centerNumber,
     drawCount: realHistory.length,
+    forwardHorizon,
     historyScopeLabel: `${realHistory.length} real chronological DGA draw${realHistory.length === 1 ? "" : "s"}`,
-    matrixRows: buildMatrixRows(realHistory, centerDrawNumber, centerNumber, radius),
+    matrixRows: buildMatrixRows(realHistory, centerDrawNumber, centerNumber, radius, forwardHorizon),
     radius,
     radiusSummaries,
     warnings,

@@ -2,6 +2,8 @@ import type { CandidateSet, Draw } from "../types";
 import { sortDrawsChronologically } from "./recentDraws";
 
 export type PreviousNeighbourShapeScope = "mains-plus-supps" | "mains";
+export type PreviousNeighbourShapeOffset = -2 | -1 | 1 | 2;
+export type PreviousNeighbourShapeOffsetLabel = "-2" | "-1" | "+1" | "+2";
 
 export interface PreviousNeighbourShapeProfile {
   targetCount: number;
@@ -14,6 +16,16 @@ export interface PreviousNeighbourShapeProfile {
   singletonHitNumbers: number[];
   duplicateHitNumbers: number[];
   directRepeatNumbers: number[];
+  directionalHitTotal: number;
+  directionalPattern: string;
+  minusTwoHits: number;
+  minusOneHits: number;
+  plusOneHits: number;
+  plusTwoHits: number;
+  minusTwoHitNumbers: number[];
+  minusOneHitNumbers: number[];
+  plusOneHitNumbers: number[];
+  plusTwoHitNumbers: number[];
 }
 
 export interface PreviousNeighbourShapeDistributionRow {
@@ -35,8 +47,34 @@ export interface PreviousNeighbourShapeQuotaResult {
   shortfalls: Record<string, number>;
 }
 
+export interface PreviousNeighbourDirectionalTargetCloud {
+  targetCount: number;
+  singletonTargets: number[];
+  duplicateTargets: number[];
+  targetsByOffset: Record<PreviousNeighbourShapeOffsetLabel, number[]>;
+}
+
 const LOTTERY_MIN = 1;
 const LOTTERY_MAX = 45;
+const DIRECTIONAL_OFFSETS: readonly PreviousNeighbourShapeOffset[] = [-2, -1, 1, 2];
+
+const offsetLabel = (offset: PreviousNeighbourShapeOffset): PreviousNeighbourShapeOffsetLabel => (
+  offset > 0 ? `+${offset}` as PreviousNeighbourShapeOffsetLabel : `${offset}` as PreviousNeighbourShapeOffsetLabel
+);
+
+const emptyOffsetSets = (): Record<PreviousNeighbourShapeOffsetLabel, Set<number>> => ({
+  "-2": new Set<number>(),
+  "-1": new Set<number>(),
+  "+1": new Set<number>(),
+  "+2": new Set<number>(),
+});
+
+const emptyOffsetArrays = (): Record<PreviousNeighbourShapeOffsetLabel, number[]> => ({
+  "-2": [],
+  "-1": [],
+  "+1": [],
+  "+2": [],
+});
 
 const validNumber = (value: unknown): value is number => (
   typeof value === "number" &&
@@ -62,13 +100,16 @@ const numbersForScope = (draw: Draw, scope: PreviousNeighbourShapeScope): number
 );
 
 const buildNeighbourBuckets = (previousNumbers: number[]) => {
-  const targetSources = new Map<number, number[]>();
+  const targetSources = new Map<number, Array<{ source: number; offset: PreviousNeighbourShapeOffset }>>();
+  const targetsByOffset = emptyOffsetSets();
   for (const source of uniqueValidNumbers(previousNumbers)) {
-    for (const target of [source - 1, source + 1]) {
+    for (const offset of DIRECTIONAL_OFFSETS) {
+      const target = source + offset;
       if (!validNumber(target)) continue;
       const sources = targetSources.get(target) ?? [];
-      sources.push(source);
+      sources.push({ source, offset });
       targetSources.set(target, sources);
+      targetsByOffset[offsetLabel(offset)].add(target);
     }
   }
 
@@ -79,8 +120,30 @@ const buildNeighbourBuckets = (previousNumbers: number[]) => {
     else singletonTargets.add(target);
   }
 
-  return { singletonTargets, duplicateTargets };
+  return { singletonTargets, duplicateTargets, targetsByOffset };
 };
+
+export function buildPreviousNeighbourDirectionalTargetCloud(
+  previousNumbers: number[],
+): PreviousNeighbourDirectionalTargetCloud {
+  const { singletonTargets, duplicateTargets, targetsByOffset } = buildNeighbourBuckets(previousNumbers);
+  const sortNumbers = (numbers: Iterable<number>) => Array.from(numbers).sort((left, right) => left - right);
+  return {
+    targetCount: singletonTargets.size + duplicateTargets.size,
+    singletonTargets: sortNumbers(singletonTargets),
+    duplicateTargets: sortNumbers(duplicateTargets),
+    targetsByOffset: {
+      "-2": sortNumbers(targetsByOffset["-2"]),
+      "-1": sortNumbers(targetsByOffset["-1"]),
+      "+1": sortNumbers(targetsByOffset["+1"]),
+      "+2": sortNumbers(targetsByOffset["+2"]),
+    },
+  };
+}
+
+const directionalPattern = (counts: Record<PreviousNeighbourShapeOffsetLabel, number>): string => (
+  `-2:${counts["-2"]} -1:${counts["-1"]} +1:${counts["+1"]} +2:${counts["+2"]}`
+);
 
 export function buildPreviousNeighbourShapeProfile(
   previousNumbers: number[],
@@ -89,21 +152,36 @@ export function buildPreviousNeighbourShapeProfile(
   const previous = uniqueValidNumbers(previousNumbers);
   const candidate = uniqueValidNumbers(candidateNumbers);
   const previousSet = new Set(previous);
-  const { singletonTargets, duplicateTargets } = buildNeighbourBuckets(previous);
+  const { singletonTargets, duplicateTargets, targetsByOffset } = buildNeighbourBuckets(previous);
 
   const singletonHitNumbers: number[] = [];
   const duplicateHitNumbers: number[] = [];
   const directRepeatNumbers: number[] = [];
+  const directionalHitNumbers = emptyOffsetArrays();
 
   for (const number of candidate) {
     if (duplicateTargets.has(number)) duplicateHitNumbers.push(number);
     else if (singletonTargets.has(number)) singletonHitNumbers.push(number);
     if (previousSet.has(number)) directRepeatNumbers.push(number);
+    for (const offset of DIRECTIONAL_OFFSETS) {
+      const label = offsetLabel(offset);
+      if (targetsByOffset[label].has(number)) directionalHitNumbers[label].push(number);
+    }
   }
 
   singletonHitNumbers.sort((left, right) => left - right);
   duplicateHitNumbers.sort((left, right) => left - right);
   directRepeatNumbers.sort((left, right) => left - right);
+  for (const label of Object.keys(directionalHitNumbers) as PreviousNeighbourShapeOffsetLabel[]) {
+    directionalHitNumbers[label].sort((left, right) => left - right);
+  }
+
+  const directionalCounts: Record<PreviousNeighbourShapeOffsetLabel, number> = {
+    "-2": directionalHitNumbers["-2"].length,
+    "-1": directionalHitNumbers["-1"].length,
+    "+1": directionalHitNumbers["+1"].length,
+    "+2": directionalHitNumbers["+2"].length,
+  };
 
   return {
     targetCount: singletonTargets.size + duplicateTargets.size,
@@ -116,6 +194,16 @@ export function buildPreviousNeighbourShapeProfile(
     singletonHitNumbers,
     duplicateHitNumbers,
     directRepeatNumbers,
+    directionalHitTotal: Object.values(directionalCounts).reduce((sum, count) => sum + count, 0),
+    directionalPattern: directionalPattern(directionalCounts),
+    minusTwoHits: directionalCounts["-2"],
+    minusOneHits: directionalCounts["-1"],
+    plusOneHits: directionalCounts["+1"],
+    plusTwoHits: directionalCounts["+2"],
+    minusTwoHitNumbers: directionalHitNumbers["-2"],
+    minusOneHitNumbers: directionalHitNumbers["-1"],
+    plusOneHitNumbers: directionalHitNumbers["+1"],
+    plusTwoHitNumbers: directionalHitNumbers["+2"],
   };
 }
 
@@ -136,6 +224,12 @@ export function annotateCandidateWithPreviousNeighbourShape(
     previousNeighbourDuplicateHits: profile.duplicateHits,
     previousNeighbourSingletonHits: profile.singletonHits,
     previousNeighbourTargetCount: profile.targetCount,
+    previousNeighbourDirectionalHits: profile.directionalHitTotal,
+    previousNeighbourDirectionalPattern: profile.directionalPattern,
+    previousNeighbourMinusTwoHits: profile.minusTwoHits,
+    previousNeighbourMinusOneHits: profile.minusOneHits,
+    previousNeighbourPlusOneHits: profile.plusOneHits,
+    previousNeighbourPlusTwoHits: profile.plusTwoHits,
   };
 }
 

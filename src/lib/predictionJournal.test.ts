@@ -487,6 +487,60 @@ describe("predictionJournal", () => {
     expect(draft.inputs.notes).toContain("DGA supplementary-pair tie-break evidence: pair 3, 5; WFMQYH exact pair 1/13 · latest exact-pair gap 4; all-history exact pair 2/344 · latest exact-pair gap 21. Selected-8 pair coverage: WFMQYH 3/28, all-history 8/28. This is diagnostic evidence, not a probability.");
   });
 
+  it("scores saved DGA Auto supps against the first target draw supplementary pair", () => {
+    const setupSnapshot = {
+      windowEnabled: true,
+      windowMode: "H",
+      customDrawCount: 13,
+      selectedRatios: [],
+      knobs: {},
+      userSelectedNumbers: [1, 2, 3, 4, 5, 6, 7, 8],
+      dgaSuggestedMainNumbers: [1, 2, 4, 6, 7, 8],
+      dgaSuggestedSuppNumbers: [3, 5],
+      dgaSuggestedSuppPair: [3, 5],
+      dgaSuggestedSuppPairActiveCount: 1,
+      dgaSuggestedSuppPairFullCount: 2,
+      dgaSuggestedSuppPairActiveDrawCount: 13,
+      dgaSuggestedSuppPairFullDrawCount: 344,
+      dgaSuppPairActiveCoverage: 3,
+      dgaSuppPairFullCoverage: 8,
+      dgaSuppPairTotalCoverage: 28,
+    } as any;
+    const history = [
+      draw("6/24/26", [10, 11, 12, 13, 14, 15], [16, 17]),
+      draw("6/26/26", [1, 7, 12, 14, 22, 34], [3, 45]),
+    ];
+    const entry = buildPredictionJournalEntry({
+      id: "prediction-dga-auto-supp",
+      now: "2026-06-24T10:30:00.000Z",
+      latestDraw: history[0],
+      targetKind: "nextDraw",
+      inputs: { numbers: [1, 2, 4, 6, 7, 8, 3, 5] },
+      setupSnapshot,
+      reviewStatus: "reviewedByUser",
+    });
+
+    const scored = scorePredictionJournalEntry(entry, history);
+    const dgaScore = scored.scores.find((score) => score.key === "dgaAutoSupps");
+
+    expect(entry.provenance?.dgaAutoSupps).toMatchObject({
+      suppNumbers: [3, 5],
+      mainNumbers: [1, 2, 4, 6, 7, 8],
+      activePairCoverage: 3,
+      totalPairCoverage: 28,
+    });
+    expect(dgaScore).toMatchObject({
+      label: "DGA Auto supps",
+      predicted: "3, 5",
+      actual: "3, 45",
+      result: "partial",
+      hitCount: 1,
+      predictedCount: 2,
+      actualCount: 2,
+    });
+    expect(dgaScore?.detail).toContain("1/2 Auto-suggested supp matched");
+  });
+
   it("distinguishes Monthly Draws Summary construction from the extra MiAN post-filter", () => {
     const setupSnapshot = {
       windowEnabled: true,

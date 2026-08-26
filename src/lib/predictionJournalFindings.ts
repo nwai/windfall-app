@@ -195,7 +195,9 @@ const collectSignals = (entry: ScoredPredictionJournalEntry): FindingSignal[] =>
       signals,
       "Selection reason",
       entry.inputs.selectionReason.detail
-        ? `${entry.inputs.selectionReason.label} - ${entry.inputs.selectionReason.detail}`
+        ? entry.inputs.selectionReason.key === "other"
+          ? `${entry.inputs.selectionReason.label} - ${entry.inputs.selectionReason.detail}`
+          : `${entry.inputs.selectionReason.label} + Other - ${entry.inputs.selectionReason.detail}`
         : entry.inputs.selectionReason.label,
     );
   }
@@ -232,6 +234,11 @@ const collectSignals = (entry: ScoredPredictionJournalEntry): FindingSignal[] =>
   const selectionInsights = entry.provenance?.selectionInsights;
   if (selectionInsights?.enabled && selectionInsights.predictedCompanionNumbers.length) {
     addSignal(signals, "Selection insights", `Captured predicted companions ${selectionInsights.predictedCompanionNumbers.join(",")}`);
+  }
+
+  const dgaAutoSupps = entry.provenance?.dgaAutoSupps;
+  if (dgaAutoSupps?.suppNumbers.length === 2) {
+    addSignal(signals, "Watched signal", "DGA Auto supps captured");
   }
 
   const uniqueSignals = new Map<string, FindingSignal>();

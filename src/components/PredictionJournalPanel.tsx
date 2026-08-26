@@ -42,6 +42,7 @@ import {
 import {
   computeWeekdayWindfallPrizeDivision,
   computeWeekdayWindfallPrizeHits,
+  rankWeekdayWindfallPrizeDivision,
   type WeekdayWindfallPrizeDivision,
 } from "../lib/prizeDivisions";
 import {
@@ -151,27 +152,40 @@ const reviewStatusLabels: Record<PredictionJournalReviewStatus, string> = {
   reviewedByUser: "Reviewed by user",
 };
 
-type PredictionJournalSelectionReasonFormValue = PredictionJournalSelectionReasonKey | "";
+type PredictionJournalPrimarySelectionReasonKey = Exclude<PredictionJournalSelectionReasonKey, "other">;
+type PredictionJournalSelectionReasonFormValue = PredictionJournalPrimarySelectionReasonKey | "";
 
 const SELECTION_REASON_NOTE_PREFIX = "Selection reason:";
 
 const selectionReasonOptions = Object.entries(PREDICTION_JOURNAL_SELECTION_REASON_LABELS)
-  .map(([key, label]) => ({ key: key as PredictionJournalSelectionReasonKey, label }));
+  .filter(([key]) => key !== "other")
+  .map(([key, label]) => ({ key: key as PredictionJournalPrimarySelectionReasonKey, label }));
 
 const selectionReasonSummary = (reason: PredictionJournalInputs["selectionReason"]): string => {
   if (!reason) return "";
-  return reason.detail ? `${reason.label} - ${reason.detail}` : reason.label;
+  if (!reason.detail) return reason.label;
+  return reason.key === "other" ? `${reason.label} - ${reason.detail}` : `${reason.label} + Other - ${reason.detail}`;
 };
 
 const selectionReasonNoteLine = (
   key: PredictionJournalSelectionReasonFormValue,
+  includeOther: boolean,
   detail: string,
 ): string | null => {
-  if (!key) return null;
-  const label = PREDICTION_JOURNAL_SELECTION_REASON_LABELS[key];
-  const cleanedDetail = detail.trim();
+  const cleanedDetail = includeOther ? detail.trim() : "";
+  if (!key && !includeOther) return null;
+  const primaryLabel = key ? PREDICTION_JOURNAL_SELECTION_REASON_LABELS[key] : "";
   const detailText = cleanedDetail && /[.!?]$/.test(cleanedDetail) ? cleanedDetail : `${cleanedDetail}.`;
-  return cleanedDetail ? `${SELECTION_REASON_NOTE_PREFIX} ${label} - ${detailText}` : `${SELECTION_REASON_NOTE_PREFIX} ${label}.`;
+
+  if (key && includeOther) {
+    return cleanedDetail
+      ? `${SELECTION_REASON_NOTE_PREFIX} ${primaryLabel} + Other - ${detailText}`
+      : `${SELECTION_REASON_NOTE_PREFIX} ${primaryLabel} + Other.`;
+  }
+  if (key) return `${SELECTION_REASON_NOTE_PREFIX} ${primaryLabel}.`;
+  return cleanedDetail
+    ? `${SELECTION_REASON_NOTE_PREFIX} ${PREDICTION_JOURNAL_SELECTION_REASON_LABELS.other} - ${detailText}`
+    : `${SELECTION_REASON_NOTE_PREFIX} ${PREDICTION_JOURNAL_SELECTION_REASON_LABELS.other}.`;
 };
 
 const notesWithoutSelectionReason = (value: string): string => (
@@ -185,10 +199,11 @@ const notesWithoutSelectionReason = (value: string): string => (
 const mergeSelectionReasonIntoNotes = (
   currentNotes: string,
   key: PredictionJournalSelectionReasonFormValue,
+  includeOther: boolean,
   detail: string,
 ): string => {
   const baseNotes = notesWithoutSelectionReason(currentNotes);
-  const reasonLine = selectionReasonNoteLine(key, detail);
+  const reasonLine = selectionReasonNoteLine(key, includeOther, detail);
   if (!reasonLine) return baseNotes;
   return baseNotes ? `${baseNotes}\n${reasonLine}` : reasonLine;
 };
@@ -462,6 +477,33 @@ const renderStructuredProvenance = (provenance: PredictionJournalProvenance) => 
         </span>
       </div>
       <div style={{ borderTop: "1px solid #edf2f7", paddingTop: 8 }}>
+        {provenance.dgaAutoSupps ? (
+          <div style={{ marginBottom: 8 }}>
+            <div style={{ fontSize: 12, fontWeight: 850, color: "#334155", marginBottom: 5 }}>
+              DGA Auto supps capture
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              <span style={provenanceChipStyle("good")}>
+                Auto supps {formatJournalNumbers(provenance.dgaAutoSupps.suppNumbers)}
+              </span>
+              <span style={provenanceChipStyle()}>
+                Main role {formatJournalNumbers(provenance.dgaAutoSupps.mainNumbers)}
+              </span>
+              <span style={provenanceChipStyle()}>
+                Pair WFMQYH {provenance.dgaAutoSupps.activePairSuppCount ?? "?"}/{provenance.dgaAutoSupps.activePairSuppDrawCount ?? "?"}
+              </span>
+              <span style={provenanceChipStyle()}>
+                Pair all-history {provenance.dgaAutoSupps.fullPairSuppCount ?? "?"}/{provenance.dgaAutoSupps.fullPairSuppDrawCount ?? "?"}
+              </span>
+              <span style={provenanceChipStyle()}>
+                Pair coverage {provenance.dgaAutoSupps.activePairCoverage ?? "?"}/{provenance.dgaAutoSupps.totalPairCoverage ?? "?"} WFMQYH
+              </span>
+            </div>
+            <div style={{ marginTop: 7, fontSize: 12, color: "#64748b", lineHeight: 1.45 }}>
+              Captured when the prediction was saved. Scored later against the first target draw's actual supplementary numbers; diagnostic only, not a probability.
+            </div>
+          </div>
+        ) : null}
         <div style={{ fontSize: 12, fontWeight: 850, color: "#334155", marginBottom: 5 }}>
           Drought-break shortlist check
         </div>
@@ -941,6 +983,11 @@ type LatestDrawReplayPrize = {
   suppHits: number;
 };
 
+type JournalEntryTargetPrizeRow = LatestDrawReplayPrize & {
+  date: string;
+  drawIndex: number;
+};
+
 const formatJournalPercent = (value: number | null | undefined): string => (
   typeof value === "number" && Number.isFinite(value) ? `${value.toFixed(2)}%` : "-"
 );
@@ -1285,6 +1332,22 @@ const scoreLatestDrawReplayPrize = (
   };
 };
 
+const scoreEntryTargetPrizeRows = (entry: ScoredPredictionJournalEntry): JournalEntryTargetPrizeRow[] => {
+  const predicted = entry.inputs.numbers ?? [];
+  if (predicted.length < 6 || entry.targetDraws.length === 0) return [];
+
+  return entry.targetDraws
+    .map((draw, index) => {
+      const prize = scoreLatestDrawReplayPrize(predicted, draw);
+      return prize ? { ...prize, date: draw.date, drawIndex: index + 1 } : null;
+    })
+    .filter((row): row is JournalEntryTargetPrizeRow => row !== null)
+    .sort((a, b) => (
+      rankWeekdayWindfallPrizeDivision(a.division) - rankWeekdayWindfallPrizeDivision(b.division)
+      || a.drawIndex - b.drawIndex
+    ));
+};
+
 const scoreEntryAgainstLatestDraw = (
   entry: ScoredPredictionJournalEntry,
   latestDraw: Draw,
@@ -1303,6 +1366,73 @@ const scoreEntryAgainstLatestDraw = (
     targetLabel: targetLabels[entry.targetKind],
     targetDrawDate: summarizeTargetDrawDate(entry),
   };
+};
+
+const renderJournalEntryTargetPrizeReplay = (rows: JournalEntryTargetPrizeRow[]): React.ReactNode => {
+  if (rows.length === 0) return null;
+  const best = rows[0];
+  return (
+    <section
+      data-testid="prediction-entry-target-prize-replay"
+      aria-label="Target-draw prize replay"
+      style={{
+        marginTop: 10,
+        border: `1px solid ${best.division === "Div1" || best.division === "Div2" ? "#f9a8d4" : "#bbf7d0"}`,
+        borderRadius: 8,
+        padding: 10,
+        background: best.division === "Div1" || best.division === "Div2" ? "#fff5f8" : "#f6fff9",
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontSize: 12, color: "#64748b", fontWeight: 850 }}>Target-draw prize replay</div>
+          <div style={{ marginTop: 2, fontSize: 17, color: "#26313d", fontWeight: 900 }}>
+            Saved line qualified in this entry's target window
+          </div>
+          <div style={{ marginTop: 2, fontSize: 12, color: "#64748b", lineHeight: 1.45 }}>
+            Post-draw replay only. First six saved numbers are checked as mains; the next two are checked as supps.
+          </div>
+        </div>
+        <span style={replayPrizePillStyle(best.division)}>Prize {best.division}</span>
+      </div>
+      <div style={{ display: "grid", gap: 7, marginTop: 10, fontSize: 12 }}>
+        {rows.map((row) => (
+          <div
+            key={`${row.drawIndex}-${row.date}-${row.division}`}
+            style={{
+              border: "1px solid #e2e8f0",
+              borderRadius: 8,
+              padding: 8,
+              background: "#fff",
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+              gap: 8,
+              alignItems: "center",
+            }}
+          >
+            <div>
+              <div style={{ color: "#64748b", fontWeight: 850 }}>Target draw</div>
+              <div style={{ color: "#26313d", fontWeight: 850 }}>D{row.drawIndex} · {row.date}</div>
+            </div>
+            <div>
+              <div style={{ color: "#64748b", fontWeight: 850 }}>Prize result</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                <span style={replayPrizePillStyle(row.division)}>Prize {row.division}</span>
+                <span style={{ color: "#475569", fontWeight: 800 }}>{row.mainHits} main · {row.suppHits} supp</span>
+              </div>
+            </div>
+            <div>
+              <div style={{ color: "#64748b", fontWeight: 850 }}>Checked roles</div>
+              <div style={{ color: "#26313d", overflowWrap: "anywhere" }}>
+                M {row.checkedMain.join(", ")}
+                {row.checkedSupp.length ? ` · S ${row.checkedSupp.join(", ")}` : " · S none"}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
 };
 
 const splitNumbers = (value: string): number[] => (
@@ -1576,6 +1706,7 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
   const [confidence, setConfidence] = useState("");
   const [reviewStatus, setReviewStatus] = useState<PredictionJournalReviewStatus>("notReviewed");
   const [selectionReasonKey, setSelectionReasonKey] = useState<PredictionJournalSelectionReasonFormValue>("");
+  const [selectionReasonIncludesOther, setSelectionReasonIncludesOther] = useState(false);
   const [selectionReasonOtherText, setSelectionReasonOtherText] = useState("");
   const [notes, setNotes] = useState("");
   const [message, setMessage] = useState("");
@@ -1723,16 +1854,19 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
   };
 
   const handleSelectionReasonChange = (value: PredictionJournalSelectionReasonFormValue) => {
-    const nextDetail = value === "other" ? selectionReasonOtherText : "";
     setSelectionReasonKey(value);
-    if (value !== "other") setSelectionReasonOtherText("");
-    setNotes((current) => mergeSelectionReasonIntoNotes(current, value, nextDetail));
+    setNotes((current) => mergeSelectionReasonIntoNotes(current, value, selectionReasonIncludesOther, selectionReasonOtherText));
+  };
+
+  const handleSelectionReasonOtherToggle = (checked: boolean) => {
+    setSelectionReasonIncludesOther(checked);
+    setNotes((current) => mergeSelectionReasonIntoNotes(current, selectionReasonKey, checked, selectionReasonOtherText));
   };
 
   const handleSelectionReasonOtherTextChange = (value: string) => {
     setSelectionReasonOtherText(value);
-    if (selectionReasonKey === "other") {
-      setNotes((current) => mergeSelectionReasonIntoNotes(current, "other", value));
+    if (selectionReasonIncludesOther) {
+      setNotes((current) => mergeSelectionReasonIntoNotes(current, selectionReasonKey, true, value));
     }
   };
 
@@ -1752,7 +1886,22 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
       const value = integerOrUndefined(bucketText[field.key]);
       if (value !== undefined) monthlyBuckets[field.key] = value;
     }
-    const cleanedSelectionReasonOtherText = selectionReasonOtherText.trim();
+    const cleanedSelectionReasonOtherText = selectionReasonIncludesOther ? selectionReasonOtherText.trim() : "";
+    const selectionReason = selectionReasonKey
+      ? {
+          version: 1 as const,
+          key: selectionReasonKey,
+          label: PREDICTION_JOURNAL_SELECTION_REASON_LABELS[selectionReasonKey],
+          ...(cleanedSelectionReasonOtherText ? { detail: cleanedSelectionReasonOtherText } : {}),
+        }
+      : selectionReasonIncludesOther
+        ? {
+            version: 1 as const,
+            key: "other" as const,
+            label: PREDICTION_JOURNAL_SELECTION_REASON_LABELS.other,
+            ...(cleanedSelectionReasonOtherText ? { detail: cleanedSelectionReasonOtherText } : {}),
+          }
+        : undefined;
 
     return normalizePredictionJournalInputs({
       oddEvenRatio,
@@ -1773,14 +1922,7 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
       droughtBreakCount: integerOrUndefined(droughtBreakCount),
       carryOverCount: integerOrUndefined(carryOverCount),
       confidence: integerOrUndefined(confidence),
-      selectionReason: selectionReasonKey
-        ? {
-            version: 1,
-            key: selectionReasonKey,
-            label: PREDICTION_JOURNAL_SELECTION_REASON_LABELS[selectionReasonKey],
-            ...(cleanedSelectionReasonOtherText ? { detail: cleanedSelectionReasonOtherText } : {}),
-          }
-        : undefined,
+      selectionReason,
       notes,
     });
   }, [
@@ -1794,6 +1936,7 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
     oddEvenRatio,
     previousNeighbourHitCount,
     previousRepeatCount,
+    selectionReasonIncludesOther,
     selectionReasonKey,
     selectionReasonOtherText,
     singleText,
@@ -1943,8 +2086,9 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
     setDroughtBreakCount(inputs.droughtBreakCount === undefined ? "" : String(inputs.droughtBreakCount));
     setCarryOverCount(inputs.carryOverCount === undefined ? "" : String(inputs.carryOverCount));
     setConfidence(inputs.confidence === undefined ? "" : String(inputs.confidence));
-    setSelectionReasonKey(inputs.selectionReason?.key ?? "");
-    setSelectionReasonOtherText(inputs.selectionReason?.key === "other" ? inputs.selectionReason.detail ?? "" : "");
+    setSelectionReasonKey(inputs.selectionReason?.key === "other" ? "" : inputs.selectionReason?.key ?? "");
+    setSelectionReasonIncludesOther(inputs.selectionReason?.key === "other" || Boolean(inputs.selectionReason?.detail));
+    setSelectionReasonOtherText(inputs.selectionReason?.detail ?? "");
     setNotes(inputs.notes ?? "");
   };
 
@@ -2265,7 +2409,7 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
         >
           <div
             role="radiogroup"
-            aria-label="Selection reason"
+            aria-label="Primary selection reason"
             className="windfall-prediction-journal-reason-options"
           >
             <label
@@ -2316,7 +2460,28 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
               </label>
             ))}
           </div>
-          {selectionReasonKey === "other" ? (
+          <label
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              minHeight: 30,
+              marginTop: 4,
+              color: "#26313d",
+              fontSize: 12,
+              fontWeight: 800,
+              lineHeight: 1.3,
+              cursor: "pointer",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={selectionReasonIncludesOther}
+              onChange={(event) => handleSelectionReasonOtherToggle(event.target.checked)}
+            />
+            Other
+          </label>
+          {selectionReasonIncludesOther ? (
             <HigField label="Other reason">
               <input
                 value={selectionReasonOtherText}
@@ -2326,7 +2491,7 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
             </HigField>
           ) : null}
           <div style={{ color: "#64748b", fontSize: 11, lineHeight: 1.35 }}>
-            The selected reason is saved as structured data and mirrored into Notes.
+            The selected shortcut and optional Other note are saved as structured data and mirrored into Notes.
           </div>
         </JournalLegendBox>
         <JournalLegendBox
@@ -2548,6 +2713,8 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
                 const normalizedReviewStatus = normalizeReviewStatus(entry.reviewStatus);
                 const terminalDigitHistory = terminalDigitHistoryByEntryId.get(entry.id);
                 const historicalPrizeCollision = historicalPrizeCollisionByEntryId.get(entry.id);
+                const targetPrizeRows = scoreEntryTargetPrizeRows(entry);
+                const bestTargetPrize = targetPrizeRows[0] ?? null;
                 return (
                   <article key={entry.id} style={{ border: "1px solid #dbe3ec", borderRadius: 8, background: "#fff", overflow: "hidden" }}>
                     <button
@@ -2578,6 +2745,11 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
                           {targetDrawDate ? <span style={{ color: "#475569", fontSize: 12, fontWeight: 800 }}>{targetDrawDate}</span> : null}
                           <span style={statusPillStyle(entry.status)}>{statusLabels[entry.status]}</span>
                           <span style={reviewPillStyle(normalizedReviewStatus)}>{reviewStatusLabels[normalizedReviewStatus]}</span>
+                          {bestTargetPrize ? (
+                            <span data-testid="prediction-entry-target-prize-pill" style={replayPrizePillStyle(bestTargetPrize.division)}>
+                              Prize {bestTargetPrize.division}
+                            </span>
+                          ) : null}
                           {entry.archivedAt ? <span style={archivedPillStyle}>Archived</span> : null}
                           <span style={{ color: "#657385", fontSize: 12 }}>
                             Anchored after {entry.anchorLatestDrawDate} · revision {entry.revision}
@@ -2655,6 +2827,7 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
                         {terminalDigitHistory ? renderTerminalDigitHistory(terminalDigitHistory) : null}
                         {historicalPrizeCollision ? renderHistoricalPrizeCollision(historicalPrizeCollision, "entry") : null}
                         {entry.reason ? <div style={{ marginTop: 8, color: "#8a4b00", fontSize: 12 }}>{entry.reason}</div> : null}
+                        {renderJournalEntryTargetPrizeReplay(targetPrizeRows)}
                         {immediateNextDrawScore ? (
                           <section
                             data-testid="prediction-immediate-next-draw"

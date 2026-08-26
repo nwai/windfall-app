@@ -19,10 +19,10 @@
   --wf-radius: 8px;
   --wf-radius-tight: 6px;
   --wf-control-radius: 7px;
-  --wf-panel-shadow: 0 14px 38px rgba(15, 23, 42, 0.08);
+  --wf-panel-shadow: 0 14px 38px rgba(54, 69, 79, 0.08);
   --wf-shadow-subtle: 0 1px 2px rgba(15, 23, 42, 0.06);
   --wf-press-shadow: inset 0 2px 5px rgba(15, 23, 42, 0.16);
-  --wf-backdrop-blur: saturate(180%) blur(18px);
+  --wf-backdrop-blur: saturate(180%) blur(12px);
   --wf-generator-bg: #fffaf0;
   --wf-generator-bg-strong: #fff4da;
   --wf-generator-rule: #d19a24;
@@ -1349,9 +1349,32 @@ tbody tr:hover {
 .windfall-selection-insights-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(250px, 1fr));
-  gap: 8px;
+  gap: 10px;
   margin-top: 8px;
   align-items: start;
+}
+
+.windfall-selection-insights-card {
+  min-width: 0;
+  border: 1px solid #dfe5ee;
+  border-radius: 8px;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.windfall-selection-insights-card__title {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 7px 10px;
+  border-bottom: 1px solid #e7edf5;
+  background: #f8fafc;
+  color: #1f4f8f;
+  font-size: 12px;
+  font-weight: 850;
+  line-height: 1.25;
+  text-align: center;
 }
 
 .windfall-prediction-journal-text-grid {

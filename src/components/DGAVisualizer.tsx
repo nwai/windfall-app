@@ -82,6 +82,7 @@ export interface DGAVisualizerProps {
    */
   wfmqyhStart?: number;
   cellSize?: number;
+  gridToolbar?: React.ReactNode;
   gridSidecar?: React.ReactNode;
 }
 
@@ -224,6 +225,7 @@ export const DGAVisualizer: React.FC<DGAVisualizerProps> = ({
   onColumnClick,
   wfmqyhStart = 0,
   cellSize = 20,
+  gridToolbar,
   gridSidecar,
 }) => {
   // Defensive defaults
@@ -2021,6 +2023,7 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
   return (
     <section style={{ width: '100%' }}>
       {controlsPosition === 'above' && renderControls()}
+      {gridToolbar ? <div style={{ margin: '8px 0' }}>{gridToolbar}</div> : null}
       {renderGridWithSidecar()}
       {controlsPosition === 'below' && renderControls()}
     </section>

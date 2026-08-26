@@ -167,7 +167,8 @@ describe("PredictionJournalPanel", () => {
     expect(notesTextArea.value).not.toContain("Selection reason: Used DGA constellation diagnostic.");
     expect(notesTextArea.value).toContain("Selection reason: Used Stage-Match Acceptance Playbook.");
 
-    const otherReason = container.querySelector("input[value='other']") as HTMLInputElement;
+    const otherReason = Array.from(container.querySelectorAll<HTMLInputElement>("input[type='checkbox']"))
+      .find((input) => input.parentElement?.textContent?.trim() === "Other") as HTMLInputElement;
     await act(async () => {
       otherReason.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       otherReason.dispatchEvent(new Event("change", { bubbles: true }));
@@ -179,7 +180,7 @@ describe("PredictionJournalPanel", () => {
     });
 
     expect(notesTextArea.value).not.toContain("Selection reason: Observed pattern in DGA grid.");
-    expect(notesTextArea.value).toContain("Selection reason: Other - Testing a split diagonal.");
+    expect(notesTextArea.value).toContain("Selection reason: Used Stage-Match Acceptance Playbook + Other - Testing a split diagonal.");
 
     const saveButton = Array.from(container.querySelectorAll("button"))
       .find((button) => button.textContent === "Save prediction") as HTMLButtonElement;
@@ -191,14 +192,14 @@ describe("PredictionJournalPanel", () => {
     const saved = JSON.parse(window.localStorage.getItem(PREDICTION_JOURNAL_STORAGE_KEY) ?? "[]");
     expect(saved[0].inputs.selectionReason).toEqual({
       version: 1,
-      key: "other",
-      label: "Other",
+      key: "stageMatchAcceptancePlaybook",
+      label: "Used Stage-Match Acceptance Playbook",
       detail: "Testing a split diagonal.",
     });
-    expect(saved[0].inputs.notes).toContain("Selection reason: Other - Testing a split diagonal.");
+    expect(saved[0].inputs.notes).toContain("Selection reason: Used Stage-Match Acceptance Playbook + Other - Testing a split diagonal.");
 
     const rowButton = container.querySelector("button[aria-controls^='prediction-journal-entry-']") as HTMLButtonElement;
-    expect(rowButton.textContent).toContain("Reason: Other - Testing a split diagonal.");
+    expect(rowButton.textContent).toContain("Reason: Used Stage-Match Acceptance Playbook + Other - Testing a split diagonal.");
 
     await act(async () => {
       root.unmount();
@@ -353,6 +354,55 @@ describe("PredictionJournalPanel", () => {
     expect(container.querySelector("button[aria-expanded='true']")).toBeTruthy();
     expect(container.querySelector("#prediction-journal-entry-prediction-panel-latest-replay-open")).toBeTruthy();
     expect(container.textContent).toContain("This is the clue trail I want to inspect.");
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it("discloses target-window prize replays inside saved journal entries", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const history = [
+      draw("6/1/26", [2, 4, 6, 8, 10, 12], [14, 16]),
+      draw("6/3/26", [4, 5, 6, 7, 8, 9], [42, 43]),
+    ];
+    const entry = buildPredictionJournalEntry({
+      id: "prediction-panel-target-prize",
+      now: "2026-06-01T10:30:00.000Z",
+      latestDraw: history[0],
+      targetKind: "nextDraw",
+      reviewStatus: "reviewedByUser",
+      inputs: {
+        numbers: [4, 5, 6, 7, 8, 9, 42, 43],
+        notes: "Entry should show its own target prize replay.",
+      },
+    });
+
+    await act(async () => {
+      root.render(React.createElement(PredictionJournalPanel, { history, initialEntries: [entry] }));
+    });
+
+    const targetPrizePill = container.querySelector("[data-testid='prediction-entry-target-prize-pill']");
+    expect(targetPrizePill?.textContent).toBe("Prize Div1");
+    expect(container.querySelector("[data-testid='prediction-entry-target-prize-replay']")).toBeNull();
+
+    const rowButton = container.querySelector("button[aria-controls^='prediction-journal-entry-']") as HTMLButtonElement;
+    await act(async () => {
+      rowButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    const replay = container.querySelector("[data-testid='prediction-entry-target-prize-replay']");
+    expect(replay).toBeTruthy();
+    expect(replay?.textContent).toContain("Target-draw prize replay");
+    expect(replay?.textContent).toContain("Saved line qualified in this entry's target window");
+    expect(replay?.textContent).toContain("Post-draw replay only");
+    expect(replay?.textContent).toContain("D1 · 6/3/26");
+    expect(replay?.textContent).toContain("Prize Div1");
+    expect(replay?.textContent).toContain("6 main · 2 supp");
+    expect(replay?.textContent).toContain("M 4, 5, 6, 7, 8, 9 · S 42, 43");
 
     await act(async () => {
       root.unmount();

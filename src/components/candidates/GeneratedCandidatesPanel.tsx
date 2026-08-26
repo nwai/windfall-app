@@ -318,7 +318,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
     }, []);
 
     // --- Column sorting ---
-    type SortKey = "nrr" | "ns" | "win" | "rdy" | "idm" | "stageIdm" | "conv" | "comp" | "ogaRaw" | "ogaPct" | "selHits" | "recentHits" | "previousNeighbourHits" | "previousNeighbourDuplicateHits" | "previousNeighbourSingletonHits" | "oddEven" | "prize" | "b0x" | "b1x" | "b2x" | "b3x" | "b4x" | "b5x" | "b6x" | "b7x" | "b8x" | "recommended" | null;
+    type SortKey = "nrr" | "ns" | "win" | "rdy" | "idm" | "stageIdm" | "conv" | "comp" | "ogaRaw" | "ogaPct" | "selHits" | "recentHits" | "previousNeighbourHits" | "previousNeighbourDuplicateHits" | "previousNeighbourDirectionalHits" | "oddEven" | "prize" | "b0x" | "b1x" | "b2x" | "b3x" | "b4x" | "b5x" | "b6x" | "b7x" | "b8x" | "recommended" | null;
     const [sortKey, setSortKey] = useState<SortKey>(null);
     const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
     const toggleSort = (key: SortKey) => {
@@ -326,7 +326,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
         setSortDir((d) => (d === "asc" ? "desc" : "asc"));
       } else {
         setSortKey(key);
-        setSortDir(key === "nrr" || key === "ns" || key === "win" || key === "rdy" || key === "idm" || key === "stageIdm" || key === "conv" || key === "comp" || key === "ogaPct" || key === "selHits" || key === "recentHits" || key === "previousNeighbourHits" || key === "previousNeighbourDuplicateHits" || key === "previousNeighbourSingletonHits" || key === "prize" || key?.startsWith("b") ? "desc" : "asc");
+        setSortDir(key === "nrr" || key === "ns" || key === "win" || key === "rdy" || key === "idm" || key === "stageIdm" || key === "conv" || key === "comp" || key === "ogaPct" || key === "selHits" || key === "recentHits" || key === "previousNeighbourHits" || key === "previousNeighbourDuplicateHits" || key === "previousNeighbourDirectionalHits" || key === "prize" || key?.startsWith("b") ? "desc" : "asc");
       }
     };
     const sortIndicator = (key: SortKey): string => (sortKey === key ? (sortDir === "asc" ? " ▲" : " ▼") : "");
@@ -1119,9 +1119,9 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
           va = a.c.previousNeighbourDuplicateHits ?? -Infinity;
           vb = b.c.previousNeighbourDuplicateHits ?? -Infinity;
           break;
-        case "previousNeighbourSingletonHits":
-          va = a.c.previousNeighbourSingletonHits ?? -Infinity;
-          vb = b.c.previousNeighbourSingletonHits ?? -Infinity;
+        case "previousNeighbourDirectionalHits":
+          va = a.c.previousNeighbourDirectionalHits ?? -Infinity;
+          vb = b.c.previousNeighbourDirectionalHits ?? -Infinity;
           break;
         case "oddEven":
           va = numsA.filter((n: number) => n % 2 === 1).length;
@@ -1782,7 +1782,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
        if (!exportData.length) return;
        const headers = [
          "#", "Main (6)", "Supp (2)", "Prize", "Odd/Even",
-         "Comp%", "OGA Raw", "OGA%", "SelHits", "RecentHits", "Prev±1", "Dup±1", "Sing±1",
+         "Comp%", "OGA Raw", "OGA%", "SelHits", "RecentHits", "Prev±2", "Dup±2", "Dir±2",
          "0x", "1x", "2x", "3x", "4x", "5x", "6x", "7x", "8x+",
           "Conv", "IDM", "StageIDM", "Rdy", "Win", "WinTier", "Nrr", "NS",
         ];
@@ -1814,7 +1814,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
            recentHits,
            c.previousNeighbourHits ?? "",
            c.previousNeighbourDuplicateHits ?? "",
-           c.previousNeighbourSingletonHits ?? "",
+           c.previousNeighbourDirectionalPattern ?? "",
            bc ? bc.undrawn : "",
            bc ? bc.times1 : "",
            bc ? bc.times2 : "",
@@ -2779,23 +2779,23 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                  <th
                    style={{ ...th, ...sortableStyle }}
                    onClick={() => toggleSort("previousNeighbourHits")}
-                   title="Total candidate numbers that are ±1 from the latest draw. Observe-only diagnostic; generation can separately require user-selected ±1/±2 targets."
+                   title="Total unique candidate numbers that are ±1 or ±2 from the latest draw. Observe-only diagnostic; generation can separately require user-selected ±1/±2 targets."
                  >
-                   Prev±1{sortIndicator("previousNeighbourHits")}
+                   Prev±2{sortIndicator("previousNeighbourHits")}
                  </th>
                  <th
                    style={{ ...th, ...sortableStyle }}
                    onClick={() => toggleSort("previousNeighbourDuplicateHits")}
-                   title="Candidate numbers that are ±1 neighbours of two previous-draw numbers, such as 34 between 33 and 35."
+                   title="Candidate numbers that are duplicated or ambiguous ±1/±2 neighbour targets from more than one latest-draw source/offset."
                  >
-                   Dup±1{sortIndicator("previousNeighbourDuplicateHits")}
+                   Dup±2{sortIndicator("previousNeighbourDuplicateHits")}
                  </th>
                  <th
                    style={{ ...th, ...sortableStyle }}
-                   onClick={() => toggleSort("previousNeighbourSingletonHits")}
-                   title="Candidate numbers that are ±1 neighbours of exactly one previous-draw number."
+                   onClick={() => toggleSort("previousNeighbourDirectionalHits")}
+                   title="Directional fingerprint as -2/-1/+1/+2 counts. Ambiguous numbers can count in more than one direction."
                  >
-                   Sing±1{sortIndicator("previousNeighbourSingletonHits")}
+                   Dir±2{sortIndicator("previousNeighbourDirectionalHits")}
                  </th>
                  <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("b0x")}>0x{sortIndicator("b0x")}</th>
                  <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("b1x")}>1x{sortIndicator("b1x")}</th>
@@ -2825,7 +2825,8 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                 const recentHits = c.recentHits ?? nums.filter((n: number) => recentSet.has(n)).length;
                 const previousNeighbourHits = c.previousNeighbourHits;
                 const previousNeighbourDuplicateHits = c.previousNeighbourDuplicateHits;
-                const previousNeighbourSingletonHits = c.previousNeighbourSingletonHits;
+                const previousNeighbourDirectionalHits = c.previousNeighbourDirectionalHits;
+                const previousNeighbourDirectionalPattern = c.previousNeighbourDirectionalPattern;
                 const odd = nums.filter((n: number) => n % 2 === 1).length;
                 const even = nums.length - odd;
                 const manualMainHits = nums.filter((n: number) => manualMainSet.has(n)).length;
@@ -2887,7 +2888,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                        borderLeft: isDimmed ? "3px solid #ccc" : undefined,
                      }}
                      onClick={() => onSelectCandidate(i)}
-                     title={`#${i + 1} SelHits=${selHits} RecentHits=${recentHits}${previousNeighbourHits !== undefined ? ` Prev±1=${previousNeighbourHits}` : ""}${previousNeighbourDuplicateHits !== undefined ? ` Dup±1=${previousNeighbourDuplicateHits}` : ""}${previousNeighbourSingletonHits !== undefined ? ` Sing±1=${previousNeighbourSingletonHits}` : ""}${convScore !== null ? ` Conv=${convScore.toFixed(1)}` : ""}${stageIdmScore !== null ? ` StageIDM=${(stageIdmScore * 100).toFixed(1)}%` : ""}`}
+                     title={`#${i + 1} SelHits=${selHits} RecentHits=${recentHits}${previousNeighbourHits !== undefined ? ` Prev±2=${previousNeighbourHits}` : ""}${previousNeighbourDuplicateHits !== undefined ? ` Dup±2=${previousNeighbourDuplicateHits}` : ""}${previousNeighbourDirectionalPattern ? ` Dir±2=${previousNeighbourDirectionalPattern}` : previousNeighbourDirectionalHits !== undefined ? ` Dir±2=${previousNeighbourDirectionalHits}` : ""}${convScore !== null ? ` Conv=${convScore.toFixed(1)}` : ""}${stageIdmScore !== null ? ` StageIDM=${(stageIdmScore * 100).toFixed(1)}%` : ""}`}
                   >
                     <td style={tdCenter}>{displayIdx + 1}</td>
                     <td style={mainTd}>{c.main.map((n: number) => renderNumber(
@@ -2920,9 +2921,13 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                     <td style={tdCenter}>{`${odd}:${even}`}</td>
                    <td style={tdCenter}>{selHits}</td>
                    <td style={tdCenter}>{recentHits}</td>
-                   <td style={tdCenter} title="Total candidate numbers that are ±1 from the latest draw">{previousNeighbourHits ?? "—"}</td>
-                   <td style={tdCenter} title="Candidate numbers that are duplicated ±1 neighbour targets">{previousNeighbourDuplicateHits ?? "—"}</td>
-                   <td style={tdCenter} title="Candidate numbers that are singleton ±1 neighbour targets">{previousNeighbourSingletonHits ?? "—"}</td>
+                   <td style={tdCenter} title="Total unique candidate numbers that are ±1 or ±2 from the latest draw">{previousNeighbourHits ?? "—"}</td>
+                   <td style={tdCenter} title="Candidate numbers that are duplicated or ambiguous ±1/±2 neighbour targets">{previousNeighbourDuplicateHits ?? "—"}</td>
+                   <td style={tdCenter} title={previousNeighbourDirectionalPattern ? `Directional fingerprint: ${previousNeighbourDirectionalPattern}` : "Directional fingerprint as -2/-1/+1/+2 counts"}>
+                     {previousNeighbourDirectionalPattern
+                       ? previousNeighbourDirectionalPattern.replace(/-2:|-1:|\+1:|\+2:/g, "").replace(/\s+/g, "/")
+                       : "—"}
+                   </td>
                    <td style={tdCenter}>{bucketCounts ? bucketCounts.undrawn : "—"}</td>
                    <td style={tdCenter}>{bucketCounts ? bucketCounts.times1 : "—"}</td>
                    <td style={tdCenter}>{bucketCounts ? bucketCounts.times2 : "—"}</td>

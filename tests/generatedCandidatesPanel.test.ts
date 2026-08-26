@@ -452,7 +452,7 @@ describe("GeneratedCandidatesPanel", () => {
     expect(headers).toHaveLength(23);
     expect(headers).toEqual(expect.arrayContaining([
       "#", "Main (6)", "Supp (2)", "Manual (M/S)", "Prize", "Odd/Even",
-      "SelHits", "RecentHits", "Prev±1", "Dup±1", "Sing±1",
+      "SelHits", "RecentHits", "Prev±2", "Dup±2", "Dir±2",
       "0x", "1x", "2x", "3x", "4x", "5x", "6x", "7x", "8x+",
       "Conv", "Stage IDM", "Actions",
     ]));
@@ -625,28 +625,30 @@ describe("GeneratedCandidatesPanel", () => {
     expect(html).toContain("Top 100.0%");
   });
 
-  it("renders previous-draw ±1 neighbour diagnostics as observe-only columns", () => {
+  it("renders previous-draw ±1/±2 neighbour diagnostics as observe-only columns", () => {
     const html = renderToStaticMarkup(
       React.createElement(GeneratedCandidatesPanel, buildProps({
         candidates: [
           {
             main: [20, 5, 34, 22, 13, 14],
             supp: [12, 29],
-            previousNeighbourHits: 3,
-            previousNeighbourDuplicateHits: 1,
-            previousNeighbourSingletonHits: 2,
+            previousNeighbourHits: 6,
+            previousNeighbourDuplicateHits: 2,
+            previousNeighbourDirectionalHits: 8,
+            previousNeighbourDirectionalPattern: "-2:2 -1:2 +1:2 +2:2",
           },
         ],
       })),
     );
 
-    expect(html).toContain("Prev±1");
-    expect(html).toContain("Dup±1");
-    expect(html).toContain("Sing±1");
-    expect(html).toContain("title=\"Total candidate numbers that are ±1 from the latest draw");
-    expect(html).toContain(">3</td>");
-    expect(html).toContain(">1</td>");
+    expect(html).toContain("Prev±2");
+    expect(html).toContain("Dup±2");
+    expect(html).toContain("Dir±2");
+    expect(html).toContain("title=\"Total unique candidate numbers that are ±1 or ±2 from the latest draw");
+    expect(html).toContain("title=\"Directional fingerprint: -2:2 -1:2 +1:2 +2:2");
+    expect(html).toContain(">6</td>");
     expect(html).toContain(">2</td>");
+    expect(html).toContain(">2/2/2/2</td>");
   });
 
   it("updates the virtualized row window only after crossing row-window boundaries", async () => {

@@ -190,6 +190,12 @@ describe("DGAMonthlyBucketStateGrid", () => {
     await expandGrid();
 
     expect(rendered.textContent).toContain("Current-month opacity: 55%");
+    const totalsIndex = rendered.textContent?.indexOf("Pinned current draw-state totals") ?? -1;
+    const opacityIndex = rendered.textContent?.indexOf("Current-month opacity") ?? -1;
+    const gridRowIndex = rendered.textContent?.indexOf("No.2026-06") ?? -1;
+    expect(totalsIndex).toBeGreaterThanOrEqual(0);
+    expect(opacityIndex).toBeGreaterThan(totalsIndex);
+    expect(gridRowIndex).toBeGreaterThan(opacityIndex);
     const opacitySlider = Array.from(rendered.querySelectorAll("input[type='range']")).find((input) =>
       input.closest("label")?.textContent?.includes("Current-month opacity"),
     ) as HTMLInputElement | undefined;
