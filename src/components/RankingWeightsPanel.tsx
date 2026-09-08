@@ -177,19 +177,20 @@ export const RankingWeightsPanel: React.FC<Props> = ({ weights, setWeights, scop
 const panelStyle: React.CSSProperties = {
   border: "1px solid #e1e5ec",
   borderRadius: 8,
-  padding: 12,
+  padding: "9px 10px",
   background: "#ffffff",
-  marginTop: 16,
-  maxWidth: 640
+  marginTop: 10,
+  maxWidth: "none",
 };
 const row: React.CSSProperties = {
-  display: "flex",
-  gap: 18,
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+  gap: 8,
   flexWrap: "wrap",
   fontSize: 12,
   marginBottom: 6
 };
-const inp: React.CSSProperties = { marginLeft: 6, width: 70 };
+const inp: React.CSSProperties = { marginLeft: 6, width: 64 };
 const foot: React.CSSProperties = { marginTop: 4, fontSize: 11, color: "#555", lineHeight: 1.4 };
 const toggleLabel: React.CSSProperties = {
   display: "block",

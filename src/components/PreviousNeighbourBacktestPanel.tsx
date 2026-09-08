@@ -38,6 +38,7 @@ const WARMUP_OPTIONS = [20, 50, 100];
 const POOL_OPTIONS = [100, 200, 500];
 const SELECTED_OPTIONS = [10, 20, 50];
 const DIRECTIONAL_LOOKBACK_OPTIONS = [1, 2] as const;
+const SHORT_DIRECTIONAL_WINDOW_DRAW_THRESHOLD = 30;
 
 const formatNumber = (value: number | null, digits = 2): string => (
   value == null ? "-" : value.toFixed(digits)
@@ -94,6 +95,17 @@ const cardStyle: React.CSSProperties = {
   borderRadius: 8,
   background: "#fff",
   padding: 12,
+};
+
+const thinEvidenceNoticeStyle: React.CSSProperties = {
+  border: "1px solid #c7d2fe",
+  borderRadius: 8,
+  background: "#eef2ff",
+  color: "#3730a3",
+  fontSize: 12,
+  lineHeight: 1.45,
+  padding: "8px 10px",
+  marginBottom: 8,
 };
 
 const selectStyle: React.CSSProperties = {
@@ -160,9 +172,19 @@ const DistributionTable: React.FC<{
 const DirectionalPatternTable: React.FC<{
   title: string;
   rows: PreviousNeighbourDirectionalPatternDistributionRow[];
-}> = ({ title, rows }) => (
+  showShortWindowOneOffNotice?: boolean;
+  validDraws?: number;
+  transitionCount?: number;
+}> = ({ title, rows, showShortWindowOneOffNotice = false, validDraws = 0, transitionCount = 0 }) => (
   <div style={cardStyle}>
     <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 6 }}>{title}</div>
+    {showShortWindowOneOffNotice ? (
+      <div role="note" style={thinEvidenceNoticeStyle}>
+        No repeated fingerprints in this WFMQYH window; all displayed rows occurred once. Try a larger WFMQYH window for recurrence evidence.
+        <br />
+        Current slice: {validDraws} valid draws, {transitionCount} tested transition{transitionCount === 1 ? "" : "s"}.
+      </div>
+    ) : null}
     <div style={{ overflowX: "auto" }}>
       <table style={{ ...miniTableStyle, minWidth: 330 }}>
         <thead>
@@ -613,6 +635,12 @@ const DirectionalPatternLab: React.FC<{
   const helper = analysis.selectionHelper;
   const latest = analysis.latestTransition;
   const topPattern = analysis.topPatterns[0];
+  const showShortWindowOneOffNotice = (
+    analysis.validDraws > 0 &&
+    analysis.validDraws < SHORT_DIRECTIONAL_WINDOW_DRAW_THRESHOLD &&
+    analysis.topPatterns.length > 0 &&
+    analysis.topPatterns.every((row) => row.observed === 1)
+  );
 
   return (
     <div style={{ display: "grid", gap: 10 }}>
@@ -697,7 +725,13 @@ const DirectionalPatternLab: React.FC<{
       ) : null}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 10 }}>
-        <DirectionalPatternTable title="Most common directional fingerprints" rows={analysis.topPatterns} />
+        <DirectionalPatternTable
+          title="Most common directional fingerprints"
+          rows={analysis.topPatterns}
+          showShortWindowOneOffNotice={showShortWindowOneOffNotice}
+          validDraws={analysis.validDraws}
+          transitionCount={analysis.transitionCount}
+        />
         <DirectionalGroupTable title="By draw ordinal" rows={analysis.byDrawOrdinal} />
         <DirectionalGroupTable title="By weekday" rows={analysis.byWeekday} />
       </div>

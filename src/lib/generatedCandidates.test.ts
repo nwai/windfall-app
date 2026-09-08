@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildHistoricalPrizeBacktest,
+  formatCandidateRowsForPasteWeightedGenerator,
   selectRowsForCandidateExport,
   type GeneratedCandidateViewRow,
 } from "./generatedCandidates";
@@ -23,6 +24,19 @@ describe("selectRowsForCandidateExport", () => {
 
   it("exports all visible rows when candidate filtering is inactive", () => {
     expect(selectRowsForCandidateExport(rows, false).map((row) => row.origIdx)).toEqual([0, 1, 2]);
+  });
+});
+
+describe("formatCandidateRowsForPasteWeightedGenerator", () => {
+  it("exports generated rows as mains plus supplementary values when available", () => {
+    const rows: GeneratedCandidateViewRow<CandidateSet>[] = [
+      { c: candidate([1, 2, 3, 4, 5, 6], [22, 28]), origIdx: 0 },
+      { c: candidate([7, 8, 9, 10, 11, 12], []), origIdx: 1 },
+    ];
+
+    expect(formatCandidateRowsForPasteWeightedGenerator(rows)).toBe(
+      "1,2,3,4,5,6,22,28\n7,8,9,10,11,12",
+    );
   });
 });
 

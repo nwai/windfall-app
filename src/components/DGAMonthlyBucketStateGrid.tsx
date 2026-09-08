@@ -258,7 +258,8 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
   const hoveredColumn = gridColumns.find((column) => column.key === hoveredColumnKey) ?? null;
   const activeSummaryColumn = hoveredColumnKey ? hoveredColumn : fallbackSummaryColumn;
   const activeSummary = activeSummaryColumn?.state ? columnSummaryByKey.get(activeSummaryColumn.key) ?? null : null;
-  const columnWidth = cellSize + 6;
+  const resolvedCellSize = Math.max(18, Math.floor(cellSize));
+  const columnWidth = resolvedCellSize + 6;
   const hasActiveStripSelection = normalizedSelectedNumbers.length > 0;
 
   if (!currentEntry || orderedTimeline.length === 0) return null;
@@ -283,7 +284,7 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
           justifyContent: "space-between",
           alignItems: "center",
           gap: 12,
-          padding: "10px 12px",
+          padding: "8px 12px",
           border: "none",
           borderBottom: expanded ? "1px solid #dbe3ef" : "none",
           background: expanded ? "#eef6ff" : "transparent",
@@ -293,7 +294,7 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
         }}
         aria-expanded={expanded}
       >
-        <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+        <span style={{ display: "flex", flexDirection: "column", gap: 1, minWidth: 0 }}>
           <strong style={{ color: "#0f172a" }}>Monthly bucket state grid</strong>
           <span style={{ color: "#64748b", fontSize: 12 }}>
               {orderedTimeline.length} month{orderedTimeline.length === 1 ? "" : "s"} · current strip month {currentEntry.monthLabel} · {currentDrawCountLabel}
@@ -312,12 +313,10 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
         </div>
       ) : (
         <>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline", flexWrap: "wrap", margin: "10px 12px 8px" }}>
-        <div>
-          <div style={{ color: "#64748b", fontSize: 12, marginTop: 2 }}>
-            45 rows by month and scheduled draw slot. The current month is grouped first; each month runs latest scheduled slot on the left down to draw 1 on the right.
-            {hasActiveStripSelection ? " Selected strip numbers keep a tick in the row label while the grid stays fully readable." : ""}
-          </div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap", margin: "6px 12px 5px" }}>
+        <div style={{ color: "#64748b", fontSize: 12 }}>
+          45 rows · newest scheduled draw slot at left · current month pinned first
+          {hasActiveStripSelection ? " · selected rows marked with a tick" : ""}
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", justifyContent: "flex-end" }}>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
@@ -328,7 +327,7 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
                   display: "inline-flex",
                   alignItems: "center",
                   gap: 5,
-                  padding: "2px 6px",
+                  padding: "1px 6px",
                   borderRadius: 999,
                   background: colorForTimes(times),
                   color: "#fff",
@@ -357,8 +356,8 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
         <div
           aria-label={`Current month draw-slot x-axis for ${currentAxisGroup.entry.monthLabel}`}
           style={{
-            margin: "0 12px 10px",
-            padding: "8px 10px",
+            margin: "0 12px 6px",
+            padding: "4px 6px",
             border: "1px solid #cfe3ff",
             borderRadius: 8,
             background: "#f8fbff",
@@ -401,8 +400,8 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
                   title={drawSlotTitle(currentAxisGroup.entry, column.slotNumber, column.state)}
                   style={{
                     flex: "0 0 auto",
-                    minWidth: 28,
-                    height: 24,
+                    minWidth: columnWidth,
+                    height: 20,
                     display: "inline-flex",
                     alignItems: "center",
                     justifyContent: "center",
@@ -423,43 +422,52 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
         </div>
       ) : null}
 
-      <div
+      <details
         style={{
-          margin: "0 12px 10px",
-          padding: 10,
+          margin: "0 12px 6px",
+          padding: "4px 6px",
           border: "1px solid #dbe3ef",
           borderRadius: 8,
           background: "#f8fafc",
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-          gap: 8,
           fontSize: 12,
           color: "#334155",
         }}
       >
-        <div><strong>Rows:</strong> numbers 1–45.</div>
-        <div><strong>Columns:</strong> scheduled 13/14-to-1 draw slots inside each month, keeping future blanks to the left.</div>
-        <div><strong>Current month group:</strong> the current strip month stays first.</div>
-        <div><strong>Header chip:</strong> recorded or simulated draw slot over calculated month capacity.</div>
-        <div><strong>Left colour rail:</strong> current strip colour for each number.</div>
-        <div><strong>Cell colour:</strong> the bucket that number occupied after that recorded or simulated slot.</div>
-        <div><strong>Blank slots:</strong> scheduled future slots with no recorded state yet.</div>
-        <div><strong>Strip focus:</strong> active strip selections add a tick beside the matching row label.</div>
-        <div><strong>Hover totals:</strong> hover any populated draw header or cell to see that draw-state column’s bucket totals.</div>
-        <div><strong>Hover link:</strong> hover a strip number or grid row to spotlight the same number in both places.</div>
-      </div>
+        <summary style={{ cursor: "pointer", color: "#0d47a1", fontWeight: 800 }}>
+          How to read this grid
+        </summary>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+            gap: 8,
+            marginTop: 8,
+          }}
+        >
+          <div><strong>Rows:</strong> numbers 1-45.</div>
+          <div><strong>Columns:</strong> scheduled 13/14-to-1 draw slots inside each month, keeping future blanks to the left.</div>
+          <div><strong>Current month group:</strong> the current strip month stays first.</div>
+          <div><strong>Header chip:</strong> recorded or simulated draw slot over calculated month capacity.</div>
+          <div><strong>Left colour rail:</strong> current strip colour for each number.</div>
+          <div><strong>Cell colour:</strong> the bucket that number occupied after that recorded or simulated slot.</div>
+          <div><strong>Blank slots:</strong> scheduled future slots with no recorded state yet.</div>
+          <div><strong>Strip focus:</strong> active strip selections add a tick beside the matching row label.</div>
+          <div><strong>Hover totals:</strong> hover any populated draw header or cell to see that draw-state column’s bucket totals.</div>
+          <div><strong>Hover link:</strong> hover a strip number or grid row to spotlight the same number in both places.</div>
+        </div>
+      </details>
 
       <div
         style={{
-          margin: "0 12px 10px",
-          padding: 10,
+          margin: "0 12px 6px",
+          padding: 6,
           border: "1px solid #bfdbfe",
           borderRadius: 8,
           background: hoveredColumnKey ? "#eff6ff" : "#f8fafc",
           boxShadow: "inset 0 1px 0 rgba(255,255,255,0.72)",
         }}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 0 }}>
             <strong style={{ color: hoveredColumnKey ? "#0d47a1" : "#0f172a" }}>
               {hoveredColumnKey ? "Hovered draw-state totals" : "Pinned current draw-state totals"}
@@ -485,7 +493,7 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
               </span>
             ) : null}
           </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 5, alignItems: "center" }}>
             {activeSummary ? activeSummary.bucketCounts.map(({ times, label, count }) => (
               <span
                 key={`${activeSummaryColumn?.key ?? "none"}-${times}`}
@@ -493,7 +501,7 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
                   display: "inline-flex",
                   alignItems: "center",
                   gap: 5,
-                  padding: "2px 7px",
+                  padding: "1px 7px",
                   borderRadius: 999,
                   background: colorForTimes(times),
                   color: "#fff",
@@ -516,8 +524,8 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
       <div
         aria-label="Current month grid opacity control"
         style={{
-          margin: "0 12px 10px",
-          padding: 10,
+          margin: "0 12px 6px",
+          padding: 6,
           border: "1px solid #cfe3ff",
           borderRadius: 8,
           background: "linear-gradient(180deg, #f8fbff 0%, #ffffff 100%)",
@@ -527,7 +535,7 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
         <label
           style={{
             display: "grid",
-            gap: 6,
+            gap: 5,
             fontSize: 12,
             color: "#334155",
           }}
@@ -553,8 +561,8 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
       {normalizedSelectedNumbers.length > 0 ? (
         <div
           style={{
-            margin: "0 12px 10px",
-            padding: 10,
+          margin: "0 12px 6px",
+          padding: 6,
             border: "1px solid #bfdbfe",
             borderRadius: 8,
             background: "linear-gradient(180deg, #eff6ff 0%, #f8fbff 100%)",
@@ -612,7 +620,7 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
             No scheduled draw-slot columns are available for the current monthly bucket timeline.
           </div>
         ) : (
-          <table style={{ borderCollapse: "collapse", fontSize: 11, width: "max-content", minWidth: "100%" }}>
+          <table className="windfall-table--custom-layout" style={{ borderCollapse: "collapse", fontSize: 11, width: "max-content", minWidth: "100%" }}>
             <thead>
               <tr>
                 <th
@@ -624,7 +632,7 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
                     background: "#f8fafc",
                     borderBottom: "1px solid #dbe3ef",
                     borderRight: "1px solid #dbe3ef",
-                    padding: "4px 6px",
+                    padding: "3px 6px",
                     width: ROW_LABEL_WIDTH,
                     minWidth: ROW_LABEL_WIDTH,
                     maxWidth: ROW_LABEL_WIDTH,
@@ -652,7 +660,7 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
                         borderRight: isCurrent ? "2px solid #1565c0" : "1px solid #edf2f7",
                         background: isCurrent ? "#e3f2fd" : "#f8fafc",
                         color: isCurrent ? "#0d47a1" : "#334155",
-                        padding: "4px 6px",
+                        padding: "3px 6px",
                         boxShadow: isCurrent ? "4px 0 10px rgba(15,23,42,0.08)" : undefined,
                         textAlign: "center",
                       }}
@@ -700,7 +708,7 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
                           zIndex: isCurrent ? 5 : 2,
                           width: columnWidth,
                           minWidth: columnWidth,
-                          height: 38,
+                          height: 28,
                           borderBottom: "1px solid #dbe3ef",
                           borderLeft: DRAW_SLOT_COLUMN_BORDER,
                           borderRight: DRAW_SLOT_COLUMN_BORDER,
@@ -750,7 +758,7 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
                           borderRight: "1px solid #dbe3ef",
                           borderBottom: "1px solid #edf2f7",
                           padding: "0 6px",
-                          height: cellSize,
+                          height: resolvedCellSize,
                           width: ROW_LABEL_WIDTH,
                           minWidth: ROW_LABEL_WIDTH,
                           maxWidth: ROW_LABEL_WIDTH,
@@ -798,7 +806,7 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
                             zIndex: isCurrent ? 3 : 1,
                             width: columnWidth,
                             minWidth: columnWidth,
-                            height: cellSize,
+                            height: resolvedCellSize,
                             background: state ? colorForTimes(times ?? 0, isCurrent ? normalizedCellOpacity : undefined) : "#f8fafc",
                             borderLeft: DRAW_SLOT_COLUMN_BORDER,
                             borderRight: DRAW_SLOT_COLUMN_BORDER,

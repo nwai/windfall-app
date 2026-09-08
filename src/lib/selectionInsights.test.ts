@@ -4,12 +4,17 @@ import {
   buildSelectionInsightPredictedCompanions,
   buildSelectionInsightsAnalytics,
   buildSelectionInsightsSnapshot,
+  mergeSelectionInsightAnchorNumbers,
 } from "./selectionInsights";
 import type { Draw } from "../types";
 
 const draw = (date: string, main: number[], supp: number[] = []): Draw => ({ date, main, supp });
 
 describe("selectionInsights", () => {
+  it("merges manual selections with forced inclusion anchors", () => {
+    expect(mergeSelectionInsightAnchorNumbers([18, 7, 18], [4, 7], null, [46, 3])).toEqual([3, 4, 7, 18]);
+  });
+
   it("keeps all observed companion numbers instead of capping the list at 12", () => {
     const history: Draw[] = [];
     for (let companion = 2; companion <= 45; companion += 3) {

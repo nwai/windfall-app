@@ -9,6 +9,7 @@ import {
   createEmptyMonthlyBucketSets,
   MONTHLY_BUCKET_KEYS,
   projectMonthlyBucketCounts,
+  resolveMonthlyStageDrawContext,
 } from "./monthlyDrawSummary";
 
 const draw = (date: string, main: number[], supp: number[] = []): Draw => ({
@@ -160,6 +161,29 @@ describe("analyzeMonthlyDrawSummary", () => {
     expect(summary.rows.find((row) => row.monthLabel === "2026-06")?.totalDrawCount).toBe(13);
     expect(summary.effectiveMonthLabel).toBe("2026-07");
     expect(summary.rows.find((row) => row.monthLabel === "2026-07")?.totalDrawCount).toBe(14);
+  });
+
+  it("resolves stage draw context even when Stage IDM has no comparable rows", () => {
+    const mondayWednesdayFriday = [1, 3, 5];
+    const history = [
+      ...repeatDraws("2026-05", 2, 30),
+      ...weekdayDraws("2026-06", mondayWednesdayFriday, 1),
+    ];
+
+    const stageContext = resolveMonthlyStageDrawContext(history, {
+      today: new Date("2026-06-30T12:00:00"),
+    });
+
+    expect(analyzeStageIdealDrawModel(history, {
+      today: new Date("2026-06-30T12:00:00"),
+    })).toBeNull();
+    expect(stageContext).toMatchObject({
+      workingMonthLabel: "2026-07",
+      expectedDrawCount: 14,
+      completedDrawCount: 0,
+      targetStageDrawCount: 1,
+      expectedDrawCountSource: "auto",
+    });
   });
 
   it("deduplicates numbers within a draw and reports invalid input instead of overcounting", () => {
@@ -395,7 +419,7 @@ describe("analyzeStageMatchAcceptancePlaybook", () => {
     expect(playbook?.rows.every((row) => row.historicalDistribution.reduce((sum, count) => sum + count, 0) === 45)).toBe(true);
   });
 
-  it("returns one best row per target undrawn count with support counts", () => {
+  it("returns multiple strongest rows per target undrawn count with support counts", () => {
     const playbook = analyzeStageMatchAcceptancePlaybook([
       ...repeatDraws("2026-01", 13, 1),
       ...repeatDraws("2026-03", 13, 1),
@@ -406,9 +430,11 @@ describe("analyzeStageMatchAcceptancePlaybook", () => {
     });
 
     expect(playbook).not.toBeNull();
-    expect(playbook?.rows).toHaveLength(1);
-    expect(playbook?.rows[0].supportCount).toBe(2);
-    expect(playbook?.rows[0].sameUndrawnMonthLabels).toEqual(["2026-03", "2026-01"]);
+    expect(playbook?.rows).toHaveLength(2);
+    expect(playbook?.rows.map((row) => row.variantRank)).toEqual([1, 2]);
+    expect(playbook?.rows.every((row) => row.totalUndrawnVariantCount === 2)).toBe(true);
+    expect(playbook?.rows.every((row) => row.supportCount === 2)).toBe(true);
+    expect(playbook?.rows.every((row) => row.sameUndrawnMonthLabels.join(",") === "2026-03,2026-01")).toBe(true);
   });
 });
 

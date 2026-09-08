@@ -150,6 +150,14 @@ export interface StageIdealDrawState {
   warnings: string[];
 }
 
+export interface MonthlyStageDrawContext {
+  workingMonthLabel: string;
+  expectedDrawCount: number;
+  targetStageDrawCount: number;
+  completedDrawCount: number;
+  expectedDrawCountSource: ExpectedDrawCountSource;
+}
+
 export interface StageMatchAcceptancePlaybookRow {
   targetUndrawnCount: number;
   historicalMonthLabel: string;
@@ -160,6 +168,8 @@ export interface StageMatchAcceptancePlaybookRow {
   scoreAfter: number;
   exactBucketHits: number;
   exact: boolean;
+  variantRank: number;
+  totalUndrawnVariantCount: number;
   supportCount: number;
   totalComparableCount: number;
   sameUndrawnMonthLabels: string[];
@@ -210,6 +220,7 @@ interface ParsedDraw {
 const DEFAULT_MAX_NUMBER = 45;
 const DEFAULT_MAX_BUCKET = 8;
 const DEFAULT_DRAW_SIZE = 8;
+const MAX_STAGE_MATCH_VARIANTS_PER_UNDRAWN = 3;
 const ISO_DATE_RE = /^\s*(\d{4})-(\d{1,2})-(\d{1,2})/;
 const SLASH_DATE_RE = /^\s*(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s*$/;
 
@@ -527,6 +538,66 @@ export function analyzeMonthlyDrawSummary(
   };
 }
 
+export function resolveMonthlyStageDrawContext(
+  history: Draw[],
+  args: AnalyzeStageIdealDrawArgs = {},
+): MonthlyStageDrawContext | null {
+  const includeSupp = args.includeSupp ?? true;
+  const maxNumber = normalizePositiveInteger(args.maxNumber, DEFAULT_MAX_NUMBER);
+  const maxBucket = normalizePositiveInteger(args.maxBucket, DEFAULT_MAX_BUCKET);
+  const drawSize = normalizePositiveInteger(args.drawSize, DEFAULT_DRAW_SIZE);
+  const parsed = parseHistoryForMonthlyAnalysis(history, { includeSupp, maxNumber });
+  if (!parsed.length) return null;
+
+  const grouped = groupParsedDrawsByMonth(parsed);
+  const maxObservedDrawsPerMonth = Math.max(1, ...[...grouped.values()].map((items) => items.length));
+  const fullRows = buildRowsFromParsedDraws({
+    parsed,
+    drawLimit: maxObservedDrawsPerMonth,
+    maxNumber,
+    maxBucket,
+    drawSize,
+  });
+
+  const todayMonthLabel = monthLabelFromLocalDate(args.today ?? new Date());
+  const resolvedWorkingMonth = resolveEffectiveMonthState({
+    rows: fullRows,
+    todayMonthLabel,
+    maxObservedDrawsPerMonth,
+    maxNumber,
+    maxBucket,
+    expectedDrawCountForMonth: (monthLabel) => expectedDrawCountFromRhythmOrFallback({
+      parsed,
+      monthLabel,
+      fallback: maxObservedDrawsPerMonth,
+    }),
+  }).monthLabel;
+  const workingMonthLabel = args.forceWorkingMonthLabel || resolvedWorkingMonth;
+  if (!workingMonthLabel) return null;
+
+  const workingItems = grouped.get(workingMonthLabel) ?? [];
+  const completedDrawCount = workingItems.length;
+  const override = args.expectedDrawCountOverride;
+  const inferredExpectedDrawCount = override && override !== "auto"
+    ? Math.max(1, Math.floor(override))
+    : expectedDrawCountFromRhythmOrFallback({
+      parsed,
+      monthLabel: workingMonthLabel,
+      fallback: maxObservedDrawsPerMonth,
+    });
+  const expectedDrawCount = Math.max(1, inferredExpectedDrawCount);
+  const targetStageDrawCount = Math.min(completedDrawCount + 1, expectedDrawCount);
+  const expectedDrawCountSource: ExpectedDrawCountSource = override && override !== "auto" ? "override" : "auto";
+
+  return {
+    workingMonthLabel,
+    expectedDrawCount,
+    targetStageDrawCount,
+    completedDrawCount,
+    expectedDrawCountSource,
+  };
+}
+
 export function analyzeStageIdealDrawModel(
   history: Draw[],
   args: AnalyzeStageIdealDrawArgs = {},
@@ -755,41 +826,43 @@ export function analyzeStageMatchAcceptancePlaybook(
     supportByUndrawn.set(candidate.targetUndrawnCount, labels);
   }
 
-  const bestByUndrawn = new Map<number, typeof candidates[number]>();
+  const candidatesByUndrawn = new Map<number, Array<typeof candidates[number]>>();
   for (const candidate of candidates) {
-    const previous = bestByUndrawn.get(candidate.targetUndrawnCount);
-    if (
-      !previous ||
-      candidate.scoreAfter < previous.scoreAfter ||
-      (candidate.scoreAfter === previous.scoreAfter && candidate.exactBucketHits > previous.exactBucketHits) ||
-      (
-        candidate.scoreAfter === previous.scoreAfter &&
-        candidate.exactBucketHits === previous.exactBucketHits &&
-        candidate.historicalMonthLabel.localeCompare(previous.historicalMonthLabel) > 0
-      )
-    ) {
-      bestByUndrawn.set(candidate.targetUndrawnCount, candidate);
-    }
+    const rows = candidatesByUndrawn.get(candidate.targetUndrawnCount) ?? [];
+    rows.push(candidate);
+    candidatesByUndrawn.set(candidate.targetUndrawnCount, rows);
   }
 
-  const rows: StageMatchAcceptancePlaybookRow[] = [...bestByUndrawn.values()]
-    .map((candidate) => {
-      const labels = supportByUndrawn.get(candidate.targetUndrawnCount) ?? [];
-      return {
-        ...candidate,
-        supportCount: labels.length,
-        totalComparableCount: comparableItems.length,
-        sameUndrawnMonthLabels: [...labels].sort((left, right) => right.localeCompare(left)),
-      };
-    })
-    .sort((left, right) => (
-      left.targetUndrawnCount - right.targetUndrawnCount ||
-      left.scoreAfter - right.scoreAfter ||
-      right.historicalMonthLabel.localeCompare(left.historicalMonthLabel)
-    ));
+  const rows: StageMatchAcceptancePlaybookRow[] = [];
+  for (const [targetUndrawnCount, groupRows] of [...candidatesByUndrawn.entries()].sort(([left], [right]) => left - right)) {
+    const sortedGroup = groupRows
+      .slice()
+      .sort((left, right) => (
+        left.scoreAfter - right.scoreAfter ||
+        right.exactBucketHits - left.exactBucketHits ||
+        left.scoreBefore - right.scoreBefore ||
+        right.historicalMonthLabel.localeCompare(left.historicalMonthLabel)
+      ));
+    const labels = supportByUndrawn.get(targetUndrawnCount) ?? [];
+    sortedGroup
+      .slice(0, MAX_STAGE_MATCH_VARIANTS_PER_UNDRAWN)
+      .forEach((candidate, index) => {
+        rows.push({
+          ...candidate,
+          variantRank: index + 1,
+          totalUndrawnVariantCount: sortedGroup.length,
+          supportCount: labels.length,
+          totalComparableCount: comparableItems.length,
+          sameUndrawnMonthLabels: [...labels].sort((left, right) => right.localeCompare(left)),
+        });
+      });
+  }
 
   if (rows.some((row) => !row.exact)) {
     warnings.push("Nearest rows appear where the historical stage cannot be matched exactly in one draw from the current bucket state.");
+  }
+  if (candidates.length > rows.length) {
+    warnings.push(`Stage-Match now shows up to ${MAX_STAGE_MATCH_VARIANTS_PER_UNDRAWN} strongest historical paths per target undrawn count; lower-ranked paths are hidden to keep the table usable.`);
   }
 
   return {

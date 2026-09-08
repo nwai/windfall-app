@@ -51,6 +51,7 @@ describe("truthfulness wording guards", () => {
     const temperatureSource = readProjectFile("src/components/TemperatureTransitionPanel.tsx");
     const churnSource = readProjectFile("src/components/ChurnPredictor.tsx");
     const returnSource = readProjectFile("src/components/ReturnPredictor.tsx");
+    const gapDispersionSource = readProjectFile("src/components/SurvivalFrailtyPanel.tsx");
     const appSource = readProjectFile("src/App.tsx");
     const ttpDocs = readProjectFile("src/docs/TTP.md");
     const zpaDocs = readProjectFile("src/docs/ZPA.md");
@@ -89,7 +90,13 @@ describe("truthfulness wording guards", () => {
     expect(returnSource).toContain("Train & Score");
 
     expect(appSource).not.toContain("Advanced Survival Analysis & Churn/Return Prediction Models");
-    expect(appSource).toContain("Advanced Survival Analysis & Churn/Return Diagnostic Models");
+    expect(appSource).toContain("Advanced Survival &amp; State Diagnostics");
+    expect(appSource).not.toContain("<ChurnPredictor");
+    expect(appSource).not.toContain("<ReturnPredictor");
+    expect(appSource).not.toContain("<ConsensusPanel");
+    expect(gapDispersionSource).toContain("Recurrent Gap Dispersion Diagnostic");
+    expect(gapDispersionSource).toContain("not a fitted gamma-frailty model");
+    expect(gapDispersionSource).not.toContain("nextEventProb");
   });
 
   it("renames next-draw probabilities to empirical diagnostics and avoids calibrated probability wording", () => {

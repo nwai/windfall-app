@@ -1,6 +1,8 @@
 import type { Draw } from "../types";
 import {
   analyzeLatestNeighbourSupport,
+  LATEST_NEIGHBOUR_SUPPORT_MODE_LABELS,
+  latestNeighbourSupportTraceTag,
   type LatestNeighbourSupportOptions,
 } from "./latestNeighbourSupport";
 import type {
@@ -44,6 +46,7 @@ export interface LatestNeighbourStageMatchCompatibilityOptions {
   excludedNumbers?: readonly number[];
   planningLastDrawOverride?: boolean;
   terminalRuleActive?: LatestNeighbourSupportOptions["terminalRuleActive"];
+  mode?: LatestNeighbourSupportOptions["mode"];
 }
 
 export interface LatestNeighbourStageMatchCompatibilityResult {
@@ -116,12 +119,15 @@ export function buildLatestNeighbourStageMatchCompatibilityTrace(
     excludedNumbers: options.excludedNumbers,
     planningLastDrawOverride: options.planningLastDrawOverride,
     terminalRuleActive: options.terminalRuleActive,
+    mode: options.mode,
   });
   const activeCounts = options.counts;
   const requiredTotal = totalCounts(activeCounts);
   const source = options.countSourceLabel.trim() || "active counts";
   const countText = formatCounts(activeCounts);
-  const prefix = `LD±1 + Stage-Match compatibility: ${analysis.targetNumbers.length} eligible +/-1 target${analysis.targetNumbers.length === 1 ? "" : "s"}`;
+  const traceTag = latestNeighbourSupportTraceTag(analysis.mode);
+  const modeLabel = LATEST_NEIGHBOUR_SUPPORT_MODE_LABELS[analysis.mode].replace(/±/g, "+/-");
+  const prefix = `${traceTag} + Stage-Match compatibility: ${analysis.targetNumbers.length} eligible ${modeLabel} target${analysis.targetNumbers.length === 1 ? "" : "s"}`;
 
   if (!hasPositiveCounts(activeCounts)) {
     return {
@@ -134,7 +140,7 @@ export function buildLatestNeighbourStageMatchCompatibilityTrace(
 
   if (!analysis.active) {
     return {
-      traceLine: `[TRACE] ${prefix}; bucket coverage none; active counts ${countText} (${source}); compatible: no (no eligible LD±1 targets remained).`,
+      traceLine: `[TRACE] ${prefix}; bucket coverage none; active counts ${countText} (${source}); compatible: no (no eligible ${traceTag} targets remained).`,
       compatible: "no",
       eligibleTargetCount: 0,
       bucketCoverage: {},
@@ -178,8 +184,8 @@ export function buildLatestNeighbourStageMatchCompatibilityTrace(
   const reason = compatible
     ? spareSlots > 0
       ? `${spareSlots} spare slot${spareSlots === 1 ? "" : "s"} outside required bucket minimums`
-      : "at least one eligible LD±1 target is inside a required bucket"
-    : "all 8 slots are claimed by bucket counts, and no eligible LD±1 target is inside a required bucket";
+      : `at least one eligible ${traceTag} target is inside a required bucket`
+    : `all 8 slots are claimed by bucket counts, and no eligible ${traceTag} target is inside a required bucket`;
 
   return {
     traceLine: `[TRACE] ${prefix}; bucket coverage ${formatCoverage(coverage, unknownCount)}; active counts ${countText} (${source}); compatible: ${compatible ? "yes" : "no"} (${reason}).`,

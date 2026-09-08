@@ -19,6 +19,7 @@ import { weightedSampleWithoutReplacement } from "./weightedSample";
 const MIN_NUMBER = 1;
 const MAX_NUMBER = 45;
 const MAIN_COUNT = 6;
+const FULL_CANDIDATE_COUNT = 8;
 const MIN_GENERATED_CANDIDATES = 4;
 const MAX_GENERATED_CANDIDATES = 30;
 
@@ -56,9 +57,12 @@ export interface PastedCandidateRow {
   lineNumber: number;
   raw: string;
   numbers: number[];
+  mainNumbers: number[];
+  supplementaryNumbers: number[];
   duplicateNumbers: number[];
   outOfRangeNumbers: number[];
   expectedSixNumbers: boolean;
+  expectedCandidateNumbers: boolean;
 }
 
 export interface PastedCandidateNumberCount {
@@ -325,10 +329,10 @@ const unsatisfiedPasteConstraintWarnings = (
 };
 
 const buildOddEvenRatioOptions = (rows: PastedCandidateRow[]): OddEvenRatioOption[] => {
-  const exactRows = rows.filter((row) => row.expectedSixNumbers);
+  const exactRows = rows.filter((row) => row.expectedCandidateNumbers && row.mainNumbers.length === MAIN_COUNT);
   const ratioCounts = new Map<string, number>();
   for (const row of exactRows) {
-    const ratio = oddEvenRatioForNumbers(row.numbers);
+    const ratio = oddEvenRatioForNumbers(row.mainNumbers);
     ratioCounts.set(ratio, (ratioCounts.get(ratio) ?? 0) + 1);
   }
   const total = exactRows.length;
@@ -476,9 +480,15 @@ export function parsePastedCandidateNumbers(input: string): PastedCandidateParse
       lineNumber: index + 1,
       raw,
       numbers,
+      mainNumbers: numbers.slice(0, MAIN_COUNT),
+      supplementaryNumbers: numbers.slice(MAIN_COUNT, FULL_CANDIDATE_COUNT),
       duplicateNumbers: [...duplicateSet].sort((left, right) => left - right),
       outOfRangeNumbers,
       expectedSixNumbers: numbers.length === MAIN_COUNT && outOfRangeNumbers.length === 0,
+      expectedCandidateNumbers: (
+        (numbers.length === MAIN_COUNT || numbers.length === FULL_CANDIDATE_COUNT)
+        && outOfRangeNumbers.length === 0
+      ),
     });
   });
 

@@ -18,6 +18,10 @@ describe("DGA drought hazard truthfulness wording", () => {
     expect(appSource).not.toContain("Most likely to break a drought next draw");
     expect(panelSource).toContain("Smoothed appearance rate");
     expect(panelSource).toContain("Observed hits / trials");
+    expect(panelSource).toContain("Replay scope: source split");
+    expect(panelSource).toContain("Replay-only");
+    expect(panelSource).toContain("does not recalculate the Strict drought or Empirical hazard shortlist above");
+    expect(panelSource).toContain("Drought source split replay scope");
     expect(heatmapSource).toContain("Smoothed drought-break appearance rate");
     expect(heatmapSource).not.toContain("Break-drought chance next draw");
   });

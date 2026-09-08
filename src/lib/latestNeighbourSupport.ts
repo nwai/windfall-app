@@ -5,6 +5,18 @@ import type { MonthlyBucketKey } from "./monthlyDrawSummary";
 
 export const LATEST_NEIGHBOUR_SUPPORT_TRACE_TAG = "LD±1";
 
+export type LatestNeighbourSupportMode = "pm1" | "pm1pm2";
+export type LatestNeighbourOffset = -2 | -1 | 1 | 2;
+
+export const LATEST_NEIGHBOUR_SUPPORT_MODE_LABELS: Record<LatestNeighbourSupportMode, string> = {
+  pm1: "±1",
+  pm1pm2: "±1/±2",
+};
+
+export const latestNeighbourSupportTraceTag = (mode: LatestNeighbourSupportMode): string => (
+  mode === "pm1pm2" ? "LD±1/±2" : LATEST_NEIGHBOUR_SUPPORT_TRACE_TAG
+);
+
 type TerminalCoordinationDigit = 0 | 5;
 
 export interface LatestNeighbourMonthlyBucketSets {
@@ -21,6 +33,7 @@ export interface LatestNeighbourMonthlyBucketSets {
 
 export interface LatestNeighbourSupportOptions {
   enabled?: boolean;
+  mode?: LatestNeighbourSupportMode;
   recentWindow?: number;
   maxRecentConsecutiveHits?: number;
   droughtDisqualifyThreshold?: number;
@@ -35,7 +48,7 @@ export interface LatestNeighbourSupportTarget {
   number: number;
   terminalDigit: number;
   sourceNumbers: number[];
-  offsets: Array<-1 | 1>;
+  offsets: LatestNeighbourOffset[];
   recentConsecutiveHits: number;
   droughtLength: number;
   bucketLabel: string | null;
@@ -63,6 +76,8 @@ export interface LatestNeighbourSupportAnalysis {
   maxRecentConsecutiveHits: number;
   droughtDisqualifyThreshold: number;
   supportBoostFactor: number;
+  mode: LatestNeighbourSupportMode;
+  offsets: LatestNeighbourOffset[];
   isPlanningLastDraw: boolean;
   traceSummary: string;
 }
@@ -73,6 +88,7 @@ const DEFAULT_RECENT_WINDOW = 10;
 const DEFAULT_MAX_RECENT_CONSECUTIVE_HITS = 7;
 const DEFAULT_DROUGHT_DISQUALIFY_THRESHOLD = 6;
 const DEFAULT_SUPPORT_BOOST_FACTOR = 3;
+const DEFAULT_MODE: LatestNeighbourSupportMode = "pm1";
 const BUCKET_KEYS: MonthlyBucketKey[] = [
   "undrawn",
   "times1",
@@ -134,6 +150,14 @@ const normalizeBoostFactor = (value: unknown): number => {
   if (!Number.isFinite(numeric)) return DEFAULT_SUPPORT_BOOST_FACTOR;
   return Math.max(1, Math.min(10, numeric));
 };
+
+const normalizeMode = (value: unknown): LatestNeighbourSupportMode => (
+  value === "pm1pm2" ? "pm1pm2" : DEFAULT_MODE
+);
+
+const offsetsForMode = (mode: LatestNeighbourSupportMode): LatestNeighbourOffset[] => (
+  mode === "pm1pm2" ? [-2, -1, 1, 2] : [-1, 1]
+);
 
 const monthLabelForEpoch = (epoch: number): string | null => {
   if (!Number.isFinite(epoch) || epoch <= 0) return null;
@@ -245,7 +269,7 @@ const sameTerminalUndrawn = (
 };
 
 const emptyAnalysis = (
-  options: Required<Pick<LatestNeighbourSupportAnalysis, "recentWindow" | "maxRecentConsecutiveHits" | "droughtDisqualifyThreshold" | "supportBoostFactor">>,
+  options: Required<Pick<LatestNeighbourSupportAnalysis, "recentWindow" | "maxRecentConsecutiveHits" | "droughtDisqualifyThreshold" | "supportBoostFactor" | "mode" | "offsets">>,
   enabled: boolean,
 ): LatestNeighbourSupportAnalysis => ({
   enabled,
@@ -260,8 +284,10 @@ const emptyAnalysis = (
   maxRecentConsecutiveHits: options.maxRecentConsecutiveHits,
   droughtDisqualifyThreshold: options.droughtDisqualifyThreshold,
   supportBoostFactor: options.supportBoostFactor,
+  mode: options.mode,
+  offsets: options.offsets,
   isPlanningLastDraw: false,
-  traceSummary: `${LATEST_NEIGHBOUR_SUPPORT_TRACE_TAG} ${enabled ? "skipped: no usable latest draw." : "OFF"}`,
+  traceSummary: `${latestNeighbourSupportTraceTag(options.mode)} ${enabled ? "skipped: no usable latest draw." : "OFF"}`,
 });
 
 export function analyzeLatestNeighbourSupport(
@@ -270,28 +296,30 @@ export function analyzeLatestNeighbourSupport(
   options: LatestNeighbourSupportOptions = {},
 ): LatestNeighbourSupportAnalysis {
   const normalizedOptions = {
+    mode: normalizeMode(options.mode),
     recentWindow: normalizePositiveInteger(options.recentWindow, DEFAULT_RECENT_WINDOW),
     maxRecentConsecutiveHits: normalizeNonNegativeInteger(options.maxRecentConsecutiveHits, DEFAULT_MAX_RECENT_CONSECUTIVE_HITS),
     droughtDisqualifyThreshold: normalizeNonNegativeInteger(options.droughtDisqualifyThreshold, DEFAULT_DROUGHT_DISQUALIFY_THRESHOLD),
     supportBoostFactor: normalizeBoostFactor(options.supportBoostFactor),
   };
+  const activeOffsets = offsetsForMode(normalizedOptions.mode);
   const enabled = !!options.enabled;
-  if (!enabled) return emptyAnalysis(normalizedOptions, false);
+  if (!enabled) return emptyAnalysis({ ...normalizedOptions, offsets: activeOffsets }, false);
 
   const chronologicalHistory = sortDrawsChronologically(history.filter((draw) => !draw.isSimulated));
   const latestDraw = chronologicalHistory[chronologicalHistory.length - 1] ?? null;
   const latestDrawNumbers = numbersForDraw(latestDraw);
   if (!latestDraw || latestDrawNumbers.length === 0) {
-    return emptyAnalysis(normalizedOptions, true);
+    return emptyAnalysis({ ...normalizedOptions, offsets: activeOffsets }, true);
   }
 
   const excludedSet = new Set((options.excludedNumbers ?? []).filter(isValidLotteryNumber));
-  const sourceNumbersByTarget = new Map<number, { sources: Set<number>; offsets: Set<-1 | 1> }>();
+  const sourceNumbersByTarget = new Map<number, { sources: Set<number>; offsets: Set<LatestNeighbourOffset> }>();
   for (const source of latestDrawNumbers) {
-    for (const offset of [-1, 1] as const) {
+    for (const offset of activeOffsets) {
       const target = source + offset;
       if (!isValidLotteryNumber(target)) continue;
-      const entry = sourceNumbersByTarget.get(target) ?? { sources: new Set<number>(), offsets: new Set<-1 | 1>() };
+      const entry = sourceNumbersByTarget.get(target) ?? { sources: new Set<number>(), offsets: new Set<LatestNeighbourOffset>() };
       entry.sources.add(source);
       entry.offsets.add(offset);
       sourceNumbersByTarget.set(target, entry);
@@ -376,7 +404,8 @@ export function analyzeLatestNeighbourSupport(
   targets.sort((left, right) => right.score - left.score || left.number - right.number);
   const targetNumbers = targets.map((target) => target.number);
   if (!monthlyBuckets) warnings.push("monthly bucket state unavailable; terminal-family drought screen skipped");
-  if (targetNumbers.length === 0) warnings.push("no eligible latest ±1 targets remained after exclusions/screens; hard rule skipped");
+  const modeLabel = LATEST_NEIGHBOUR_SUPPORT_MODE_LABELS[normalizedOptions.mode];
+  if (targetNumbers.length === 0) warnings.push(`no eligible latest ${modeLabel} targets remained after exclusions/screens; hard rule skipped`);
 
   const eligiblePreview = targets
     .slice(0, 12)
@@ -387,9 +416,9 @@ export function analyzeLatestNeighbourSupport(
     .map((item) => `${item.number}:${item.reason}`)
     .join(" | ");
   const traceSummary = [
-    `${LATEST_NEIGHBOUR_SUPPORT_TRACE_TAG} ${targetNumbers.length > 0 ? "ON" : "skipped"}`,
+    `${latestNeighbourSupportTraceTag(normalizedOptions.mode)} ${targetNumbers.length > 0 ? "ON" : "skipped"}`,
     `latest ${latestDraw.date || "unknown"}`,
-    `requires ≥1 eligible ±1 target`,
+    `requires ≥1 eligible ${modeLabel} target`,
     `eligible ${targetNumbers.length}${eligiblePreview ? ` [${eligiblePreview}]` : ""}`,
     `disqualified ${disqualified.length}${disqualifiedPreview ? ` [${disqualifiedPreview}]` : ""}`,
     `recent streak cap ${normalizedOptions.maxRecentConsecutiveHits}/${normalizedOptions.recentWindow}`,
@@ -409,6 +438,8 @@ export function analyzeLatestNeighbourSupport(
     maxRecentConsecutiveHits: normalizedOptions.maxRecentConsecutiveHits,
     droughtDisqualifyThreshold: normalizedOptions.droughtDisqualifyThreshold,
     supportBoostFactor: normalizedOptions.supportBoostFactor,
+    mode: normalizedOptions.mode,
+    offsets: activeOffsets,
     isPlanningLastDraw: planningLastDraw,
     traceSummary,
   };

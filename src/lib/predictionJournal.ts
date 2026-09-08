@@ -30,6 +30,7 @@ export const PREDICTION_JOURNAL_SELECTION_REASON_LABELS = {
   stageMatchAcceptancePlaybook: "Used Stage-Match Acceptance Playbook",
   latestNeighbourMainSix: "Used ± to choose main 6",
   selectionInsights: "Used Selection insights to choose numbers",
+  nextDrawEvidenceEnsemble: "Used Next-Draw Evidence Ensemble",
   officialQuickpickPasteWeighted: "Created official TattsLotto quickpick to generate candidates, then pasted them into Paste-weighted generator",
   other: "Other",
 } as const;
@@ -177,6 +178,7 @@ export interface PredictionJournalProvenance {
     hotCold: number[];
     droughtBreakForced: number[];
     pasteWeightedMissing: number[];
+    signalConfluenceForced: number[];
     carryOverBoosted: number[];
     effectiveGenerationForced: number[];
   };
@@ -434,6 +436,23 @@ const formatSumFilter = (sumFilter: unknown): string | null => {
   return `Sum filter: ${filter.min ?? "-"}-${filter.max ?? "-"}`;
 };
 
+const clampSetupOverlapCount = (value: unknown): number => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.max(0, Math.min(8, Math.trunc(numeric))) : 0;
+};
+
+const formatLastDrawOverlapSetup = (setup: Partial<AppPresetSnapshot> & Record<string, any>): string | null => {
+  const min = clampSetupOverlapCount(setup.minRecentMatches);
+  const maxEnabled = setup.maxLastDrawMatchesEnabled === true;
+  const max = clampSetupOverlapCount(setup.maxLastDrawMatchesValue);
+  if (min === 0 && !maxEnabled) return null;
+  if (maxEnabled && min > 0 && max === min) return `Last-draw overlap: exactly ${min}`;
+  if (maxEnabled && min === 0) return `Last-draw overlap: at most ${max}`;
+  if (!maxEnabled && min > 0) return `Last-draw overlap: at least ${min}`;
+  if (maxEnabled && min > max) return `Last-draw overlap: conflicting ${min}-${max}`;
+  return `Last-draw overlap: between ${min}-${max}`;
+};
+
 const setupBucketLabels: Array<[PredictionBucketKey, string]> = [
   ["undrawn", "0x"],
   ["times1", "1x"],
@@ -644,6 +663,7 @@ export function buildPredictionJournalProvenance(
   const hotCold = setupNumberList(setup, "hotColdForcedNumbers");
   const droughtBreakForced = setupNumberList(setup, "droughtBreakSelectedNumbers");
   const pasteWeightedMissing = setupNumberList(setup, "pasteWeightedForcedNumbers");
+  const signalConfluenceForced = setupNumberList(setup, "signalConfluenceForcedNumbers");
   const carryOverBoosted = setupNumberList(setup, "selectedCarryOverBoostNumbers");
   const effectiveGenerationForced = setupNumberList(setup, "generationForcedNumbers");
   const userExcluded = setupNumberList(setup, "excludedNumbers");
@@ -710,8 +730,9 @@ export function buildPredictionJournalProvenance(
       hotCold,
       droughtBreakForced,
       pasteWeightedMissing,
+      signalConfluenceForced,
       carryOverBoosted,
-      effectiveGenerationForced: effectiveGenerationForced.length ? effectiveGenerationForced : uniqueDraftNumbers(trend, latestNeighbourTargets, hotCold, droughtBreakForced, pasteWeightedMissing, carryOverBoosted),
+      effectiveGenerationForced: effectiveGenerationForced.length ? effectiveGenerationForced : uniqueDraftNumbers(trend, latestNeighbourTargets, hotCold, droughtBreakForced, pasteWeightedMissing, signalConfluenceForced, carryOverBoosted),
     },
     exclusionSources: {
       user: userExcluded,
@@ -800,6 +821,20 @@ const formatStrictDroughtQuotaSetup = (watch: PredictionJournalStrictDroughtQuot
   return `Strict drought quota: SDSR-advised ${watch.active ? `min ${watch.effectiveMin}` : "observe-only"} (${watch.advice.sourceLabel}, ${watch.advice.trials} trials)`;
 };
 
+const formatEmpiricalDroughtQuotaSetup = (setup: Partial<AppPresetSnapshot> & Record<string, any>): string => {
+  const mode = normalizeStrictDroughtQuotaMode(setup.empiricalDroughtQuotaMode);
+  const manualMin = Math.min(8, normalizeInteger(setup.empiricalDroughtQuotaManualMin) ?? 0);
+  const eligibleNumbers = setupNumberList(setup, "empiricalDroughtQuotaEligibleNumbers");
+  const effectiveMin = Math.min(8, eligibleNumbers.length || 8, normalizeInteger(setup.empiricalDroughtQuotaEffectiveMin) ?? (mode === "manual" ? manualMin : 0));
+  if (mode === "off") return "Empirical drought quota: off";
+  if (mode === "manual") {
+    return `Empirical drought quota: manual min ${effectiveMin} from ${eligibleNumbers.length || "unknown"} eligible`;
+  }
+  const sourceLabel = setupString(setup, "empiricalDroughtQuotaAdviceSourceLabel", "Not enough empirical hazard evidence");
+  const trials = normalizeInteger(setup.empiricalDroughtQuotaAdviceTrials) ?? 0;
+  return `Empirical drought quota: hazard-advised ${effectiveMin > 0 ? `min ${effectiveMin}` : "observe-only"} (${sourceLabel}, ${trials} trials)`;
+};
+
 const positiveBucketCounts = (counts: PredictionBucketCounts | undefined): PredictionBucketCounts | undefined => {
   if (!counts) return undefined;
   const output: PredictionBucketCounts = {};
@@ -865,6 +900,7 @@ export function buildPredictionJournalDraftFromSetup(snapshot: AppPresetSnapshot
   const hotColdForced = normalizeNumberList(setup.hotColdForcedNumbers, 1, 45) ?? [];
   const droughtForced = normalizeNumberList(setup.droughtBreakSelectedNumbers, 1, 45) ?? [];
   const pasteWeightedForced = normalizeNumberList(setup.pasteWeightedForcedNumbers, 1, 45) ?? [];
+  const signalConfluenceForced = normalizeNumberList(setup.signalConfluenceForcedNumbers, 1, 45) ?? [];
   const carryOverBoosted = normalizeNumberList(setup.selectedCarryOverBoostNumbers, 1, 45) ?? [];
   const userExcluded = normalizeNumberList(setup.excludedNumbers, 1, 45) ?? [];
   const hotColdExcluded = normalizeNumberList(setup.hotColdExcludedNumbers, 1, 45) ?? [];
@@ -887,7 +923,7 @@ export function buildPredictionJournalDraftFromSetup(snapshot: AppPresetSnapshot
   const dgaPairActiveCoverage = normalizeInteger(setup.dgaSuppPairActiveCoverage);
   const dgaPairFullCoverage = normalizeInteger(setup.dgaSuppPairFullCoverage);
   const dgaPairTotalCoverage = normalizeInteger(setup.dgaSuppPairTotalCoverage);
-  const forcedUnion = uniqueDraftNumbers(trendForced, latestNeighbourForced, hotColdForced, droughtForced, pasteWeightedForced, carryOverBoosted);
+  const forcedUnion = uniqueDraftNumbers(trendForced, latestNeighbourForced, hotColdForced, droughtForced, pasteWeightedForced, signalConfluenceForced, carryOverBoosted);
   const effectiveForced = normalizeNumberList(setup.generationForcedNumbers, 1, 45) ?? forcedUnion;
   const candidateNumbers = uniqueDraftNumbers(userSelected, forcedUnion);
   const dgaSuggestedLine = uniqueDraftNumbers(dgaSuggestedMain, dgaSuggestedSupp);
@@ -953,7 +989,7 @@ export function buildPredictionJournalDraftFromSetup(snapshot: AppPresetSnapshot
   notes.push(`SDE1: ${knobs.enableSDE1 ? `ON; exclusions ${formatDraftNumbers(sde1Excluded)}` : "OFF"}.`);
   notes.push(`HC3: ${knobs.enableHC3 ? `ON; exclusions ${formatDraftNumbers(hc3Excluded)}` : "OFF"}.`);
   notes.push(`User selected numbers: ${formatDraftNumbers(userSelected)}.`);
-  notes.push(`Forced/boosted inclusion sources: trend ${formatDraftNumbers(trendForced)}; latest +/- targets ${formatDraftNumbers(latestNeighbourForced)}; hot/cold ${formatDraftNumbers(hotColdForced)}; drought-break ${formatDraftNumbers(droughtForced)}; paste-weighted missing ${formatDraftNumbers(pasteWeightedForced)}; carry-over boosted ${formatDraftNumbers(carryOverBoosted)}.`);
+  notes.push(`Forced/boosted inclusion sources: trend ${formatDraftNumbers(trendForced)}; latest +/- targets ${formatDraftNumbers(latestNeighbourForced)}; hot/cold ${formatDraftNumbers(hotColdForced)}; drought-break ${formatDraftNumbers(droughtForced)}; paste-weighted missing ${formatDraftNumbers(pasteWeightedForced)}; Signal Confluence ${formatDraftNumbers(signalConfluenceForced)}; carry-over boosted ${formatDraftNumbers(carryOverBoosted)}.`);
   notes.push(`Effective generation forced numbers: ${formatDraftNumbers(effectiveForced)}.`);
   notes.push(`Exclusion sources: user ${formatDraftNumbers(userExcluded)}; hot/cold ${formatDraftNumbers(hotColdExcluded)}; auto-unselected ${formatDraftNumbers(autoSelectionExcluded)}; main-bucket auto ${formatDraftNumbers(bucketAutoExcluded)}; SDE1 ${formatDraftNumbers(sde1Excluded)}; HC3 ${formatDraftNumbers(hc3Excluded)}.`);
   notes.push(`Effective generation exclusions: ${formatDraftNumbers(allExcluded)}.`);
@@ -990,8 +1026,9 @@ export function summarizePredictionJournalSetup(snapshot: AppPresetSnapshot | nu
   const generation: string[] = [
     `Scoring influence: ${setup.scoringGenerationInfluence ?? "off"}`,
     formatD1TerminalMomentumSetup(setup),
-    `Latest +/-1 support: ${setup.latestNeighbourSupportEnabled ? "on" : "off"}`,
+    `Latest ${setup.latestNeighbourSupportMode === "pm1pm2" ? "+/-1/+/-2" : "+/-1"} support: ${setup.latestNeighbourSupportEnabled ? "on" : "off"}`,
     formatStrictDroughtQuotaSetup(strictDroughtQuota),
+    formatEmpiricalDroughtQuotaSetup(setup),
     `Month-end carry-over: ${setup.monthEndCarryOverBiasEnabled ? (setup.monthEndCarryOverStrength ?? "normal") : "off"}`,
     `Use counts when constructing candidates: ${setup.monthlyConstructiveEnabled ? "on" : "off"}`,
     `Acceptance needs counts: ${formatAcceptanceNeedsCounts(setup.acceptanceNeedsCounts)}`,
@@ -1004,7 +1041,8 @@ export function summarizePredictionJournalSetup(snapshot: AppPresetSnapshot | nu
   const sumFilter = formatSumFilter(setup.sumFilter);
   if (sumFilter) filters.push(sumFilter);
   if (setup.digitWidthConstraintEnabled) filters.push(`Digit width: ${setup.digitWidthSingleDigitPercent ?? "-"}%`);
-  if (setup.maxLastDrawMatchesEnabled) filters.push(`Max last-draw matches: ${setup.maxLastDrawMatchesValue ?? "-"}`);
+  const lastDrawOverlap = formatLastDrawOverlapSetup(setup);
+  if (lastDrawOverlap) filters.push(lastDrawOverlap);
   if (countList(setup.previousNeighbourConstraintNumbers) > 0) {
     filters.push(`Previous +/- targets: ${countList(setup.previousNeighbourConstraintNumbers)}`);
   }
@@ -1017,6 +1055,7 @@ export function summarizePredictionJournalSetup(snapshot: AppPresetSnapshot | nu
     [setup.hotColdExcludedNumbers, "Hot/cold excluded"],
     [setup.droughtBreakSelectedNumbers, "Drought-break forced"],
     [setup.pasteWeightedForcedNumbers, "Paste-weighted forced"],
+    [setup.signalConfluenceForcedNumbers, "Signal Confluence forced"],
     [setup.selectedCarryOverBoostNumbers, "Carry-over boosted"],
     [setup.generationForcedNumbers, "Effective generation forced"],
     [setup.allExcludedNumbers, "Effective generation exclusions"],

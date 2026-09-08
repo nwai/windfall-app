@@ -295,7 +295,7 @@ export function summarizeResearchDiarySetup(snapshot: AppPresetSnapshot | null |
   const knobs = (setup.knobs && typeof setup.knobs === "object" ? setup.knobs : {}) as Record<string, unknown>;
   const generation = [
     `Scoring influence: ${setup.scoringGenerationInfluence ?? "off"}`,
-    `Latest +/-1 support: ${setup.latestNeighbourSupportEnabled ? "on" : "off"}`,
+    `Latest ${setup.latestNeighbourSupportMode === "pm1pm2" ? "+/-1/+/-2" : "+/-1"} support: ${setup.latestNeighbourSupportEnabled ? "on" : "off"}`,
     `Month-end carry-over: ${setup.monthEndCarryOverBiasEnabled ? (setup.monthEndCarryOverStrength ?? "normal") : "off"}`,
     `Use counts when constructing candidates: ${setup.monthlyConstructiveEnabled ? "on" : "off"}`,
     `Acceptance needs counts: ${formatAcceptanceNeedsCounts(setup.acceptanceNeedsCounts)}`,
@@ -418,12 +418,13 @@ export function computeResearchDiaryNextDrawContext(
   const today = parseDateParts(options.now ?? new Date()) ?? datePartsFromUtcTime(Date.now());
   const recordedDates = realDrawDates(history);
   const recordedIsoDates = new Set(recordedDates.map(datePartsToIso));
-  const nextDraw = findNextScheduledDrawDate(today, recordedIsoDates);
+  const latestRecorded = recordedDates[recordedDates.length - 1];
+  const searchStart = latestRecorded ? addDays(latestRecorded, 1) : today;
+  const nextDraw = findNextScheduledDrawDate(searchStart, recordedIsoDates);
   const nextDrawIso = datePartsToIso(nextDraw);
   const monthKey = monthKeyFromParts(nextDraw);
   const monthDrawCount = countScheduledDrawsInMonth(nextDraw.year, nextDraw.month);
   const drawOrdinal = countScheduledDrawsInMonth(nextDraw.year, nextDraw.month, nextDraw.day);
-  const latestRecorded = recordedDates[recordedDates.length - 1];
   const nextDrawTime = datePartsToUtcTime(nextDraw);
   const recordedDrawsInTargetMonth = recordedDates.filter((parts) => (
     monthKeyFromParts(parts) === monthKey && datePartsToUtcTime(parts) < nextDrawTime

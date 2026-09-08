@@ -15,6 +15,7 @@ import {
   type DrawBucketPatternStats,
 } from "../lib/drawBucketPatterns";
 import { forecastDrawBucketMonth, type BucketHitForecast } from "../lib/drawBucketMonthForecast";
+import type { DrawBucketPatternGenerationInfluenceRow } from "../lib/drawBucketPatternInfluence";
 import { getMostRecentDraw } from "../lib/recentDraws";
 
 type HeatmapTone = "past" | "current";
@@ -38,6 +39,9 @@ export interface DrawBucketPatternPanelProps {
   planningMonthLabel?: string;
   planningMonthExpectedDrawCount?: number;
   planningMonthIsReset?: boolean;
+  generationInfluenceEnabled?: boolean;
+  onGenerationInfluenceEnabledChange?: (enabled: boolean) => void;
+  onGenerationInfluenceRowsChange?: (rows: DrawBucketPatternGenerationInfluenceRow[]) => void;
 }
 
 const getHeatmapCellColors = (
@@ -660,6 +664,9 @@ export const DrawBucketPatternPanel: React.FC<DrawBucketPatternPanelProps> = ({
   planningMonthLabel,
   planningMonthExpectedDrawCount,
   planningMonthIsReset = false,
+  generationInfluenceEnabled = false,
+  onGenerationInfluenceEnabledChange,
+  onGenerationInfluenceRowsChange,
 }) => {
   const [includeSupp, setIncludeSupp] = useState<boolean>(true);
   const [sortMode, setSortMode] = useState<DrawBucketPatternSortMode>("overall");
@@ -758,6 +765,20 @@ export const DrawBucketPatternPanel: React.FC<DrawBucketPatternPanelProps> = ({
     [sortMode, stats],
   );
 
+  const generationInfluenceRows = useMemo<DrawBucketPatternGenerationInfluenceRow[]>(
+    () => leaderboardRows.map((row) => ({
+      key: row.stat.key,
+      label: row.stat.label,
+      numbers: row.stat.numbers,
+      recentAverageHits: row.recentAverageHits,
+    })),
+    [leaderboardRows],
+  );
+
+  useEffect(() => {
+    onGenerationInfluenceRowsChange?.(generationInfluenceRows);
+  }, [generationInfluenceRows, onGenerationInfluenceRowsChange]);
+
   const sortedStats = useMemo(
     () => leaderboardRows.map((row) => row.stat),
     [leaderboardRows],
@@ -855,6 +876,17 @@ export const DrawBucketPatternPanel: React.FC<DrawBucketPatternPanelProps> = ({
             />
             Include supp (main + supp)
           </label>
+          <label
+            style={{ fontSize: 12, color: "#444", display: "inline-flex", alignItems: "center", gap: 6 }}
+            title={`Softly weights candidate generation by the leaderboard's Recent avg (${recentWindowSize}) values. This is not a hard filter or probability.`}
+          >
+            <input
+              type="checkbox"
+              checked={generationInfluenceEnabled}
+              onChange={(e) => onGenerationInfluenceEnabledChange?.(e.target.checked)}
+            />
+            Use leaderboard boost
+          </label>
           <label style={{ fontSize: 12, color: "#444" }}>
             Sort by:
             <select
@@ -914,6 +946,9 @@ export const DrawBucketPatternPanel: React.FC<DrawBucketPatternPanelProps> = ({
         </span>
         <span style={summaryChip} title="Forecast cells fill blank active-month slots using month-summary, overlap, ending-sequence, and 1-digit/2-digit signals from historical months.">
           Forecast: <b>{showForecast ? `${forecastedSlotCount} slot${forecastedSlotCount === 1 ? "" : "s"}` : "off"}</b>
+        </span>
+        <span style={summaryChip} title={`When on, candidate generation uses Recent avg (${recentWindowSize}) from this leaderboard as a soft terminal-digit boost before strict filters run.`}>
+          Generation boost: <b>{generationInfluenceEnabled ? "on" : "off"}</b>
         </span>
       </div>
       {currentMonthForecast?.warnings.length ? (

@@ -22,16 +22,16 @@ const knobs: Knobs = {
 
 type ForcedCandidateOptions = {
   div5Options?: { maxMainCount?: number };
-  mainZeroOptions?: { maxCount?: number; boost?: number; singleDigitBoost?: number; twoDigitBoost?: number };
-  mainFiveOptions?: { maxCount?: number; boost?: number; singleDigitBoost?: number; twoDigitBoost?: number };
-  mainOneOptions?: { maxCount?: number; boost?: number; singleDigitBoost?: number; twoDigitBoost?: number };
-  mainTwoOptions?: { maxCount?: number; boost?: number; singleDigitBoost?: number; twoDigitBoost?: number };
-  mainThreeOptions?: { maxCount?: number; boost?: number; singleDigitBoost?: number; twoDigitBoost?: number };
-  mainFourOptions?: { maxCount?: number; boost?: number; singleDigitBoost?: number; twoDigitBoost?: number };
-  mainSixOptions?: { maxCount?: number; boost?: number; singleDigitBoost?: number; twoDigitBoost?: number };
-  mainSevenOptions?: { maxCount?: number; boost?: number; singleDigitBoost?: number; twoDigitBoost?: number };
-  mainEightOptions?: { maxCount?: number; boost?: number; singleDigitBoost?: number; twoDigitBoost?: number };
-  mainNineOptions?: { maxCount?: number; boost?: number; singleDigitBoost?: number; twoDigitBoost?: number };
+  mainZeroOptions?: { maxCount?: number; countMode?: "atLeast" | "exactly" | "atMost"; targetCount?: number; boost?: number; singleDigitBoost?: number; twoDigitBoost?: number };
+  mainFiveOptions?: { maxCount?: number; countMode?: "atLeast" | "exactly" | "atMost"; targetCount?: number; boost?: number; singleDigitBoost?: number; twoDigitBoost?: number };
+  mainOneOptions?: { maxCount?: number; countMode?: "atLeast" | "exactly" | "atMost"; targetCount?: number; boost?: number; singleDigitBoost?: number; twoDigitBoost?: number };
+  mainTwoOptions?: { maxCount?: number; countMode?: "atLeast" | "exactly" | "atMost"; targetCount?: number; boost?: number; singleDigitBoost?: number; twoDigitBoost?: number };
+  mainThreeOptions?: { maxCount?: number; countMode?: "atLeast" | "exactly" | "atMost"; targetCount?: number; boost?: number; singleDigitBoost?: number; twoDigitBoost?: number };
+  mainFourOptions?: { maxCount?: number; countMode?: "atLeast" | "exactly" | "atMost"; targetCount?: number; boost?: number; singleDigitBoost?: number; twoDigitBoost?: number };
+  mainSixOptions?: { maxCount?: number; countMode?: "atLeast" | "exactly" | "atMost"; targetCount?: number; boost?: number; singleDigitBoost?: number; twoDigitBoost?: number };
+  mainSevenOptions?: { maxCount?: number; countMode?: "atLeast" | "exactly" | "atMost"; targetCount?: number; boost?: number; singleDigitBoost?: number; twoDigitBoost?: number };
+  mainEightOptions?: { maxCount?: number; countMode?: "atLeast" | "exactly" | "atMost"; targetCount?: number; boost?: number; singleDigitBoost?: number; twoDigitBoost?: number };
+  mainNineOptions?: { maxCount?: number; countMode?: "atLeast" | "exactly" | "atMost"; targetCount?: number; boost?: number; singleDigitBoost?: number; twoDigitBoost?: number };
   mainDecadeBiases?: Partial<Record<"decade0x" | "decade1x" | "decade2x" | "decade3x" | "decade4x", number>>;
   digitWidthConstraint?: { enabled?: boolean; singleDigitPercent?: number; scope?: "main" | "mainAndSupp" };
 };
@@ -356,6 +356,40 @@ describe("generateCandidates OGA bias decile acceptance", () => {
     const res = generateForcedCandidate(history, forced, { mainOneOptions: { maxCount: 2 } });
     expect(res.candidates).toHaveLength(1);
     expect(res.candidates[0].main.filter((n) => n % 10 === 1)).toHaveLength(1);
+  });
+
+  it("requires the exact selected terminal-digit count when countMode is exactly", () => {
+    const history: Draw[] = [
+      draw([1, 2, 3, 4, 5, 6], [7, 8]),
+      draw([9, 10, 11, 12, 13, 14], [15, 16]),
+    ];
+    const passing = generateForcedCandidate(history, [2, 12, 1, 3, 4, 5, 6, 7], {
+      mainTwoOptions: { countMode: "exactly", targetCount: 2 },
+    });
+    const failing = generateForcedCandidate(history, [2, 1, 3, 4, 5, 6, 7, 8], {
+      mainTwoOptions: { countMode: "exactly", targetCount: 2 },
+    });
+
+    expect(passing.candidates).toHaveLength(1);
+    expect(failing.candidates).toHaveLength(0);
+    expect(failing.rejectionStats.mainTwoSet).toBeGreaterThan(0);
+  });
+
+  it("requires at least the selected terminal-digit count when countMode is atLeast", () => {
+    const history: Draw[] = [
+      draw([1, 2, 3, 4, 5, 6], [7, 8]),
+      draw([9, 10, 11, 12, 13, 14], [15, 16]),
+    ];
+    const passing = generateForcedCandidate(history, [2, 12, 1, 3, 4, 5, 6, 7], {
+      mainTwoOptions: { countMode: "atLeast", targetCount: 2 },
+    });
+    const failing = generateForcedCandidate(history, [2, 1, 3, 4, 5, 6, 7, 8], {
+      mainTwoOptions: { countMode: "atLeast", targetCount: 2 },
+    });
+
+    expect(passing.candidates).toHaveLength(1);
+    expect(failing.candidates).toHaveLength(0);
+    expect(failing.rejectionStats.mainTwoSet).toBeGreaterThan(0);
   });
 
   it("applies a single-digit-only main digit boost even when the max-allowed toggle is off", () => {

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { buildDrawSlotAxisLabels } from "../src/components/TemperatureHeatmap";
+import {
+  buildDrawSlotAxisLabels,
+  getTemperatureOverlayBucketIndex,
+  getTemperatureOverlayLetter,
+} from "../src/components/TemperatureHeatmap";
 import type { Draw } from "../src/types";
 
 const draw = (date: string, isSimulated = false): Draw => ({
@@ -21,5 +25,16 @@ describe("TemperatureHeatmap draw-slot x-axis labels", () => {
     ]);
 
     expect(labels).toEqual(["1", "2", "1", "2", "3"]);
+  });
+});
+
+describe("TemperatureHeatmap observe-only temperature badges", () => {
+  it("maps temperature values into compact and detailed badge letters", () => {
+    expect(getTemperatureOverlayLetter(getTemperatureOverlayBucketIndex(0.02), "detailed")).toBe("pR");
+    expect(getTemperatureOverlayLetter(getTemperatureOverlayBucketIndex(0.52), "compact")).toBe("N");
+    expect(getTemperatureOverlayLetter(getTemperatureOverlayBucketIndex(0.72), "detailed")).toBe("H");
+    expect(getTemperatureOverlayLetter(getTemperatureOverlayBucketIndex(0.72), "compact")).toBe("H");
+    expect(getTemperatureOverlayLetter(getTemperatureOverlayBucketIndex(0.99), "detailed")).toBe("V");
+    expect(getTemperatureOverlayLetter(7, "off")).toBe("");
   });
 });

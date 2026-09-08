@@ -1,0 +1,426 @@
+.ndee-panel {
+  color: #1d1d1f;
+  font-family: Helvetica, Arial, system-ui, sans-serif;
+}
+
+.ndee-intro-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 4px 0 14px;
+}
+
+.ndee-intro-copy {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  max-width: 820px;
+}
+
+.ndee-intro-copy p,
+.ndee-verdict p {
+  margin: 0;
+  color: #515154;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.ndee-observe-badge {
+  flex: 0 0 auto;
+  border: 1px solid #73777f;
+  border-radius: 999px;
+  padding: 3px 8px;
+  color: #3a3a3c;
+  background: #f5f5f7;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.ndee-empty-state {
+  border-top: 1px solid #d2d2d7;
+  padding: 18px 0 6px;
+  color: #6e6e73;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.ndee-results {
+  display: grid;
+  gap: 14px;
+}
+
+.ndee-provenance-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  border-top: 1px solid #d2d2d7;
+  border-bottom: 1px solid #d2d2d7;
+  padding: 9px 0;
+  color: #515154;
+  font-size: 12px;
+}
+
+.ndee-warning,
+.ndee-conflict-note {
+  border-left: 3px solid #b25b00;
+  background: #fff8ed;
+  padding: 9px 11px;
+  color: #6e3b00;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.ndee-primary-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(250px, 0.65fr);
+  gap: 12px;
+}
+
+.ndee-forecast-band,
+.ndee-verdict {
+  border: 1px solid #d2d2d7;
+  border-radius: 8px;
+  padding: 14px;
+  background: #fff;
+}
+
+.ndee-verdict {
+  border-left-width: 5px;
+}
+
+.ndee-verdict--supported-lift {
+  border-left-color: #16844a;
+  background: #f3fbf6;
+}
+
+.ndee-verdict--no-validated-lift {
+  border-left-color: #a86600;
+  background: #fffaf0;
+}
+
+.ndee-verdict--insufficient {
+  border-left-color: #6e6e73;
+  background: #f5f5f7;
+}
+
+.ndee-section-kicker {
+  margin-bottom: 8px;
+  color: #6e6e73;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.ndee-verdict-title {
+  margin-bottom: 6px;
+  font-size: 19px;
+  font-weight: 800;
+  line-height: 1.15;
+}
+
+.ndee-verdict-meta {
+  margin-top: 10px;
+  color: #6e6e73;
+  font-size: 11px;
+}
+
+.ndee-role-row {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.ndee-role-label {
+  color: #515154;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ndee-number-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.ndee-number-pill,
+.ndee-mini-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.ndee-number-pill {
+  min-width: 38px;
+  height: 38px;
+  padding: 0 8px;
+  border: 2px solid currentColor;
+  font-size: 15px;
+}
+
+.ndee-number-pill--main,
+.ndee-mini-number--main {
+  color: #9e1725;
+  background: #fff0f2;
+}
+
+.ndee-number-pill--supp,
+.ndee-mini-number--supp {
+  color: #126d3e;
+  background: #eaf8f0;
+}
+
+.ndee-mini-number--alternate {
+  color: #515154;
+  background: #f2f2f4;
+}
+
+.ndee-mini-number {
+  min-width: 28px;
+  height: 28px;
+  padding: 0 5px;
+  font-size: 12px;
+}
+
+.ndee-alternates {
+  margin-top: 11px;
+  color: #515154;
+  font-size: 12px;
+}
+
+.ndee-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.ndee-action-message {
+  margin-top: 9px;
+  color: #126d3e;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ndee-conflict-note {
+  margin-top: 10px;
+}
+
+.ndee-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(105px, 1fr));
+  border-top: 1px solid #d2d2d7;
+  border-bottom: 1px solid #d2d2d7;
+}
+
+.ndee-metric {
+  min-width: 0;
+  padding: 12px 10px;
+  border-right: 1px solid #e5e5ea;
+}
+
+.ndee-metric:last-child {
+  border-right: 0;
+}
+
+.ndee-metric-label {
+  color: #6e6e73;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.ndee-metric-value {
+  margin-top: 4px;
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.ndee-metric-detail {
+  margin-top: 5px;
+  color: #8e8e93;
+  font-size: 10px;
+}
+
+.ndee-comparison-band {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px 18px;
+  padding: 11px 13px;
+  background: #f5f5f7;
+  border-radius: 6px;
+  color: #3a3a3c;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.ndee-two-column {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(260px, 0.6fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.ndee-data-section {
+  min-width: 0;
+}
+
+.ndee-section-title {
+  margin-bottom: 3px;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.ndee-section-note {
+  min-height: 32px;
+  margin-bottom: 7px;
+  color: #6e6e73;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.ndee-table-scroll {
+  overflow: auto;
+  border: 1px solid #d2d2d7;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.ndee-table-scroll--ranking {
+  max-height: 430px;
+}
+
+.ndee-table-scroll--pairs {
+  max-height: 430px;
+}
+
+.ndee-table-scroll--audit {
+  max-height: 340px;
+}
+
+.ndee-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.ndee-table th,
+.ndee-table td {
+  padding: 7px 8px;
+  border-bottom: 1px solid #ececef;
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+
+.ndee-table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #f5f5f7;
+  color: #3a3a3c;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.ndee-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.ndee-table tbody tr:hover td {
+  background: #f8f8fa;
+}
+
+.ndee-driver-cell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  white-space: normal;
+  min-width: 270px;
+}
+
+.ndee-driver--positive {
+  color: #126d3e;
+}
+
+.ndee-driver--negative {
+  color: #9e1725;
+}
+
+.ndee-methodology {
+  border-top: 1px solid #d2d2d7;
+  padding-top: 10px;
+  color: #515154;
+  font-size: 12px;
+}
+
+.ndee-methodology summary {
+  min-height: 32px;
+  cursor: pointer;
+  color: #1d1d1f;
+  font-weight: 800;
+}
+
+.ndee-methodology ul {
+  margin: 5px 0 0;
+  padding-left: 20px;
+  line-height: 1.5;
+}
+
+@media (max-width: 980px) {
+  .ndee-metrics-grid {
+    grid-template-columns: repeat(3, minmax(105px, 1fr));
+  }
+
+  .ndee-metric:nth-child(3) {
+    border-right: 0;
+  }
+
+  .ndee-metric:nth-child(-n + 3) {
+    border-bottom: 1px solid #e5e5ea;
+  }
+
+  .ndee-two-column {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 700px) {
+  .ndee-intro-row,
+  .ndee-intro-copy {
+    flex-direction: column;
+  }
+
+  .ndee-primary-grid,
+  .ndee-comparison-band {
+    grid-template-columns: 1fr;
+  }
+
+  .ndee-metrics-grid {
+    grid-template-columns: repeat(2, minmax(100px, 1fr));
+  }
+
+  .ndee-metric,
+  .ndee-metric:nth-child(3) {
+    border-right: 1px solid #e5e5ea;
+    border-bottom: 1px solid #e5e5ea;
+  }
+
+  .ndee-metric:nth-child(even) {
+    border-right: 0;
+  }
+
+  .ndee-role-row {
+    grid-template-columns: 1fr;
+  }
+}

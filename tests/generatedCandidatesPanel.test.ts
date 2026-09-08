@@ -159,6 +159,56 @@ describe("GeneratedCandidatesPanel", () => {
     expect(document.body.textContent).toContain("exactly 7");
   });
 
+  it("lets the manual prize checker request saving a complete 8-number row as the next draw", async () => {
+    const onSaveManualAsNextDraw = vi.fn();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    try {
+      await act(async () => {
+        root.render(React.createElement(GeneratedCandidatesPanel, buildProps({
+          manualSimSelected: [1, 2, 3, 4, 5, 6, 7, 8],
+          manualNextDrawDate: "2026-09-04",
+          onSaveManualAsNextDraw,
+        })));
+      });
+
+      const button = Array.from(container.querySelectorAll("button"))
+        .find((candidate) => candidate.textContent?.includes("Save as Next Draw")) as HTMLButtonElement | undefined;
+      expect(button).toBeTruthy();
+      expect(button?.disabled).toBe(false);
+      expect(button?.getAttribute("title")).toContain("2026-09-04");
+
+      await act(async () => {
+        button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+
+      expect(onSaveManualAsNextDraw).toHaveBeenCalledWith([1, 2, 3, 4, 5, 6, 7, 8]);
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
+  it("disables Save as Next Draw until Manual Prize Check has 8 numbers", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(GeneratedCandidatesPanel, buildProps({
+        manualSimSelected: [1, 2, 3, 4, 5, 6, 7],
+        manualNextDrawDate: "2026-09-04",
+        onSaveManualAsNextDraw: vi.fn(),
+      })),
+    );
+    const document = new DOMParser().parseFromString(html, "text/html");
+    const button = Array.from(document.querySelectorAll("button"))
+      .find((candidate) => candidate.textContent?.includes("Save as Next Draw"));
+
+    expect(button?.getAttribute("disabled")).toBe("");
+    expect(button?.getAttribute("title")).toContain("Select 8 numbers");
+  });
+
   it("shows a stop-and-partial button only while generation is running", () => {
     const idleHtml = renderToStaticMarkup(
       React.createElement(GeneratedCandidatesPanel, buildProps({
@@ -229,7 +279,7 @@ describe("GeneratedCandidatesPanel", () => {
     }
   });
 
-  it("copies generated candidate mains as paste-weighted comma-separated rows", async () => {
+  it("copies generated candidate rows as paste-weighted comma-separated evidence rows", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     const originalClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
     Object.defineProperty(navigator, "clipboard", {
@@ -248,7 +298,7 @@ describe("GeneratedCandidatesPanel", () => {
       });
 
       const copyButton = container.querySelector(
-        'button[aria-label="Copy generated candidate mains as comma-separated rows for the Paste-Weighted Candidate Generator"]',
+        'button[aria-label="Copy generated candidate rows as comma-separated rows for the Paste-Weighted Candidate Generator"]',
       ) as HTMLButtonElement | null;
       expect(copyButton).not.toBeNull();
 
@@ -257,8 +307,8 @@ describe("GeneratedCandidatesPanel", () => {
         await Promise.resolve();
       });
 
-      expect(writeText).toHaveBeenCalledWith("1,2,3,4,5,6\n9,10,11,12,13,14");
-      expect(container.textContent).toContain("Copied 2 candidate main rows");
+      expect(writeText).toHaveBeenCalledWith("1,2,3,4,5,6,7,8\n9,10,11,12,13,14,15,16");
+      expect(container.textContent).toContain("Copied 2 candidate rows");
     } finally {
       await act(async () => {
         root.unmount();

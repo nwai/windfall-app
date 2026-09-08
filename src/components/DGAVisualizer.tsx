@@ -1650,7 +1650,7 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
 
   const renderGrid = () => (
     <div ref={scrollShellRef} style={{ overflowX: 'auto', border: 0, boxShadow: gridLineShadow('#ccc'), background: '#fff' }}>
-      <table key={tableKey} style={{ borderCollapse: 'collapse', fontSize: 13 }}>
+      <table className="windfall-table--custom-layout" key={tableKey} style={{ borderCollapse: 'collapse', fontSize: 13 }}>
         <thead>
           <tr>
             <th

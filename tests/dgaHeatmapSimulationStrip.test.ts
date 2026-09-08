@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 const readAppSource = () => readFileSync(resolve(process.cwd(), "src/App.tsx"), "utf8");
 const readDgaVisualizerSource = () => readFileSync(resolve(process.cwd(), "src/components/DGAVisualizer.tsx"), "utf8");
+const readDgaNumberStripsSource = () => readFileSync(resolve(process.cwd(), "src/components/DGANumberStrips.tsx"), "utf8");
 
 describe("DGA heatmap simulation strip wiring", () => {
   it("uses the shared user-selected numbers in every DGA user selection strip", () => {
@@ -39,16 +40,15 @@ describe("DGA heatmap simulation strip wiring", () => {
 
   it("exposes Scoring System Numbers diagnostic ranks through hover and accessibility text", () => {
     const appSource = readAppSource();
+    const stripSource = readDgaNumberStripsSource();
     const rankMapStart = appSource.indexOf("const dgaScoringNumberDiagnostics = useMemo");
-    const stripStart = appSource.indexOf("const DGASimulateStrip: React.FC<DGASimulateStripProps>");
-    const stripBlock = appSource.slice(stripStart, appSource.indexOf("};\n\n// UserExclusionsStrip", stripStart));
 
     expect(rankMapStart).toBeGreaterThanOrEqual(0);
     expect(appSource.slice(rankMapStart, appSource.indexOf("const drawHistoryProvenance", rankMapStart))).toContain("scoringGenerationProfile.numberScores");
-    expect(stripBlock).toContain("Numbers diagnostic rank #");
-    expect(stripBlock).toContain("diagnostic support, not probability");
-    expect(stripBlock).not.toContain("#{diagnostic.rank}");
-    expect(stripBlock).toContain("Numbers diagnostic rank ${diagnostic.rank} of 45");
+    expect(stripSource).toContain("Numbers diagnostic rank #");
+    expect(stripSource).toContain("diagnostic support, not probability");
+    expect(stripSource).not.toContain("#{diagnostic.rank}");
+    expect(stripSource).toContain("Numbers diagnostic rank ${diagnostic.rank} of 45");
   });
 
   it("can mirror DGA strip selections into the latest draw ±1/±2 constraint builder", () => {
@@ -146,14 +146,20 @@ describe("DGA heatmap simulation strip wiring", () => {
 
   it("keeps the DGA return Back button outside the grid card body", () => {
     const appSource = readAppSource();
-    const dgaGridRefStart = appSource.indexOf("<div ref={dgaGridRef}");
-    const cardStart = appSource.indexOf("<InlineCollapsibleCard", dgaGridRefStart);
-    const beforeCardBlock = appSource.slice(dgaGridRefStart, cardStart);
+    const gridStart = appSource.indexOf('title="DGA grid"');
+    const visualizerStart = appSource.indexOf("<DGAVisualizer", gridStart);
+    const visualizerEnd = appSource.indexOf("</InlineCollapsibleCard>", visualizerStart);
+    const visualizerBlock = appSource.slice(visualizerStart, visualizerEnd);
 
-    expect(dgaGridRefStart).toBeGreaterThanOrEqual(0);
-    expect(cardStart).toBeGreaterThan(dgaGridRefStart);
-    expect(beforeCardBlock).toContain("simScrollOriginY !== null");
-    expect(beforeCardBlock).toContain("scrollBackToOrigin");
-    expect(beforeCardBlock).toContain("↑ Back");
+    expect(gridStart).toBeGreaterThanOrEqual(0);
+    expect(visualizerStart).toBeGreaterThan(gridStart);
+    expect(visualizerEnd).toBeGreaterThan(visualizerStart);
+    expect(visualizerBlock).toContain("gridToolbar={simScrollOriginY !== null");
+    expect(visualizerBlock).toContain("scrollBackToOrigin");
+    expect(visualizerBlock).toContain("↑ Back");
+
+    const visualizerSource = readDgaVisualizerSource();
+    expect(visualizerSource).toContain("{gridToolbar ? <div style={{ margin: '8px 0' }}>{gridToolbar}</div> : null}");
+    expect(visualizerSource.indexOf("{gridToolbar ?")).toBeLessThan(visualizerSource.indexOf("{renderGridWithSidecar()}"));
   });
 });

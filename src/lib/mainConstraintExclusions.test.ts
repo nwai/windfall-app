@@ -84,6 +84,24 @@ describe("deriveMainConstraintExclusions", () => {
     expect(result.excludedNumbers).toEqual([7, 17, 27, 37]);
   });
 
+  it("does not treat exact quota rows as at-most maxima for auto-exclusions", () => {
+    const result = deriveMainConstraintExclusions(
+      [
+        { bucketKey: "main0", enabled: true, mode: "exactly", count: 3 },
+        { bucketKey: "main1", enabled: true, mode: "exactly", count: 3 },
+        { bucketKey: "main5", enabled: true, mode: "atMost", count: 1 },
+        { bucketKey: "main6", enabled: false, count: 0 },
+      ],
+      bucketMap,
+      6
+    );
+
+    expect(result.shouldApply).toBe(false);
+    expect(result.totalSelectedMax).toBe(1);
+    expect(result.excludedBucketKeys).toEqual([]);
+    expect(result.excludedNumbers).toEqual([]);
+  });
+
   it("treats a single-digit-only boost as sufficient to keep a bucket eligible", () => {
     const result = deriveMainConstraintExclusions(
       [

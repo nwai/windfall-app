@@ -183,6 +183,9 @@ describe("DGAMonthlyBucketStateGrid", () => {
     ) as HTMLElement | undefined;
     expect(yAxisLabel?.style.background).toBe("rgb(255, 255, 255)");
     expect(yAxisLabel?.style.color).toBe("rgb(15, 23, 42)");
+
+    const table = rendered.querySelector("table");
+    expect(table?.className).toContain("windfall-table--custom-layout");
   }, 15000);
 
   it("honors bucket opacity and selected ticks without dimming non-selected rows", async () => {

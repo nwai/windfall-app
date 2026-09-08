@@ -64,6 +64,8 @@ export interface PredictionJournalPanelProps {
 export interface PredictionJournalDraftRequest {
   id: number;
   setupSnapshot?: AppPresetSnapshot;
+  inputOverrides?: PredictionJournalInputs;
+  sourceLabel?: string;
 }
 
 type PredictionJournalViewMode = "entries" | "draft";
@@ -2130,19 +2132,28 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
   useEffect(() => {
     if (!newPredictionDraft) return;
     const draft = buildPredictionJournalDraftFromSetup(newPredictionDraft.setupSnapshot ?? getSetupSnapshot?.());
+    const overrideNotes = newPredictionDraft.inputOverrides?.notes?.trim();
+    const baseNotes = draft.inputs.notes?.trim();
+    const mergedInputs = normalizePredictionJournalInputs({
+      ...draft.inputs,
+      ...newPredictionDraft.inputOverrides,
+      notes: [baseNotes, overrideNotes].filter(Boolean).join("\n\n"),
+    });
     setJournalViewMode("draft");
     setEditingId(null);
     setTargetKind(draft.targetKind);
     setReviewStatus("notReviewed");
     setShowUnreviewedSaveAlert(false);
     setShowHistoricalPrizeCollisionSaveAlert(false);
-    fillFormFromInputs(draft.inputs);
-    if (draft.inputs.numbers?.length) {
-      applyNumbersAutoFill(numberText(draft.inputs.numbers), draft.targetKind);
+    fillFormFromInputs(mergedInputs);
+    if (mergedInputs.numbers?.length) {
+      applyNumbersAutoFill(numberText(mergedInputs.numbers), draft.targetKind);
     }
     setShowValidationErrors(false);
     setExpandedEntryId(null);
-    setMessage(`New prediction draft created from current setup (${draft.sourceSummary.length} context lines). Review before saving.`);
+    setMessage(
+      `${newPredictionDraft.sourceLabel ?? "New prediction draft"} created from current setup (${draft.sourceSummary.length} context lines). Review before saving.`,
+    );
   }, [newPredictionDraft?.id]);
 
   useEffect(() => {

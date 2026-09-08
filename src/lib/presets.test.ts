@@ -51,9 +51,12 @@ describe("normalizeAppPresetSnapshot", () => {
 
     expect(normalized.acceptanceNeedsEnabled).toBe(false);
     expect(normalized.acceptanceNeedsCounts).toEqual(DEFAULT_PRESET_ACCEPTANCE_NEEDS_COUNTS);
+    expect(normalized.bucketCoveragePlannerEnabled).toBe(false);
+    expect(normalized.bucketCoveragePlannerIgnoreUndrawn).toBe(true);
     expect(normalized.maxLastDrawMatchesEnabled).toBe(false);
     expect(normalized.maxLastDrawMatchesValue).toBe(3);
     expect(normalized.latestNeighbourSupportEnabled).toBe(false);
+    expect(normalized.latestNeighbourSupportMode).toBe("pm1");
     expect(normalized.numCandidates).toBe(8);
     expect(normalized.batchSize).toBe(200);
     expect(normalized.batchSessionRuns).toBe(10);
@@ -65,8 +68,14 @@ describe("normalizeAppPresetSnapshot", () => {
     expect(normalized.mrbIncludeSupp).toBe(true);
     expect(normalized.mrbBucketBoosts).toEqual(DEFAULT_PRESET_MRB_BUCKET_BOOSTS);
     expect(normalized.pasteWeightedForcedNumbers).toEqual([]);
+    expect(normalized.signalConfluenceForcedNumbers).toEqual([]);
     expect(normalized.pickSixSource).toBe("manual");
     expect(normalized.pickSixManual).toEqual(DEFAULT_PRESET_PICK_SIX_MANUAL);
+    expect(normalized.mainTwoSetMode).toBe("atMost");
+    expect(normalized.dgaHeatmapView).toBe("temperature");
+    expect(normalized.tempMetric).toBe("hybrid");
+    expect(normalized.monthlyBucketTemperatureOverlayMode).toBe("off");
+    expect(normalized.monthlyBucketTemperatureMetric).toBe("recency");
   });
 
   it("sanitizes malformed imported values before they reach UI state", () => {
@@ -75,11 +84,14 @@ describe("normalizeAppPresetSnapshot", () => {
         userSelectedNumbers: [1, "2", 2, 46] as any,
         weightedTargets: { 1: 2, 2: Number.NaN, 20: 9 } as any,
         acceptanceNeedsCounts: { undrawn: -2, times1: 2.4, times2: "3" } as any,
+        bucketCoveragePlannerEnabled: "yes" as any,
+        bucketCoveragePlannerIgnoreUndrawn: false,
         trendLookback: -5,
         trendThreshold: Number.POSITIVE_INFINITY,
         allowedTrendRatios: ["4-2-2", "4-4-4", "bad"],
         droughtBreakSelectedNumbers: [7, "8", 9, 10, 46, 7] as any,
         pasteWeightedForcedNumbers: [3, "4", 4, 50, 0, 3] as any,
+        signalConfluenceForcedNumbers: [11, "12", 12, 90, 11] as any,
         maxLastDrawMatchesValue: 99,
         numCandidates: 0,
         batchSize: Number.POSITIVE_INFINITY,
@@ -88,10 +100,19 @@ describe("normalizeAppPresetSnapshot", () => {
         mrbBucketBoosts: { undrawn: 50, times1: 3, times2: "bad" } as any,
         pickSixSource: "bad" as any,
         pickSixManual: [45, 45, 0, 46, 10] as any,
+        latestNeighbourSupportMode: "pm1pm2",
+        mainTwoSetMode: "exactly",
+        mainSevenSetMode: "banana" as any,
+        dgaHeatmapView: "banana" as any,
+        tempMetric: "banana" as any,
+        monthlyBucketTemperatureOverlayMode: "detailed",
+        monthlyBucketTemperatureMetric: "banana" as any,
       }),
     );
 
     expect(normalized.acceptanceNeedsCounts).toMatchObject({ undrawn: 0, times1: 2, times2: 3 });
+    expect(normalized.bucketCoveragePlannerEnabled).toBe(true);
+    expect(normalized.bucketCoveragePlannerIgnoreUndrawn).toBe(false);
     expect(normalized.userSelectedNumbers).toEqual([1, 2]);
     expect(normalized.weightedTargets).toEqual({ 1: 2, 2: 1 });
     expect(normalized.trendLookback).toBe(4);
@@ -99,7 +120,8 @@ describe("normalizeAppPresetSnapshot", () => {
     expect(normalized.allowedTrendRatios).toEqual(["4-2-2"]);
     expect(normalized.droughtBreakSelectedNumbers).toEqual([7, 8, 9]);
     expect(normalized.pasteWeightedForcedNumbers).toEqual([3, 4]);
-    expect(normalized.maxLastDrawMatchesValue).toBe(6);
+    expect(normalized.signalConfluenceForcedNumbers).toEqual([11, 12]);
+    expect(normalized.maxLastDrawMatchesValue).toBe(8);
     expect(normalized.numCandidates).toBe(1);
     expect(normalized.batchSize).toBe(200);
     expect(normalized.batchSessionRuns).toBe(1);
@@ -107,5 +129,12 @@ describe("normalizeAppPresetSnapshot", () => {
     expect(normalized.mrbBucketBoosts?.times2).toBe(1);
     expect(normalized.pickSixSource).toBe("manual");
     expect(normalized.pickSixManual).toEqual([45, 10, 1, 2, 3, 4, 5, 6]);
+    expect(normalized.latestNeighbourSupportMode).toBe("pm1pm2");
+    expect(normalized.mainTwoSetMode).toBe("exactly");
+    expect(normalized.mainSevenSetMode).toBe("atMost");
+    expect(normalized.dgaHeatmapView).toBe("temperature");
+    expect(normalized.tempMetric).toBe("hybrid");
+    expect(normalized.monthlyBucketTemperatureOverlayMode).toBe("detailed");
+    expect(normalized.monthlyBucketTemperatureMetric).toBe("recency");
   });
 });

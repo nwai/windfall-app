@@ -1075,13 +1075,14 @@ describe("PredictionJournalPanel", () => {
             previousNeighbourConstraintNumbers: [12],
             hotColdForcedNumbers: [20],
             droughtBreakSelectedNumbers: [],
+            signalConfluenceForcedNumbers: [32],
             selectedCarryOverBoostNumbers: [],
             excludedNumbers: [44],
             hotColdExcludedNumbers: [42],
             autoExcludedFromSelection: [21],
             mainConstraintAutoExcludedNumbers: [35],
             effectiveExcludedNumbers: [21, 42, 44],
-            generationForcedNumbers: [10, 12, 20],
+            generationForcedNumbers: [10, 12, 20, 32],
             generationExcludedNumbers: [21, 35, 42, 44],
             allExcludedNumbers: [4, 6, 8, 21, 22, 24, 35, 42, 44],
             sde1Exclusions: [4, 6, 8],
@@ -1110,13 +1111,13 @@ describe("PredictionJournalPanel", () => {
     const notesTextArea = container.querySelector("textarea[placeholder='Why this looked plausible before the draw...']") as HTMLTextAreaElement;
 
     expect(oddEvenInput.value).toBe("5:3");
-    expect(numbersTextArea.value).toBe("1, 2, 3, 10, 12, 20");
+    expect(numbersTextArea.value).toBe("1, 2, 3, 10, 12, 20, 32");
     expect(terminalDigitsTextArea.value).toBe("0, 1, 2, 3");
     expect((controlByLabel<HTMLInputElement>(container, "Undrawn")).value).toBe("2");
     expect((controlByLabel<HTMLInputElement>(container, "1x")).value).toBe("3");
     expect((controlByLabel<HTMLInputElement>(container, "3x")).value).toBe("1");
     expect((controlByLabel<HTMLInputElement>(container, "Single-digit")).value).toBe("3");
-    expect((controlByLabel<HTMLInputElement>(container, "Double-digit")).value).toBe("3");
+    expect((controlByLabel<HTMLInputElement>(container, "Double-digit")).value).toBe("4");
     expect((controlByLabel<HTMLInputElement>(container, "U/D/F ratio")).value).not.toBe("");
     expect((controlByLabel<HTMLInputElement>(container, "Repeat count")).value).toBe("2");
     expect((controlByLabel<HTMLInputElement>(container, "±1/±2 count")).value).not.toBe("");
@@ -1125,7 +1126,8 @@ describe("PredictionJournalPanel", () => {
     expect(notesTextArea.value).toContain("New prediction draft created from the current app setup.");
     expect(notesTextArea.value).toContain("SDE1: ON; exclusions 4, 6, 8.");
     expect(notesTextArea.value).toContain("HC3: ON; exclusions 22, 24.");
-    expect(notesTextArea.value).toContain("Effective generation forced numbers: 10, 12, 20.");
+    expect(notesTextArea.value).toContain("Signal Confluence 32");
+    expect(notesTextArea.value).toContain("Effective generation forced numbers: 10, 12, 20, 32.");
     expect(notesTextArea.value).toContain("Exclusion sources: user 44; hot/cold 42; auto-unselected 21; main-bucket auto 35; SDE1 4, 6, 8; HC3 22, 24.");
     expect(notesTextArea.value).toContain("Effective generation exclusions: 4, 6, 8, 21, 22, 24, 35, 42, 44.");
     expect(container.textContent).toContain("New prediction draft created from current setup");

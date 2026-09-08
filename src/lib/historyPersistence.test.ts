@@ -22,6 +22,29 @@ describe("historyPersistence", () => {
     expect(loadCachedDrawHistory()).toBeNull();
   });
 
+  it("fails closed instead of partially accepting an invalid cached payload", () => {
+    window.localStorage.setItem("draw-history:reviewed:v1", JSON.stringify({
+      updatedAt: new Date().toISOString(),
+      rows: [
+        sampleRows[0],
+        { date: "not-a-date", mains: [1, 2, 3, 4, 5, 6], supps: [7, 8] },
+      ],
+    }));
+
+    expect(loadCachedDrawHistory()).toBeNull();
+  });
+
+  it("never persists simulated rows as startup evidence", () => {
+    saveCachedDrawHistory([
+      sampleRows[0],
+      { ...sampleRows[1], isSimulated: true },
+    ]);
+    expect(loadCachedDrawHistory()).toEqual([sampleRows[0]]);
+
+    saveCachedDrawHistory([{ ...sampleRows[1], isSimulated: true }]);
+    expect(loadCachedDrawHistory()).toBeNull();
+  });
+
   it("clears the cached draw history", () => {
     saveCachedDrawHistory(sampleRows);
     clearCachedDrawHistory();

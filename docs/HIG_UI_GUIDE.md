@@ -18,6 +18,10 @@ Windfall is a dense analytical app, so the design goal is not decoration. The de
 - Do not rely on `title` text for essential explanations.
 - Prefer `InfoHelp` for longer explanations that need to work with keyboard and touch.
 - Keep buttons at or above the app's HIG target sizing unless inside a genuinely dense table.
+- Keep a table panel's collapsible title visible while its table is being reviewed.
+- Treat the complete `thead` as one sticky header group so grouped or multi-row headings retain their order.
+- Let ordinary data tables use the shared bounded scroll frame when their contents exceed its height limit.
+- Reserve `windfall-table--custom-layout` for geometry-driven tables whose independent scrolling or row alignment would be broken by the shared table behavior.
 - Make controls wrap into rows on narrow screens.
 - Do not use color alone to communicate status.
 - Use one visible title source per panel, usually the `CollapsibleSection` heading. Do not repeat the same panel title inside the panel body.

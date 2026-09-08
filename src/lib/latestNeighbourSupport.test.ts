@@ -30,12 +30,35 @@ describe("latestNeighbourSupport", () => {
     const analysis = analyzeLatestNeighbourSupport(history, emptyBuckets(), { enabled: true });
 
     expect(analysis.active).toBe(true);
+    expect(analysis.mode).toBe("pm1");
+    expect(analysis.offsets).toEqual([-1, 1]);
     expect(analysis.latestDrawDate).toBe("2026-06-03");
     expect(analysis.targetNumbers).toContain(4);
     expect(analysis.targetNumbers).toContain(6);
     expect(analysis.targetNumbers).toContain(20);
+    expect(analysis.targetNumbers).not.toContain(3);
     expect(candidateSatisfiesLatestNeighbourSupport([1, 2, 3, 4, 30, 31, 32, 33], analysis)).toBe(true);
     expect(candidateSatisfiesLatestNeighbourSupport([1, 2, 3, 7, 30, 31, 32, 33], analysis)).toBe(false);
+  });
+
+  it("can widen automatic support to +/-1 and +/-2 targets when the mode is selected", () => {
+    const history = [
+      draw("2026-06-01", [4, 8, 12, 16, 20, 24]),
+      draw("2026-06-03", [10, 20, 30, 40, 12, 22], [5, 15]),
+    ];
+
+    const analysis = analyzeLatestNeighbourSupport(history, emptyBuckets(), {
+      enabled: true,
+      mode: "pm1pm2",
+    });
+
+    expect(analysis.mode).toBe("pm1pm2");
+    expect(analysis.offsets).toEqual([-2, -1, 1, 2]);
+    expect(analysis.targetNumbers).toContain(8);
+    expect(analysis.targetNumbers).toContain(14);
+    expect(analysis.traceSummary).toContain("LD±1/±2 ON");
+    expect(analysis.traceSummary).toContain("eligible ±1/±2 target");
+    expect(candidateSatisfiesLatestNeighbourSupport([1, 2, 3, 8, 31, 32, 33, 34], analysis)).toBe(true);
   });
 
   it("disqualifies a latest +/-1 target with an excessive recent consecutive hit streak", () => {

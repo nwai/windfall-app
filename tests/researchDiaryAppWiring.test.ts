@@ -10,8 +10,9 @@ describe("Research Diary app wiring", () => {
 
     expect(app).toContain('import { ResearchDiaryPanel } from "./components/ResearchDiaryPanel";');
     expect(app).toContain('panelId="research-diary"');
-    expect(app.indexOf('panelId="prediction-journal"')).toBeLessThan(app.indexOf('panelId="research-diary"'));
+    expect(app.indexOf('id="workflow-validation"')).toBeLessThan(app.indexOf('panelId="research-diary"'));
     expect(app.indexOf('panelId="research-diary"')).toBeLessThan(app.indexOf('panelId="backtest-validation"'));
+    expect(app.indexOf('panelId="research-diary"')).toBeLessThan(app.indexOf('panelId="prediction-journal"'));
     expect(app).toContain("<ResearchDiaryPanel");
     expect(app).toContain("history={realHistory}");
     expect(app).toContain("getSetupSnapshot={() => buildSnapshot({ includePanelFavorites: true })}");

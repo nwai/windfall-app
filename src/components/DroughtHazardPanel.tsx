@@ -12,12 +12,21 @@ import {
   normalizeUserExclusionLocks,
   removeUserExcludedNumbers,
 } from "../lib/userExclusionLocks";
+import {
+  analyzeDroughtShortlistSourceReplay,
+  type DroughtShortlistHitDetail,
+  type DroughtShortlistSourceReplayResult,
+} from "../lib/droughtShortlistSourceReplay";
 
 type DroughtDisplayMode = "strict" | "empirical";
+type DroughtReplayScope = "all-baseline" | "wfmqyh";
 
 export const DroughtHazardPanel: React.FC<{
   history: Draw[];
   fullHistory?: Draw[];
+  baselineHistory?: Draw[];
+  baselineHistoryScopeLabel?: string;
+  wfmqyhHistoryScopeLabel?: string;
   top?: number;
   title?: string;
   strictThreshold?: number;
@@ -30,6 +39,9 @@ export const DroughtHazardPanel: React.FC<{
 }> = ({
   history,
   fullHistory,
+  baselineHistory,
+  baselineHistoryScopeLabel,
+  wfmqyhHistoryScopeLabel,
   top = 12,
   title,
   strictThreshold = STRICT_DROUGHT_DEFAULT_THRESHOLD,
@@ -41,10 +53,25 @@ export const DroughtHazardPanel: React.FC<{
   bucketLabels,
 }) => {
   const [mode, setMode] = React.useState<DroughtDisplayMode>(defaultMode);
+  const [replayScope, setReplayScope] = React.useState<DroughtReplayScope>("all-baseline");
   const empirical = React.useMemo(() => computeDroughtHazard(history), [history]);
   const strict = React.useMemo(
     () => computeStrictDroughtShortlist(history, fullHistory?.length ? fullHistory : history, { threshold: strictThreshold }),
     [fullHistory, history, strictThreshold],
+  );
+  const replayHistory = replayScope === "all-baseline"
+    ? (baselineHistory?.length ? baselineHistory : fullHistory?.length ? fullHistory : history)
+    : history;
+  const replayScopeLabel = replayScope === "all-baseline"
+    ? (baselineHistoryScopeLabel ?? `All baseline history (${replayHistory.length} real draw${replayHistory.length === 1 ? "" : "s"})`)
+    : (wfmqyhHistoryScopeLabel ?? `Current WFMQYH window (${history.length} real draw${history.length === 1 ? "" : "s"})`);
+  const droughtSourceReplay = React.useMemo(
+    () => analyzeDroughtShortlistSourceReplay(replayHistory, {
+      contextHistory: fullHistory?.length ? fullHistory : replayHistory,
+      strictThreshold,
+      topK: top,
+    }),
+    [fullHistory, replayHistory, strictThreshold, top],
   );
   const { baselineProbability, maxK, byNumber, priorTrials } = empirical;
   const userExcludedNumbers = React.useMemo(
@@ -182,12 +209,235 @@ export const DroughtHazardPanel: React.FC<{
           />
         )}
       </div>
+      <DroughtSourceReplayAudit
+        result={droughtSourceReplay}
+        scope={replayScope}
+        scopeLabel={replayScopeLabel}
+        onScopeChange={setReplayScope}
+      />
       <div style={{ fontSize: 12, color: "#666", marginTop: 6 }}>
         Strict rank uses full-history current drought first. Break maturity is the share of that number's completed {strict.threshold}+ drought episodes that were broken at or before its current drought length. Max observed empirical drought length k = {maxK}. Sparse empirical lengths are stabilized with {priorTrials} baseline prior trials. Month bucket is context only; it does not drive the rate.
       </div>
     </section>
   );
 };
+
+const DroughtSourceReplayAudit: React.FC<{
+  result: DroughtShortlistSourceReplayResult;
+  scope: DroughtReplayScope;
+  scopeLabel: string;
+  onScopeChange: (scope: DroughtReplayScope) => void;
+}> = ({ result, scope, scopeLabel, onScopeChange }) => {
+  const hasTrials = result.eligibleTrials > 0;
+  const splitNote = result.exclusiveSplitPValue == null
+    ? "Exclusive strict/empirical split needs at least one exclusive hit."
+    : result.exclusiveSplitPValue >= 0.05
+      ? `Exclusive strict-only vs empirical-only hits are consistent with an even split (p=${formatPValue(result.exclusiveSplitPValue)}).`
+      : `Exclusive strict-only vs empirical-only hits are not consistent with an even split (p=${formatPValue(result.exclusiveSplitPValue)}).`;
+
+  return (
+    <div style={auditCardStyle}>
+      <div style={auditHeaderStyle}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 900 }}>Replay scope: source split</div>
+          <div style={auditFinePrintStyle}>
+            Replay-only. This switch changes the source-split audit below; it does not recalculate the Strict drought or Empirical hazard shortlist above.
+          </div>
+        </div>
+        <div role="group" aria-label="Drought source split replay scope" style={compactSegmentedControl}>
+          <button
+            type="button"
+            aria-pressed={scope === "all-baseline"}
+            onClick={() => onScopeChange("all-baseline")}
+            style={compactModeButton(scope === "all-baseline")}
+          >
+            All baseline
+          </button>
+          <button
+            type="button"
+            aria-pressed={scope === "wfmqyh"}
+            onClick={() => onScopeChange("wfmqyh")}
+            style={compactModeButton(scope === "wfmqyh")}
+          >
+            WFMQYH
+          </button>
+        </div>
+      </div>
+      <div style={auditFinePrintStyle}>
+        {scopeLabel}. Scope {result.scope}; top {result.topK} per list; strict threshold {result.strictThreshold}+; warm-up {result.minHistory} prior draws.
+        Shortlist rows above keep their own scoring scope: Strict drought uses full-history current drought, while Empirical hazard uses the active WFMQYH window.
+      </div>
+      {!hasTrials ? (
+        <div role="status" style={auditEmptyStyle}>
+          Not enough real draws in this scope to replay drought-source hits. Needs more than {result.minHistory} valid prior draws.
+        </div>
+      ) : (
+        <>
+          <div style={auditMetricGridStyle}>
+            <AuditMetric label="Eligible draws" value={String(result.eligibleTrials)} detail={`${result.firstTargetDate ?? "—"} to ${result.latestTargetDate ?? "—"}`} />
+            <AuditMetric label="Avg drought hits" value={formatDecimal(result.averageUnionHits)} detail={`random-size expectation ${formatDecimal(result.expectedRandomUnionHits)}`} />
+            <AuditMetric label="Any-hit draws" value={formatPercent(result.unionHitDrawRate)} detail={`random-size expectation ${formatPercent(result.expectedRandomUnionHitDrawRate)}`} />
+            <AuditMetric label="Avg list overlap" value={formatDecimal(result.averageShortlistOverlapSize)} detail={`union size ${formatDecimal(result.averageShortlistUnionSize)}`} />
+          </div>
+          <div style={auditTableGridStyle}>
+            <AuditSummaryTable
+              title="Source of drawn drought-hit numbers"
+              rows={result.sourceRows.map((row) => ({
+                key: row.key,
+                label: row.label,
+                count: row.count,
+                share: row.share,
+              }))}
+            />
+            <AuditSummaryTable
+              title="Draw class"
+              rows={result.drawClassRows.map((row) => ({
+                key: row.key,
+                label: row.label,
+                count: row.count,
+                share: row.share,
+              }))}
+            />
+          </div>
+          <div style={auditFinePrintStyle}>
+            {splitNote}
+          </div>
+          <div style={auditDetailGridStyle}>
+            <StageSourceTable rows={result.stageRows} />
+            <LatestSourceRowsTable rows={result.latestRows} />
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+
+const AuditMetric: React.FC<{ label: string; value: string; detail: string }> = ({ label, value, detail }) => (
+  <div style={auditMetricStyle}>
+    <div style={{ fontSize: 11, color: "#64748b", fontWeight: 800, textTransform: "uppercase" }}>{label}</div>
+    <div style={{ fontSize: 20, fontWeight: 900, color: "#0f172a", lineHeight: 1.1 }}>{value}</div>
+    <div style={{ fontSize: 11, color: "#64748b" }}>{detail}</div>
+  </div>
+);
+
+const AuditSummaryTable: React.FC<{
+  title: string;
+  rows: Array<{ key: string; label: string; count: number; share: number }>;
+}> = ({ title, rows }) => (
+  <div style={auditSubCardStyle}>
+    <div style={auditTableTitleStyle}>{title}</div>
+    <table style={compactTableStyle}>
+      <thead>
+        <tr>
+          <th style={{ ...compactTh, textAlign: "left" }}>Bucket</th>
+          <th style={compactTh}>Count</th>
+          <th style={compactTh}>Share</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row) => (
+          <tr key={row.key}>
+            <td style={{ ...compactTd, textAlign: "left" }}>{row.label}</td>
+            <td style={compactTd}>{row.count}</td>
+            <td style={compactTd}>{formatPercent(row.share)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+);
+
+const StageSourceTable: React.FC<{ rows: DroughtShortlistSourceReplayResult["stageRows"] }> = ({ rows }) => (
+  <div style={auditSubCardStyle}>
+    <div style={auditTableTitleStyle}>By draw ordinal / month stage</div>
+    <div style={scrollTableWrapStyle}>
+      <table style={compactTableStyle}>
+        <thead>
+          <tr>
+            <th style={{ ...compactTh, textAlign: "left" }}>Stage</th>
+            <th style={compactTh}>Trials</th>
+            <th style={compactTh}>Avg hits</th>
+            <th style={compactTh}>Strict avg</th>
+            <th style={compactTh}>Emp avg</th>
+            <th style={compactTh}>Both avg</th>
+            <th style={compactTh}>Zero</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={`${row.stageLabel}-${row.trials}`}>
+              <td style={{ ...compactTd, textAlign: "left" }}>{row.stageLabel}</td>
+              <td style={compactTd}>{row.trials}</td>
+              <td style={compactTd}>{formatDecimal(row.averageUnionHits)}</td>
+              <td style={compactTd}>{formatDecimal(row.averageStrictHits)}</td>
+              <td style={compactTd}>{formatDecimal(row.averageEmpiricalHits)}</td>
+              <td style={compactTd}>{formatDecimal(row.averageOverlapHits)}</td>
+              <td style={compactTd}>{formatPercent(row.zeroHitRate)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </div>
+);
+
+const LatestSourceRowsTable: React.FC<{ rows: DroughtShortlistSourceReplayResult["latestRows"] }> = ({ rows }) => (
+  <div style={auditSubCardStyle}>
+    <div style={auditTableTitleStyle}>Latest audit rows</div>
+    <div style={scrollTableWrapStyle}>
+      <table style={{ ...compactTableStyle, minWidth: 680 }}>
+        <thead>
+          <tr>
+            <th style={{ ...compactTh, textAlign: "left" }}>Date</th>
+            <th style={compactTh}>Stage</th>
+            <th style={compactTh}>Hits</th>
+            <th style={{ ...compactTh, textAlign: "left" }}>Strict-only</th>
+            <th style={{ ...compactTh, textAlign: "left" }}>Empirical-only</th>
+            <th style={{ ...compactTh, textAlign: "left" }}>Both</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={`${row.targetDate}-${row.targetIndex}`}>
+              <td style={{ ...compactTd, textAlign: "left" }}>{row.targetDate}</td>
+              <td style={compactTd}>{formatStage(row.targetMonthDrawCount, row.targetDrawOrdinal, row.targetMonthComplete)}</td>
+              <td style={compactTd}>{row.unionHitCount}</td>
+              <td style={{ ...compactTd, textAlign: "left" }}>{formatHits(row.strictOnlyHits)}</td>
+              <td style={{ ...compactTd, textAlign: "left" }}>{formatHits(row.empiricalOnlyHits)}</td>
+              <td style={{ ...compactTd, textAlign: "left" }}>{formatHits(row.overlappingHits)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+    <div style={auditFinePrintStyle}>S = strict rank. E = empirical rank. Rank is rebuilt from prior draws only.</div>
+  </div>
+);
+
+const formatHits = (hits: DroughtShortlistHitDetail[]): string => {
+  if (!hits.length) return "—";
+  return hits.map((hit) => {
+    const rank = hit.source === "both"
+      ? `S${hit.strictRank ?? "?"}/E${hit.empiricalRank ?? "?"}`
+      : hit.source === "strict-only"
+        ? `S${hit.strictRank ?? "?"}`
+        : `E${hit.empiricalRank ?? "?"}`;
+    return `${hit.number} ${rank} ${hit.where}`;
+  }).join(" · ");
+};
+
+const formatStage = (
+  monthDrawCount: number | null,
+  drawOrdinal: number | null,
+  complete: boolean,
+): string => {
+  if (!monthDrawCount || !drawOrdinal) return "—";
+  return `${monthDrawCount}D D${drawOrdinal}${complete ? "" : " open"}`;
+};
+
+const formatPercent = (value: number): string => `${(value * 100).toFixed(1)}%`;
+const formatDecimal = (value: number): string => value.toFixed(2);
+const formatPValue = (value: number): string => value < 0.001 ? "<0.001" : value.toFixed(3);
 
 const StrictDroughtTable: React.FC<{
   rows: StrictDroughtNumberRow[];
@@ -325,3 +575,125 @@ const numberButton = (active: boolean, disabled: boolean): React.CSSProperties =
   fontWeight: 800,
   fontVariantNumeric: "tabular-nums",
 });
+
+const auditCardStyle: React.CSSProperties = {
+  border: "1px solid #e2e8f0",
+  borderRadius: 8,
+  background: "#f8fafc",
+  padding: 10,
+  marginTop: 12,
+};
+
+const auditHeaderStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "flex-start",
+  justifyContent: "space-between",
+  gap: 10,
+  flexWrap: "wrap",
+  marginBottom: 8,
+};
+
+const auditFinePrintStyle: React.CSSProperties = {
+  fontSize: 12,
+  color: "#64748b",
+  lineHeight: 1.4,
+};
+
+const auditEmptyStyle: React.CSSProperties = {
+  border: "1px solid #e2e8f0",
+  borderRadius: 8,
+  background: "#ffffff",
+  color: "#475569",
+  fontSize: 12,
+  padding: "8px 10px",
+  marginTop: 8,
+};
+
+const auditMetricGridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+  gap: 8,
+  marginTop: 8,
+};
+
+const auditMetricStyle: React.CSSProperties = {
+  border: "1px solid #e2e8f0",
+  borderRadius: 8,
+  background: "#ffffff",
+  padding: "8px 10px",
+};
+
+const auditTableGridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+  gap: 8,
+  marginTop: 8,
+};
+
+const auditDetailGridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+  gap: 8,
+  marginTop: 8,
+};
+
+const auditSubCardStyle: React.CSSProperties = {
+  border: "1px solid #e2e8f0",
+  borderRadius: 8,
+  background: "#ffffff",
+  padding: 8,
+  minWidth: 0,
+};
+
+const auditTableTitleStyle: React.CSSProperties = {
+  color: "#0f172a",
+  fontSize: 12,
+  fontWeight: 900,
+  marginBottom: 6,
+};
+
+const compactSegmentedControl: React.CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 5,
+};
+
+const compactModeButton = (active: boolean): React.CSSProperties => ({
+  minHeight: 30,
+  border: `1px solid ${active ? "#0f172a" : "#cbd5e1"}`,
+  borderRadius: 8,
+  background: active ? "#0f172a" : "#ffffff",
+  color: active ? "#ffffff" : "#0f172a",
+  cursor: "pointer",
+  fontSize: 12,
+  fontWeight: 800,
+  padding: "4px 8px",
+});
+
+const compactTableStyle: React.CSSProperties = {
+  width: "100%",
+  borderCollapse: "collapse",
+  fontSize: 12,
+};
+
+const compactTh: React.CSSProperties = {
+  borderBottom: "1px solid #e2e8f0",
+  color: "#475569",
+  fontWeight: 900,
+  padding: "5px 6px",
+  textAlign: "right",
+  whiteSpace: "nowrap",
+};
+
+const compactTd: React.CSSProperties = {
+  borderBottom: "1px solid #f1f5f9",
+  color: "#0f172a",
+  padding: "5px 6px",
+  textAlign: "right",
+  verticalAlign: "top",
+};
+
+const scrollTableWrapStyle: React.CSSProperties = {
+  maxHeight: 220,
+  overflow: "auto",
+};

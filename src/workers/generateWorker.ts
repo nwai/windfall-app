@@ -11,10 +11,16 @@
  */
 
 import { generateCandidates } from "../generateCandidates";
-import type { GenerateCandidateRatioOption, GenerateCandidatesResult, StrictDroughtQuotaGenerationOptions } from "../generateCandidates";
+import type {
+  EmpiricalDroughtQuotaGenerationOptions,
+  GenerateCandidateRatioOption,
+  GenerateCandidatesResult,
+  StrictDroughtQuotaGenerationOptions,
+} from "../generateCandidates";
 import type { ScoringGenerationProfile } from "../lib/scoringGenerationInfluence";
 import type { LatestNeighbourSupportOptions } from "../lib/latestNeighbourSupport";
 import type { D1TerminalMomentumGenerationProfile } from "../lib/d1TerminalMomentumInfluence";
+import type { MonthlyBucketKey } from "../lib/monthlyDrawSummary";
 
 /** Monthly bucket options with arrays instead of Sets (for structured clone) */
 interface SerializedMonthlyBucketOptions {
@@ -35,10 +41,20 @@ interface SerializedMonthlyBucketOptions {
     times8: number[];
   };
   selectedNumberBiasEnabled?: boolean;
+  bucketCoveragePlanner?: {
+    enabled?: boolean;
+    ignoredBucketKeys?: MonthlyBucketKey[];
+    maxFullCoverage?: number;
+    maxSampledCoverage?: number;
+  };
 }
+
+type MainDigitCountMode = "atLeast" | "exactly" | "atMost";
 
 interface MainDigitConstraintOptions {
   maxCount?: number;
+  countMode?: MainDigitCountMode;
+  targetCount?: number;
   boost?: number;
   singleDigitBoost?: number;
   twoDigitBoost?: number;
@@ -103,10 +119,12 @@ export interface GenerateWorkerArgs {
   scoringGenerationProfile?: ScoringGenerationProfile;
   /** Serializable D1 terminal momentum profile for soft generation weighting. */
   d1TerminalMomentumProfile?: D1TerminalMomentumGenerationProfile;
-  /** Default-off experimental latest-draw +/-1 support rule. */
+  /** Default-off experimental latest-draw neighbour support rule. */
   latestNeighbourSupportOptions?: LatestNeighbourSupportOptions;
   /** Default-off strict drought-break shortlist quota. */
   strictDroughtQuotaOptions?: StrictDroughtQuotaGenerationOptions;
+  /** Default-off empirical drought-hazard shortlist quota. */
+  empiricalDroughtQuotaOptions?: EmpiricalDroughtQuotaGenerationOptions;
 }
 
 function deserializeMonthlyBuckets(
@@ -142,6 +160,7 @@ function deserializeMonthlyBuckets(
         }
       : undefined,
     selectedNumberBiasEnabled: opts.selectedNumberBiasEnabled,
+    bucketCoveragePlanner: opts.bucketCoveragePlanner,
   };
 }
 
@@ -223,7 +242,8 @@ ctx.addEventListener("message", (e: MessageEvent) => {
       args.d1TerminalMomentumProfile,
       progressSetter,
       args.latestNeighbourSupportOptions,
-      args.strictDroughtQuotaOptions
+      args.strictDroughtQuotaOptions,
+      args.empiricalDroughtQuotaOptions
     );
 
     ctx.postMessage({ type: "result", id, result });

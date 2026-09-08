@@ -210,6 +210,62 @@ const clampFloat = (value: number, min: number, max: number): number => (
   Math.max(min, Math.min(max, Number.isFinite(value) ? value : min))
 );
 
+type LastDrawOverlapRuleMode = "off" | "atLeast" | "exactly" | "atMost" | "customRange";
+
+const lastDrawOverlapModeOptions: Array<{ value: Exclude<LastDrawOverlapRuleMode, "customRange">; label: string }> = [
+  { value: "off", label: "Off" },
+  { value: "atLeast", label: "At least" },
+  { value: "exactly", label: "Exactly" },
+  { value: "atMost", label: "At most" },
+];
+
+const clampLastDrawOverlapCount = (value: unknown, mode: LastDrawOverlapRuleMode): number => {
+  const numeric = Number(value);
+  const whole = Number.isFinite(numeric) ? Math.trunc(numeric) : 0;
+  const lower = mode === "atLeast" ? 1 : 0;
+  return Math.max(lower, Math.min(8, whole));
+};
+
+const deriveLastDrawOverlapMode = (
+  minMatches: number,
+  maxEnabled: boolean,
+  maxMatches: number,
+): LastDrawOverlapRuleMode => {
+  const min = clampLastDrawOverlapCount(minMatches, "off");
+  const max = clampLastDrawOverlapCount(maxMatches, "off");
+  if (min === 0 && !maxEnabled) return "off";
+  if (maxEnabled && min > 0 && max === min) return "exactly";
+  if (maxEnabled && min === 0) return "atMost";
+  if (!maxEnabled && min > 0) return "atLeast";
+  return "customRange";
+};
+
+const getLastDrawOverlapDisplayCount = (
+  mode: LastDrawOverlapRuleMode,
+  minMatches: number,
+  maxMatches: number,
+): number => {
+  if (mode === "atLeast" || mode === "exactly" || mode === "customRange") {
+    return clampLastDrawOverlapCount(minMatches, mode);
+  }
+  if (mode === "atMost") return clampLastDrawOverlapCount(maxMatches, mode);
+  return clampLastDrawOverlapCount(maxMatches, "exactly");
+};
+
+const formatLastDrawOverlapRuleSummary = (
+  mode: LastDrawOverlapRuleMode,
+  minMatches: number,
+  maxMatches: number,
+): string => {
+  if (mode === "off") return "off";
+  const min = clampLastDrawOverlapCount(minMatches, mode);
+  const max = clampLastDrawOverlapCount(maxMatches, "off");
+  if (mode === "customRange") return `between ${min}-${max}`;
+  if (mode === "atLeast") return `at least ${min}`;
+  if (mode === "exactly") return `exactly ${min}`;
+  return `at most ${max}`;
+};
+
 const sortedList = (numbers: number[]): string => (
   numbers.length ? [...numbers].sort((a, b) => a - b).join(", ") : "none"
 );
@@ -285,6 +341,46 @@ const WeightInput: React.FC<{ value: number; onChange: (value: number) => void; 
 export const CandidateGenerationInfluencesPanel: React.FC<CandidateGenerationInfluencesPanelProps> = (props) => {
   const repeatUnionCandidateMax = props.repeatUnionCandidateMax ?? 8;
   const repeatUnionUniqueCount = props.repeatUnionUniqueCount ?? null;
+  const lastDrawOverlapRuleMode = deriveLastDrawOverlapMode(
+    props.minRecentMatches,
+    props.maxLastDrawMatchesEnabled,
+    props.maxLastDrawMatchesValue,
+  );
+  const lastDrawOverlapRuleCount = getLastDrawOverlapDisplayCount(
+    lastDrawOverlapRuleMode,
+    props.minRecentMatches,
+    props.maxLastDrawMatchesValue,
+  );
+  const lastDrawOverlapRuleSummary = formatLastDrawOverlapRuleSummary(
+    lastDrawOverlapRuleMode,
+    props.minRecentMatches,
+    props.maxLastDrawMatchesValue,
+  );
+  const lastDrawOverlapCountOptions = lastDrawOverlapRuleMode === "atLeast"
+    ? [1, 2, 3, 4, 5, 6, 7, 8]
+    : [0, 1, 2, 3, 4, 5, 6, 7, 8];
+  const applyLastDrawOverlapRule = (mode: Exclude<LastDrawOverlapRuleMode, "customRange">, rawCount: number) => {
+    const count = clampLastDrawOverlapCount(rawCount, mode);
+    if (mode === "off") {
+      props.setMinRecentMatches(0);
+      props.setMaxLastDrawMatchesEnabled(false);
+      return;
+    }
+    if (mode === "atLeast") {
+      props.setMinRecentMatches(Math.max(1, count));
+      props.setMaxLastDrawMatchesEnabled(false);
+      return;
+    }
+    if (mode === "exactly") {
+      props.setMinRecentMatches(count);
+      props.setMaxLastDrawMatchesValue(count);
+      props.setMaxLastDrawMatchesEnabled(true);
+      return;
+    }
+    props.setMinRecentMatches(0);
+    props.setMaxLastDrawMatchesValue(count);
+    props.setMaxLastDrawMatchesEnabled(true);
+  };
   const sum = useMemo(() => normalizeSumFilter(props.sumFilter), [props.sumFilter]);
   const readiness = useMemo(() => normalizeReadinessWeights(props.rdyWeights), [props.rdyWeights]);
   const acceptance = useMemo(() => summarizeAcceptanceNeeds(props.effectiveMianCounts), [props.effectiveMianCounts]);
@@ -301,6 +397,8 @@ export const CandidateGenerationInfluencesPanel: React.FC<CandidateGenerationInf
     tricky: props.useTrickyRule,
     ratios: props.selectedRatios,
     minRecentMatches: props.minRecentMatches,
+    maxLastDrawMatchesEnabled: props.maxLastDrawMatchesEnabled,
+    maxLastDrawMatchesValue: props.maxLastDrawMatchesValue,
     recentMatchBias: props.recentMatchBias,
     repeatWindowSizeW: props.repeatWindowSizeW,
     minFromRecentUnionM: props.minFromRecentUnionM,
@@ -573,18 +671,38 @@ export const CandidateGenerationInfluencesPanel: React.FC<CandidateGenerationInf
               Latest-Draw Overlap Controls
             </div>
             <label style={labelStyle}>
-              Minimum Matches To Last Draw
-              <input type="number" min={0} max={8} value={props.minRecentMatches} onChange={(event) => props.setMinRecentMatches(clampInt(Number(event.target.value), 0, 8))} style={inputStyle} />
+              Last-Draw Overlap Rule
+              <select
+                value={lastDrawOverlapRuleMode}
+                onChange={(event) => {
+                  const selectedMode = event.target.value as LastDrawOverlapRuleMode;
+                  if (selectedMode === "customRange") return;
+                  const nextCount = selectedMode === "atLeast" && lastDrawOverlapRuleCount === 0 ? 1 : lastDrawOverlapRuleCount;
+                  applyLastDrawOverlapRule(selectedMode, nextCount);
+                }}
+                style={inputStyle}
+              >
+                {lastDrawOverlapRuleMode === "customRange" && <option value="customRange">Custom range</option>}
+                {lastDrawOverlapModeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
             </label>
-            <label style={{ display: "inline-flex", gap: 6, alignItems: "center", fontSize: 12 }}>
-              <input type="checkbox" checked={props.maxLastDrawMatchesEnabled} onChange={(event) => props.setMaxLastDrawMatchesEnabled(event.target.checked)} />
-              Maximum Matches To Last Draw
-              <select value={props.maxLastDrawMatchesValue} disabled={!props.maxLastDrawMatchesEnabled} onChange={(event) => props.setMaxLastDrawMatchesValue(clampInt(Number(event.target.value), 1, 8))} style={inputStyle}>
-                {[1, 2, 3, 4, 5, 6, 7, 8].map((value) => <option key={value} value={value}>{value}</option>)}
+            <label style={labelStyle}>
+              Count
+              <select
+                value={lastDrawOverlapRuleCount}
+                disabled={lastDrawOverlapRuleMode === "off" || lastDrawOverlapRuleMode === "customRange"}
+                onChange={(event) => {
+                  if (lastDrawOverlapRuleMode === "customRange") return;
+                  applyLastDrawOverlapRule(lastDrawOverlapRuleMode, Number(event.target.value));
+                }}
+                style={{ ...inputStyle, opacity: lastDrawOverlapRuleMode === "off" || lastDrawOverlapRuleMode === "customRange" ? 0.45 : 1 }}
+              >
+                {lastDrawOverlapCountOptions.map((value) => <option key={value} value={value}>{value}</option>)}
               </select>
             </label>
             <div style={{ color: "#64748b", fontSize: 11, lineHeight: 1.45 }}>
-              Minimum and maximum matches are strict filters. Last-draw match bias is only a soft weighting strength.
+              Active strict rule: <strong>{lastDrawOverlapRuleSummary}</strong>. Off means no hard latest-draw overlap filter; exactly 0 forces no latest-draw repeats. Last-draw match bias is only a soft weighting strength.
+              {lastDrawOverlapRuleMode === "customRange" ? " This saved state uses a legacy min/max range; choose a mode above to normalize it." : ""}
             </div>
             <label style={labelStyle}>
               Last-Draw Match Bias

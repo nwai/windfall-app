@@ -69,6 +69,12 @@ export const normalizeSelectionInsightNumbers = (numbers: unknown): number[] => 
   return Array.from(new Set(numbers.filter(validLotteryNumber))).sort((a, b) => a - b);
 };
 
+export const mergeSelectionInsightAnchorNumbers = (...groups: unknown[]): number[] => (
+  normalizeSelectionInsightNumbers(groups.flatMap((group) => (
+    Array.isArray(group) ? group : []
+  )))
+);
+
 const drawNumbers = (draw: Draw): number[] => (
   [...(Array.isArray(draw.main) ? draw.main : []), ...(Array.isArray(draw.supp) ? draw.supp : [])]
     .filter(validLotteryNumber)

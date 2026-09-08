@@ -86,6 +86,8 @@ describe("buildGenerationProvenance", () => {
       tricky: false,
       ratios: ["4:4", "5:3"],
       minRecentMatches: 1,
+      maxLastDrawMatchesEnabled: true,
+      maxLastDrawMatchesValue: 1,
       recentMatchBias: 0.5,
       repeatWindowSizeW: 12,
       minFromRecentUnionM: 2,
@@ -115,6 +117,7 @@ describe("buildGenerationProvenance", () => {
     });
 
     expect(provenance).toContain("Sum=120-190 main+supp");
+    expect(provenance).toContain("LastDrawOverlap=exactly 1");
     expect(provenance).toContain("End1Set=max 1");
     expect(provenance).not.toContain("$");
     expect(provenance).not.toContain("${");

@@ -25,10 +25,14 @@ import { buildDrawGrid, findDiamondsAllRadii, getPredictedNumbers } from "./dga"
 import { normalizeDgaSelectedNumbers } from "./lib/dgaSelectedNumbers";
 import {
   buildDgaSuppSuggestion,
-  type DgaSuppSuggestion,
 } from "./lib/dgaSuppSuggestion";
 import { DGAVisualizer } from "./components/DGAVisualizer";
 import { DGAConstellationDiagnosticPanel } from "./components/DGAConstellationDiagnosticPanel";
+import {
+  DGASimulateStrip,
+  UserExclusionsStrip,
+  type DGAScoringNumberDiagnostic,
+} from "./components/DGANumberStrips";
 import { computeOGA, getOGAPercentile } from "./utils/oga";
 import { ogaPercentileToSimilarity } from "./lib/ogaQuality";
 import { Draw, Knobs, CandidateSet, type KeptGeneratedCandidateRow } from "./types";
@@ -40,15 +44,11 @@ import { computeTrendMap } from "./lib/trend";
 import { buildMonthlyRepeatBiasWeights, MRB_BUCKET_KEYS, MRB_BUCKET_LABELS, MRB_BUDGET } from "./lib/numberBiases";
 import { OGAHistogram } from "./components/OGAHistogram";
 import { DGA_CELL_SIZE } from "./constants/ui";
-import { TemperatureHeatmap } from "./components/TemperatureHeatmap";
+import { TemperatureHeatmap, type TemperatureOverlayMode } from "./components/TemperatureHeatmap";
 import { TracePanel } from "./components/TracePanel";
 import { SurvivalAnalyzer } from "./components/SurvivalAnalyzer";
-import { ChurnPredictor } from "./components/ChurnPredictor";
-import { ReturnPredictor } from "./components/ReturnPredictor";
 import { MultiStateChurnPanel } from "./components/MultiStateChurnPanel";
-import { SurvivalCoxPanel } from "./components/SurvivalCoxPanel";
 import { SurvivalFrailtyPanel } from "./components/SurvivalFrailtyPanel";
-import { ConsensusPanel } from "./components/ConsensusPanel";
 import { DroughtHazardPanel } from "./components/DroughtHazardPanel";
 import {
   STRICT_DROUGHT_DEFAULT_THRESHOLD,
@@ -56,8 +56,11 @@ import {
   computeStrictDroughtShortlist,
 } from "./lib/droughtHazard";
 import {
+  buildEmpiricalDroughtQuotaAdvice,
+  buildEmpiricalDroughtQuotaShortlist,
   buildStrictDroughtQuotaAdvice,
   buildStrictDroughtQuotaShortlist,
+  type DroughtQuotaCountSummary,
   type StrictDroughtQuotaControlMode,
 } from "./lib/strictDroughtQuotaAdvice";
 import { BatesPanel } from "./components/BatesPanel";
@@ -85,7 +88,6 @@ import { showToast } from "./lib/toastBus";
 import { GlobalZoneWeighting } from "./components/GlobalZoneWeighting";
 import DrawHistoryManager from "./components/DrawHistoryManager";
 import DrawHistoryIntegrityPanel from "./components/DrawHistoryIntegrityPanel";
-import { buildChurnDataset } from "./lib/churnFeatures";
 import { HeatmapLegendBar } from "./components/HeatmapLegendBar";
 import {
   buildMonthlyBucketDrawSeries,
@@ -113,19 +115,29 @@ import type { GenerateWorkerArgs } from "./workers/generateWorker";
 import { ModulationDiagnosticsPanel } from "./components/ModulationDiagnosticsPanel";
 import { SelectionInsightsPanel, SelectionInsightsPredictionPanel } from "./components/SelectionInsightsPanel";
 import {
+  buildSelectionInsightPredictedCompanions,
   buildSelectionInsightsAnalytics,
   buildSelectionInsightsSnapshot,
+  mergeSelectionInsightAnchorNumbers,
 } from "./lib/selectionInsights";
 import { OddEvenRatioCadencePanel } from "./components/OddEvenRatioCadencePanel";
 import { ScoringSystemDiagnosticsPanel } from "./components/ScoringSystemDiagnosticsPanel";
+import { analyzeScoringSystemDiagnostics } from "./lib/scoringSystemDiagnostics";
 import {
   buildScoringGenerationProfile,
   type ScoringGenerationInfluence,
 } from "./lib/scoringGenerationInfluence";
+import { analyzeDrawBucketPatterns, buildDrawBucketPatternLeaderboard, DEFAULT_RECENT_DRAW_BUCKET_WINDOW } from "./lib/drawBucketPatterns";
 import { normalizeReadinessWeights, type ReadinessWeights } from "./lib/candidateGenerationInfluences";
 import { PredictionJournalPanel, type PredictionJournalDraftRequest } from "./components/PredictionJournalPanel";
 import { ResearchDiaryPanel } from "./components/ResearchDiaryPanel";
+import {
+  buildDrawBucketPatternDigitBoosts,
+  formatDrawBucketPatternInfluenceTrace,
+  type DrawBucketPatternGenerationInfluenceRow,
+} from "./lib/drawBucketPatternInfluence";
 import { PreviousNeighbourBacktestPanel } from "./components/PreviousNeighbourBacktestPanel";
+import { GuidedWorkflowPanel, type GuidedWorkflowStep } from "./components/GuidedWorkflowPanel";
 import { CollapsibleSection } from "./components/shared/CollapsibleSection";
 import { InlineCollapsibleCard } from "./components/shared/InlineCollapsibleCard";
 import { HigButton, HigField, HigSlider, InfoHelp } from "./components/shared/HigControls";
@@ -138,12 +150,15 @@ import { MostLikelyNotDrawnPanel } from "./components/MostLikelyNotDrawnPanel";
 import { BacktestPanel } from "./components/BacktestPanel";
 import { DroughtBacktestPanel } from "./components/DroughtBacktestPanel";
 import { SettingsSensitivityReplayPanel } from "./components/SettingsSensitivityReplayPanel";
+import { NextDrawEvidenceEnsemblePanel } from "./components/NextDrawEvidenceEnsemblePanel";
+import type { NextDrawEvidenceResult } from "./lib/nextDrawEvidenceEnsemble";
+import { SignalConfluencePanel } from "./components/SignalConfluencePanel";
 import { NextHotBlocksPanel } from "./components/NextHotBlocksPanel";
 import { TattslottoTicketGridReplayPanel } from "./components/TattslottoTicketGridReplayPanel";
 import UndrawnPatternsPanel from "./components/UndrawnPatternsPanel";
 import MonthlyOverlapPanel from "./components/MonthlyOverlapPanel";
 import MonthlyDrawsSummaryPanel, { type MonthlyConstraintPayload, type MonthlyFrequencyConstraints, type MonthlyBucketSets, type MonthlyIdealDrawState, type StageIdealDrawState } from "./components/MonthlyDrawsSummaryPanel";
-import { computeIdealMonthlyDraw } from "./lib/monthlyDrawSummary";
+import { computeIdealMonthlyDraw, type MonthlyBucketKey } from "./lib/monthlyDrawSummary";
 import MonthlyBucketTransitionLabPanel from "./components/MonthlyBucketTransitionLabPanel";
 import MonthlyFirstLastPanel from "./components/MonthlyFirstLastPanel";
 import MonthlyDigitOccurrencePanel from "./components/MonthlyDigitOccurrencePanel";
@@ -161,14 +176,33 @@ import {
   type D1TerminalMomentumStrength,
 } from "./lib/endingDigitSequences";
 import { buildD1TerminalMomentumGenerationProfile } from "./lib/d1TerminalMomentumInfluence";
+import {
+  analyzeBucketCoveragePlanner,
+  BUCKET_COVERAGE_FULL_LIMIT,
+  BUCKET_COVERAGE_SAMPLED_LIMIT,
+  formatBucketCoveragePlannerTrace,
+} from "./lib/monthlyBucketCoveragePlanner";
 import DGAMonthlyBucketStateGrid from "./components/DGAMonthlyBucketStateGrid";
 import { buildMonthlyBucketTimeline } from "./lib/monthlyBucketTimeline";
 import { deriveMainConstraintExclusions } from "./lib/mainConstraintExclusions";
 import {
+  broadcastDrawHistoryUpdated,
+  downloadCsvFallback,
+  parseCsv,
+  pickCsvFile,
+  readCsvFromHandle,
+  toCsv,
+  writeCsvToHandle,
+} from "./lib/drawHistory";
+import { validateDrawEntry, type DrawHistoryDateFormat } from "./lib/drawHistoryValidation";
+import {
   analyzeDrawHistoryRows,
   applyAutomaticHistoryCorrections,
+  buildHistoryExactKey,
   drawsFromRows,
+  normalizeHistoryDate,
   rowsFromDraws,
+  sortHistoryRows,
 } from "./lib/drawHistoryReview";
 import { clearCachedDrawHistory, loadCachedDrawHistory, saveCachedDrawHistory } from "./lib/historyPersistence";
 import {
@@ -225,6 +259,7 @@ import {
   togglePreviousNeighbourConstraintNumber as togglePreviousNeighbourConstraintTarget,
 } from "./lib/previousNeighbourTargets";
 import { buildLatestNeighbourStageMatchCompatibilityTrace } from "./lib/latestNeighbourStageMatchCompatibility";
+import type { LatestNeighbourSupportMode } from "./lib/latestNeighbourSupport";
 import { analyzeHotColdRanking } from "./lib/hotColdRanking";
 import { buildPortfolioWindowShapeEvidence } from "./lib/portfolioWindowShape";
 import { summarizeDrawHistoryProvenance } from "./lib/drawHistoryProvenance";
@@ -243,18 +278,42 @@ import {
   saveFavoritePanelIds,
 } from "./lib/panelFavorites";
 import { dateFromMonthLabel } from "./lib/planningDrawContext";
+import { findNextHistoryDrawDate } from "./lib/drawHistoryNextDraw";
+import { PREDICTION_JOURNAL_SELECTION_REASON_LABELS } from "./lib/predictionJournal";
 
 type DgaHeatmapViewMode = "temperature" | "monthlyBucketState";
+type TemperatureMetricMode = "ema" | "recency" | "hybrid";
 
 const DGA_HEATMAP_GUTTER = 15;
 
-interface DGAScoringNumberDiagnostic {
-  rank: number;
-  score: number;
-}
+const normalizeTemperatureMetricMode = (
+  value: unknown,
+  fallback: TemperatureMetricMode = "hybrid",
+): TemperatureMetricMode => (
+  value === "ema" || value === "recency" || value === "hybrid" ? value : fallback
+);
+
+const normalizeTemperatureOverlayMode = (value: unknown): TemperatureOverlayMode => (
+  value === "compact" || value === "detailed" ? value : "off"
+);
+
+const formatTemperatureMetricLabel = (metric: TemperatureMetricMode): string => {
+  if (metric === "ema") return "EMA";
+  if (metric === "recency") return "Recency";
+  return "Hybrid";
+};
 
 type MonthEndCarryOverStrength = "light" | "normal" | "strong";
 type SelectedCarryOverBoostMode = "normal" | "strong" | "nearForced";
+const latestNeighbourSupportModeLabel = (mode: LatestNeighbourSupportMode): string => (
+  mode === "pm1pm2" ? "±1/±2" : "±1"
+);
+const latestNeighbourSupportTraceLabel = (mode: LatestNeighbourSupportMode): string => (
+  mode === "pm1pm2" ? "LD±1/±2" : "LD±1"
+);
+const normalizeLatestNeighbourSupportMode = (value: unknown): LatestNeighbourSupportMode => (
+  value === "pm1pm2" ? "pm1pm2" : "pm1"
+);
 
 const MONTH_END_CARRY_OVER_STRENGTHS: Record<MonthEndCarryOverStrength, {
   label: string;
@@ -749,6 +808,7 @@ const formatGenerationTraceLines = (options: {
       ["repeat", stats.repeatUnion],
       ["ld±1", stats.latestNeighbourSupport],
       ["strictDrought", stats.strictDroughtQuota],
+      ["empDrought", stats.empiricalDroughtQuota],
       ["recMin", stats.minRecent],
       ["recMax", stats.maxLastDraw],
       ["recBias", stats.recentBias],
@@ -789,6 +849,7 @@ const WINDOW_OPTIONS = [
 ];
 
 const NUM_MAINS = 6;
+const NUM_SUPPS = 2;
 const MAIN_MIN = 1;
 const MAIN_MAX = 45;
 const MIN_VALID_DRAWS = 45;
@@ -797,6 +858,49 @@ const API_URL =
 const DEFAULT_ATTEMPT_MULTIPLIER = 400;
 const MAX_DROUGHT_BREAK_FORCED_NUMBERS = 3;
 const STRICT_DROUGHT_QUOTA_TOP_K = 8;
+
+const dateFormatForDrawHistory = (draws: readonly Draw[]): DrawHistoryDateFormat => (
+  draws.some((draw) => typeof draw.date === "string" && draw.date.includes("/")) ? "mdyy" : "iso"
+);
+
+const formatDroughtQuotaPct = (value: number): string => `${(value * 100).toFixed(1)}%`;
+const formatDroughtQuotaPp = (value: number): string => {
+  const rounded = Math.abs(value) < 0.0005 ? 0 : value;
+  return `${rounded >= 0 ? "+" : ""}${(rounded * 100).toFixed(1)}pp`;
+};
+
+const droughtQuotaReplayRowStyle = (lift: number): React.CSSProperties => {
+  const isPositiveOrNeutral = lift >= -0.0005;
+  return {
+  display: "grid",
+  gap: 2,
+  padding: "5px 7px",
+  borderRadius: 7,
+  border: `1px solid ${isPositiveOrNeutral ? "#bbf7d0" : "#fecaca"}`,
+  background: isPositiveOrNeutral ? "#f0fdf4" : "#fef2f2",
+  color: isPositiveOrNeutral ? "#166534" : "#991b1b",
+  minWidth: 92,
+  };
+};
+
+const DroughtQuotaCountReplayRows: React.FC<{ rows: DroughtQuotaCountSummary[] }> = ({ rows }) => {
+  const displayRows = rows.filter((row) => row.minCount > 0);
+  if (!displayRows.length) {
+    return <div style={{ color: "#64748b", fontSize: 11 }}>No count replay rows available yet.</div>;
+  }
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+      {displayRows.map((row) => (
+        <div key={row.minCount} style={droughtQuotaReplayRowStyle(row.lift)} title={`Observed ${row.observedCount} replay rows at or above this count.`}>
+          <span style={{ fontWeight: 900 }}>≥{row.minCount}</span>
+          <span>obs {formatDroughtQuotaPct(row.observedRate)}</span>
+          <span>rand {formatDroughtQuotaPct(row.expectedRandomRate)}</span>
+          <span>{formatDroughtQuotaPp(row.lift)}</span>
+        </div>
+      ))}
+    </div>
+  );
+};
 
 const zeroMonthlyFrequencyConstraints = (): MonthlyFrequencyConstraints => ({
   undrawn: 0,
@@ -873,9 +977,10 @@ const keepExistingNumberListWhenEqual = (current: number[], next: number[]): num
 );
 
 const hasActiveTerminalCoordinationRuleForTrace = (
-  options?: { maxCount?: number; boost?: number; singleDigitBoost?: number; twoDigitBoost?: number },
+  options?: { maxCount?: number; countMode?: MainDigitCountMode; targetCount?: number; boost?: number; singleDigitBoost?: number; twoDigitBoost?: number },
 ): boolean => (
   typeof options?.maxCount === "number" ||
+  (options?.countMode === "atLeast" || options?.countMode === "exactly" || options?.countMode === "atMost") ||
   [options?.boost, options?.singleDigitBoost, options?.twoDigitBoost].some((value) => {
     const numeric = Number(value);
     return Number.isFinite(numeric) && numeric > 0;
@@ -975,6 +1080,104 @@ type MainBucketBoostState = Record<GenerationConstraintBucketKey, {
   singleDigit: number;
   twoDigit: number;
 }>;
+type MainDigitCountMode = "off" | "atLeast" | "exactly" | "atMost";
+type LastDrawOverlapRuleMode = "off" | "atLeast" | "exactly" | "atMost" | "customRange";
+
+const mainDigitCountModeOptions: Array<{ value: MainDigitCountMode; label: string }> = [
+  { value: "off", label: "Off" },
+  { value: "atLeast", label: "At least" },
+  { value: "exactly", label: "Exactly" },
+  { value: "atMost", label: "At most" },
+];
+
+const lastDrawOverlapModeOptions: Array<{ value: Exclude<LastDrawOverlapRuleMode, "customRange">; label: string }> = [
+  { value: "off", label: "Off" },
+  { value: "atLeast", label: "At least" },
+  { value: "exactly", label: "Exactly" },
+  { value: "atMost", label: "At most" },
+];
+
+const normalizeMainDigitCountMode = (value: unknown): MainDigitCountMode => (
+  value === "atLeast" || value === "exactly" || value === "atMost" || value === "off"
+    ? value
+    : "atMost"
+);
+
+const formatMainDigitCountModeLabel = (mode: MainDigitCountMode): string => {
+  if (mode === "atLeast") return "at least";
+  if (mode === "exactly") return "exactly";
+  if (mode === "atMost") return "at most";
+  return "off";
+};
+
+const formatLastDrawOverlapModeLabel = (mode: LastDrawOverlapRuleMode): string => {
+  if (mode === "atLeast") return "at least";
+  if (mode === "exactly") return "exactly";
+  if (mode === "atMost") return "at most";
+  if (mode === "customRange") return "between";
+  return "off";
+};
+
+const clampLastDrawOverlapCount = (value: unknown, mode: LastDrawOverlapRuleMode): number => {
+  const numeric = Number(value);
+  const whole = Number.isFinite(numeric) ? Math.trunc(numeric) : 0;
+  const lower = mode === "atLeast" ? 1 : 0;
+  return Math.max(lower, Math.min(8, whole));
+};
+
+const deriveLastDrawOverlapMode = (
+  minMatches: number,
+  maxEnabled: boolean,
+  maxMatches: number,
+): LastDrawOverlapRuleMode => {
+  const min = clampLastDrawOverlapCount(minMatches, "off");
+  const max = clampLastDrawOverlapCount(maxMatches, "off");
+  if (min === 0 && !maxEnabled) return "off";
+  if (maxEnabled && min > 0 && max === min) return "exactly";
+  if (maxEnabled && min === 0) return "atMost";
+  if (!maxEnabled && min > 0) return "atLeast";
+  return "customRange";
+};
+
+const getLastDrawOverlapDisplayCount = (
+  mode: LastDrawOverlapRuleMode,
+  minMatches: number,
+  maxMatches: number,
+): number => {
+  if (mode === "atLeast" || mode === "exactly" || mode === "customRange") {
+    return clampLastDrawOverlapCount(minMatches, mode);
+  }
+  if (mode === "atMost") return clampLastDrawOverlapCount(maxMatches, mode);
+  return clampLastDrawOverlapCount(maxMatches, "exactly");
+};
+
+const formatLastDrawOverlapRuleSummary = (
+  mode: LastDrawOverlapRuleMode,
+  minMatches: number,
+  maxMatches: number,
+): string => {
+  if (mode === "off") return "off";
+  const min = clampLastDrawOverlapCount(minMatches, mode);
+  const max = clampLastDrawOverlapCount(maxMatches, "off");
+  if (mode === "customRange") return `between ${min}-${max}`;
+  return `${formatLastDrawOverlapModeLabel(mode)} ${getLastDrawOverlapDisplayCount(mode, min, max)}`;
+};
+
+const buildMainDigitGenerationOption = (
+  enabled: boolean,
+  mode: MainDigitCountMode,
+  count: number,
+  boosts: { singleDigit: number; twoDigit: number },
+) => {
+  const activeMode = enabled && mode !== "off" ? mode : undefined;
+  return {
+    countMode: activeMode,
+    targetCount: activeMode ? count : undefined,
+    maxCount: activeMode === "atMost" ? count : undefined,
+    singleDigitBoost: boosts.singleDigit,
+    twoDigitBoost: boosts.twoDigit,
+  };
+};
 
 const defaultMainBucketBoosts: MainBucketBoostState = {
   main0: { singleDigit: 0, twoDigit: 0 },
@@ -1155,25 +1358,37 @@ function AppInner(): JSX.Element {
   const [jaccardThreshold, setJaccardThreshold] = useState<number>(0.5);
   const [mainZeroSetEnabled, setMainZeroSetEnabled] = useState<boolean>(false);
   const [maxMainZeroSetCount, setMaxMainZeroSetCount] = useState<number>(0);
+  const [mainZeroSetMode, setMainZeroSetMode] = useState<MainDigitCountMode>("atMost");
   const [mainFiveSetEnabled, setMainFiveSetEnabled] = useState<boolean>(false);
   const [maxMainFiveSetCount, setMaxMainFiveSetCount] = useState<number>(0);
+  const [mainFiveSetMode, setMainFiveSetMode] = useState<MainDigitCountMode>("atMost");
   const [mainOneSetEnabled, setMainOneSetEnabled] = useState<boolean>(false);
   const [maxMainOneSetCount, setMaxMainOneSetCount] = useState<number>(0);
+  const [mainOneSetMode, setMainOneSetMode] = useState<MainDigitCountMode>("atMost");
   const [mainTwoSetEnabled, setMainTwoSetEnabled] = useState<boolean>(false);
   const [maxMainTwoSetCount, setMaxMainTwoSetCount] = useState<number>(0);
+  const [mainTwoSetMode, setMainTwoSetMode] = useState<MainDigitCountMode>("atMost");
   const [mainThreeSetEnabled, setMainThreeSetEnabled] = useState<boolean>(false);
   const [maxMainThreeSetCount, setMaxMainThreeSetCount] = useState<number>(0);
+  const [mainThreeSetMode, setMainThreeSetMode] = useState<MainDigitCountMode>("atMost");
   const [mainFourSetEnabled, setMainFourSetEnabled] = useState<boolean>(false);
   const [maxMainFourSetCount, setMaxMainFourSetCount] = useState<number>(0);
+  const [mainFourSetMode, setMainFourSetMode] = useState<MainDigitCountMode>("atMost");
   const [mainSixSetEnabled, setMainSixSetEnabled] = useState<boolean>(false);
   const [maxMainSixSetCount, setMaxMainSixSetCount] = useState<number>(0);
+  const [mainSixSetMode, setMainSixSetMode] = useState<MainDigitCountMode>("atMost");
   const [mainSevenSetEnabled, setMainSevenSetEnabled] = useState<boolean>(false);
   const [maxMainSevenSetCount, setMaxMainSevenSetCount] = useState<number>(0);
+  const [mainSevenSetMode, setMainSevenSetMode] = useState<MainDigitCountMode>("atMost");
   const [mainEightSetEnabled, setMainEightSetEnabled] = useState<boolean>(false);
   const [maxMainEightSetCount, setMaxMainEightSetCount] = useState<number>(0);
+  const [mainEightSetMode, setMainEightSetMode] = useState<MainDigitCountMode>("atMost");
   const [mainNineSetEnabled, setMainNineSetEnabled] = useState<boolean>(false);
   const [maxMainNineSetCount, setMaxMainNineSetCount] = useState<number>(0);
+  const [mainNineSetMode, setMainNineSetMode] = useState<MainDigitCountMode>("atMost");
   const [mainBucketBoosts, setMainBucketBoosts] = useState<MainBucketBoostState>(defaultMainBucketBoosts);
+  const [drawBucketPatternInfluenceEnabled, setDrawBucketPatternInfluenceEnabled] = useState<boolean>(false);
+  const [drawBucketPatternInfluenceRows, setDrawBucketPatternInfluenceRows] = useState<DrawBucketPatternGenerationInfluenceRow[]>([]);
   const [mainDecadeBiases, setMainDecadeBiases] = useState<Record<GenerationConstraintDecadeKey, number>>(defaultMainDecadeBiases);
   const [digitWidthConstraintEnabled, setDigitWidthConstraintEnabled] = useState<boolean>(false);
   const [digitWidthSingleDigitPercent, setDigitWidthSingleDigitPercent] = useState<number>(0);
@@ -1181,6 +1396,8 @@ function AppInner(): JSX.Element {
   const [acceptanceNeedsEnabled, setAcceptanceNeedsEnabled] = useState<boolean>(false);
   const [acceptanceNeedsCounts, setAcceptanceNeedsCounts] = useState<MonthlyFrequencyConstraints>(() => zeroMonthlyFrequencyConstraints());
   const [acceptanceNeedsHardExclude, setAcceptanceNeedsHardExclude] = useState<boolean>(false);
+  const [bucketCoveragePlannerEnabled, setBucketCoveragePlannerEnabled] = useState<boolean>(false);
+  const [bucketCoveragePlannerIgnoreUndrawn, setBucketCoveragePlannerIgnoreUndrawn] = useState<boolean>(true);
   const [attemptMultiplier, setAttemptMultiplier] = useState<number>(DEFAULT_ATTEMPT_MULTIPLIER);
   const [overgenFactor, setOvergenFactor] = useState<number>(50);
   const [scoringGenerationInfluence, setScoringGenerationInfluence] = useState<ScoringGenerationInfluence>("off");
@@ -1219,186 +1436,216 @@ function AppInner(): JSX.Element {
   const exactConstraintRows = useMemo(() => [
     {
       key: "main0",
-      label: "0-ending numbers max allowed",
-      helper: "at most this many candidate numbers ending in 0 (main + supp)",
+      label: "0-ending numbers",
+      helper: "count rule applies to candidate numbers ending in 0 (main + supp)",
       badge: "(10, 20, 30, 40)",
       max: 4,
       enabled: mainZeroSetEnabled,
       setEnabled: setMainZeroSetEnabled,
+      mode: mainZeroSetEnabled ? mainZeroSetMode : ("off" as MainDigitCountMode),
+      setMode: setMainZeroSetMode,
       count: maxMainZeroSetCount,
       setCount: setMaxMainZeroSetCount,
       singleDigitBoost: mainBucketBoosts.main0.singleDigit,
       twoDigitBoost: mainBucketBoosts.main0.twoDigit,
       setSingleDigitBoost: (nextBoost: number) => updateMainBucketBoost("main0", "singleDigit", nextBoost),
       setTwoDigitBoost: (nextBoost: number) => updateMainBucketBoost("main0", "twoDigit", nextBoost),
-      title: "Allow at most this many candidate numbers from the set 10, 20, 30, 40 across main and supplementary picks.",
+      title: "Control how many candidate numbers from the set 10, 20, 30, 40 may appear across main and supplementary picks.",
       bucketKey: "main0" as const,
     },
     {
       key: "main1",
-      label: "1-ending numbers max allowed",
-      helper: "at most this many candidate numbers ending in 1 (main + supp)",
+      label: "1-ending numbers",
+      helper: "count rule applies to candidate numbers ending in 1 (main + supp)",
       badge: "(1, 11, 21, 31, 41)",
       max: 5,
       enabled: mainOneSetEnabled,
       setEnabled: setMainOneSetEnabled,
+      mode: mainOneSetEnabled ? mainOneSetMode : ("off" as MainDigitCountMode),
+      setMode: setMainOneSetMode,
       count: maxMainOneSetCount,
       setCount: setMaxMainOneSetCount,
       singleDigitBoost: mainBucketBoosts.main1.singleDigit,
       twoDigitBoost: mainBucketBoosts.main1.twoDigit,
       setSingleDigitBoost: (nextBoost: number) => updateMainBucketBoost("main1", "singleDigit", nextBoost),
       setTwoDigitBoost: (nextBoost: number) => updateMainBucketBoost("main1", "twoDigit", nextBoost),
-      title: "Allow at most this many candidate numbers from the set 1, 11, 21, 31, 41 across main and supplementary picks.",
+      title: "Control how many candidate numbers from the set 1, 11, 21, 31, 41 may appear across main and supplementary picks.",
       bucketKey: "main1" as const,
     },
     {
       key: "main2",
-      label: "2-ending numbers max allowed",
-      helper: "at most this many candidate numbers ending in 2 (main + supp)",
+      label: "2-ending numbers",
+      helper: "count rule applies to candidate numbers ending in 2 (main + supp)",
       badge: "(2, 12, 22, 32, 42)",
       max: 5,
       enabled: mainTwoSetEnabled,
       setEnabled: setMainTwoSetEnabled,
+      mode: mainTwoSetEnabled ? mainTwoSetMode : ("off" as MainDigitCountMode),
+      setMode: setMainTwoSetMode,
       count: maxMainTwoSetCount,
       setCount: setMaxMainTwoSetCount,
       singleDigitBoost: mainBucketBoosts.main2.singleDigit,
       twoDigitBoost: mainBucketBoosts.main2.twoDigit,
       setSingleDigitBoost: (nextBoost: number) => updateMainBucketBoost("main2", "singleDigit", nextBoost),
       setTwoDigitBoost: (nextBoost: number) => updateMainBucketBoost("main2", "twoDigit", nextBoost),
-      title: "Allow at most this many candidate numbers from the set 2, 12, 22, 32, 42 across main and supplementary picks.",
+      title: "Control how many candidate numbers from the set 2, 12, 22, 32, 42 may appear across main and supplementary picks.",
       bucketKey: "main2" as const,
     },
     {
       key: "main3",
-      label: "3-ending numbers max allowed",
-      helper: "at most this many candidate numbers ending in 3 (main + supp)",
+      label: "3-ending numbers",
+      helper: "count rule applies to candidate numbers ending in 3 (main + supp)",
       badge: "(3, 13, 23, 33, 43)",
       max: 5,
       enabled: mainThreeSetEnabled,
       setEnabled: setMainThreeSetEnabled,
+      mode: mainThreeSetEnabled ? mainThreeSetMode : ("off" as MainDigitCountMode),
+      setMode: setMainThreeSetMode,
       count: maxMainThreeSetCount,
       setCount: setMaxMainThreeSetCount,
       singleDigitBoost: mainBucketBoosts.main3.singleDigit,
       twoDigitBoost: mainBucketBoosts.main3.twoDigit,
       setSingleDigitBoost: (nextBoost: number) => updateMainBucketBoost("main3", "singleDigit", nextBoost),
       setTwoDigitBoost: (nextBoost: number) => updateMainBucketBoost("main3", "twoDigit", nextBoost),
-      title: "Allow at most this many candidate numbers from the set 3, 13, 23, 33, 43 across main and supplementary picks.",
+      title: "Control how many candidate numbers from the set 3, 13, 23, 33, 43 may appear across main and supplementary picks.",
       bucketKey: "main3" as const,
     },
     {
       key: "main4",
-      label: "4-ending numbers max allowed",
-      helper: "at most this many candidate numbers ending in 4 (main + supp)",
+      label: "4-ending numbers",
+      helper: "count rule applies to candidate numbers ending in 4 (main + supp)",
       badge: "(4, 14, 24, 34, 44)",
       max: 5,
       enabled: mainFourSetEnabled,
       setEnabled: setMainFourSetEnabled,
+      mode: mainFourSetEnabled ? mainFourSetMode : ("off" as MainDigitCountMode),
+      setMode: setMainFourSetMode,
       count: maxMainFourSetCount,
       setCount: setMaxMainFourSetCount,
       singleDigitBoost: mainBucketBoosts.main4.singleDigit,
       twoDigitBoost: mainBucketBoosts.main4.twoDigit,
       setSingleDigitBoost: (nextBoost: number) => updateMainBucketBoost("main4", "singleDigit", nextBoost),
       setTwoDigitBoost: (nextBoost: number) => updateMainBucketBoost("main4", "twoDigit", nextBoost),
-      title: "Allow at most this many candidate numbers from the set 4, 14, 24, 34, 44 across main and supplementary picks.",
+      title: "Control how many candidate numbers from the set 4, 14, 24, 34, 44 may appear across main and supplementary picks.",
       bucketKey: "main4" as const,
     },
     {
       key: "main5",
-      label: "5-ending numbers max allowed",
-      helper: "at most this many candidate numbers ending in 5 (main + supp)",
+      label: "5-ending numbers",
+      helper: "count rule applies to candidate numbers ending in 5 (main + supp)",
       badge: "(5, 15, 25, 35, 45)",
       max: 5,
       enabled: mainFiveSetEnabled,
       setEnabled: setMainFiveSetEnabled,
+      mode: mainFiveSetEnabled ? mainFiveSetMode : ("off" as MainDigitCountMode),
+      setMode: setMainFiveSetMode,
       count: maxMainFiveSetCount,
       setCount: setMaxMainFiveSetCount,
       singleDigitBoost: mainBucketBoosts.main5.singleDigit,
       twoDigitBoost: mainBucketBoosts.main5.twoDigit,
       setSingleDigitBoost: (nextBoost: number) => updateMainBucketBoost("main5", "singleDigit", nextBoost),
       setTwoDigitBoost: (nextBoost: number) => updateMainBucketBoost("main5", "twoDigit", nextBoost),
-      title: "Allow at most this many candidate numbers from the set 5, 15, 25, 35, 45 across main and supplementary picks.",
+      title: "Control how many candidate numbers from the set 5, 15, 25, 35, 45 may appear across main and supplementary picks.",
       bucketKey: "main5" as const,
     },
     {
       key: "main6",
-      label: "6-ending numbers max allowed",
-      helper: "at most this many candidate numbers ending in 6 (main + supp)",
+      label: "6-ending numbers",
+      helper: "count rule applies to candidate numbers ending in 6 (main + supp)",
       badge: "(6, 16, 26, 36)",
       max: 4,
       enabled: mainSixSetEnabled,
       setEnabled: setMainSixSetEnabled,
+      mode: mainSixSetEnabled ? mainSixSetMode : ("off" as MainDigitCountMode),
+      setMode: setMainSixSetMode,
       count: maxMainSixSetCount,
       setCount: setMaxMainSixSetCount,
       singleDigitBoost: mainBucketBoosts.main6.singleDigit,
       twoDigitBoost: mainBucketBoosts.main6.twoDigit,
       setSingleDigitBoost: (nextBoost: number) => updateMainBucketBoost("main6", "singleDigit", nextBoost),
       setTwoDigitBoost: (nextBoost: number) => updateMainBucketBoost("main6", "twoDigit", nextBoost),
-      title: "Allow at most this many candidate numbers from the set 6, 16, 26, 36 across main and supplementary picks.",
+      title: "Control how many candidate numbers from the set 6, 16, 26, 36 may appear across main and supplementary picks.",
       bucketKey: "main6" as const,
     },
     {
       key: "main7",
-      label: "7-ending numbers max allowed",
-      helper: "at most this many candidate numbers ending in 7 (main + supp)",
+      label: "7-ending numbers",
+      helper: "count rule applies to candidate numbers ending in 7 (main + supp)",
       badge: "(7, 17, 27, 37)",
       max: 4,
       enabled: mainSevenSetEnabled,
       setEnabled: setMainSevenSetEnabled,
+      mode: mainSevenSetEnabled ? mainSevenSetMode : ("off" as MainDigitCountMode),
+      setMode: setMainSevenSetMode,
       count: maxMainSevenSetCount,
       setCount: setMaxMainSevenSetCount,
       singleDigitBoost: mainBucketBoosts.main7.singleDigit,
       twoDigitBoost: mainBucketBoosts.main7.twoDigit,
       setSingleDigitBoost: (nextBoost: number) => updateMainBucketBoost("main7", "singleDigit", nextBoost),
       setTwoDigitBoost: (nextBoost: number) => updateMainBucketBoost("main7", "twoDigit", nextBoost),
-      title: "Allow at most this many candidate numbers from the set 7, 17, 27, 37 across main and supplementary picks.",
+      title: "Control how many candidate numbers from the set 7, 17, 27, 37 may appear across main and supplementary picks.",
       bucketKey: "main7" as const,
     },
     {
       key: "main8",
-      label: "8-ending numbers max allowed",
-      helper: "at most this many candidate numbers ending in 8 (main + supp)",
+      label: "8-ending numbers",
+      helper: "count rule applies to candidate numbers ending in 8 (main + supp)",
       badge: "(8, 18, 28, 38)",
       max: 4,
       enabled: mainEightSetEnabled,
       setEnabled: setMainEightSetEnabled,
+      mode: mainEightSetEnabled ? mainEightSetMode : ("off" as MainDigitCountMode),
+      setMode: setMainEightSetMode,
       count: maxMainEightSetCount,
       setCount: setMaxMainEightSetCount,
       singleDigitBoost: mainBucketBoosts.main8.singleDigit,
       twoDigitBoost: mainBucketBoosts.main8.twoDigit,
       setSingleDigitBoost: (nextBoost: number) => updateMainBucketBoost("main8", "singleDigit", nextBoost),
       setTwoDigitBoost: (nextBoost: number) => updateMainBucketBoost("main8", "twoDigit", nextBoost),
-      title: "Allow at most this many candidate numbers from the set 8, 18, 28, 38 across main and supplementary picks.",
+      title: "Control how many candidate numbers from the set 8, 18, 28, 38 may appear across main and supplementary picks.",
       bucketKey: "main8" as const,
     },
     {
       key: "main9",
-      label: "9-ending numbers max allowed",
-      helper: "at most this many candidate numbers ending in 9 (main + supp)",
+      label: "9-ending numbers",
+      helper: "count rule applies to candidate numbers ending in 9 (main + supp)",
       badge: "(9, 19, 29, 39)",
       max: 4,
       enabled: mainNineSetEnabled,
       setEnabled: setMainNineSetEnabled,
+      mode: mainNineSetEnabled ? mainNineSetMode : ("off" as MainDigitCountMode),
+      setMode: setMainNineSetMode,
       count: maxMainNineSetCount,
       setCount: setMaxMainNineSetCount,
       singleDigitBoost: mainBucketBoosts.main9.singleDigit,
       twoDigitBoost: mainBucketBoosts.main9.twoDigit,
       setSingleDigitBoost: (nextBoost: number) => updateMainBucketBoost("main9", "singleDigit", nextBoost),
       setTwoDigitBoost: (nextBoost: number) => updateMainBucketBoost("main9", "twoDigit", nextBoost),
-      title: "Allow at most this many candidate numbers from the set 9, 19, 29, 39 across main and supplementary picks.",
+      title: "Control how many candidate numbers from the set 9, 19, 29, 39 may appear across main and supplementary picks.",
       bucketKey: "main9" as const,
     },
   ] as const, [
     mainBucketBoosts,
     mainEightSetEnabled,
+    mainEightSetMode,
     mainFiveSetEnabled,
+    mainFiveSetMode,
     mainFourSetEnabled,
+    mainFourSetMode,
     mainNineSetEnabled,
+    mainNineSetMode,
     mainOneSetEnabled,
+    mainOneSetMode,
     mainSevenSetEnabled,
+    mainSevenSetMode,
     mainSixSetEnabled,
+    mainSixSetMode,
     mainThreeSetEnabled,
+    mainThreeSetMode,
     mainTwoSetEnabled,
+    mainTwoSetMode,
     mainZeroSetEnabled,
+    mainZeroSetMode,
     maxMainEightSetCount,
     maxMainFiveSetCount,
     maxMainFourSetCount,
@@ -1706,9 +1953,52 @@ function AppInner(): JSX.Element {
   const [maxLastDrawMatchesValue, setMaxLastDrawMatchesValue] = useState<number>(3);
   const [previousNeighbourConstraintNumbers, setPreviousNeighbourConstraintNumbers] = useState<number[]>([]);
   const [latestNeighbourSupportEnabled, setLatestNeighbourSupportEnabled] = useState<boolean>(false);
+  const [latestNeighbourSupportMode, setLatestNeighbourSupportMode] = useState<LatestNeighbourSupportMode>("pm1");
   const [strictDroughtQuotaMode, setStrictDroughtQuotaMode] = useState<StrictDroughtQuotaControlMode>("off");
   const [strictDroughtQuotaManualMin, setStrictDroughtQuotaManualMin] = useState<number>(1);
+  const [empiricalDroughtQuotaMode, setEmpiricalDroughtQuotaMode] = useState<StrictDroughtQuotaControlMode>("off");
+  const [empiricalDroughtQuotaManualMin, setEmpiricalDroughtQuotaManualMin] = useState<number>(1);
   const [recentMatchBias, setRecentMatchBias] = useState<number>(0);
+  const lastDrawOverlapRuleMode = deriveLastDrawOverlapMode(
+    minRecentMatches,
+    maxLastDrawMatchesEnabled,
+    maxLastDrawMatchesValue,
+  );
+  const lastDrawOverlapRuleCount = getLastDrawOverlapDisplayCount(
+    lastDrawOverlapRuleMode,
+    minRecentMatches,
+    maxLastDrawMatchesValue,
+  );
+  const lastDrawOverlapRuleSummary = formatLastDrawOverlapRuleSummary(
+    lastDrawOverlapRuleMode,
+    minRecentMatches,
+    maxLastDrawMatchesValue,
+  );
+  const lastDrawOverlapCountOptions = lastDrawOverlapRuleMode === "atLeast"
+    ? [1, 2, 3, 4, 5, 6, 7, 8]
+    : [0, 1, 2, 3, 4, 5, 6, 7, 8];
+  const applyLastDrawOverlapRule = useCallback((mode: Exclude<LastDrawOverlapRuleMode, "customRange">, rawCount: number) => {
+    const count = clampLastDrawOverlapCount(rawCount, mode);
+    if (mode === "off") {
+      setMinRecentMatches(0);
+      setMaxLastDrawMatchesEnabled(false);
+      return;
+    }
+    if (mode === "atLeast") {
+      setMinRecentMatches(Math.max(1, count));
+      setMaxLastDrawMatchesEnabled(false);
+      return;
+    }
+    if (mode === "exactly") {
+      setMinRecentMatches(count);
+      setMaxLastDrawMatchesValue(count);
+      setMaxLastDrawMatchesEnabled(true);
+      return;
+    }
+    setMinRecentMatches(0);
+    setMaxLastDrawMatchesValue(count);
+    setMaxLastDrawMatchesEnabled(true);
+  }, []);
   const [highlightMsg, setHighlightMsg] = useState<string>("");
   const [highlights, setHighlights] = useState<any[]>([]);
   const [dgaHeatmapExpanded, setDgaHeatmapExpanded] = useState<boolean>(true);
@@ -1721,6 +2011,7 @@ function AppInner(): JSX.Element {
   const [hotColdExcludedNumbers, setHotColdExcludedNumbers] = useState<number[]>([]);
   const [droughtBreakSelectedNumbers, setDroughtBreakSelectedNumbers] = useState<number[]>([]);
   const [pasteWeightedForcedNumbers, setPasteWeightedForcedNumbers] = useState<number[]>([]);
+  const [signalConfluenceForcedNumbers, setSignalConfluenceForcedNumbers] = useState<number[]>([]);
   const [userSelectedNumbers, setUserSelectedNumbers] = useState<number[]>([]);
   const [autoExcludeUnselected, setAutoExcludeUnselected] = useState<boolean>(false);
   const normalizedUserSelectedNumbersForGeneration = useMemo(
@@ -1752,8 +2043,10 @@ function AppInner(): JSX.Element {
   const [focusNumber, setFocusNumber] = useState<number | null>(null);
   const [showHeatmapLetters, setShowHeatmapLetters] = useState(false);
   const [showMbsHoverSparkline, setShowMbsHoverSparkline] = useState(true);
-  const [tempMetric, setTempMetric] = useState<"ema" | "recency" | "hybrid">("hybrid");
+  const [tempMetric, setTempMetric] = useState<TemperatureMetricMode>("hybrid");
   const [dgaHeatmapView, setDgaHeatmapView] = useState<DgaHeatmapViewMode>("temperature");
+  const [monthlyBucketTemperatureOverlayMode, setMonthlyBucketTemperatureOverlayMode] = useState<TemperatureOverlayMode>("off");
+  const [monthlyBucketTemperatureMetric, setMonthlyBucketTemperatureMetric] = useState<TemperatureMetricMode>("recency");
   const [dgaMonthlyBucketStateOpacity, setDgaMonthlyBucketStateOpacity] = useState<number>(1);
   const [repeatWindowSizeW, setRepeatWindowSizeW] = useState<number>(12);
   const [minFromRecentUnionM, setMinFromRecentUnionM] = useState<number>(0);
@@ -1816,9 +2109,6 @@ function AppInner(): JSX.Element {
 
   // Auto-save dirty flag ref (used by the interval below)
 
-  const [survivalOut, setSurvivalOut] = useState<{ number: number; baseProb?: number; biasedProb?: number }[] | undefined>(undefined);
-  const [churnOut, setChurnOut] = useState<{ number: number; pChurn: number }[] | undefined>(undefined);
-  const [returnOut, setReturnOut] = useState<{ number: number; pReturn: number }[] | undefined>(undefined);
   const [insightsEnabled, setInsightsEnabled] = useState<boolean>(false); // default OFF
   // OGA band state for panel (optional)
   const [activeOGABand, setActiveOGABand] = useState<{ lower: number; upper: number } | null>(null);
@@ -1854,8 +2144,9 @@ function AppInner(): JSX.Element {
     setHistory(nextHistory);
     setStartupHistoryChoice(null);
     setHighlights([]);
-    if (nextHistory.some((draw) => !draw.isSimulated)) {
-      saveCachedDrawHistory(rowsFromDraws(nextHistory));
+    const cacheableRealHistory = strictValidateDraws(nextHistory.filter((draw) => !draw.isSimulated));
+    if (cacheableRealHistory.length > 0) {
+      saveCachedDrawHistory(rowsFromDraws(cacheableRealHistory));
     } else {
       clearCachedDrawHistory();
     }
@@ -2007,6 +2298,7 @@ function AppInner(): JSX.Element {
       ...hotColdForcedNumbers,
       ...droughtBreakSelectedNumbers,
       ...pasteWeightedForcedNumbers,
+      ...signalConfluenceForcedNumbers,
     ]) {
       if (!Number.isInteger(number) || number < 1 || number > 45 || seen.has(number) || excluded.has(number)) continue;
       seen.add(number);
@@ -2019,6 +2311,7 @@ function AppInner(): JSX.Element {
     hotColdForcedNumbers,
     pasteWeightedForcedNumbers,
     previousNeighbourConstraintNumbers,
+    signalConfluenceForcedNumbers,
     trendSelectedNumbers,
   ]);
 
@@ -2036,8 +2329,9 @@ function AppInner(): JSX.Element {
     () => normalizeHotColdGenerationNumbers([
       ...droughtBreakSelectedNumbers,
       ...pasteWeightedForcedNumbers,
+      ...signalConfluenceForcedNumbers,
     ]),
-    [droughtBreakSelectedNumbers, pasteWeightedForcedNumbers],
+    [droughtBreakSelectedNumbers, pasteWeightedForcedNumbers, signalConfluenceForcedNumbers],
   );
 
   const generationForcedOverflow = generationForcedNumbers.length > 8;
@@ -2159,9 +2453,10 @@ function AppInner(): JSX.Element {
 
   const mainConstraintAutoExclusions = useMemo(() => {
     return deriveMainConstraintExclusions(
-      exactConstraintRows.map(({ bucketKey, enabled, count, singleDigitBoost, twoDigitBoost }) => ({
+      exactConstraintRows.map(({ bucketKey, enabled, mode, count, singleDigitBoost, twoDigitBoost }) => ({
         bucketKey,
         enabled,
+        mode,
         count,
         singleDigitBoost,
         twoDigitBoost,
@@ -2193,6 +2488,7 @@ function AppInner(): JSX.Element {
     setHotColdForcedNumbers((current) => pruneManualExcludedNumbers(current));
     setDroughtBreakSelectedNumbers((current) => pruneManualExcludedNumbers(current, MAX_DROUGHT_BREAK_FORCED_NUMBERS));
     setPasteWeightedForcedNumbers((current) => pruneManualExcludedNumbers(current));
+    setSignalConfluenceForcedNumbers((current) => pruneManualExcludedNumbers(current));
     setUserSelectedNumbers((current) => pruneManualExcludedNumbers(current));
     setManualSimSelected((current) => keepExistingNumberListWhenEqual(
       current,
@@ -2221,12 +2517,42 @@ function AppInner(): JSX.Element {
       .join(", ");
   }, [exactConstraintRows]);
 
+  const activeMainDigitRuleSummary = useMemo(() => {
+    return exactConstraintRows
+      .flatMap(({ bucketKey, mode, count }) => (
+        mode !== "off" ? [`bucket ${bucketKey.replace("main", "")} ${formatMainDigitCountModeLabel(mode)} ${count}`] : []
+      ))
+      .join(", ");
+  }, [exactConstraintRows]);
+
   const activeMainDecadeBiasSummary = useMemo(() => {
     return mainDecadeConstraintRows
       .filter(({ bias }) => bias !== 0)
       .map(({ bucketKey, bias }) => `${bucketKey.replace("decade", "")}:${bias > 0 ? `+${bias}` : bias}`)
       .join(", ");
   }, [mainDecadeConstraintRows]);
+
+  const drawBucketPatternDigitBoostResult = useMemo(
+    () => buildDrawBucketPatternDigitBoosts(drawBucketPatternInfluenceRows, drawBucketPatternInfluenceEnabled),
+    [drawBucketPatternInfluenceEnabled, drawBucketPatternInfluenceRows],
+  );
+
+  const drawBucketPatternInfluenceTrace = useMemo(
+    () => formatDrawBucketPatternInfluenceTrace(drawBucketPatternDigitBoostResult, DEFAULT_RECENT_DRAW_BUCKET_WINDOW),
+    [drawBucketPatternDigitBoostResult],
+  );
+
+  const effectiveMainBucketBoosts = useMemo<MainBucketBoostState>(() => {
+    return (Object.keys(generationConstraintNumberBuckets) as GenerationConstraintBucketKey[]).reduce<MainBucketBoostState>((acc, bucketKey) => {
+      const digit = Number(bucketKey.replace("main", ""));
+      const leaderboardBoost = drawBucketPatternDigitBoostResult.boostsByDigit[digit] ?? { singleDigit: 0, twoDigit: 0 };
+      acc[bucketKey] = {
+        singleDigit: Math.min(5, mainBucketBoosts[bucketKey].singleDigit + leaderboardBoost.singleDigit),
+        twoDigit: Math.min(5, mainBucketBoosts[bucketKey].twoDigit + leaderboardBoost.twoDigit),
+      };
+      return acc;
+    }, { ...defaultMainBucketBoosts });
+  }, [drawBucketPatternDigitBoostResult.boostsByDigit, mainBucketBoosts]);
 
   const digitWidthConstraintTargets = useMemo(() => deriveDigitWidthTargets({
     enabled: digitWidthConstraintEnabled,
@@ -2235,38 +2561,48 @@ function AppInner(): JSX.Element {
   }), [digitWidthConstraintEnabled, digitWidthSingleDigitPercent, digitWidthConstraintScope]);
 
   const mainDigitGenerationOptions = useMemo(() => ({
-    main0: { maxCount: mainZeroSetEnabled ? maxMainZeroSetCount : undefined, singleDigitBoost: mainBucketBoosts.main0.singleDigit, twoDigitBoost: mainBucketBoosts.main0.twoDigit },
-    main1: { maxCount: mainOneSetEnabled ? maxMainOneSetCount : undefined, singleDigitBoost: mainBucketBoosts.main1.singleDigit, twoDigitBoost: mainBucketBoosts.main1.twoDigit },
-    main2: { maxCount: mainTwoSetEnabled ? maxMainTwoSetCount : undefined, singleDigitBoost: mainBucketBoosts.main2.singleDigit, twoDigitBoost: mainBucketBoosts.main2.twoDigit },
-    main3: { maxCount: mainThreeSetEnabled ? maxMainThreeSetCount : undefined, singleDigitBoost: mainBucketBoosts.main3.singleDigit, twoDigitBoost: mainBucketBoosts.main3.twoDigit },
-    main4: { maxCount: mainFourSetEnabled ? maxMainFourSetCount : undefined, singleDigitBoost: mainBucketBoosts.main4.singleDigit, twoDigitBoost: mainBucketBoosts.main4.twoDigit },
-    main5: { maxCount: mainFiveSetEnabled ? maxMainFiveSetCount : undefined, singleDigitBoost: mainBucketBoosts.main5.singleDigit, twoDigitBoost: mainBucketBoosts.main5.twoDigit },
-    main6: { maxCount: mainSixSetEnabled ? maxMainSixSetCount : undefined, singleDigitBoost: mainBucketBoosts.main6.singleDigit, twoDigitBoost: mainBucketBoosts.main6.twoDigit },
-    main7: { maxCount: mainSevenSetEnabled ? maxMainSevenSetCount : undefined, singleDigitBoost: mainBucketBoosts.main7.singleDigit, twoDigitBoost: mainBucketBoosts.main7.twoDigit },
-    main8: { maxCount: mainEightSetEnabled ? maxMainEightSetCount : undefined, singleDigitBoost: mainBucketBoosts.main8.singleDigit, twoDigitBoost: mainBucketBoosts.main8.twoDigit },
-    main9: { maxCount: mainNineSetEnabled ? maxMainNineSetCount : undefined, singleDigitBoost: mainBucketBoosts.main9.singleDigit, twoDigitBoost: mainBucketBoosts.main9.twoDigit },
+    main0: buildMainDigitGenerationOption(mainZeroSetEnabled, mainZeroSetMode, maxMainZeroSetCount, effectiveMainBucketBoosts.main0),
+    main1: buildMainDigitGenerationOption(mainOneSetEnabled, mainOneSetMode, maxMainOneSetCount, effectiveMainBucketBoosts.main1),
+    main2: buildMainDigitGenerationOption(mainTwoSetEnabled, mainTwoSetMode, maxMainTwoSetCount, effectiveMainBucketBoosts.main2),
+    main3: buildMainDigitGenerationOption(mainThreeSetEnabled, mainThreeSetMode, maxMainThreeSetCount, effectiveMainBucketBoosts.main3),
+    main4: buildMainDigitGenerationOption(mainFourSetEnabled, mainFourSetMode, maxMainFourSetCount, effectiveMainBucketBoosts.main4),
+    main5: buildMainDigitGenerationOption(mainFiveSetEnabled, mainFiveSetMode, maxMainFiveSetCount, effectiveMainBucketBoosts.main5),
+    main6: buildMainDigitGenerationOption(mainSixSetEnabled, mainSixSetMode, maxMainSixSetCount, effectiveMainBucketBoosts.main6),
+    main7: buildMainDigitGenerationOption(mainSevenSetEnabled, mainSevenSetMode, maxMainSevenSetCount, effectiveMainBucketBoosts.main7),
+    main8: buildMainDigitGenerationOption(mainEightSetEnabled, mainEightSetMode, maxMainEightSetCount, effectiveMainBucketBoosts.main8),
+    main9: buildMainDigitGenerationOption(mainNineSetEnabled, mainNineSetMode, maxMainNineSetCount, effectiveMainBucketBoosts.main9),
   }), [
     mainZeroSetEnabled,
+    mainZeroSetMode,
     maxMainZeroSetCount,
     mainOneSetEnabled,
+    mainOneSetMode,
     maxMainOneSetCount,
     mainTwoSetEnabled,
+    mainTwoSetMode,
     maxMainTwoSetCount,
     mainThreeSetEnabled,
+    mainThreeSetMode,
     maxMainThreeSetCount,
     mainFourSetEnabled,
+    mainFourSetMode,
     maxMainFourSetCount,
     mainFiveSetEnabled,
+    mainFiveSetMode,
     maxMainFiveSetCount,
     mainSixSetEnabled,
+    mainSixSetMode,
     maxMainSixSetCount,
     mainSevenSetEnabled,
+    mainSevenSetMode,
     maxMainSevenSetCount,
     mainEightSetEnabled,
+    mainEightSetMode,
     maxMainEightSetCount,
     mainNineSetEnabled,
+    mainNineSetMode,
     maxMainNineSetCount,
-    mainBucketBoosts,
+    effectiveMainBucketBoosts,
   ]);
 
   const mainDecadeGenerationBiases = useMemo(() => ({ ...mainDecadeBiases }), [mainDecadeBiases]);
@@ -2405,11 +2741,67 @@ function AppInner(): JSX.Element {
     () => Array.from(new Set([...generationExcludedNumbers, ...sde1Exclusions, ...hc3Exclusions])).sort((a, b) => a - b),
     [generationExcludedNumbers, hc3Exclusions, sde1Exclusions]
   );
+  const bucketCoveragePlannerCounts = useMemo(() => (
+    maxMonthlyFrequencyConstraints(
+      monthlyConstructiveEnabled ? monthlyConstraintPayload?.constraints : null,
+      acceptanceNeedsEnabled ? effectiveMianCounts : null,
+    )
+  ), [acceptanceNeedsEnabled, effectiveMianCounts, monthlyConstraintPayload, monthlyConstructiveEnabled]);
+  const bucketCoveragePlannerCountTotal = useMemo(
+    () => MONTHLY_FREQUENCY_KEYS.reduce((sum, key) => sum + Math.max(0, bucketCoveragePlannerCounts[key] ?? 0), 0),
+    [bucketCoveragePlannerCounts],
+  );
+  const bucketCoveragePlannerBuckets = monthlyConstraintPayload?.buckets ?? monthlyBucketSetsAlways ?? null;
+  const bucketCoveragePlannerPoolSize = rwr45Enabled
+    ? RWR45_CANDIDATE_COUNT
+    : numCandidates * Math.max(1, overgenFactor);
+  const bucketCoveragePlannerIgnoredBucketKeys = useMemo<MonthlyBucketKey[]>(
+    () => (bucketCoveragePlannerIgnoreUndrawn ? ["undrawn"] : []),
+    [bucketCoveragePlannerIgnoreUndrawn],
+  );
+  const bucketCoveragePlannerPreview = useMemo(() => (
+    analyzeBucketCoveragePlanner({
+      enabled: bucketCoveragePlannerEnabled,
+      constraints: bucketCoveragePlannerCountTotal > 0 ? bucketCoveragePlannerCounts : null,
+      buckets: bucketCoveragePlannerBuckets,
+      ignoredBucketKeys: bucketCoveragePlannerIgnoredBucketKeys,
+      excludedNumbers: allExclusions,
+      forcedNumbers: generationForcedNumbers,
+      requestedPoolSize: bucketCoveragePlannerPoolSize,
+      candidateSlots: 8,
+      maxFullCoverage: BUCKET_COVERAGE_FULL_LIMIT,
+      maxSampledCoverage: BUCKET_COVERAGE_SAMPLED_LIMIT,
+    })
+  ), [
+    allExclusions,
+    bucketCoveragePlannerBuckets,
+    bucketCoveragePlannerCountTotal,
+    bucketCoveragePlannerCounts,
+    bucketCoveragePlannerEnabled,
+    bucketCoveragePlannerIgnoredBucketKeys,
+    bucketCoveragePlannerPoolSize,
+    generationForcedNumbers,
+  ]);
   const selectionUnavailableNumbers = allExclusions;
   const selectionUnavailableSet = useMemo(
     () => new Set(selectionUnavailableNumbers),
     [selectionUnavailableNumbers],
   );
+  const toggleSignalConfluenceForcedNumber = useCallback((number: number) => {
+    if (!Number.isInteger(number) || number < 1 || number > 45) return;
+    if (selectionUnavailableSet.has(number)) return;
+    setSignalConfluenceForcedNumbers((current) => {
+      const normalized = normalizeHotColdGenerationNumbers(current);
+      if (normalized.includes(number)) {
+        return normalized.filter((value) => value !== number);
+      }
+      const alreadyForcedByAnotherSource = generationForcedNumbers.includes(number);
+      if (!alreadyForcedByAnotherSource && generationForcedNumbers.length >= 8) {
+        return normalized;
+      }
+      return normalizeHotColdGenerationNumbers([...normalized, number]);
+    });
+  }, [generationForcedNumbers, selectionUnavailableSet]);
   const toggleSharedUserSelectedNumber = useCallback((number: number) => {
     if (!Number.isInteger(number) || number < 1 || number > 45) return;
     if (selectionUnavailableSet.has(number)) return;
@@ -2425,6 +2817,20 @@ function AppInner(): JSX.Element {
   const strictDroughtQuotaEligibleNumbers = useMemo(
     () => strictDroughtQuotaShortlist.numbers.filter((number) => !selectionUnavailableSet.has(number)),
     [selectionUnavailableSet, strictDroughtQuotaShortlist.numbers],
+  );
+  const empiricalDroughtQuotaShortlist = useMemo(
+    () => buildEmpiricalDroughtQuotaShortlist(realFilteredHistory, {
+      topK: STRICT_DROUGHT_QUOTA_TOP_K,
+    }),
+    [realFilteredHistory],
+  );
+  const empiricalDroughtQuotaEligibleNumbers = useMemo(
+    () => empiricalDroughtQuotaShortlist.numbers.filter((number) => !selectionUnavailableSet.has(number)),
+    [empiricalDroughtQuotaShortlist.numbers, selectionUnavailableSet],
+  );
+  const droughtQuotaOverlapNumbers = useMemo(
+    () => strictDroughtQuotaEligibleNumbers.filter((number) => empiricalDroughtQuotaEligibleNumbers.includes(number)),
+    [empiricalDroughtQuotaEligibleNumbers, strictDroughtQuotaEligibleNumbers],
   );
   const strictDroughtQuotaAdvice = useMemo(
     () => buildStrictDroughtQuotaAdvice(baselineHistory, {
@@ -2443,6 +2849,17 @@ function AppInner(): JSX.Element {
       strictDroughtQuotaShortlist.topK,
     ],
   );
+  const empiricalDroughtQuotaAdvice = useMemo(
+    () => buildEmpiricalDroughtQuotaAdvice(baselineHistory, {
+      currentShortlistSize: empiricalDroughtQuotaEligibleNumbers.length,
+      topK: empiricalDroughtQuotaShortlist.topK,
+    }),
+    [
+      baselineHistory,
+      empiricalDroughtQuotaEligibleNumbers.length,
+      empiricalDroughtQuotaShortlist.topK,
+    ],
+  );
   const strictDroughtQuotaEffectiveMin = useMemo(() => {
     if (strictDroughtQuotaMode === "off") return 0;
     const raw = strictDroughtQuotaMode === "advised"
@@ -2455,10 +2872,25 @@ function AppInner(): JSX.Element {
     strictDroughtQuotaManualMin,
     strictDroughtQuotaMode,
   ]);
-  const strictDroughtQuotaActive = strictDroughtQuotaMode !== "off" && strictDroughtQuotaEffectiveMin > 0;
+  const empiricalDroughtQuotaEffectiveMin = useMemo(() => {
+    if (empiricalDroughtQuotaMode === "off") return 0;
+    const raw = empiricalDroughtQuotaMode === "advised"
+      ? empiricalDroughtQuotaAdvice.recommendedMinCount
+      : empiricalDroughtQuotaManualMin;
+    return Math.max(0, Math.min(8, empiricalDroughtQuotaEligibleNumbers.length, Math.floor(raw)));
+  }, [
+    empiricalDroughtQuotaAdvice.recommendedMinCount,
+    empiricalDroughtQuotaEligibleNumbers.length,
+    empiricalDroughtQuotaManualMin,
+    empiricalDroughtQuotaMode,
+  ]);
   const strictDroughtQuotaSummary = strictDroughtQuotaMode === "off"
     ? "off"
     : `${strictDroughtQuotaMode === "advised" ? "SDSR" : "manual"} min ${strictDroughtQuotaEffectiveMin}`;
+  const empiricalDroughtQuotaSummary = empiricalDroughtQuotaMode === "off"
+    ? "off"
+    : `${empiricalDroughtQuotaMode === "advised" ? "hazard" : "manual"} min ${empiricalDroughtQuotaEffectiveMin}`;
+  const droughtQuotaSummary = `strict ${strictDroughtQuotaSummary} · empirical ${empiricalDroughtQuotaSummary}`;
   const strictDroughtQuotaGenerationOptions = useMemo<GenerateWorkerArgs["strictDroughtQuotaOptions"] | undefined>(() => {
     if (strictDroughtQuotaMode === "off") return undefined;
     return {
@@ -2477,6 +2909,24 @@ function AppInner(): JSX.Element {
     strictDroughtQuotaShortlist.numbers,
     strictDroughtQuotaShortlist.rankMultipliers,
   ]);
+  const empiricalDroughtQuotaGenerationOptions = useMemo<GenerateWorkerArgs["empiricalDroughtQuotaOptions"] | undefined>(() => {
+    if (empiricalDroughtQuotaMode === "off") return undefined;
+    return {
+      enabled: true,
+      minCount: empiricalDroughtQuotaEffectiveMin,
+      shortlist: empiricalDroughtQuotaShortlist.numbers,
+      rankMultipliers: empiricalDroughtQuotaShortlist.rankMultipliers,
+      sourceLabel: empiricalDroughtQuotaMode === "advised"
+        ? `hazard-advised · ${empiricalDroughtQuotaAdvice.sourceLabel}`
+        : "manual",
+    };
+  }, [
+    empiricalDroughtQuotaAdvice.sourceLabel,
+    empiricalDroughtQuotaEffectiveMin,
+    empiricalDroughtQuotaMode,
+    empiricalDroughtQuotaShortlist.numbers,
+    empiricalDroughtQuotaShortlist.rankMultipliers,
+  ]);
   const strictDroughtQuotaTraceLine = useCallback((label: string): string | null => {
     if (strictDroughtQuotaMode === "off") return null;
     const current = strictDroughtQuotaEligibleNumbers.length
@@ -2493,6 +2943,22 @@ function AppInner(): JSX.Element {
     strictDroughtQuotaEligibleNumbers,
     strictDroughtQuotaMode,
   ]);
+  const empiricalDroughtQuotaTraceLine = useCallback((label: string): string | null => {
+    if (empiricalDroughtQuotaMode === "off") return null;
+    const current = empiricalDroughtQuotaEligibleNumbers.length
+      ? `current eligible top ${empiricalDroughtQuotaEligibleNumbers.length}: ${empiricalDroughtQuotaEligibleNumbers.join(", ")}`
+      : "current eligible top empirical shortlist is empty";
+    if (empiricalDroughtQuotaMode === "advised") {
+      return `[TRACE] ${label}: Empirical drought quota hazard-advised ${empiricalDroughtQuotaAdvice.shouldApplyQuota ? "ON" : "observe-only"}; effective minimum ${empiricalDroughtQuotaEffectiveMin}; ${current}; ${empiricalDroughtQuotaAdvice.reason}`;
+    }
+    return `[TRACE] ${label}: Empirical drought quota manual ON; effective minimum ${empiricalDroughtQuotaEffectiveMin}; ${current}.`;
+  }, [
+    empiricalDroughtQuotaAdvice.reason,
+    empiricalDroughtQuotaAdvice.shouldApplyQuota,
+    empiricalDroughtQuotaEffectiveMin,
+    empiricalDroughtQuotaEligibleNumbers,
+    empiricalDroughtQuotaMode,
+  ]);
   useEffect(() => {
     setStrictDroughtQuotaManualMin((previous) => {
       const safePrevious = Number.isFinite(previous) ? Math.max(0, Math.trunc(previous)) : 0;
@@ -2500,6 +2966,13 @@ function AppInner(): JSX.Element {
       return next === previous ? previous : next;
     });
   }, [strictDroughtQuotaEligibleNumbers.length]);
+  useEffect(() => {
+    setEmpiricalDroughtQuotaManualMin((previous) => {
+      const safePrevious = Number.isFinite(previous) ? Math.max(0, Math.trunc(previous)) : 0;
+      const next = Math.min(safePrevious, Math.min(8, empiricalDroughtQuotaEligibleNumbers.length));
+      return next === previous ? previous : next;
+    });
+  }, [empiricalDroughtQuotaEligibleNumbers.length]);
   const hotColdExcludedSet = useMemo(
     () => new Set(hotColdExcludedNumbers),
     [hotColdExcludedNumbers],
@@ -2526,6 +2999,7 @@ function AppInner(): JSX.Element {
     setHotColdForcedNumbers((current) => pruneSelectionUnavailableNumbers(current));
     setDroughtBreakSelectedNumbers((current) => pruneSelectionUnavailableNumbers(current, MAX_DROUGHT_BREAK_FORCED_NUMBERS));
     setPasteWeightedForcedNumbers((current) => pruneSelectionUnavailableNumbers(current));
+    setSignalConfluenceForcedNumbers((current) => pruneSelectionUnavailableNumbers(current));
     setUserSelectedNumbers((current) => pruneSelectionUnavailableNumbers(current));
     setManualSimSelected((current) => keepExistingNumberListWhenEqual(
       current,
@@ -2576,17 +3050,46 @@ function AppInner(): JSX.Element {
   const [predictionJournalOpen, setPredictionJournalOpen] = useState<boolean>(false);
   const [predictionJournalDraftRequest, setPredictionJournalDraftRequest] = useState<PredictionJournalDraftRequest | null>(null);
   const [predictionJournalEntriesRequestId, setPredictionJournalEntriesRequestId] = useState(0);
+  const [nextDrawEvidenceResultForConfluence, setNextDrawEvidenceResultForConfluence] = useState<NextDrawEvidenceResult | null>(null);
   const predictionJournalDraftIdRef = useRef(0);
   const predictionJournalEntriesRequestIdRef = useRef(0);
 
+  const selectionInsightsAnchorNumbers = useMemo(
+    () => mergeSelectionInsightAnchorNumbers(userSelectedNumbers, generationForcedNumbers),
+    [generationForcedNumbers, userSelectedNumbers],
+  );
+
   const selectionInsightsWindowAnalytics = useMemo(
-    () => buildSelectionInsightsAnalytics(realFilteredHistory, userSelectedNumbers, { topKTriplets: 10 }),
-    [realFilteredHistory, userSelectedNumbers],
+    () => buildSelectionInsightsAnalytics(realFilteredHistory, selectionInsightsAnchorNumbers, { topKTriplets: 10 }),
+    [realFilteredHistory, selectionInsightsAnchorNumbers],
   );
   const selectionInsightsAllHistoryAnalytics = useMemo(
-    () => buildSelectionInsightsAnalytics(realHistory, userSelectedNumbers, { topKTriplets: 10 }),
-    [realHistory, userSelectedNumbers],
+    () => buildSelectionInsightsAnalytics(realHistory, selectionInsightsAnchorNumbers, { topKTriplets: 10 }),
+    [realHistory, selectionInsightsAnchorNumbers],
   );
+
+  const selectionInsightsPredictedCompanionRows = useMemo(
+    () => buildSelectionInsightPredictedCompanions(selectionInsightsWindowAnalytics, selectionInsightsAllHistoryAnalytics).slice(0, 12),
+    [selectionInsightsAllHistoryAnalytics, selectionInsightsWindowAnalytics],
+  );
+
+  const signalConfluenceScoringNumberRows = useMemo(
+    () => analyzeScoringSystemDiagnostics(realHistory, realFilteredHistory, { scope: "mains-plus-supps" }).numberRows,
+    [realFilteredHistory, realHistory],
+  );
+
+  const signalConfluenceDrawBucketPatternRows = useMemo<DrawBucketPatternGenerationInfluenceRow[]>(() => {
+    const stats = analyzeDrawBucketPatterns(realFilteredHistory, {
+      includeSupp: true,
+      recentWindowSize: DEFAULT_RECENT_DRAW_BUCKET_WINDOW,
+    });
+    return buildDrawBucketPatternLeaderboard(stats, "overall").map((row) => ({
+      key: row.stat.key,
+      label: row.stat.label,
+      numbers: row.stat.numbers,
+      recentAverageHits: row.recentAverageHits,
+    }));
+  }, [realFilteredHistory]);
 
   // DGA grid strips mirror the shared user-selected numbers; DGA simulation uses the first 8.
   const [mirrorDgaStripToPreviousNeighbour, setMirrorDgaStripToPreviousNeighbour] = useState<boolean>(false);
@@ -2773,8 +3276,149 @@ function AppInner(): JSX.Element {
 
   // Manual simulation is a prize-worthiness scratchpad for the generated-candidate table.
   const [manualSimSelected, setManualSimSelected] = useState<number[]>([]);
+  const [isSavingManualPrizeCheckAsDraw, setIsSavingManualPrizeCheckAsDraw] = useState(false);
   const [pickSixSource, setPickSixSource] = useState<PickSixSource>("manual");
   const [pickSixManual, setPickSixManual] = useState<number[]>([1, 2, 3, 4, 5, 6, 7, 8]);
+
+  const manualPrizeCheckNextDraw = useMemo(
+    () => findNextHistoryDrawDate(realHistory, planningDrawContext.today),
+    [planningDrawContext.todayIso, realHistory],
+  );
+
+  const manualPrizeCheckSaveDisabledReason = useMemo(() => {
+    if (!manualPrizeCheckNextDraw.targetDate) {
+      return "Load real draw history before saving a manual prize-check result.";
+    }
+    if (manualPrizeCheckNextDraw.isFuture) {
+      return `The next history draw date is ${manualPrizeCheckNextDraw.targetDate}, which is still in the future. Save after the draw has happened, or use Draw History Manager for a deliberate manual correction.`;
+    }
+    return null;
+  }, [manualPrizeCheckNextDraw]);
+
+  const handleSaveManualPrizeCheckAsNextDraw = useCallback(async (numbers: number[]) => {
+    if (isSavingManualPrizeCheckAsDraw) return;
+
+    const normalized = normalizeManualPrizeCheckNumbers(numbers, [], NUM_MAINS + NUM_SUPPS);
+    if (normalized.length !== NUM_MAINS + NUM_SUPPS) {
+      showToast("Manual Prize Check needs 8 unique numbers before it can be saved as a draw.");
+      setTraceMaybe((traceLines) => [
+        ...traceLines,
+        `[TRACE] Save as Next Draw blocked: Manual Prize Check had ${normalized.length}/8 usable numbers.`,
+      ]);
+      return;
+    }
+
+    const targetInfo = findNextHistoryDrawDate(realHistory, planningDrawContext.today);
+    if (!targetInfo.targetDate) {
+      showToast("Load real draw history before saving a manual prize-check result.");
+      setTraceMaybe((traceLines) => [...traceLines, "[TRACE] Save as Next Draw blocked: no next history draw date could be resolved."]);
+      return;
+    }
+    if (targetInfo.isFuture) {
+      showToast(`Next history draw date ${targetInfo.targetDate} is still in the future.`);
+      setTraceMaybe((traceLines) => [
+        ...traceLines,
+        `[TRACE] Save as Next Draw blocked: target ${targetInfo.targetDate} is still in the future.`,
+      ]);
+      return;
+    }
+
+    const mainNumbers = normalized.slice(0, NUM_MAINS);
+    const suppNumbers = normalized.slice(NUM_MAINS, NUM_MAINS + NUM_SUPPS);
+    const confirmed = typeof window === "undefined" || window.confirm([
+      `Save Manual Prize Check as draw ${targetInfo.targetDate}?`,
+      "",
+      `Main: ${mainNumbers.join(", ")}`,
+      `Supp: ${suppNumbers.join(", ")}`,
+      "",
+      "This will update Windfall's loaded real history and ask for CSV write/download handling so the history file can be updated.",
+    ].join("\n"));
+    if (!confirmed) {
+      setTraceMaybe((traceLines) => [...traceLines, `[TRACE] Save as Next Draw cancelled for ${targetInfo.targetDate}.`]);
+      return;
+    }
+
+    const outputDateFormat = dateFormatForDrawHistory(realHistory);
+    const validated = validateDrawEntry({
+      date: targetInfo.targetDate,
+      mains: mainNumbers.map(String),
+      supps: suppNumbers.map(String),
+    }, {
+      mainCount: NUM_MAINS,
+      suppCount: NUM_SUPPS,
+      minNumber: MAIN_MIN,
+      maxNumber: MAIN_MAX,
+      outputDateFormat,
+    });
+
+    if (!validated.ok) {
+      showToast(validated.message);
+      setTraceMaybe((traceLines) => [...traceLines, `[TRACE] Save as Next Draw blocked: ${validated.message}`]);
+      return;
+    }
+
+    const localRows = rowsFromDraws(realHistory).filter((row) => !row.isSimulated);
+    const exactKey = buildHistoryExactKey(validated.row);
+    if (localRows.some((row) => buildHistoryExactKey(row) === exactKey)) {
+      const message = `That exact draw already exists in history (${validated.row.date}). Nothing was saved.`;
+      showToast(message);
+      setTraceMaybe((traceLines) => [...traceLines, `[TRACE] Save as Next Draw blocked: ${message}`]);
+      return;
+    }
+
+    const normalizedDate = normalizeHistoryDate(validated.row.date);
+    if (localRows.some((row) => normalizeHistoryDate(row.date) === normalizedDate)) {
+      const message = `A different draw is already stored for ${validated.row.date}. Resolve the date conflict in Draw History Manager before saving another version.`;
+      showToast(message);
+      setTraceMaybe((traceLines) => [...traceLines, `[TRACE] Save as Next Draw blocked: ${message}`]);
+      return;
+    }
+
+    const nextRows = sortHistoryRows([validated.row, ...localRows], "desc");
+    let persistenceLabel = "CSV download created";
+
+    setIsSavingManualPrizeCheckAsDraw(true);
+    try {
+      const supportsFileSystemAccess = typeof window !== "undefined" && "showOpenFilePicker" in window;
+      let csv = toCsv(nextRows);
+      if (supportsFileSystemAccess) {
+        try {
+          const handle = await pickCsvFile();
+          const file = await handle.getFile();
+          const existingCsv = await readCsvFromHandle(handle).catch(() => "");
+          const header = existingCsv ? parseCsv(existingCsv).header : undefined;
+          csv = toCsv(nextRows, header);
+          await writeCsvToHandle(handle, csv);
+          persistenceLabel = `saved to ${file.name}`;
+        } catch {
+          downloadCsvFallback("windfall_history_lottolyzer.csv", csv);
+          persistenceLabel = "CSV download created after direct write was not completed";
+        }
+      } else if (typeof document !== "undefined") {
+        downloadCsvFallback("windfall_history_lottolyzer.csv", csv);
+      }
+
+      commitHistory(drawsFromRows(nextRows));
+      broadcastDrawHistoryUpdated({ rows: nextRows, added: validated.row });
+      showToast(`Saved draw ${validated.row.date}.`);
+      setTraceMaybe((traceLines) => [
+        ...traceLines,
+        `[TRACE] Save as Next Draw: saved ${validated.row.date} from Manual Prize Check (${persistenceLabel}). Main ${mainNumbers.join(", ")} · Supp ${suppNumbers.join(", ")}.`,
+      ]);
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : String(caught);
+      showToast(`Save as Next Draw failed: ${message}`);
+      setTraceMaybe((traceLines) => [...traceLines, `[TRACE] Save as Next Draw failed: ${message}`]);
+    } finally {
+      setIsSavingManualPrizeCheckAsDraw(false);
+    }
+  }, [
+    commitHistory,
+    isSavingManualPrizeCheckAsDraw,
+    planningDrawContext.today,
+    realHistory,
+    setTraceMaybe,
+  ]);
 
   const numberConflictLedger = useMemo(
     () => buildNumberConflictLedger([
@@ -2783,6 +3427,7 @@ function AppInner(): JSX.Element {
       { kind: "hardInclude", label: "Hot/Cold include rows", numbers: hotColdForcedNumbers },
       { kind: "hardInclude", label: "Drought-break shortlist", numbers: droughtBreakSelectedNumbers },
       { kind: "hardInclude", label: "Paste-Weighted missing-number selections", numbers: pasteWeightedForcedNumbers },
+      { kind: "hardInclude", label: "Signal Confluence forced", numbers: signalConfluenceForcedNumbers },
       { kind: "hardExclude", label: "User Exclusions", numbers: excludedNumbers },
       { kind: "hardExclude", label: "Hot/Cold exclude rows", numbers: hotColdExcludedNumbers },
       { kind: "hardExclude", label: "Auto-exclude unselected user numbers", numbers: autoExcludedFromSelection },
@@ -2812,6 +3457,7 @@ function AppInner(): JSX.Element {
       selectedCarryOverBoostMode,
       selectedCarryOverBoostNumbers,
       sde1Exclusions,
+      signalConfluenceForcedNumbers,
       trendSelectedNumbers,
       userSelectedNumbers,
     ],
@@ -3608,6 +4254,7 @@ function AppInner(): JSX.Element {
         0: hasActiveTerminalCoordinationRuleForTrace(mainDigitGenerationOptions.main0),
         5: hasActiveTerminalCoordinationRuleForTrace(mainDigitGenerationOptions.main5),
       },
+      mode: latestNeighbourSupportMode,
     }).traceLine;
   }
 
@@ -3628,6 +4275,122 @@ function AppInner(): JSX.Element {
     const req = constraints;
     return `Monthly buckets — sizes und:${sizes.undrawn} 1x:${sizes.times1} 2x:${sizes.times2} 3x:${sizes.times3} 4x:${sizes.times4} 5x:${sizes.times5} 6x:${sizes.times6} 7x:${sizes.times7} 8x+:${sizes.times8}; required ≥ und:${req.undrawn} 1x:${req.times1} 2x:${req.times2} 3x:${req.times3} 4x:${req.times4} 5x:${req.times5} 6x:${req.times6} 7x:${req.times7} 8x+:${req.times8}`;
   };
+
+  function buildGenerationCompatibilityAuditTraceLines(label: string): string[] {
+    const activeHardGates: string[] = [];
+    const blockers: string[] = [];
+    const cautions: string[] = [];
+    const mianExclusions = getMianHardExclusions();
+    const excludedForAudit = Array.from(new Set([...allExclusions, ...mianExclusions])).sort((a, b) => a - b);
+    const excludedSet = new Set(excludedForAudit);
+    const forcedBlocked = generationForcedNumbers.filter((number) => excludedSet.has(number));
+
+    if (generationForcedNumbers.length > 8) {
+      blockers.push(`forced numbers ${generationForcedNumbers.length}/8`);
+    } else if (generationForcedNumbers.length > 0) {
+      activeHardGates.push(`forced ${generationForcedNumbers.length}/8`);
+    }
+    if (forcedBlocked.length > 0) {
+      blockers.push(`forced numbers also excluded [${formatTraceNumberPreview(forcedBlocked)}]`);
+    }
+    if (excludedForAudit.length > 0) {
+      activeHardGates.push(`exclusions ${excludedForAudit.length}`);
+    }
+    if (selectedRatios.length > 0 && !useTrickyRule) {
+      activeHardGates.push(`odd/even quotas ${selectedRatios.join(", ")}`);
+    }
+    if (useTrickyRule) {
+      activeHardGates.push("Tricky Rule excludes 0:8 and 8:0");
+    }
+    if (lastDrawOverlapRuleMode !== "off") {
+      activeHardGates.push(`last-draw ${lastDrawOverlapRuleSummary}`);
+    }
+    if (minRecentMatches > 0 && maxLastDrawMatchesEnabled && minRecentMatches > maxLastDrawMatchesValue) {
+      blockers.push(`last-draw min ${minRecentMatches} exceeds max ${maxLastDrawMatchesValue}`);
+    }
+    if (repeatUnionEnabled) {
+      activeHardGates.push(`newest-draw pool M ${minFromRecentUnionM}`);
+      if (minFromRecentUnionM > repeatUnionCandidateMax) {
+        blockers.push(`newest-draw pool minimum ${minFromRecentUnionM} exceeds feasible max ${repeatUnionCandidateMax}`);
+      }
+    }
+    if (latestNeighbourSupportEnabled) {
+      activeHardGates.push(`${latestNeighbourSupportTraceLabel(latestNeighbourSupportMode)} minimum 1`);
+    }
+    if (strictDroughtQuotaEffectiveMin > 0) {
+      activeHardGates.push(`strict drought minimum ${strictDroughtQuotaEffectiveMin}`);
+    }
+    if (empiricalDroughtQuotaEffectiveMin > 0) {
+      activeHardGates.push(`empirical drought minimum ${empiricalDroughtQuotaEffectiveMin}`);
+    }
+
+    const strictSet = new Set(strictDroughtQuotaEligibleNumbers);
+    const empiricalSet = new Set(empiricalDroughtQuotaEligibleNumbers);
+    const forcedStrictHits = generationForcedNumbers.filter((number) => strictSet.has(number)).length;
+    const forcedEmpiricalHits = generationForcedNumbers.filter((number) => empiricalSet.has(number)).length;
+    const remainingStrictNeed = Math.max(0, strictDroughtQuotaEffectiveMin - forcedStrictHits);
+    const remainingEmpiricalNeed = Math.max(0, empiricalDroughtQuotaEffectiveMin - forcedEmpiricalHits);
+    if (remainingStrictNeed > 0 || remainingEmpiricalNeed > 0) {
+      const forcedSet = new Set(generationForcedNumbers);
+      const overlapAvailable = droughtQuotaOverlapNumbers
+        .filter((number) => !forcedSet.has(number) && !excludedSet.has(number))
+        .length;
+      const minimumAdditionalSlots = Math.max(
+        remainingStrictNeed,
+        remainingEmpiricalNeed,
+        remainingStrictNeed + remainingEmpiricalNeed - overlapAvailable,
+      );
+      const remainingSlots = Math.max(0, 8 - Math.min(8, generationForcedNumbers.length));
+      if (minimumAdditionalSlots > remainingSlots) {
+        blockers.push(`drought quotas need at least ${minimumAdditionalSlots} extra slot${minimumAdditionalSlots === 1 ? "" : "s"} but only ${remainingSlots} remain`);
+      }
+    }
+
+    const activeMonthlyCounts = maxMonthlyFrequencyConstraints(
+      monthlyConstraintPayload?.constraints,
+      acceptanceNeedsEnabled ? effectiveMianCounts : null,
+    );
+    const activeMonthlyTotal = MONTHLY_FREQUENCY_KEYS.reduce((sum, key) => sum + Math.max(0, activeMonthlyCounts[key] ?? 0), 0);
+    const activeMonthlyParts = MONTHLY_FREQUENCY_KEYS
+      .map((key) => ({ key, required: Math.max(0, activeMonthlyCounts[key] ?? 0) }))
+      .filter(({ required }) => required > 0);
+    if (activeMonthlyTotal > 0) {
+      activeHardGates.push(`monthly buckets ${formatMonthlyConstraintCountsForTrace(activeMonthlyCounts)}`);
+      if (activeMonthlyTotal > 8) {
+        blockers.push(`monthly bucket minimums total ${activeMonthlyTotal}/8`);
+      }
+      const buckets = monthlyConstraintPayload?.buckets ?? monthlyBucketSetsAlways ?? null;
+      if (!buckets) {
+        cautions.push("monthly bucket counts are active but bucket state is unavailable");
+      } else {
+        const bucketShortages = activeMonthlyParts
+          .filter(({ key, required }) => buckets[key].size < required)
+          .map(({ key, required }) => `${MONTHLY_FREQUENCY_SHORT_LABELS[key]} needs ${required}, has ${buckets[key].size}`);
+        if (bucketShortages.length > 0) {
+          blockers.push(`bucket shortages ${bucketShortages.join("; ")}`);
+        }
+      }
+    }
+    if (bucketCoveragePlannerEnabled) {
+      const bucketPlanModeLabel = `${bucketCoveragePlannerPreview.label.toLowerCase()}${bucketCoveragePlannerIgnoreUndrawn ? ", 0x random" : ""}`;
+      if (bucketCoveragePlannerPreview.canGenerate) {
+        activeHardGates.push(`bucket coverage planner ${bucketPlanModeLabel} (${formatBucketCoveragePlannerTrace(bucketCoveragePlannerPreview).split("|")[0].trim()})`);
+      } else {
+        cautions.push(`bucket coverage planner blocked: ${bucketCoveragePlannerPreview.reasons.join(" ")}`);
+      }
+    }
+
+    if (readinessHardFiltersActive) activeHardGates.push(`Rdy component floors ${readinessHardFilterSummary}`);
+    if (sumFilter.enabled) activeHardGates.push(`sum ${sumFilter.min}-${sumFilter.max}${sumFilter.includeSupp ? "+supp" : ""}`);
+    if (digitWidthConstraintTargets.enabled) activeHardGates.push(`digit width ${digitWidthConstraintTargets.singleDigitCount}/${digitWidthConstraintTargets.twoDigitCount}`);
+
+    const hardGateText = activeHardGates.length ? activeHardGates.join(" · ") : "none beyond uniqueness";
+    const blockerText = blockers.length ? blockers.join(" · ") : "none detected";
+    const cautionText = cautions.length ? ` · cautions ${cautions.join(" · ")}` : "";
+    return [
+      `[TRACE] ${label} compatibility audit · active hard gates: ${hardGateText} · blockers: ${blockerText}${cautionText}`,
+    ];
+  }
 
   function buildGenerationActiveSetupTraceLines(options: {
     label: string;
@@ -3669,9 +4432,9 @@ function AppInner(): JSX.Element {
       jaccardEnabled ? `Jaccard<=${Math.round(jaccardThreshold * 100)}%` : null,
       readinessHardFiltersActive ? `Rdy ${readinessHardFilterSummary}` : null,
       sumFilter.enabled ? `Sum ${sumFilter.min}-${sumFilter.max}${sumFilter.includeSupp ? "+supp" : ""}` : null,
-      maxLastDrawMatchesEnabled ? `last-draw max ${maxLastDrawMatchesValue}` : null,
-      minRecentMatches > 0 ? `last-draw min ${minRecentMatches}` : null,
+      lastDrawOverlapRuleMode !== "off" ? `last-draw ${lastDrawOverlapRuleSummary}` : null,
       repeatUnionEnabled ? `repeat pool ${repeatUnionSummary}` : null,
+      activeMainDigitRuleSummary ? `ending rules ${activeMainDigitRuleSummary}` : null,
     ].filter(Boolean).join(", ") || "none";
     const weightingSummaryForTrace = [
       lambdaEnabled ? `lambda ${lambda.toFixed(2)}` : "lambda off",
@@ -3679,6 +4442,7 @@ function AppInner(): JSX.Element {
       selectedBoostEnabled ? `selected boost x${selectedBoostFactor}` : "selected boost off",
       recentMatchBias > 0 ? `last-draw bias ${recentMatchBias}` : "last-draw bias off",
       d1TerminalMomentumSgiEnabled ? `D1 SGI ${formatD1TerminalMomentumStrength(d1TerminalMomentumGenerationProfile.internalStrength)}` : "D1 SGI off",
+      drawBucketPatternInfluenceEnabled ? "Draw Bucket Patterns boost on" : "Draw Bucket Patterns boost off",
       activeMainDigitBoostSummary ? `ending boosts ${activeMainDigitBoostSummary}` : null,
       activeMainDecadeBiasSummary ? `decade bias ${activeMainDecadeBiasSummary}` : null,
       digitWidthConstraintTargets.enabled ? `digit-width ${digitWidthConstraintTargets.singleDigitPercent}/${digitWidthConstraintTargets.twoDigitPercent}` : null,
@@ -3689,6 +4453,7 @@ function AppInner(): JSX.Element {
       monthlyConstraintPayload ? `Stage-Match ON` : "Stage-Match off",
       monthlyConstructiveEnabled ? "constructive fill ON" : "constructive fill off",
       acceptanceNeedsEnabled ? `MiAN ON ${formatMonthlyConstraintCountsForTrace(effectiveMianCounts)}${acceptanceNeedsHardExclude ? " hard-exclude" : ""}` : "MiAN off",
+      bucketCoveragePlannerEnabled ? `bucket coverage ${bucketCoveragePlannerPreview.label}${bucketCoveragePlannerIgnoreUndrawn ? " (0x random)" : ""}` : "bucket coverage off",
     ].join(" · ");
     const forcedAndExcludedSummary = [
       `forced ${generationForcedNumbers.length} [${formatTraceNumberPreview(generationForcedNumbers)}]`,
@@ -3701,17 +4466,18 @@ function AppInner(): JSX.Element {
     const lines = [
       `[TRACE] ${options.label} active setup · ${requestParts} · WFMQYH real ${realFilteredHistory.length}/${filteredHistory.length} · all real ${realHistory.length} · latest ${mostRecentDrawDateLabel}`,
       `[TRACE] ${options.label} active filters · hard ${hardFilterSummaryForTrace} · odd/even ${useTrickyRule ? "Tricky ON; ratio choices ignored" : ratioSummaryForTrace} · trend ${allowedTrendRatios.length ? allowedTrendRatios.join(", ") : "off"}`,
-      `[TRACE] ${options.label} active recency · LD±1 ${latestNeighbourSupportEnabled ? "ON" : "off"} · latest ±1/±2 forced ${previousNeighbourConstraintNumbers.length ? previousNeighbourConstraintNumbers.join(", ") : "off"} · strict drought ${strictDroughtQuotaSummary}`,
+      `[TRACE] ${options.label} active recency · ${latestNeighbourSupportTraceLabel(latestNeighbourSupportMode)} ${latestNeighbourSupportEnabled ? "ON" : "off"} · latest ±1/±2 forced ${previousNeighbourConstraintNumbers.length ? previousNeighbourConstraintNumbers.join(", ") : "off"} · drought quotas ${droughtQuotaSummary}`,
       `[TRACE] ${options.label} active weighting · ${weightingSummaryForTrace} · survivor ranking ${survivorSignalsForTrace}`,
       `[TRACE] ${options.label} active monthly/provenance · ${monthlySummaryForTrace} · ${forcedAndExcludedSummary}`,
     ];
 
-	    if (options.emitFullSnapshot) {
-	      lines.push(`[TRACE] ${options.label} active setup detail · user selected ${userSelectedNumbers.length} [${formatTraceNumberPreview(userSelectedNumbers)}] · manual exclusions ${excludedNumbers.length} [${formatTraceNumberPreview(excludedNumbers)}] · hot/cold exclusions ${hotColdExcludedNumbers.length} [${formatTraceNumberPreview(hotColdExcludedNumbers)}]`);
-	    }
+		    if (options.emitFullSnapshot) {
+		      lines.push(`[TRACE] ${options.label} active setup detail · user selected ${userSelectedNumbers.length} [${formatTraceNumberPreview(userSelectedNumbers)}] · manual exclusions ${excludedNumbers.length} [${formatTraceNumberPreview(excludedNumbers)}] · hot/cold exclusions ${hotColdExcludedNumbers.length} [${formatTraceNumberPreview(hotColdExcludedNumbers)}] · signal confluence forced ${signalConfluenceForcedNumbers.length} [${formatTraceNumberPreview(signalConfluenceForcedNumbers)}]`);
+		    }
 	    if (repeatUnionMonthlyCompatibilityTrace) {
 	      lines.push(`[TRACE] ${repeatUnionMonthlyCompatibilityTrace}`);
 	    }
+      lines.push(...buildGenerationCompatibilityAuditTraceLines(options.label));
 
 	    return lines;
 	  }
@@ -3828,17 +4594,23 @@ function AppInner(): JSX.Element {
       }
       if (generationForcedNumbers.length > 0) {
         setTraceMaybe((t) => [...t,
-          `[TRACE] RwR45 forced generation numbers active: ${generationForcedNumbers.join(", ")} (trend selections ${trendSelectedNumbers.length}; latest ±1/±2 targets ${previousNeighbourConstraintNumbers.length}; hot/cold row selections ${hotColdForcedNumbers.length}; drought-break selections ${droughtBreakSelectedNumbers.length}; paste-weighted missing selections ${pasteWeightedForcedNumbers.length})`
+          `[TRACE] RwR45 forced generation numbers active: ${generationForcedNumbers.join(", ")} (trend selections ${trendSelectedNumbers.length}; latest ±1/±2 targets ${previousNeighbourConstraintNumbers.length}; hot/cold row selections ${hotColdForcedNumbers.length}; drought-break selections ${droughtBreakSelectedNumbers.length}; paste-weighted missing selections ${pasteWeightedForcedNumbers.length}; signal confluence ${signalConfluenceForcedNumbers.length})`
         ]);
       }
       if (latestNeighbourSupportEnabled) {
-        setTraceMaybe((t) => [...t, "[TRACE] LD±1 is ON but RwR45/PNUaRW45 bypasses evidence filters; LD±1 was not applied to this random-coverage run."]);
+        setTraceMaybe((t) => [...t, `[TRACE] ${latestNeighbourSupportTraceLabel(latestNeighbourSupportMode)} is ON but RwR45/PNUaRW45 bypasses evidence filters; ${latestNeighbourSupportTraceLabel(latestNeighbourSupportMode)} was not applied to this random-coverage run.`]);
       }
-      if (strictDroughtQuotaMode !== "off") {
-        setTraceMaybe((t) => [...t, "[TRACE] Strict drought quota is ON but RwR45/PNUaRW45 bypasses evidence quotas; strict drought quota was not applied to this random-coverage run."]);
+      if (strictDroughtQuotaMode !== "off" || empiricalDroughtQuotaMode !== "off") {
+        setTraceMaybe((t) => [...t, "[TRACE] Drought quota is ON but RwR45/PNUaRW45 bypasses evidence quotas; strict/empirical drought quotas were not applied to this random-coverage run."]);
       }
       if (d1TerminalMomentumSgiEnabled) {
         setTraceMaybe((t) => [...t, "[TRACE] D1 Terminal Momentum SGI is ON but RwR45/PNUaRW45 bypasses evidence weighting; D1 SGI was not applied to this random-coverage run."]);
+      }
+      if (drawBucketPatternInfluenceEnabled) {
+        setTraceMaybe((t) => [...t, "[TRACE] Draw Bucket Patterns influence is ON but RwR45/PNUaRW45 bypasses evidence weighting; leaderboard boost was not applied to this random-coverage run."]);
+      }
+      if (bucketCoveragePlannerEnabled) {
+        setTraceMaybe((t) => [...t, "[TRACE] Bucket Coverage Planner is ON but RwR45/PNUaRW45 uses its own random-coverage partition; bucket coverage planning was not applied."]);
       }
       const result = generateRwR45Candidates(Math.random, {
         forcedNumbers: generationForcedNumbers,
@@ -3902,12 +4674,21 @@ function AppInner(): JSX.Element {
     const ogaStats = forecastOGA(realFilteredHistory, baselineForOGAForecast, ogaSpokeCount);
     const monthEndCarryOverWeights = monthEndCarryOverBiasEnabled ? monthEndCarryOverWeightsForGeneration : undefined;
     const latestNeighbourMonthlyBuckets = monthlyBucketSetsAlways ?? monthlyConstraintPayload?.buckets ?? dgaLiveMonthlyBuckets;
-    const monthlyBucketOptions = monthlyConstructiveEnabled && monthlyConstraintPayload ? {
-      constraints: monthlyConstraintPayload.constraints,
-      buckets: monthlyConstraintPayload.buckets,
+    const activeMonthlyBucketOptions = bucketCoveragePlannerCountTotal > 0 && bucketCoveragePlannerBuckets ? {
+      constraints: bucketCoveragePlannerCounts,
+      buckets: bucketCoveragePlannerBuckets,
       allowShortfall: true,
-      boostPenalize: monthlyConstraintPayload.boostPenalize ?? false,
-    } : latestNeighbourSupportEnabled ? {
+      boostPenalize: monthlyConstructiveEnabled ? monthlyConstraintPayload?.boostPenalize ?? false : false,
+      selectedNumbersByBucket: monthlyConstructiveEnabled ? monthlyConstraintPayload?.selectedNumbersByBucket : undefined,
+      selectedNumberBiasEnabled: monthlyConstructiveEnabled ? monthlyConstraintPayload?.selectedNumberBiasEnabled : false,
+      bucketCoveragePlanner: {
+        enabled: bucketCoveragePlannerEnabled,
+        ignoredBucketKeys: bucketCoveragePlannerIgnoredBucketKeys,
+        maxFullCoverage: BUCKET_COVERAGE_FULL_LIMIT,
+        maxSampledCoverage: BUCKET_COVERAGE_SAMPLED_LIMIT,
+      },
+    } : undefined;
+    const monthlyBucketOptions = activeMonthlyBucketOptions ? activeMonthlyBucketOptions : latestNeighbourSupportEnabled ? {
       constraints: zeroMonthlyFrequencyConstraints(),
       buckets: latestNeighbourMonthlyBuckets,
       allowShortfall: true,
@@ -3944,7 +4725,10 @@ function AppInner(): JSX.Element {
       ]);
     }
     if (activeMainDigitBoostSummary) {
-      setTraceMaybe((t) => [...t, `[TRACE] Ending-digit boosts active: ${activeMainDigitBoostSummary} (split 1-digit / 2-digit boosts; applies even when Max is Off; affects main + supp picks)`]);
+      setTraceMaybe((t) => [...t, `[TRACE] Ending-digit soft boosts active: ${activeMainDigitBoostSummary} (1-digit/2-digit values are sampling weights only; Max caps are reported under active filters and candidate rules; affects main + supp picks)`]);
+    }
+    if (drawBucketPatternInfluenceTrace) {
+      setTraceMaybe((t) => [...t, drawBucketPatternInfluenceTrace]);
     }
     if (activeMainDecadeBiasSummary) {
       setTraceMaybe((t) => [...t, `[TRACE] Digit decade bias active: ${activeMainDecadeBiasSummary} (positive = boost, negative = punish; affects main + supp picks)`]);
@@ -3966,7 +4750,7 @@ function AppInner(): JSX.Element {
     }
     if (generationForcedNumbers.length > 0) {
       setTraceMaybe((t) => [...t,
-        `[TRACE] Forced generation numbers active: ${generationForcedNumbers.join(", ")} (trend selections ${trendSelectedNumbers.length}; latest ±1/±2 targets ${previousNeighbourConstraintNumbers.length}; hot/cold row selections ${hotColdForcedNumbers.length}; drought-break selections ${droughtBreakSelectedNumbers.length}; paste-weighted missing selections ${pasteWeightedForcedNumbers.length})`
+        `[TRACE] Forced generation numbers active: ${generationForcedNumbers.join(", ")} (trend selections ${trendSelectedNumbers.length}; latest ±1/±2 targets ${previousNeighbourConstraintNumbers.length}; hot/cold row selections ${hotColdForcedNumbers.length}; drought-break selections ${droughtBreakSelectedNumbers.length}; paste-weighted missing selections ${pasteWeightedForcedNumbers.length}; signal confluence ${signalConfluenceForcedNumbers.length})`
       ]);
     }
     const autoExcludeTrace = buildAutoExcludeUnselectedTraceLine("Generation");
@@ -3976,6 +4760,10 @@ function AppInner(): JSX.Element {
     const strictDroughtTrace = strictDroughtQuotaTraceLine("Generation");
     if (strictDroughtTrace) {
       setTraceMaybe((t) => [...t, strictDroughtTrace]);
+    }
+    const empiricalDroughtTrace = empiricalDroughtQuotaTraceLine("Generation");
+    if (empiricalDroughtTrace) {
+      setTraceMaybe((t) => [...t, empiricalDroughtTrace]);
     }
     const latestNeighbourStageMatchTrace = buildLatestNeighbourStageMatchCompatibilityLine(
       Array.from(new Set([...excludedWithMiAN, ...sde1Exclusions, ...hc3Exclusions])).sort((a, b) => a - b),
@@ -4051,8 +4839,10 @@ function AppInner(): JSX.Element {
       latestNeighbourSupportOptions: {
         enabled: latestNeighbourSupportEnabled,
         planningLastDrawOverride: planningDrawContext.isPlanningLastDraw,
+        mode: latestNeighbourSupportMode,
       },
       strictDroughtQuotaOptions: strictDroughtQuotaGenerationOptions,
+      empiricalDroughtQuotaOptions: empiricalDroughtQuotaGenerationOptions,
     };
 
     // Trace callback: appends messages as they arrive from the worker
@@ -4252,12 +5042,21 @@ function AppInner(): JSX.Element {
     const ogaStats = forecastOGA(realFilteredHistory, baselineForOGAForecast, ogaSpokeCount);
     const monthEndCarryOverWeights = monthEndCarryOverBiasEnabled ? monthEndCarryOverWeightsForGeneration : undefined;
     const latestNeighbourMonthlyBuckets = monthlyBucketSetsAlways ?? monthlyConstraintPayload?.buckets ?? dgaLiveMonthlyBuckets;
-    const monthlyBucketOptions = monthlyConstructiveEnabled && monthlyConstraintPayload ? {
-      constraints: monthlyConstraintPayload.constraints,
-      buckets: monthlyConstraintPayload.buckets,
+    const activeMonthlyBucketOptions = bucketCoveragePlannerCountTotal > 0 && bucketCoveragePlannerBuckets ? {
+      constraints: bucketCoveragePlannerCounts,
+      buckets: bucketCoveragePlannerBuckets,
       allowShortfall: true,
-      boostPenalize: monthlyConstraintPayload.boostPenalize ?? false,
-    } : latestNeighbourSupportEnabled ? {
+      boostPenalize: monthlyConstructiveEnabled ? monthlyConstraintPayload?.boostPenalize ?? false : false,
+      selectedNumbersByBucket: monthlyConstructiveEnabled ? monthlyConstraintPayload?.selectedNumbersByBucket : undefined,
+      selectedNumberBiasEnabled: monthlyConstructiveEnabled ? monthlyConstraintPayload?.selectedNumberBiasEnabled : false,
+      bucketCoveragePlanner: {
+        enabled: bucketCoveragePlannerEnabled,
+        ignoredBucketKeys: bucketCoveragePlannerIgnoredBucketKeys,
+        maxFullCoverage: BUCKET_COVERAGE_FULL_LIMIT,
+        maxSampledCoverage: BUCKET_COVERAGE_SAMPLED_LIMIT,
+      },
+    } : undefined;
+    const monthlyBucketOptions = activeMonthlyBucketOptions ? activeMonthlyBucketOptions : latestNeighbourSupportEnabled ? {
       constraints: zeroMonthlyFrequencyConstraints(),
       buckets: latestNeighbourMonthlyBuckets,
       allowShortfall: true,
@@ -4290,7 +5089,7 @@ function AppInner(): JSX.Element {
       ]);
     }
     if (activeMainDigitBoostSummary) {
-      setTraceMaybe((t) => [...t, `[TRACE] Ending-digit boosts active: ${activeMainDigitBoostSummary} (split 1-digit / 2-digit boosts; applies even when Max is Off; affects main + supp picks)`]);
+      setTraceMaybe((t) => [...t, `[TRACE] Ending-digit soft boosts active: ${activeMainDigitBoostSummary} (1-digit/2-digit values are sampling weights only; Max caps are reported under active filters and candidate rules; affects main + supp picks)`]);
     }
     if (activeMainDecadeBiasSummary) {
       setTraceMaybe((t) => [...t, `[TRACE] Digit decade bias active: ${activeMainDecadeBiasSummary} (positive = boost, negative = punish; affects main + supp picks)`]);
@@ -4312,7 +5111,7 @@ function AppInner(): JSX.Element {
     }
     if (generationForcedNumbers.length > 0) {
       setTraceMaybe((t) => [...t,
-        `[TRACE] ${traceLabel}: forced generation numbers active ${generationForcedNumbers.join(", ")} (trend selections ${trendSelectedNumbers.length}; latest ±1/±2 targets ${previousNeighbourConstraintNumbers.length}; hot/cold row selections ${hotColdForcedNumbers.length}; drought-break selections ${droughtBreakSelectedNumbers.length}; paste-weighted missing selections ${pasteWeightedForcedNumbers.length})`
+        `[TRACE] ${traceLabel}: forced generation numbers active ${generationForcedNumbers.join(", ")} (trend selections ${trendSelectedNumbers.length}; latest ±1/±2 targets ${previousNeighbourConstraintNumbers.length}; hot/cold row selections ${hotColdForcedNumbers.length}; drought-break selections ${droughtBreakSelectedNumbers.length}; paste-weighted missing selections ${pasteWeightedForcedNumbers.length}; signal confluence ${signalConfluenceForcedNumbers.length})`
       ]);
     }
     const autoExcludeTrace = buildAutoExcludeUnselectedTraceLine(traceLabel);
@@ -4322,6 +5121,10 @@ function AppInner(): JSX.Element {
     const strictDroughtTrace = strictDroughtQuotaTraceLine(traceLabel);
     if (strictDroughtTrace) {
       setTraceMaybe((t) => [...t, strictDroughtTrace]);
+    }
+    const empiricalDroughtTrace = empiricalDroughtQuotaTraceLine(traceLabel);
+    if (empiricalDroughtTrace) {
+      setTraceMaybe((t) => [...t, empiricalDroughtTrace]);
     }
     const latestNeighbourStageMatchTrace = buildLatestNeighbourStageMatchCompatibilityLine(
       Array.from(new Set([...excludedWithMiANBatch, ...sde1Exclusions, ...hc3Exclusions])).sort((a, b) => a - b),
@@ -4398,8 +5201,10 @@ function AppInner(): JSX.Element {
       {
         enabled: latestNeighbourSupportEnabled,
         planningLastDrawOverride: planningDrawContext.isPlanningLastDraw,
+        mode: latestNeighbourSupportMode,
       },
-      strictDroughtQuotaGenerationOptions
+      strictDroughtQuotaGenerationOptions,
+      empiricalDroughtQuotaGenerationOptions
     );
 
     const monthlyTrace = buildMonthlyTrace();
@@ -4635,11 +5440,6 @@ function AppInner(): JSX.Element {
 
   const maxGPWFWindow = realFilteredHistory.length > 0 ? realFilteredHistory.length : 45;
 
-  const churnDataset = useMemo(
-    () => (realFilteredHistory ? buildChurnDataset(realFilteredHistory, { churnWindowK: 12, returnHorizon: 6 }) : []),
-    [realFilteredHistory]
-  );
-
   // Candidate simulation: adds synthetic column to DGA only (does not clear manual checkboxes)
 
   // Legend counts for heatmap (from trendValueSeries)
@@ -4727,13 +5527,21 @@ function AppInner(): JSX.Element {
   const dgaHeatmapBucketIndexSeries = isMonthlyBucketHeatmapView
     ? dgaMonthlyBucketDrawSeriesFull.bucketIndexSeries
     : undefined;
+  const activeHeatmapTemperatureMetric = isMonthlyBucketHeatmapView && monthlyBucketTemperatureOverlayMode !== "off"
+    ? monthlyBucketTemperatureMetric
+    : tempMetric;
+  const monthlyBucketTemperatureOverlaySummary = monthlyBucketTemperatureOverlayMode === "compact"
+    ? ` Temperature badges show compact H/W/N/C from ${formatTemperatureMetricLabel(monthlyBucketTemperatureMetric)}.`
+    : monthlyBucketTemperatureOverlayMode === "detailed"
+      ? ` Temperature badges show detailed temperature letters from ${formatTemperatureMetricLabel(monthlyBucketTemperatureMetric)}.`
+      : "";
   const dgaHeatmapTitle = isMonthlyBucketHeatmapView
     ? "Monthly Bucket State Heatmap"
     : "Temperature Heatmap";
   const dgaHeatmapSubtitle = isMonthlyBucketHeatmapView
     ? dgaHeatmapActiveWindow
-      ? `${simulatedDraw ? "Appends the simulated next draw on the right and " : ""}shows each number’s running calendar-month bucket after every draw across all history. Columns outside the active WFMQYH window are dimmed; legend and drought summaries stay scoped to the active window.`
-      : `${simulatedDraw ? "Appends the simulated next draw on the right. " : ""}Shows each number’s running calendar-month bucket after every draw (Undrawn → 8x+).`
+      ? `${simulatedDraw ? "Appends the simulated next draw on the right and " : ""}shows each number’s running calendar-month bucket after every draw across all history. Columns outside the active WFMQYH window are dimmed; legend and drought summaries stay scoped to the active window.${monthlyBucketTemperatureOverlaySummary}`
+      : `${simulatedDraw ? "Appends the simulated next draw on the right. " : ""}Shows each number’s running calendar-month bucket after every draw (Undrawn → 8x+).${monthlyBucketTemperatureOverlaySummary}`
     : dgaHeatmapActiveWindow
       ? "Shows each number’s temperature bucket across all history using the selected metric. Columns outside the active WFMQYH window are dimmed; legend and drought summaries stay scoped to the active window."
       : "Shows the temperature bucket of each number through time using the selected metric.";
@@ -4756,16 +5564,16 @@ function AppInner(): JSX.Element {
   const readinessHardFiltersActive = readinessHardFilterSummary !== "off";
 
   const endDigitSetSummary = [
-    `0=${mainZeroSetEnabled ? `max ${maxMainZeroSetCount}` : "off"}`,
-    `1=${mainOneSetEnabled ? `max ${maxMainOneSetCount}` : "off"}`,
-    `2=${mainTwoSetEnabled ? `max ${maxMainTwoSetCount}` : "off"}`,
-    `3=${mainThreeSetEnabled ? `max ${maxMainThreeSetCount}` : "off"}`,
-    `4=${mainFourSetEnabled ? `max ${maxMainFourSetCount}` : "off"}`,
-    `5=${mainFiveSetEnabled ? `max ${maxMainFiveSetCount}` : "off"}`,
-    `6=${mainSixSetEnabled ? `max ${maxMainSixSetCount}` : "off"}`,
-    `7=${mainSevenSetEnabled ? `max ${maxMainSevenSetCount}` : "off"}`,
-    `8=${mainEightSetEnabled ? `max ${maxMainEightSetCount}` : "off"}`,
-    `9=${mainNineSetEnabled ? `max ${maxMainNineSetCount}` : "off"}`,
+    `0=${mainZeroSetEnabled ? `${formatMainDigitCountModeLabel(mainZeroSetMode)} ${maxMainZeroSetCount}` : "off"}`,
+    `1=${mainOneSetEnabled ? `${formatMainDigitCountModeLabel(mainOneSetMode)} ${maxMainOneSetCount}` : "off"}`,
+    `2=${mainTwoSetEnabled ? `${formatMainDigitCountModeLabel(mainTwoSetMode)} ${maxMainTwoSetCount}` : "off"}`,
+    `3=${mainThreeSetEnabled ? `${formatMainDigitCountModeLabel(mainThreeSetMode)} ${maxMainThreeSetCount}` : "off"}`,
+    `4=${mainFourSetEnabled ? `${formatMainDigitCountModeLabel(mainFourSetMode)} ${maxMainFourSetCount}` : "off"}`,
+    `5=${mainFiveSetEnabled ? `${formatMainDigitCountModeLabel(mainFiveSetMode)} ${maxMainFiveSetCount}` : "off"}`,
+    `6=${mainSixSetEnabled ? `${formatMainDigitCountModeLabel(mainSixSetMode)} ${maxMainSixSetCount}` : "off"}`,
+    `7=${mainSevenSetEnabled ? `${formatMainDigitCountModeLabel(mainSevenSetMode)} ${maxMainSevenSetCount}` : "off"}`,
+    `8=${mainEightSetEnabled ? `${formatMainDigitCountModeLabel(mainEightSetMode)} ${maxMainEightSetCount}` : "off"}`,
+    `9=${mainNineSetEnabled ? `${formatMainDigitCountModeLabel(mainNineSetMode)} ${maxMainNineSetCount}` : "off"}`,
   ].join(" · ");
   const activeSetupProvenanceGroups: Array<{
     title: string;
@@ -4800,12 +5608,13 @@ function AppInner(): JSX.Element {
       target: "recencyLatestDraw",
       targetLabel: "Go to Recency & Latest Draw Rules",
       items: [
-        { label: "RecMin", value: minRecentMatches },
+        { label: "Last draw", value: lastDrawOverlapRuleSummary },
         { label: "RecBias", value: recentMatchBias },
-        { label: "LD±1", value: latestNeighbourSupportEnabled ? "on" : "off" },
-        { label: "Strict drought quota", value: strictDroughtQuotaSummary },
+        { label: latestNeighbourSupportTraceLabel(latestNeighbourSupportMode), value: latestNeighbourSupportEnabled ? "on" : "off" },
+        { label: "Drought quotas", value: droughtQuotaSummary },
         { label: "Prev ±1/±2", value: previousNeighbourConstraintNumbers.length ? previousNeighbourConstraintNumbers.join(", ") : "off" },
         { label: "Drought-break", value: droughtBreakSelectedNumbers.length ? droughtBreakSelectedNumbers.join(", ") : "off" },
+        { label: "Signal Confluence", value: signalConfluenceForcedNumbers.length ? signalConfluenceForcedNumbers.join(", ") : "off" },
         { label: "Repeat", value: repeatUnionSummary },
         { label: "GPWF", value: gpwfEnabled ? "on" : "off" },
         { label: "Lambda", value: lambdaEnabled ? lambda.toFixed(2) : "off" },
@@ -4861,6 +5670,55 @@ function AppInner(): JSX.Element {
     }
   };
 
+  const handleUseNextDrawEvidenceNumbers = (numbers: number[]) => {
+    const available = removeUserExcludedNumbers(numbers, selectionUnavailableNumbers);
+    setUserSelectedNumbers(available);
+    showToast(
+      available.length === numbers.length
+        ? "Evidence forecast mirrored to User Selected Numbers."
+        : `Evidence forecast mirrored with ${numbers.length - available.length} active exclusion${numbers.length - available.length === 1 ? "" : "s"} kept out.`,
+    );
+  };
+
+  const handleNextDrawEvidenceJournalDraft = (result: NextDrawEvidenceResult) => {
+    const orderedNumbers = [...result.main, ...result.supp];
+    const oddCount = orderedNumbers.filter((number) => number % 2 !== 0).length;
+    const terminalDigits = Array.from(new Set(orderedNumbers.map((number) => number % 10))).sort((a, b) => a - b);
+    const validation = result.validation;
+    const notes = [
+      `Raw Next-Draw Evidence Ensemble forecast ${result.modelVersion}.`,
+      `Cutoff: ${result.cutoffDate ?? "unknown"}. Target: ${result.targetDate ?? "next unrecorded draw"}.`,
+      `Raw mains: ${result.main.join(", ")}. Raw supps: ${result.supp.join(", ")}.`,
+      `Walk-forward verdict: ${validation.statusLabel}`,
+      `Replay: ${validation.drawsEvaluated} targets; model ${validation.model.meanHits.toFixed(2)} mean top-eight hits; all-history frequency ${validation.fullFrequency.meanHits.toFixed(2)}; recent-13 frequency ${validation.recent13Frequency.meanHits.toFixed(2)}; random expectation ${validation.randomExpectedHits.toFixed(2)}.`,
+      "Observe-only provenance: these are fixed model estimates, not calibrated lottery probabilities or a guarantee.",
+    ].join("\n");
+
+    predictionJournalDraftIdRef.current += 1;
+    setPredictionJournalDraftRequest({
+      id: predictionJournalDraftIdRef.current,
+      setupSnapshot: buildSnapshot({ includePanelFavorites: true, includeDerivedPredictionEvidence: true }),
+      inputOverrides: {
+        numbers: orderedNumbers,
+        oddEvenRatio: `${oddCount}:${orderedNumbers.length - oddCount}`,
+        terminalDigits,
+        selectionReason: {
+          version: 1,
+          key: "nextDrawEvidenceEnsemble",
+          label: PREDICTION_JOURNAL_SELECTION_REASON_LABELS.nextDrawEvidenceEnsemble,
+        },
+        notes,
+      },
+      sourceLabel: "Next-Draw Evidence Ensemble draft",
+    });
+    setPredictionJournalOpen(true);
+    if (typeof window !== "undefined") {
+      window.requestAnimationFrame(() => {
+        document.getElementById("panel-prediction-journal")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    }
+  };
+
   const handleViewPredictionEntries = () => {
     predictionJournalEntriesRequestIdRef.current += 1;
     setPredictionJournalEntriesRequestId(predictionJournalEntriesRequestIdRef.current);
@@ -4871,6 +5729,230 @@ function AppInner(): JSX.Element {
       });
     }
   };
+
+  const guidedConstraintFragments = useMemo(() => {
+    const fragments: string[] = [];
+    if (selectedRatios.length) fragments.push(`odd/even ${selectedRatios.join(" ")}`);
+    if (useTrickyRule) fragments.push("tricky rule");
+    if (monthlyConstructiveEnabled && monthlyConstraintPayload) fragments.push("Stage-Match constructive");
+    else if (monthlyConstraintPayload) fragments.push("Stage-Match playbook");
+    if (acceptanceNeedsEnabled) fragments.push(`MiAN ${acceptanceNeedsHardExclude ? "hard" : "counts"}`);
+    if (bucketCoveragePlannerEnabled) fragments.push(`bucket coverage ${bucketCoveragePlannerPreview.label}${bucketCoveragePlannerIgnoreUndrawn ? " (0x random)" : ""}`);
+    if (latestNeighbourSupportEnabled) fragments.push(latestNeighbourSupportTraceLabel(latestNeighbourSupportMode));
+    if (previousNeighbourConstraintNumbers.length) fragments.push(`latest ±1/±2 ${previousNeighbourConstraintNumbers.length}`);
+    if (signalConfluenceForcedNumbers.length) fragments.push(`Signal Confluence forced ${signalConfluenceForcedNumbers.length}`);
+    if (strictDroughtQuotaMode !== "off") fragments.push(`strict drought ${strictDroughtQuotaEffectiveMin}`);
+    if (empiricalDroughtQuotaMode !== "off") fragments.push(`empirical drought ${empiricalDroughtQuotaEffectiveMin}`);
+    if (repeatUnionEnabled) fragments.push(`newest-draw pool ${repeatUnionSummary}`);
+    if (lastDrawOverlapRuleMode !== "off") fragments.push(`last-draw ${lastDrawOverlapRuleSummary}`);
+    if (entropyEnabled || hammingEnabled || jaccardEnabled) fragments.push("distance filters");
+    if (readinessHardFiltersActive) fragments.push(`Rdy hard ${readinessHardFilterSummary}`);
+    if (sumFilter.enabled) fragments.push(`sum ${sumFilter.min}-${sumFilter.max}`);
+    if (digitWidthConstraintTargets.enabled) fragments.push("single/double digit quota");
+    if (activeMainDigitBoostSummary) fragments.push("ending boosts");
+    if (activeMainDecadeBiasSummary) fragments.push("decade bias");
+    if (activeScoringGenerationProfile) fragments.push(`Numbers diagnostic ${formatScoringInfluenceLabel(scoringGenerationInfluence)}`);
+    if (d1TerminalMomentumSgiEnabled) fragments.push(`D1 SGI ${formatD1TerminalMomentumStrength(d1TerminalMomentumGenerationProfile.internalStrength)}`);
+    if (monthEndCarryOverBiasEnabled) fragments.push(`carry-over ${monthEndCarryOverStrengthSettings.label}`);
+    if (lambdaEnabled) fragments.push(`lambda ${lambda.toFixed(2)}`);
+    if (gpwfEnabled) fragments.push("GPWF");
+    if (enableOGAForecastBias) fragments.push(`OGA KDE ${ogaPreferredBand}`);
+    return fragments;
+  }, [
+    acceptanceNeedsEnabled,
+    acceptanceNeedsHardExclude,
+    activeMainDecadeBiasSummary,
+    activeMainDigitBoostSummary,
+    activeScoringGenerationProfile,
+    bucketCoveragePlannerEnabled,
+    bucketCoveragePlannerIgnoreUndrawn,
+    bucketCoveragePlannerPreview.label,
+    d1TerminalMomentumGenerationProfile.internalStrength,
+    d1TerminalMomentumSgiEnabled,
+    digitWidthConstraintTargets.enabled,
+    empiricalDroughtQuotaEffectiveMin,
+    empiricalDroughtQuotaMode,
+    enableOGAForecastBias,
+    entropyEnabled,
+    gpwfEnabled,
+    hammingEnabled,
+    jaccardEnabled,
+    lambda,
+    lambdaEnabled,
+    latestNeighbourSupportEnabled,
+    latestNeighbourSupportMode,
+    lastDrawOverlapRuleMode,
+    lastDrawOverlapRuleSummary,
+    monthEndCarryOverBiasEnabled,
+    monthEndCarryOverStrengthSettings.label,
+    monthlyConstraintPayload,
+    monthlyConstructiveEnabled,
+    ogaPreferredBand,
+    previousNeighbourConstraintNumbers.length,
+    readinessHardFilterSummary,
+    readinessHardFiltersActive,
+    repeatUnionEnabled,
+    repeatUnionSummary,
+    scoringGenerationInfluence,
+    selectedRatios,
+    signalConfluenceForcedNumbers.length,
+    strictDroughtQuotaEffectiveMin,
+    strictDroughtQuotaMode,
+    sumFilter.enabled,
+    sumFilter.max,
+    sumFilter.min,
+    useTrickyRule,
+  ]);
+
+  const guidedConstraintSummary = guidedConstraintFragments.length
+    ? `${guidedConstraintFragments.slice(0, 5).join(" · ")}${guidedConstraintFragments.length > 5 ? ` · +${guidedConstraintFragments.length - 5} more` : ""}`
+    : "No explicit generation constraints are active yet.";
+
+  const guidedSelectionSummary = [
+    userSelectedNumbers.length ? `${userSelectedNumbers.length} user selected` : null,
+    generationForcedNumbers.length ? `${generationForcedNumbers.length} forced` : null,
+    allExclusions.length ? `${allExclusions.length} excluded` : null,
+    autoExcludeUnselected ? `exclude-unselected ${autoExcludedFromSelection.length}` : null,
+  ].filter(Boolean).join(" · ") || "No user-selected, forced, or excluded numbers currently active.";
+
+  const guidedSetupSummary = [
+    realHistory.length ? `${realHistory.length} real draws` : "No real history",
+    realFilteredHistory.length ? `${historyWindowName}: ${realFilteredHistory.length} real` : "No active real window",
+    candidates.length ? `${candidates.length} generated rows` : "No generated rows",
+  ].join(" · ");
+
+  const guidedPreDrawSteps = useMemo<GuidedWorkflowStep[]>(() => {
+    const guidedWindowDateRangeLabel = customWindowDateRangeLabel.replace(/^Custom date range:/, "Date range:");
+    const activeWindowDetail = realFilteredHistory.length
+      ? `${historyWindowName}: ${realFilteredHistory.length} real draw${realFilteredHistory.length === 1 ? "" : "s"}${guidedWindowDateRangeLabel ? ` · ${guidedWindowDateRangeLabel}` : ""}.`
+      : "Choose a real draw-history window before trusting evidence panels or generator weights.";
+    const generationRowCount = candidates.length + pasteWeightedPortfolioCandidates.length + keptGeneratedCandidateRows.length;
+
+    return [
+      {
+        id: "history",
+        title: "Confirm draw history",
+        detail: realHistory.length
+          ? `${realHistory.length} real draw${realHistory.length === 1 ? "" : "s"} loaded; latest ${mostRecentDrawDateLabel}.`
+          : "Load a real CSV history before using evidence panels or generation weights.",
+        status: realHistory.length ? "Ready" : "Review",
+        tone: realHistory.length ? "ready" : "review",
+        href: "#panel-draw-history-manager",
+        actionLabel: "Open history",
+      },
+      {
+        id: "window",
+        title: "Set WFMQYH",
+        detail: activeWindowDetail,
+        status: realFilteredHistory.length ? "Ready" : "Review",
+        tone: realFilteredHistory.length ? "ready" : "review",
+        href: "#panel-windowed-draw-filtering",
+        actionLabel: "Open WFMQYH",
+      },
+      {
+        id: "signals",
+        title: "Review evidence panels",
+        detail: "Inspect Signals and Validation before treating any number or constraint as useful evidence.",
+        status: realFilteredHistory.length ? "Review" : "Needs history",
+        tone: realFilteredHistory.length ? "review" : "optional",
+        href: "#workflow-signals",
+        actionLabel: "Open signals",
+      },
+      {
+        id: "selection",
+        title: "Choose numbers to include or exclude",
+        detail: guidedSelectionSummary,
+        status: generationForcedNumbers.length || allExclusions.length || userSelectedNumbers.length || autoExcludeUnselected ? "Set" : "Optional",
+        tone: generationForcedNumbers.length || allExclusions.length || userSelectedNumbers.length || autoExcludeUnselected ? "ready" : "optional",
+        href: "#panel-user-selected-numbers",
+        actionLabel: "Open selections",
+      },
+      {
+        id: "constraints",
+        title: "Review generation constraints",
+        detail: guidedConstraintSummary,
+        status: guidedConstraintFragments.length ? "Active" : "Review",
+        tone: guidedConstraintFragments.length ? "ready" : "review",
+        href: "#panel-candidate-generation-influences",
+        actionLabel: "Open setup",
+      },
+      {
+        id: "generate",
+        title: "Generate and inspect candidates",
+        detail: generationRowCount
+          ? `${generationRowCount} candidate row${generationRowCount === 1 ? "" : "s"} available across generated, paste-weighted, or kept rows.`
+          : "Generate candidates only after the active setup summary matches what you intended.",
+        status: generationRowCount ? "Rows ready" : "Next",
+        tone: generationRowCount ? "ready" : "review",
+        href: "#panel-generated-candidates",
+        actionLabel: "Open generator",
+      },
+      {
+        id: "journal",
+        title: "Save a prediction before the draw",
+        detail: "Use Prediction Journal to capture the setup and hypothesis before real results arrive.",
+        status: "Recommended",
+        tone: "review",
+        href: "#panel-prediction-journal",
+        actionLabel: "Open journal",
+      },
+    ];
+  }, [
+    allExclusions.length,
+    autoExcludeUnselected,
+    candidates.length,
+    customWindowDateRangeLabel,
+    generationForcedNumbers.length,
+    guidedConstraintFragments.length,
+    guidedConstraintSummary,
+    guidedSelectionSummary,
+    historyWindowName,
+    keptGeneratedCandidateRows.length,
+    mostRecentDrawDateLabel,
+    pasteWeightedPortfolioCandidates.length,
+    realFilteredHistory.length,
+    realHistory.length,
+    userSelectedNumbers.length,
+  ]);
+
+  const guidedPostDrawSteps = useMemo<GuidedWorkflowStep[]>(() => [
+    {
+      id: "post-history",
+      title: "Enter the actual draw",
+      detail: "Add the official result to Draw History Manager, then let real-history panels refresh from the saved CSV.",
+      status: "After draw",
+      tone: "after",
+      href: "#panel-draw-history-manager",
+      actionLabel: "Open history",
+    },
+    {
+      id: "post-prize",
+      title: "Prize check candidate rows",
+      detail: "Use Manual Prize Check in Generated Candidates after the result is known; prize checking is not part of pre-draw setup.",
+      status: "After draw",
+      tone: "after",
+      href: "#panel-generated-candidates",
+      actionLabel: "Open prize check",
+    },
+    {
+      id: "post-score",
+      title: "Score saved predictions",
+      detail: "Use Compare active entries to latest draw and journal scorecards to record hit, partial, miss, and replay-prize evidence.",
+      status: "After draw",
+      tone: "after",
+      href: "#panel-prediction-journal",
+      actionLabel: "Open scorecard",
+    },
+    {
+      id: "post-diary",
+      title: "Record lessons learned",
+      detail: "Add diary notes for recurring draw-context observations such as draw ordinal, weekday, SDE1/HC3, drought, or DGA patterns.",
+      status: "After draw",
+      tone: "after",
+      href: "#panel-research-diary",
+      actionLabel: "Open diary",
+    },
+  ], []);
 
   return (
     <PanelFavoritesProvider favoritePanelIds={favoritePanelIds} onToggleFavorite={toggleFavoritePanel}>
@@ -4907,6 +5989,12 @@ function AppInner(): JSX.Element {
         Active window: {activeWindowProvenance.realDraws} real / {activeWindowProvenance.totalDraws} loaded.
         {drawHistoryProvenance.warning ? <> <b>Warning:</b> {drawHistoryProvenance.warning}</> : null}
       </div>
+
+      <GuidedWorkflowPanel
+        setupSummary={guidedSetupSummary}
+        preDrawSteps={guidedPreDrawSteps}
+        postDrawSteps={guidedPostDrawSteps}
+      />
 
       {history.length === 0 && startupHistoryChoice?.source === "none" && (
         <section
@@ -5549,7 +6637,7 @@ function AppInner(): JSX.Element {
         <SurvivalAnalyzer
           history={baselineHistory}
           excludedNumbers={allExclusions}
-          probabilityHeading="Probability of Appearance in Next Draw (Per Number):"
+          probabilityHeading="Empirical appearance diagnostics by number:"
           externalWindowSize={baselineHistory.length}
           historyScopeLabel={baselineHistoryScopeLabel}
           enableSDE1Global={knobs.enableSDE1}
@@ -5561,7 +6649,6 @@ function AppInner(): JSX.Element {
           highlightColor="#3BD759"
           onSelectionChange={setSelectedNumbers}
           patternsSelected={selectedWindowPatterns}
-          onStats={(rows) => setSurvivalOut(rows)}
         />
       </CollapsibleSection>
 
@@ -5610,6 +6697,9 @@ function AppInner(): JSX.Element {
         <DroughtHazardPanel
           history={realFilteredHistory}
           fullHistory={realHistory}
+          baselineHistory={baselineHistory}
+          baselineHistoryScopeLabel={baselineHistoryScopeLabel}
+          wfmqyhHistoryScopeLabel={`Current WFMQYH window (${realFilteredHistory.length} real draw${realFilteredHistory.length === 1 ? "" : "s"})`}
           top={8}
           title="Drought-break shortlist (mains + supps)"
           bucketLabels={monthlyBucketLabels}
@@ -5724,6 +6814,9 @@ function AppInner(): JSX.Element {
             planningMonthLabel={planningDrawContext.targetMonthLabel}
             planningMonthExpectedDrawCount={planningDrawContext.targetMonthExpectedDrawCount}
             planningMonthIsReset={planningDrawContext.isPlanningReset}
+            generationInfluenceEnabled={drawBucketPatternInfluenceEnabled}
+            onGenerationInfluenceEnabledChange={setDrawBucketPatternInfluenceEnabled}
+            onGenerationInfluenceRowsChange={setDrawBucketPatternInfluenceRows}
           />
         </div>
       </CollapsibleSection>
@@ -5776,11 +6869,12 @@ function AppInner(): JSX.Element {
         <TargetSetQuickStatsPanel forcedNumbers={generationForcedNumbers} selectedNumbers={userSelectedNumbers} />
       </CollapsibleSection>
 
-      {/* [ORDER-ANCHOR] 14 Advanced Survival Analysis & Churn/Return Diagnostic Models */}
-      <CollapsibleSection panelId="survival-churn-diagnostic-models" title={<b>Advanced Survival Analysis & Churn/Return Diagnostic Models</b>} defaultOpen={false}>
+      {/* [ORDER-ANCHOR] 14 Advanced Survival & State Diagnostics */}
+      <CollapsibleSection panelId="survival-churn-diagnostic-models" title={<b>Advanced Survival &amp; State Diagnostics</b>} summaryHint="descriptive state and recurrent-gap evidence" defaultOpen={false}>
         <div style={{ marginTop: 12 }}>
-          <ChurnPredictor dataset={churnDataset} totalDraws={activeWindowProvenance.realDraws} minDraws={36} modelType="rf" onPredictions={setChurnOut} />
-          <ReturnPredictor dataset={churnDataset} totalDraws={activeWindowProvenance.realDraws} minDraws={36} modelType="rf" onPredictions={setReturnOut} />
+          <div style={{ borderLeft: "3px solid #73777f", background: "#f5f5f7", padding: "10px 12px", color: "#3a3a3c", fontSize: 12, lineHeight: 1.5 }}>
+            <b>Truthfulness repair:</b> the former churn classifier, return predictor, Cox top-picks, and cross-model consensus have been removed from the active app. They did not have comparable temporally labelled out-of-sample evidence, so their scores could not honestly be combined or described as next-draw predictions. The remaining tables are descriptive diagnostics only.
+          </div>
 
           <UserExclusionsStrip
             title="User Exclusions"
@@ -5793,23 +6887,10 @@ function AppInner(): JSX.Element {
           />
 
           <MultiStateChurnPanel history={realFilteredHistory} excludedNumbers={allExclusions} churnThreshold={15} />
-          <SurvivalCoxPanel history={realFilteredHistory} excludedNumbers={allExclusions} />
           <SurvivalFrailtyPanel
             history={realFilteredHistory}
             excludedNumbers={allExclusions}
-            exclusionsSlot={
-              <UserExclusionsStrip
-                title="User Exclusions"
-                excludedNumbers={excludedNumbers}
-                setExcludedNumbers={setExcludedNumbers}
-                orientation="horizontal"
-                labelPosition="bottom"
-                showClearButton={true}
-                monthlyBuckets={monthlyBucketSetsAlways ?? monthlyConstraintPayload?.buckets}
-              />
-            }
           />
-          <ConsensusPanel survival={survivalOut} churn={churnOut} reactivate={returnOut} />
         </div>
       </CollapsibleSection>
 
@@ -5953,6 +7034,54 @@ function AppInner(): JSX.Element {
         />
       </CollapsibleSection>
 
+      {/* [ORDER-ANCHOR] 21.9 Next-Draw Evidence Ensemble */}
+      <CollapsibleSection
+        panelId="next-draw-evidence-ensemble"
+        title={<b>Next-Draw Evidence Ensemble (6+2)</b>}
+        summaryHint="observe-only fixed model and no-lookahead replay"
+        defaultOpen={false}
+      >
+        <NextDrawEvidenceEnsemblePanel
+          history={realHistory}
+          unavailableNumbers={selectionUnavailableNumbers}
+          onUseNumbers={handleUseNextDrawEvidenceNumbers}
+          onDraftPrediction={handleNextDrawEvidenceJournalDraft}
+          onResultChange={setNextDrawEvidenceResultForConfluence}
+        />
+      </CollapsibleSection>
+
+      {/* [ORDER-ANCHOR] 21.92 Signal Confluence */}
+      <CollapsibleSection
+        panelId="signal-confluence-ledger"
+        title={<b>Signal Confluence / Number Consensus Ledger</b>}
+        summaryHint="observe-only cross-panel number support"
+        defaultOpen={false}
+      >
+        <SignalConfluencePanel
+          activeHistory={realFilteredHistory}
+          allHistoryDrawCount={realHistory.length}
+          latestDrawDate={previousNeighbourLatestDraw?.date}
+          targetDrawDate={planningDrawContext.targetDrawDate}
+          latestNeighbourMode={latestNeighbourSupportMode}
+          latestNeighbourRows={previousNeighbourConstraintRows}
+          strictDroughtNumbers={strictDroughtQuotaEligibleNumbers}
+          empiricalDroughtNumbers={empiricalDroughtQuotaEligibleNumbers}
+          sharedAnalysisSelectionNumbers={selectedNumbers}
+          hotColdRows={portfolioHotColdRows}
+          drawBucketPatternRows={signalConfluenceDrawBucketPatternRows}
+          scoringNumberRows={signalConfluenceScoringNumberRows}
+          selectionInsightRows={selectionInsightsPredictedCompanionRows}
+          nextDrawEvidenceResult={nextDrawEvidenceResultForConfluence}
+          monthlyBuckets={monthlyBucketSetsAlways ?? monthlyConstraintPayload?.buckets ?? null}
+          userSelectedNumbers={userSelectedNumbers}
+          forcedNumbers={generationForcedNumbers}
+          excludedNumbers={allExclusions}
+          signalConfluenceForcedNumbers={signalConfluenceForcedNumbers}
+          onToggleForcedNumber={toggleSignalConfluenceForcedNumber}
+          maxForcedNumbers={8}
+        />
+      </CollapsibleSection>
+
       {/* [ORDER-ANCHOR] 21.95 Prediction Journal & Scorecard */}
       <CollapsibleSection
         panelId="prediction-journal"
@@ -6049,9 +7178,14 @@ function AppInner(): JSX.Element {
             {/* Windowed (WFMQYH) version */}
             <div className="windfall-selection-insights-card">
               <div className="windfall-selection-insights-card__title">Windowed (WFMQYH)</div>
+              <div style={{ fontSize: 11, color: "#64748b", lineHeight: 1.4, margin: "0 0 8px" }}>
+                Anchors: {selectionInsightsAnchorNumbers.length
+                  ? `${selectionInsightsAnchorNumbers.join(", ")} (manual selections plus active forced inclusions)`
+                  : "none yet"}
+              </div>
               <SelectionInsightsPanel
                 history={realFilteredHistory}
-                selected={userSelectedNumbers}
+                selected={selectionInsightsAnchorNumbers}
                 topKTriplets={10}
                 historyWindowName={`${historyWindowName} (WFMQYH)`}
                 ogaHistory={realFilteredHistory}
@@ -6064,9 +7198,14 @@ function AppInner(): JSX.Element {
             {/* All History version */}
             <div className="windfall-selection-insights-card">
               <div className="windfall-selection-insights-card__title">All History</div>
+              <div style={{ fontSize: 11, color: "#64748b", lineHeight: 1.4, margin: "0 0 8px" }}>
+                Anchors: {selectionInsightsAnchorNumbers.length
+                  ? `${selectionInsightsAnchorNumbers.join(", ")} (manual selections plus active forced inclusions)`
+                  : "none yet"}
+              </div>
               <SelectionInsightsPanel
                 history={realHistory}
-                selected={userSelectedNumbers}
+                selected={selectionInsightsAnchorNumbers}
                 topKTriplets={10}
                 historyWindowName={`All History`}
                 ogaHistory={realHistory}
@@ -6100,10 +7239,11 @@ function AppInner(): JSX.Element {
               <span className="windfall-generation-setup-summary-chip">Ratios {selectedRatios.length ? selectedRatios.join(" ") : "off"}</span>
               <span className="windfall-generation-setup-summary-chip">Scoring {formatScoringInfluenceLabel(scoringGenerationInfluence)}</span>
               <span className="windfall-generation-setup-summary-chip">D1 SGI {d1TerminalMomentumSgiEnabled ? formatD1TerminalMomentumStrength(d1TerminalMomentumGenerationProfile.internalStrength) : "off"}</span>
-              <span className="windfall-generation-setup-summary-chip">LD±1 {latestNeighbourSupportEnabled ? "on" : "off"}</span>
+              <span className="windfall-generation-setup-summary-chip">{latestNeighbourSupportTraceLabel(latestNeighbourSupportMode)} {latestNeighbourSupportEnabled ? "on" : "off"}</span>
               <span className="windfall-generation-setup-summary-chip">Rdy filters {readinessHardFilterSummary}</span>
               <span className="windfall-generation-setup-summary-chip">Carry-over {monthEndCarryOverBiasEnabled ? monthEndCarryOverStrengthSettings.label : "off"}</span>
               <span className="windfall-generation-setup-summary-chip">Stage IDM {stageIdealDrawState ? `${stageIdealDrawState.comparableMonthCount} comps` : "unavailable"}</span>
+              <span className="windfall-generation-setup-summary-chip">Bucket plan {bucketCoveragePlannerEnabled ? `${bucketCoveragePlannerPreview.label}${bucketCoveragePlannerIgnoreUndrawn ? " · 0x random" : ""}` : "off"}</span>
             </div>
 
             <div className="windfall-generation-setup-stack">
@@ -6116,13 +7256,13 @@ function AppInner(): JSX.Element {
                 expanded={engineRankingExpanded}
                 onExpandedChange={setEngineRankingExpanded}
               >
-                <div className="windfall-influences-grid">
-              <div className="windfall-influence-card windfall-influence-card--wide">
+                <div className="windfall-engine-ranking-grid">
+              <div className="windfall-influence-card windfall-engine-ranking-section">
                 <h3 className="windfall-influence-card__title">OGA Reference And Ranking</h3>
                 <p className="windfall-influence-card__subtitle">
                   Geometry reference settings and ranking weights used when candidates are scored, sorted, and explained.
                 </p>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, alignItems: "end" }}>
+                <div className="windfall-engine-ranking-field-grid">
                   <HigField label="OGA reference" help="Windowed uses the active WFMQYH history. Full History uses every valid draw loaded in the app.">
                     <select
                       value={ogaRefMode}
@@ -6166,16 +7306,16 @@ function AppInner(): JSX.Element {
                 />
 
                 {/* OGA Forecast Bias (KDE) */}
-                <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px dashed #d7dde8" }}>
-                  <div style={{ fontWeight: 800, marginBottom: 6, color: "#0f172a" }}>OGA Forecast Bias (KDE)</div>
-                  <p style={{ margin: "0 0 8px", color: "#64748b", fontSize: 12, lineHeight: 1.4 }}>
+                <div className="windfall-engine-ranking-subsection">
+                  <div className="windfall-engine-ranking-subsection__title">OGA Forecast Bias (KDE)</div>
+                  <p className="windfall-engine-ranking-note">
                     Optional generation acceptance bias from the OGA forecast distribution. This is diagnostic evidence, not a probability guarantee.
                   </p>
-                  <label style={{ display: "block", marginBottom: 8, fontSize: 12, fontWeight: 800 }}>
+                  <label className="windfall-engine-ranking-toggle">
                     <input type="checkbox" checked={enableOGAForecastBias} onChange={(e) => setEnableOGAForecastBias(e.target.checked)} style={{ marginRight: 6 }} />
                     Enable bias by Next Draw OGA forecast
                   </label>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, alignItems: "end", marginBottom: 8 }}>
+                  <div className="windfall-engine-ranking-field-grid">
                     <HigField label="Forecast baseline" help="Windowed uses the active WFMQYH history. Full History uses every valid real draw loaded in the app.">
                       <select value={ogaBaselineMode} onChange={(e) => setOGABaselineMode(e.target.value as any)} style={{ width: "100%" }}>
                         <option value="window">Windowed</option>
@@ -6196,10 +7336,10 @@ function AppInner(): JSX.Element {
                     const thresholds = dec?.thresholds || [];
                     return (
                       <div style={{ marginTop: 6 }}>
-                        <div style={{ fontSize: 12, fontWeight: 800, color: "#334155" }}>Preferred decile bands</div>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
+                        <div className="windfall-engine-ranking-subsection__title">Preferred decile bands</div>
+                        <div className="windfall-engine-decile-grid">
                           {Array.from({ length: 10 }, (_, i) => i).map((i) => (
-                            <label key={i} style={{ border: '1px solid #e5e7eb', borderRadius: 6, padding: '4px 6px', background: "#fff", fontSize: 12 }}>
+                            <label key={i} className="windfall-engine-decile">
                               <input
                                 type="checkbox"
                                 checked={ogaPreferredDeciles.some(d => d.index === i)}
@@ -6230,13 +7370,13 @@ function AppInner(): JSX.Element {
                                     return [...prev, { index: i, weight: w }];
                                   });
                                 }}
-                                style={{ width: 60, marginLeft: 6 }}
+                                style={{ width: 54, marginLeft: 6 }}
                                 title="Weight"
                               />
                             </label>
                           ))}
                         </div>
-                        <div style={{ fontSize: 11, color: '#64748b', marginTop: 5, lineHeight: 1.4 }}>
+                        <div className="windfall-engine-ranking-note">
                           Select one or more deciles and assign weights; candidates whose OGA falls in selected deciles are accepted with probability proportional to weight. If none are selected, low/mid/high is used.
                         </div>
                       </div>
@@ -6245,7 +7385,7 @@ function AppInner(): JSX.Element {
                 </div>
               </div>
 
-              <div className="windfall-influence-card">
+              <div className="windfall-influence-card windfall-engine-ranking-section">
                 <h3 className="windfall-influence-card__title">Generation Engine Controls</h3>
                 <p className="windfall-influence-card__subtitle">
                   Recency weighting and GPWF frequency weighting used inside the main generation engine.
@@ -6267,11 +7407,11 @@ function AppInner(): JSX.Element {
                       <option value="strong">Strong</option>
                     </select>
                   </HigField>
-                  <p style={{ margin: 0, color: "#64748b", fontSize: 12, lineHeight: 1.4 }}>
+                  <p className="windfall-engine-ranking-note">
                     Applies the Numbers diagnostic evidence weighting before candidate filters run; selected constraints still decide which candidates survive.
                   </p>
-                  <div style={{ height: 1, background: "#e5e7eb", margin: "2px 0" }} aria-hidden="true" />
-                  <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 800 }}>
+                  <div className="windfall-engine-ranking-rule" aria-hidden="true" />
+                  <label className="windfall-engine-ranking-toggle">
                     <input
                       type="checkbox"
                       checked={d1TerminalMomentumSgiEnabled}
@@ -6306,8 +7446,8 @@ function AppInner(): JSX.Element {
                       User control is ON/OFF only. Windfall chooses off/light/normal/strong internally from prior-month evidence; this is soft weighting, not a hard filter.
                     </span>
                   </div>
-                  <div style={{ height: 1, background: "#e5e7eb", margin: "2px 0" }} aria-hidden="true" />
-                  <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 800 }}>
+                  <div className="windfall-engine-ranking-rule" aria-hidden="true" />
+                  <label className="windfall-engine-ranking-toggle">
                     <input
                       type="checkbox"
                       checked={lambdaEnabled}
@@ -6325,8 +7465,8 @@ function AppInner(): JSX.Element {
                       onCommit={setLambda}
                     />
                   </HigField>
-                  <div style={{ height: 1, background: "#e5e7eb", margin: "2px 0" }} aria-hidden="true" />
-                  <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 800 }}>
+                  <div className="windfall-engine-ranking-rule" aria-hidden="true" />
+                  <label className="windfall-engine-ranking-toggle">
                     <input
                       type="checkbox"
                       checked={gpwfEnabled}
@@ -6337,7 +7477,7 @@ function AppInner(): JSX.Element {
                   {(() => {
                     const gpwfMaxWindow = Math.max(3, Math.min(maxGPWFWindow, realFilteredHistory.length || maxGPWFWindow));
                     return (
-                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 8 }}>
+                      <div className="windfall-engine-gpwf-grid">
                         <HigField label="Window" help={`Recent draws considered, capped at ${gpwfMaxWindow}.`}>
                           <input
                             type="number"
@@ -6392,7 +7532,7 @@ function AppInner(): JSX.Element {
                 </div>
               </div>
 
-              <div className="windfall-influence-card">
+              <div className="windfall-influence-card windfall-engine-ranking-section windfall-engine-ranking-section--full">
                 <h3 className="windfall-influence-card__title">Readiness (Rdy) Scoring</h3>
                 <p className="windfall-influence-card__subtitle">
                   Ranking weights for the Generated Candidates Rdy column. These sliders change score emphasis only; hard rejection thresholds live in Hard Filters.
@@ -6518,7 +7658,7 @@ function AppInner(): JSX.Element {
                 id={ACTIVE_SETUP_SHAPE_BUCKET_CARD_ID}
                 title="Shape & Bucket Quotas"
                 subtitle="Ending-digit, decade, monthly bucket, and carry-over composition controls."
-                collapsedSummary={`Digit width ${digitWidthConstraintTargets.enabled ? `${digitWidthConstraintTargets.singleDigitCount}/${digitWidthConstraintTargets.twoDigitCount}` : "off"} · MiAN ${acceptanceNeedsEnabled ? "on" : "off"} · ending boosts ${activeMainDigitBoostSummary || "off"} · decade ${activeMainDecadeBiasSummary || "off"} · MRB ${mrbEnabled ? "on" : "off"}`}
+                collapsedSummary={`Digit width ${digitWidthConstraintTargets.enabled ? `${digitWidthConstraintTargets.singleDigitCount}/${digitWidthConstraintTargets.twoDigitCount}` : "off"} · MiAN ${acceptanceNeedsEnabled ? "on" : "off"} · bucket plan ${bucketCoveragePlannerEnabled ? `${bucketCoveragePlannerPreview.label}${bucketCoveragePlannerIgnoreUndrawn ? " / 0x random" : ""}` : "off"} · ending rules ${activeMainDigitRuleSummary || "off"} · ending boosts ${activeMainDigitBoostSummary || "off"} · decade ${activeMainDecadeBiasSummary || "off"} · MRB ${mrbEnabled ? "on" : "off"}`}
                 defaultExpanded={false}
                 expanded={shapeBucketQuotasExpanded}
                 onExpandedChange={setShapeBucketQuotasExpanded}
@@ -6541,13 +7681,13 @@ function AppInner(): JSX.Element {
                     <div className="windfall-constraint-section__header">
                       <div id="ending-digit-limits-title" className="windfall-constraint-section__title">Ending Digit Limits</div>
                       <div className="windfall-constraint-section__subtitle">
-                        Cap ending buckets and add targeted 1-digit or 2-digit generation boosts.
+                        Choose Off, At least, Exactly, or At most for each terminal digit; boosts only adjust sampling weight.
                       </div>
                     </div>
                     <div className="windfall-influence-legend">
                       <span className="windfall-influence-legend__item">
                         <span aria-hidden="true" className="windfall-influence-legend__dot windfall-influence-legend__dot--boost" />
-                        <span>Amber row = boosted during generation; any positive 1-digit or 2-digit boost keeps that bucket eligible even when Max is Off.</span>
+                        <span>Amber row = soft boost active; Mode + Count is the hard acceptance rule across all 8 numbers.</span>
                       </span>
                       <span className="windfall-influence-legend__item">
                         <span aria-hidden="true" className="windfall-influence-legend__dot windfall-influence-legend__dot--punish" />
@@ -6555,7 +7695,7 @@ function AppInner(): JSX.Element {
                       </span>
                     </div>
                     <div className="windfall-constraint-section__grid windfall-constraint-section__grid--ending">
-                  {exactConstraintRows.map(({ key, label, helper, badge, max, enabled, setEnabled, count, setCount, singleDigitBoost, twoDigitBoost, setSingleDigitBoost, setTwoDigitBoost, title, bucketKey }) => {
+                  {exactConstraintRows.map(({ key, label, helper, badge, max, enabled, setEnabled, mode, setMode, count, setCount, singleDigitBoost, twoDigitBoost, setSingleDigitBoost, setTwoDigitBoost, title, bucketKey }) => {
                     const bucketSummary = generationConstraintBucketSummaries[bucketKey];
                     const maxDrawResultCount = Math.max(...bucketSummary.drawResultCounts.map(({ count }) => count), 0);
                     const bucketNumbers = generationConstraintNumberBuckets[bucketKey];
@@ -6598,7 +7738,7 @@ function AppInner(): JSX.Element {
                                   padding: "1px 7px",
                                   whiteSpace: "nowrap",
                                 }}
-                                title={`${boostBadgeParts.join(" • ")}: this bucket stays active in generation weighting even if Max is Off.`}
+                                title={`${boostBadgeParts.join(" • ")}: this bucket stays active in generation weighting even if the count rule is Off.`}
                               >
                                 Boosted {boostBadgeParts.join(" · ")}
                               </span>
@@ -6606,33 +7746,41 @@ function AppInner(): JSX.Element {
                           </div>
                           <div style={{ fontSize: 11, color: isBoosted ? "#8a5a00" : "#777", marginTop: 2 }}>
                             {helper}
-                            {isBoosted ? " • boosted sub-buckets stay eligible for weighted candidate picks" : ""}
+                            {isBoosted ? " • boost affects sampling only; the selected count rule still decides acceptance" : ""}
                           </div>
                         </div>
                         <div className="windfall-influence-control-grid">
-                          <label style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, color: "#555", whiteSpace: "nowrap" }}>
-                            <input
-                              type="checkbox"
-                              checked={!enabled}
-                              onChange={(e) => setEnabled(!e.target.checked)}
-                            />
-                            Off
+                          <label style={{ display: "grid", gap: 2, fontSize: 10, color: "#666", fontWeight: 600 }}>
+                            <span>Mode</span>
+                            <select
+                              value={mode}
+                              onChange={(e) => {
+                                const nextMode = normalizeMainDigitCountMode(e.target.value);
+                                setMode(nextMode);
+                                setEnabled(nextMode !== "off");
+                              }}
+                              style={{ minWidth: 88, fontWeight: 400 }}
+                            >
+                              {mainDigitCountModeOptions.map((option) => (
+                                <option key={option.value} value={option.value}>{option.label}</option>
+                              ))}
+                            </select>
                           </label>
                           <label style={{ display: "grid", gap: 2, fontSize: 10, color: "#666", fontWeight: 600 }}>
-                            <span>Max</span>
+                            <span>Count</span>
                             <select
                               value={count}
-                              disabled={!enabled}
+                              disabled={mode === "off"}
                               onChange={(e) => setCount(Math.max(0, Math.min(max, Number(e.target.value) || 0)))}
-                              style={{ minWidth: 64, opacity: enabled ? 1 : 0.55, fontWeight: 400 }}
+                              style={{ minWidth: 64, opacity: mode !== "off" ? 1 : 0.55, fontWeight: 400 }}
                             >
                               {Array.from({ length: max + 1 }, (_, idx) => (
                                 <option key={idx} value={idx}>{idx}</option>
                               ))}
                             </select>
                           </label>
-                          <label style={{ display: "grid", gap: 2, fontSize: 10, color: "#666", fontWeight: 600 }} title="Generation weight boost for the single-digit members of this ending-digit bucket. Applies even when Off is checked.">
-                            <span>1-digit</span>
+                          <label style={{ display: "grid", gap: 2, fontSize: 10, color: "#666", fontWeight: 600 }} title="Generation weight boost for the single-digit members of this ending-digit bucket. Applies even when the count rule mode is Off.">
+                            <span>1-digit boost</span>
                             <select
                               value={singleDigitBoost}
                               disabled={!hasSingleDigitNumbers}
@@ -6650,8 +7798,8 @@ function AppInner(): JSX.Element {
                               ))}
                             </select>
                           </label>
-                          <label style={{ display: "grid", gap: 2, fontSize: 10, color: "#666", fontWeight: 600 }} title="Generation weight boost for the two-digit members of this ending-digit bucket. Applies even when Off is checked.">
-                            <span>2-digit</span>
+                          <label style={{ display: "grid", gap: 2, fontSize: 10, color: "#666", fontWeight: 600 }} title="Generation weight boost for the two-digit members of this ending-digit bucket. Applies even when the count rule mode is Off.">
+                            <span>2-digit boost</span>
                             <select
                               value={twoDigitBoost}
                               disabled={!hasTwoDigitNumbers}
@@ -6991,6 +8139,119 @@ function AppInner(): JSX.Element {
                       )}
                     </div>
                   )}
+                  <div
+                    style={{
+                      marginTop: 10,
+                      padding: "9px 10px",
+                      border: `1px solid ${
+                        bucketCoveragePlannerEnabled
+                          ? bucketCoveragePlannerPreview.tone === "good"
+                            ? "#86efac"
+                            : bucketCoveragePlannerPreview.tone === "warn"
+                              ? "#facc15"
+                              : "#fecaca"
+                          : "#e2e8f0"
+                      }`,
+                      borderRadius: 8,
+                      background: bucketCoveragePlannerEnabled
+                        ? bucketCoveragePlannerPreview.tone === "good"
+                          ? "#f0fdf4"
+                          : bucketCoveragePlannerPreview.tone === "warn"
+                            ? "#fffbeb"
+                            : "#fef2f2"
+                        : "#f8fafc",
+                      display: "grid",
+                      gap: 8,
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                      <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 800, color: "#0f172a" }}>
+                        <input
+                          type="checkbox"
+                          checked={bucketCoveragePlannerEnabled}
+                          onChange={(e) => setBucketCoveragePlannerEnabled(e.target.checked)}
+                        />
+                        Bucket Coverage Planner
+                      </label>
+                      <span
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 6,
+                          borderRadius: 999,
+                          padding: "2px 8px",
+                          border: "1px solid rgba(15, 23, 42, 0.12)",
+                          background: "#fff",
+                          color: bucketCoveragePlannerEnabled
+                            ? bucketCoveragePlannerPreview.tone === "good"
+                              ? "#166534"
+                              : bucketCoveragePlannerPreview.tone === "warn"
+                                ? "#92400e"
+                                : "#991b1b"
+                            : "#64748b",
+                          fontSize: 11,
+                          fontWeight: 900,
+                        }}
+                      >
+                        {bucketCoveragePlannerEnabled ? bucketCoveragePlannerPreview.label : "Off"}
+                      </span>
+                      <InfoHelp label="Bucket Coverage Planner help">
+                        Bucket Coverage Planner uses active Acceptance Needs or Stage-Match bucket counts to cover bucket combinations before later filters run. Leave Undrawn random keeps the Undrawn count active but excludes the large 0x bucket from the coverage burden. Full coverage is allowed only when the planned combination burden is small enough; sampled coverage is labelled; oversized spaces are blocked so Windfall does not imply completeness it cannot provide.
+                      </InfoHelp>
+                    </div>
+                    <label
+                      style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "#334155", fontWeight: 650 }}
+                      title="Recommended for most draws. The Undrawn count is still enforced by Acceptance Needs or Stage-Match, but its many possible combinations are not treated as a coverage promise."
+                    >
+                      <input
+                        type="checkbox"
+                        checked={bucketCoveragePlannerIgnoreUndrawn}
+                        onChange={(e) => setBucketCoveragePlannerIgnoreUndrawn(e.target.checked)}
+                      />
+                      Leave Undrawn random
+                    </label>
+                    <div style={{ fontSize: 11, color: "#475569", lineHeight: 1.45 }}>
+                      {bucketCoveragePlannerEnabled
+                        ? `Burden ${bucketCoveragePlannerPreview.burden ? bucketCoveragePlannerPreview.burden.toLocaleString() : "n/a"} planned combinations · pool ${bucketCoveragePlannerPreview.requestedPoolSize.toLocaleString()} · required ${bucketCoveragePlannerPreview.requiredTotal}/8 slots · planned ${bucketCoveragePlannerPreview.plannedRequiredTotal}/${bucketCoveragePlannerPreview.remainingRequiredTotal} remaining slots.`
+                        : "Default off. Turn on to plan bucket combinations from active Acceptance Needs before ordinary candidate filters run."}
+                    </div>
+                    {bucketCoveragePlannerEnabled && (
+                      <>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                          {bucketCoveragePlannerPreview.rows
+                            .filter((row) => row.required > 0)
+                            .map((row) => {
+                              const chipText = row.ignoredForCoverage
+                                ? `${row.label} random req ${row.required}`
+                                : `${row.label} C(${row.availableCount},${row.remainingRequired})=${row.combinationCount.toLocaleString()}`;
+                              const chipTitle = row.ignoredForCoverage
+                                ? `Bucket ${row.label}: required ${row.required}; forced already satisfy ${row.forcedCount}; remaining ${row.remainingRequired} is still filled by standard random constructive fill and excluded from coverage burden.`
+                                : `Bucket ${row.label}: required ${row.required}; forced already satisfy ${row.forcedCount}; remaining combination count C(${row.availableCount}, ${row.remainingRequired}) = ${row.combinationCount.toLocaleString()}.`;
+                              return (
+                                <span
+                                  key={row.key}
+                                  title={chipTitle}
+                                  style={{
+                                    border: "1px solid rgba(15, 23, 42, 0.12)",
+                                    background: row.ignoredForCoverage ? "#f8fafc" : "#fff",
+                                    borderRadius: 999,
+                                    padding: "2px 7px",
+                                    fontSize: 11,
+                                    color: row.ignoredForCoverage ? "#64748b" : "#0f172a",
+                                    fontVariantNumeric: "tabular-nums",
+                                  }}
+                                >
+                                  {chipText}
+                                </span>
+                              );
+                            })}
+                        </div>
+                        <div style={{ fontSize: 11, color: bucketCoveragePlannerPreview.tone === "bad" ? "#991b1b" : "#64748b", lineHeight: 1.45 }}>
+                          {bucketCoveragePlannerPreview.reasons.join(" ")}
+                        </div>
+                      </>
+                    )}
+                    </div>
                     </div>
                   </section>
 
@@ -7271,7 +8532,7 @@ function AppInner(): JSX.Element {
                 id={ACTIVE_SETUP_PROVENANCE_TARGET_IDS.recencyLatestDraw}
                 title="Recency & Latest Draw Rules"
                 subtitle="Odd/even, selected/recent survivor weights, last-draw overlap, latest ±1/±2 targets, and repeat-window rules."
-                collapsedSummary={`Recent min ${minRecentMatches} · SelHits ${rankingWeights.selHitsEnabled ? "on" : "off"} · RecentHits ${rankingWeights.recentHitsEnabled ? "on" : "off"} · LD±1 ${latestNeighbourSupportEnabled ? "on" : "off"} · strict drought ${strictDroughtQuotaSummary} · latest ±1/±2 ${previousNeighbourConstraintNumbers.length || "off"} · repeat ${repeatUnionEnabled ? `last ${effectiveRepeatWindowSizeW}/M ${minFromRecentUnionM}` : "off"}`}
+                collapsedSummary={`Last draw ${lastDrawOverlapRuleSummary} · SelHits ${rankingWeights.selHitsEnabled ? "on" : "off"} · RecentHits ${rankingWeights.recentHitsEnabled ? "on" : "off"} · ${latestNeighbourSupportTraceLabel(latestNeighbourSupportMode)} ${latestNeighbourSupportEnabled ? "on" : "off"} · drought quotas ${droughtQuotaSummary} · latest ±1/±2 ${previousNeighbourConstraintNumbers.length || "off"} · repeat ${repeatUnionEnabled ? `last ${effectiveRepeatWindowSizeW}/M ${minFromRecentUnionM}` : "off"}`}
                 defaultExpanded={false}
                 expanded={recencyLatestDrawExpanded}
                 onExpandedChange={setRecencyLatestDrawExpanded}
@@ -7325,93 +8586,122 @@ function AppInner(): JSX.Element {
                   style={{
                     marginTop: 8,
                     padding: "8px 10px",
-                    border: `1px solid ${latestNeighbourSupportEnabled ? "#93c5fd" : "#e5e7eb"}`,
+                    border: `1px solid ${strictDroughtQuotaMode !== "off" || empiricalDroughtQuotaMode !== "off" ? "#c4b5fd" : "#e5e7eb"}`,
                     borderRadius: 6,
-                    background: latestNeighbourSupportEnabled ? "#eff6ff" : "#fafafa",
-                    display: "grid",
-                    gap: 6,
-                  }}
-                >
-                  <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 800 }}>
-                    <input
-                      type="checkbox"
-                      checked={latestNeighbourSupportEnabled}
-                      onChange={(event) => setLatestNeighbourSupportEnabled(event.target.checked)}
-                    />
-                    Latest ±1 Support (LD±1)
-                    <InfoHelp label="Latest ±1 Support help">
-                      Experimental default-off rule. When enabled, Windfall builds the +1/-1 neighbours of the latest real draw, removes targets that fail recent-streak, exclusion, and monthly terminal-family drought screens, then requires every generated candidate to contain at least one remaining eligible target. Trace records the eligible targets and rejections.
-                    </InfoHelp>
-                  </label>
-                  <div style={{ color: "#64748b", fontSize: 11, lineHeight: 1.45 }}>
-                    Uses the latest WFMQYH draw, recent 10-draw streak cap &gt;7, current monthly buckets when available, and existing 0/5 ending-digit rules as coordination checks. It is evidence-based filtering, not a probability claim.
-                  </div>
-                </div>
-                <div
-                  style={{
-                    marginTop: 8,
-                    padding: "8px 10px",
-                    border: `1px solid ${strictDroughtQuotaMode !== "off" ? "#c4b5fd" : "#e5e7eb"}`,
-                    borderRadius: 6,
-                    background: strictDroughtQuotaMode !== "off" ? "#f5f3ff" : "#fafafa",
+                    background: strictDroughtQuotaMode !== "off" || empiricalDroughtQuotaMode !== "off" ? "#f5f3ff" : "#fafafa",
                     display: "grid",
                     gap: 8,
                   }}
                 >
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-                    <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 800 }}>
-                      Strict drought quota
-                      <select
-                        value={strictDroughtQuotaMode}
-                        onChange={(event) => setStrictDroughtQuotaMode(event.target.value as StrictDroughtQuotaControlMode)}
-                        style={{ minHeight: 30, borderRadius: 8, border: "1px solid #cbd5e1", padding: "3px 8px", fontWeight: 800 }}
-                      >
-                        <option value="off">Off</option>
-                        <option value="advised">SDSR-advised</option>
-                        <option value="manual">Manual minimum</option>
-                      </select>
-                    </label>
-                    <InfoHelp label="Strict drought quota help">
-                      Default-off generation rule. Manual mode requires each generated 8-number candidate to contain at least the chosen count from the current strict drought-break shortlist. SDSR-advised mode uses the no-lookahead Strict Drought Shortlist Replay to choose a cautious minimum when the current draw ordinal/month-stage has supportive evidence. This is a quota, not a win probability.
+                    <div style={{ fontSize: 12, fontWeight: 900 }}>Drought quota counts</div>
+                    <InfoHelp label="Drought quota counts help">
+                      Default-off generation quotas. Strict drought 6+ uses the current strict drought-break shortlist; empirical hazard uses the current smoothed empirical hazard shortlist. Manual modes use your chosen minimum count. Advised modes use no-lookahead replay evidence, stay capped at a low-count minimum of 1, and only apply when the replay beats an equal-size random baseline enough to justify it. These are hard quotas, not win probabilities.
                     </InfoHelp>
                   </div>
-                  {strictDroughtQuotaMode === "manual" && (
-                    <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 700 }}>
-                      Minimum from shortlist:
-                      <input
-                        type="number"
-                        min={0}
-                        max={Math.min(8, strictDroughtQuotaEligibleNumbers.length)}
-                        value={strictDroughtQuotaManualMin}
-                        onChange={(event) => {
-                          const value = Number(event.target.value);
-                          const safe = Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
-                          setStrictDroughtQuotaManualMin(Math.min(safe, Math.min(8, strictDroughtQuotaEligibleNumbers.length)));
-                        }}
-                        style={{ width: 60 }}
-                      />
-                      <span style={{ color: "#6b21a8", fontSize: 11, fontWeight: 800 }}>
-                        max {Math.min(8, strictDroughtQuotaEligibleNumbers.length)}
-                      </span>
-                    </label>
-                  )}
                   <div style={{ color: "#475569", fontSize: 11, lineHeight: 1.45 }}>
-                    {strictDroughtQuotaMode === "off"
-                      ? <>Off. Current strict drought shortlist top {STRICT_DROUGHT_QUOTA_TOP_K}: {strictDroughtQuotaEligibleNumbers.length ? strictDroughtQuotaEligibleNumbers.join(", ") : "none after active exclusions"}.</>
-                      : strictDroughtQuotaMode === "advised"
-                        ? <>{strictDroughtQuotaAdvice.traceLabel}. Effective minimum {strictDroughtQuotaEffectiveMin}. {strictDroughtQuotaAdvice.reason}</>
-                        : <>Manual minimum {strictDroughtQuotaEffectiveMin}. Current eligible strict drought shortlist: {strictDroughtQuotaEligibleNumbers.length ? strictDroughtQuotaEligibleNumbers.join(", ") : "none after active exclusions"}.</>}
+                    Overlap: {droughtQuotaOverlapNumbers.length ? droughtQuotaOverlapNumbers.join(", ") : "none"}. A number in both lists can satisfy both quota families, but still occupies one candidate slot.
                   </div>
-                  {strictDroughtQuotaMode === "advised" && (
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, color: "#334155", fontSize: 11 }}>
-                      <span style={{ fontWeight: 800 }}>Replay slice</span>
-                      <span>{strictDroughtQuotaAdvice.sourceLabel}</span>
-                      <span>Trials {strictDroughtQuotaAdvice.trials}</span>
-                      <span>1-3 hits {(strictDroughtQuotaAdvice.oneToThreeHitRate * 100).toFixed(1)}%</span>
-                      <span>Random {(strictDroughtQuotaAdvice.expectedRandomOneToThreeHitRate * 100).toFixed(1)}%</span>
-                      <span>Zero-hit {(strictDroughtQuotaAdvice.zeroHitRate * 100).toFixed(1)}%</span>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 10 }}>
+                    <div style={{ display: "grid", gap: 7, padding: 8, border: "1px solid #ddd6fe", borderRadius: 8, background: "#fff" }}>
+                      <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 800, flexWrap: "wrap" }}>
+                        Strict drought 6+
+                        <select
+                          value={strictDroughtQuotaMode}
+                          onChange={(event) => setStrictDroughtQuotaMode(event.target.value as StrictDroughtQuotaControlMode)}
+                          style={{ minHeight: 30, borderRadius: 8, border: "1px solid #cbd5e1", padding: "3px 8px", fontWeight: 800 }}
+                        >
+                          <option value="off">Off</option>
+                          <option value="advised">SDSR-advised</option>
+                          <option value="manual">Manual minimum</option>
+                        </select>
+                      </label>
+                      {strictDroughtQuotaMode === "manual" && (
+                        <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 700, flexWrap: "wrap" }}>
+                          Minimum:
+                          <input
+                            type="number"
+                            min={0}
+                            max={Math.min(8, strictDroughtQuotaEligibleNumbers.length)}
+                            value={strictDroughtQuotaManualMin}
+                            onChange={(event) => {
+                              const value = Number(event.target.value);
+                              const safe = Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
+                              setStrictDroughtQuotaManualMin(Math.min(safe, Math.min(8, strictDroughtQuotaEligibleNumbers.length)));
+                            }}
+                            style={{ width: 60 }}
+                          />
+                          <span style={{ color: "#6b21a8", fontSize: 11, fontWeight: 800 }}>
+                            max {Math.min(8, strictDroughtQuotaEligibleNumbers.length)}
+                          </span>
+                        </label>
+                      )}
+                      <div style={{ color: "#475569", fontSize: 11, lineHeight: 1.45 }}>
+                        {strictDroughtQuotaMode === "off"
+                          ? <>Off. Current eligible top {STRICT_DROUGHT_QUOTA_TOP_K}: {strictDroughtQuotaEligibleNumbers.length ? strictDroughtQuotaEligibleNumbers.join(", ") : "none after active exclusions"}.</>
+                          : strictDroughtQuotaMode === "advised"
+                            ? <>{strictDroughtQuotaAdvice.traceLabel}. Effective minimum {strictDroughtQuotaEffectiveMin}. {strictDroughtQuotaAdvice.reason}</>
+                            : <>Manual minimum {strictDroughtQuotaEffectiveMin}. Current eligible strict shortlist: {strictDroughtQuotaEligibleNumbers.length ? strictDroughtQuotaEligibleNumbers.join(", ") : "none after active exclusions"}.</>}
+                      </div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, color: "#334155", fontSize: 11 }}>
+                        <span style={{ fontWeight: 800 }}>Replay</span>
+                        <span>{strictDroughtQuotaAdvice.sourceLabel}</span>
+                        <span>Trials {strictDroughtQuotaAdvice.trials}</span>
+                        <span>1-3 {formatDroughtQuotaPct(strictDroughtQuotaAdvice.oneToThreeHitRate)}</span>
+                        <span>Random {formatDroughtQuotaPct(strictDroughtQuotaAdvice.expectedRandomOneToThreeHitRate)}</span>
+                      </div>
+                      <DroughtQuotaCountReplayRows rows={strictDroughtQuotaAdvice.countSummaries} />
                     </div>
-                  )}
+                    <div style={{ display: "grid", gap: 7, padding: 8, border: "1px solid #bae6fd", borderRadius: 8, background: "#fff" }}>
+                      <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 800, flexWrap: "wrap" }}>
+                        Empirical hazard
+                        <select
+                          value={empiricalDroughtQuotaMode}
+                          onChange={(event) => setEmpiricalDroughtQuotaMode(event.target.value as StrictDroughtQuotaControlMode)}
+                          style={{ minHeight: 30, borderRadius: 8, border: "1px solid #cbd5e1", padding: "3px 8px", fontWeight: 800 }}
+                        >
+                          <option value="off">Off</option>
+                          <option value="advised">Hazard-advised</option>
+                          <option value="manual">Manual minimum</option>
+                        </select>
+                      </label>
+                      {empiricalDroughtQuotaMode === "manual" && (
+                        <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 700, flexWrap: "wrap" }}>
+                          Minimum:
+                          <input
+                            type="number"
+                            min={0}
+                            max={Math.min(8, empiricalDroughtQuotaEligibleNumbers.length)}
+                            value={empiricalDroughtQuotaManualMin}
+                            onChange={(event) => {
+                              const value = Number(event.target.value);
+                              const safe = Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
+                              setEmpiricalDroughtQuotaManualMin(Math.min(safe, Math.min(8, empiricalDroughtQuotaEligibleNumbers.length)));
+                            }}
+                            style={{ width: 60 }}
+                          />
+                          <span style={{ color: "#0369a1", fontSize: 11, fontWeight: 800 }}>
+                            max {Math.min(8, empiricalDroughtQuotaEligibleNumbers.length)}
+                          </span>
+                        </label>
+                      )}
+                      <div style={{ color: "#475569", fontSize: 11, lineHeight: 1.45 }}>
+                        {empiricalDroughtQuotaMode === "off"
+                          ? <>Off. Current eligible top {STRICT_DROUGHT_QUOTA_TOP_K}: {empiricalDroughtQuotaEligibleNumbers.length ? empiricalDroughtQuotaEligibleNumbers.join(", ") : "none after active exclusions"}.</>
+                          : empiricalDroughtQuotaMode === "advised"
+                            ? <>{empiricalDroughtQuotaAdvice.traceLabel}. Effective minimum {empiricalDroughtQuotaEffectiveMin}. {empiricalDroughtQuotaAdvice.reason}</>
+                            : <>Manual minimum {empiricalDroughtQuotaEffectiveMin}. Current eligible empirical shortlist: {empiricalDroughtQuotaEligibleNumbers.length ? empiricalDroughtQuotaEligibleNumbers.join(", ") : "none after active exclusions"}.</>}
+                      </div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, color: "#334155", fontSize: 11 }}>
+                        <span style={{ fontWeight: 800 }}>Replay</span>
+                        <span>{empiricalDroughtQuotaAdvice.sourceLabel}</span>
+                        <span>Trials {empiricalDroughtQuotaAdvice.trials}</span>
+                        <span>1-3 {formatDroughtQuotaPct(empiricalDroughtQuotaAdvice.oneToThreeHitRate)}</span>
+                        <span>Random {formatDroughtQuotaPct(empiricalDroughtQuotaAdvice.expectedRandomOneToThreeHitRate)}</span>
+                      </div>
+                      <DroughtQuotaCountReplayRows rows={empiricalDroughtQuotaAdvice.countSummaries} />
+                    </div>
+                  </div>
                 </div>
                 <div
                   style={{
@@ -7430,6 +8720,54 @@ function AppInner(): JSX.Element {
                   </div>
                   <div style={{ marginTop: 5, color: "#64748b", fontSize: 11, lineHeight: 1.45 }}>
                     Default off until one or more target numbers are selected. Selected targets are combined with Number Trends forced numbers before candidate generation.
+                  </div>
+                  <div
+                    style={{
+                      marginTop: 8,
+                      padding: "8px 10px",
+                      border: `1px solid ${latestNeighbourSupportEnabled ? "#93c5fd" : "#e5e7eb"}`,
+                      borderRadius: 6,
+                      background: latestNeighbourSupportEnabled ? "#eff6ff" : "#fafafa",
+                      display: "grid",
+                      gap: 6,
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 800 }}>
+                        <input
+                          type="checkbox"
+                          checked={latestNeighbourSupportEnabled}
+                          onChange={(event) => setLatestNeighbourSupportEnabled(event.target.checked)}
+                        />
+                        Latest support ({latestNeighbourSupportTraceLabel(latestNeighbourSupportMode)})
+                        <InfoHelp label="Latest draw support help">
+                          Experimental default-off rule. When enabled, Windfall builds the selected neighbour cloud from the latest real draw, removes targets that fail recent-streak, exclusion, and monthly terminal-family drought screens, then requires every generated candidate to contain at least one remaining eligible target. Trace records the mode, eligible targets, and rejections.
+                        </InfoHelp>
+                      </label>
+                      <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 800, color: "#334155" }}>
+                        Mode
+                        <select
+                          value={latestNeighbourSupportMode}
+                          onChange={(event) => setLatestNeighbourSupportMode(normalizeLatestNeighbourSupportMode(event.target.value))}
+                          disabled={!latestNeighbourSupportEnabled}
+                          style={{
+                            minHeight: 30,
+                            borderRadius: 8,
+                            border: "1px solid #cbd5e1",
+                            padding: "3px 8px",
+                            background: latestNeighbourSupportEnabled ? "#fff" : "#f1f5f9",
+                            color: latestNeighbourSupportEnabled ? "#0f172a" : "#94a3b8",
+                            fontWeight: 800,
+                          }}
+                        >
+                          <option value="pm1">±1 only</option>
+                          <option value="pm1pm2">±1 and ±2</option>
+                        </select>
+                      </label>
+                    </div>
+                    <div style={{ color: "#64748b", fontSize: 11, lineHeight: 1.45 }}>
+                      Uses {latestNeighbourSupportModeLabel(latestNeighbourSupportMode)} targets from the latest WFMQYH draw, recent 10-draw streak cap &gt;7, current monthly buckets when available, and existing 0/5 ending-digit rules as coordination checks. It is evidence-based filtering, not a probability claim.
+                    </div>
                   </div>
                   {userExclusionReminder && (
                     <div role="status" style={{ marginTop: 6, color: "#475569", fontSize: 11, lineHeight: 1.45 }}>
@@ -7655,32 +8993,50 @@ function AppInner(): JSX.Element {
                     Latest-draw overlap controls
                   </div>
                   <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: "8px 14px", alignItems: "center" }}>
-                    <label title="Strictly require each candidate to contain at least this many numbers from the most recent draw.">
-                      Minimum matches to <span style={{ fontWeight: 900, textDecoration: "underline", textUnderlineOffset: "2px" }}>last draw</span>:
-                      <input type="number" min={0} max={8} value={minRecentMatches} onChange={(e) => setMinRecentMatches(Number(e.target.value))} style={{ width: 60, marginLeft: 6 }} />
-                    </label>
-                    <label title="Reject candidates that share more than the chosen number of matches with the last draw">
-                      <input
-                        type="checkbox"
-                        checked={maxLastDrawMatchesEnabled}
-                        onChange={(e) => setMaxLastDrawMatchesEnabled(e.target.checked)}
-                        style={{ marginRight: 6 }}
-                      />
-                      Maximum matches to <span style={{ fontWeight: 900, textDecoration: "underline", textUnderlineOffset: "2px" }}>last draw</span>:
+                    <label title="Choose how strictly each candidate must overlap with the immediate previous draw.">
+                      <span style={{ fontWeight: 900, textDecoration: "underline", textUnderlineOffset: "2px" }}>Last draw</span> overlap rule:
                       <select
-                        value={maxLastDrawMatchesValue}
-                        onChange={(e) => setMaxLastDrawMatchesValue(Number(e.target.value))}
-                        disabled={!maxLastDrawMatchesEnabled}
-                        style={{ marginLeft: 6, opacity: maxLastDrawMatchesEnabled ? 1 : 0.4 }}
+                        value={lastDrawOverlapRuleMode}
+                        onChange={(e) => {
+                          const selectedMode = e.target.value as LastDrawOverlapRuleMode;
+                          if (selectedMode === "customRange") return;
+                          const nextMode = selectedMode;
+                          const nextCount = nextMode === "atLeast" && lastDrawOverlapRuleCount === 0
+                            ? 1
+                            : lastDrawOverlapRuleCount;
+                          applyLastDrawOverlapRule(nextMode, nextCount);
+                        }}
+                        style={{ marginLeft: 6 }}
                       >
-                        {[0,1,2,3,4,5,6,7,8].map((v) => (
+                        {lastDrawOverlapRuleMode === "customRange" && (
+                          <option value="customRange">Custom range</option>
+                        )}
+                        {lastDrawOverlapModeOptions.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label title="The number of matches to compare against the immediate previous draw.">
+                      Count:
+                      <select
+                        value={lastDrawOverlapRuleCount}
+                        onChange={(e) => {
+                          if (lastDrawOverlapRuleMode === "customRange") return;
+                          applyLastDrawOverlapRule(lastDrawOverlapRuleMode, Number(e.target.value));
+                        }}
+                        disabled={lastDrawOverlapRuleMode === "off" || lastDrawOverlapRuleMode === "customRange"}
+                        style={{ marginLeft: 6, opacity: lastDrawOverlapRuleMode === "off" || lastDrawOverlapRuleMode === "customRange" ? 0.45 : 1 }}
+                      >
+                        {lastDrawOverlapCountOptions.map((v) => (
                           <option key={v} value={v}>{v}</option>
                         ))}
                       </select>
                     </label>
                   </div>
                   <div style={{ marginTop: 4, color: "#64748b", fontSize: 11, lineHeight: 1.45 }}>
-                    Minimum and maximum matches are strict filters. <span style={{ fontWeight: 900, textDecoration: "underline", textUnderlineOffset: "2px" }}>Last draw</span> match bias below is only a soft weighting strength.
+                    Active strict rule: <strong>{lastDrawOverlapRuleSummary}</strong>. Off means no hard latest-draw overlap filter. Exactly 0 is the clean no-repeat setting.
+                    {" "}<span style={{ fontWeight: 900, textDecoration: "underline", textUnderlineOffset: "2px" }}>Last draw</span> match bias below is only a soft weighting strength.
+                    {lastDrawOverlapRuleMode === "customRange" ? " This saved state uses a legacy min/max range; choose a mode above to normalize it." : ""}
                   </div>
                   <div style={{ marginTop: 8 }}>
                     <label title="Soft last-draw overlap strength. With minimum matches at 0 it penalizes latest-draw numbers; with minimum matches above 0 it favours higher overlap among candidates that pass the minimum.">
@@ -7887,7 +9243,7 @@ function AppInner(): JSX.Element {
             <div className="windfall-influence-report">
               <div style={{ marginBottom: 6 }}>
                 <b>Forced numbers</b> ({generationForcedNumbers.length}): {generationForcedNumbers.length ? sortedGenerationForcedNumbers.join(", ") : "— none —"}
-                <span style={{ color: "#64748b" }}> Trend {trendSelectedNumbers.length}; latest ±1/±2 {previousNeighbourConstraintNumbers.length}; drought-break {droughtBreakSelectedNumbers.length}; paste-weighted {pasteWeightedForcedNumbers.length}.</span>
+                <span style={{ color: "#64748b" }}> Trend {trendSelectedNumbers.length}; latest ±1/±2 {previousNeighbourConstraintNumbers.length}; drought-break {droughtBreakSelectedNumbers.length}; paste-weighted {pasteWeightedForcedNumbers.length}; Signal Confluence {signalConfluenceForcedNumbers.length}.</span>
               </div>
               <div className="windfall-influence-report__grid">
                 <div>
@@ -8015,6 +9371,10 @@ function AppInner(): JSX.Element {
             mostRecentDraw={realFilteredHistory[realFilteredHistory.length - 1] || null}
             manualSimSelected={manualSimSelected}
             setManualSimSelected={setManualSimSelected}
+            manualNextDrawDate={manualPrizeCheckNextDraw.targetDate ?? undefined}
+            manualSaveDisabledReason={manualPrizeCheckSaveDisabledReason ?? undefined}
+            isSavingManualAsNextDraw={isSavingManualPrizeCheckAsDraw}
+            onSaveManualAsNextDraw={handleSaveManualPrizeCheckAsNextDraw}
             activeOGABand={activeOGABand}
             forcedNumbers={generationForcedNumbers}
             activeSimCandidateIdx={simCandidateIdx ?? -1}
@@ -8070,9 +9430,12 @@ function AppInner(): JSX.Element {
               monthlyConstructiveEnabled,
               monthlyConstructiveConstraints: monthlyConstraintPayload?.constraints,
               minRecentMatches,
+              maxLastDrawMatchesEnabled,
+              maxLastDrawMatchesValue,
               recentMatchBias,
               previousNeighbourConstraintNumbers: [...previousNeighbourConstraintNumbers],
               latestNeighbourSupportEnabled,
+              latestNeighbourSupportMode,
               entropyEnabled,
               entropyThreshold,
               hammingEnabled,
@@ -8204,22 +9567,53 @@ function AppInner(): JSX.Element {
                     <option value="monthlyBucketState">Monthly bucket state</option>
                   </select>
                 </label>
+                {!isMonthlyBucketHeatmapView ? (
+                  <label style={{ fontSize: 13 }}>
+                    Metric:
+                    <select
+                      value={tempMetric}
+                      onChange={(e) => setTempMetric(normalizeTemperatureMetricMode(e.target.value))}
+                      style={{ marginLeft: 6 }}
+                      title="EMA • Recency • Hybrid"
+                    >
+                      <option value="hybrid">Hybrid (EMA + Recency)</option>
+                      <option value="ema">EMA only</option>
+                      <option value="recency">Recency only</option>
+                    </select>
+                  </label>
+                ) : (
+                  <>
+                    <label style={{ fontSize: 13 }}>
+                      Temp badge:
+                      <select
+                        value={monthlyBucketTemperatureOverlayMode}
+                        onChange={(e) => setMonthlyBucketTemperatureOverlayMode(normalizeTemperatureOverlayMode(e.target.value))}
+                        style={{ marginLeft: 6 }}
+                        title="Add observe-only temperature letters inside Monthly Bucket State cells"
+                      >
+                        <option value="off">Off</option>
+                        <option value="compact">Compact H/W/N/C</option>
+                        <option value="detailed">Detailed letters</option>
+                      </select>
+                    </label>
+                    <label style={{ fontSize: 13, opacity: monthlyBucketTemperatureOverlayMode === "off" ? 0.62 : 1 }}>
+                      Badge metric:
+                      <select
+                        value={monthlyBucketTemperatureMetric}
+                        onChange={(e) => setMonthlyBucketTemperatureMetric(normalizeTemperatureMetricMode(e.target.value, "recency"))}
+                        style={{ marginLeft: 6 }}
+                        title="Choose the temperature metric used by the observe-only badges"
+                        disabled={monthlyBucketTemperatureOverlayMode === "off"}
+                      >
+                        <option value="recency">Recency only</option>
+                        <option value="ema">EMA only</option>
+                        <option value="hybrid">Hybrid (EMA + Recency)</option>
+                      </select>
+                    </label>
+                  </>
+                )}
                 <label style={{ fontSize: 13 }}>
-                  Metric:
-                  <select
-                    value={tempMetric}
-                    onChange={(e) => setTempMetric(e.target.value as any)}
-                    style={{ marginLeft: 6 }}
-                    title="EMA • Recency • Hybrid"
-                    disabled={isMonthlyBucketHeatmapView}
-                  >
-                    <option value="hybrid">Hybrid (EMA ⊕ Recency)</option>
-                    <option value="ema">EMA only</option>
-                    <option value="recency">Recency only</option>
-                  </select>
-                </label>
-                <label style={{ fontSize: 13 }}>
-                  Letters:
+                  {isMonthlyBucketHeatmapView ? "Bucket letters:" : "Letters:"}
                   <input type="checkbox" checked={showHeatmapLetters} onChange={e => setShowHeatmapLetters(e.target.checked)} style={{ marginLeft: 6 }} title="Overlay letter codes" />
                 </label>
                 {isMonthlyBucketHeatmapView ? (
@@ -8251,7 +9645,7 @@ function AppInner(): JSX.Element {
                       cellSize={DGA_CELL_SIZE}
                       gutter={DGA_HEATMAP_GUTTER}
                       showLegend={false}
-                      metric={tempMetric}
+                      metric={activeHeatmapTemperatureMetric}
                       buckets={dgaHeatmapBucketLabels.length}
                       bucketStops={isMonthlyBucketHeatmapView ? undefined : bucketStops}
                       bucketLabels={dgaHeatmapBucketLabels}
@@ -8268,6 +9662,8 @@ function AppInner(): JSX.Element {
                       highlightedColumns={dgaHeatmapHighlightedColumns}
                       showBucketLetters={showHeatmapLetters}
                       bucketLetters={dgaHeatmapBucketLetters}
+                      temperatureOverlayMode={isMonthlyBucketHeatmapView ? monthlyBucketTemperatureOverlayMode : "off"}
+                      temperatureOverlayMetricLabel={isMonthlyBucketHeatmapView ? formatTemperatureMetricLabel(monthlyBucketTemperatureMetric) : undefined}
                       showDrawSlotAxis={isMonthlyBucketHeatmapView}
                       showHoverSparkline={!isMonthlyBucketHeatmapView || showMbsHoverSparkline}
                     />
@@ -8470,6 +9866,7 @@ function AppInner(): JSX.Element {
       hotColdExcludedNumbers: [...hotColdExcludedNumbers],
       droughtBreakSelectedNumbers: [...droughtBreakSelectedNumbers],
       pasteWeightedForcedNumbers: [...pasteWeightedForcedNumbers],
+      signalConfluenceForcedNumbers: [...signalConfluenceForcedNumbers],
       trendLookback,
       trendThreshold,
       allowedTrendRatios: [...allowedTrendRatios],
@@ -8486,24 +9883,34 @@ function AppInner(): JSX.Element {
       ttp: {},
       mainZeroSetEnabled,
       mainZeroSetCount: maxMainZeroSetCount,
+      mainZeroSetMode,
       mainOneSetEnabled,
       mainOneSetCount: maxMainOneSetCount,
+      mainOneSetMode,
       mainTwoSetEnabled,
       mainTwoSetCount: maxMainTwoSetCount,
+      mainTwoSetMode,
       mainThreeSetEnabled,
       mainThreeSetCount: maxMainThreeSetCount,
+      mainThreeSetMode,
       mainFourSetEnabled,
       mainFourSetCount: maxMainFourSetCount,
+      mainFourSetMode,
       mainFiveSetEnabled,
       mainFiveSetCount: maxMainFiveSetCount,
+      mainFiveSetMode,
       mainSixSetEnabled,
       mainSixSetCount: maxMainSixSetCount,
+      mainSixSetMode,
       mainSevenSetEnabled,
       mainSevenSetCount: maxMainSevenSetCount,
+      mainSevenSetMode,
       mainEightSetEnabled,
       mainEightSetCount: maxMainEightSetCount,
+      mainEightSetMode,
       mainNineSetEnabled,
       mainNineSetCount: maxMainNineSetCount,
+      mainNineSetMode,
       mainBucketBoosts: { ...mainBucketBoosts },
       mainDecadeBiases: { ...mainDecadeBiases },
       digitWidthConstraintEnabled,
@@ -8512,6 +9919,7 @@ function AppInner(): JSX.Element {
       attemptMultiplier,
       overgenFactor,
       scoringGenerationInfluence,
+      drawBucketPatternInfluenceEnabled,
       d1TerminalMomentumSgiEnabled,
       d1TerminalMomentumInternalStrength: d1TerminalMomentumGenerationProfile.internalStrength,
       d1TerminalMomentumStageMode: d1TerminalMomentumGenerationProfile.stageMode,
@@ -8525,6 +9933,8 @@ function AppInner(): JSX.Element {
         ? monthlyConstraintPayload.constraints
         : acceptanceNeedsCounts,
       acceptanceNeedsHardExclude,
+      bucketCoveragePlannerEnabled,
+      bucketCoveragePlannerIgnoreUndrawn,
       selectedBoostEnabled,
       selectedBoostFactor,
       ogaSpokeCount,
@@ -8536,8 +9946,11 @@ function AppInner(): JSX.Element {
       recentMatchBias,
       previousNeighbourConstraintNumbers: [...previousNeighbourConstraintNumbers],
       latestNeighbourSupportEnabled,
+      latestNeighbourSupportMode,
       strictDroughtQuotaMode,
       strictDroughtQuotaManualMin,
+      empiricalDroughtQuotaMode,
+      empiricalDroughtQuotaManualMin,
       repeatWindowSizeW,
       minFromRecentUnionM,
       sumFilter: { ...sumFilter },
@@ -8548,6 +9961,8 @@ function AppInner(): JSX.Element {
       insightsEnabled,
       dgaHeatmapView,
       tempMetric,
+      monthlyBucketTemperatureOverlayMode,
+      monthlyBucketTemperatureMetric,
       showHeatmapLetters,
       showMbsHoverSparkline,
       dgaMonthlyBucketStateOpacity,
@@ -8626,9 +10041,25 @@ function AppInner(): JSX.Element {
       snapshot.strictDroughtQuotaAdviceOneToThreeLift = strictDroughtQuotaAdvice.oneToThreeLift;
       snapshot.strictDroughtQuotaAdviceZeroHitRate = strictDroughtQuotaAdvice.zeroHitRate;
       snapshot.strictDroughtQuotaAdviceExpectedRandomZeroHitRate = strictDroughtQuotaAdvice.expectedRandomZeroHitRate;
+      snapshot.empiricalDroughtQuotaEffectiveMin = empiricalDroughtQuotaEffectiveMin;
+      snapshot.empiricalDroughtQuotaEligibleNumbers = sortedSnapshotNumbers(empiricalDroughtQuotaEligibleNumbers);
+      snapshot.empiricalDroughtQuotaAdviceShouldApply = empiricalDroughtQuotaAdvice.shouldApplyQuota;
+      snapshot.empiricalDroughtQuotaAdviceRecommendedMin = empiricalDroughtQuotaAdvice.recommendedMinCount;
+      snapshot.empiricalDroughtQuotaAdviceConfidence = empiricalDroughtQuotaAdvice.confidence;
+      snapshot.empiricalDroughtQuotaAdviceSourceLabel = empiricalDroughtQuotaAdvice.sourceLabel;
+      snapshot.empiricalDroughtQuotaAdviceReason = empiricalDroughtQuotaAdvice.reason;
+      snapshot.empiricalDroughtQuotaAdviceTraceLabel = empiricalDroughtQuotaAdvice.traceLabel;
+      snapshot.empiricalDroughtQuotaAdviceTrials = empiricalDroughtQuotaAdvice.trials;
+      snapshot.empiricalDroughtQuotaAdviceAverageHits = empiricalDroughtQuotaAdvice.averageHits;
+      snapshot.empiricalDroughtQuotaAdviceExpectedRandomAverageHits = empiricalDroughtQuotaAdvice.expectedRandomAverageHits;
+      snapshot.empiricalDroughtQuotaAdviceOneToThreeHitRate = empiricalDroughtQuotaAdvice.oneToThreeHitRate;
+      snapshot.empiricalDroughtQuotaAdviceExpectedRandomOneToThreeHitRate = empiricalDroughtQuotaAdvice.expectedRandomOneToThreeHitRate;
+      snapshot.empiricalDroughtQuotaAdviceOneToThreeLift = empiricalDroughtQuotaAdvice.oneToThreeLift;
+      snapshot.empiricalDroughtQuotaAdviceZeroHitRate = empiricalDroughtQuotaAdvice.zeroHitRate;
+      snapshot.empiricalDroughtQuotaAdviceExpectedRandomZeroHitRate = empiricalDroughtQuotaAdvice.expectedRandomZeroHitRate;
       snapshot.selectionInsightsSnapshot = buildSelectionInsightsSnapshot({
         enabled: insightsEnabled,
-        selected: userSelectedNumbers,
+        selected: selectionInsightsAnchorNumbers,
         windowLabel: historyWindowName,
         windowHistory: realFilteredHistory,
         allHistory: realHistory,
@@ -8667,6 +10098,7 @@ function AppInner(): JSX.Element {
     setHotColdExcludedNumbers(normalizeHotColdGenerationNumbers(s.hotColdExcludedNumbers));
     setDroughtBreakSelectedNumbers(normalizeHotColdGenerationNumbers(s.droughtBreakSelectedNumbers).slice(0, MAX_DROUGHT_BREAK_FORCED_NUMBERS));
     setPasteWeightedForcedNumbers(normalizeHotColdGenerationNumbers(s.pasteWeightedForcedNumbers));
+    setSignalConfluenceForcedNumbers(normalizeHotColdGenerationNumbers(s.signalConfluenceForcedNumbers));
     setRankingWeights({
           oga: s.rankingWeights?.oga ?? 0.7,
           selHitsEnabled: s.rankingWeights?.selHitsEnabled ?? false,
@@ -8685,25 +10117,45 @@ function AppInner(): JSX.Element {
       : s.requireDiv5
         ? 1
         : 0;
-    setMainZeroSetEnabled(s.mainZeroSetEnabled ?? legacyMainDiv5Enabled);
+    const savedMainZeroSetMode = normalizeMainDigitCountMode(s.mainZeroSetMode);
+    const savedMainOneSetMode = normalizeMainDigitCountMode(s.mainOneSetMode);
+    const savedMainTwoSetMode = normalizeMainDigitCountMode(s.mainTwoSetMode);
+    const savedMainThreeSetMode = normalizeMainDigitCountMode(s.mainThreeSetMode);
+    const savedMainFourSetMode = normalizeMainDigitCountMode(s.mainFourSetMode);
+    const savedMainFiveSetMode = normalizeMainDigitCountMode(s.mainFiveSetMode);
+    const savedMainSixSetMode = normalizeMainDigitCountMode(s.mainSixSetMode);
+    const savedMainSevenSetMode = normalizeMainDigitCountMode(s.mainSevenSetMode);
+    const savedMainEightSetMode = normalizeMainDigitCountMode(s.mainEightSetMode);
+    const savedMainNineSetMode = normalizeMainDigitCountMode(s.mainNineSetMode);
+    setMainZeroSetMode(savedMainZeroSetMode);
+    setMainOneSetMode(savedMainOneSetMode);
+    setMainTwoSetMode(savedMainTwoSetMode);
+    setMainThreeSetMode(savedMainThreeSetMode);
+    setMainFourSetMode(savedMainFourSetMode);
+    setMainFiveSetMode(savedMainFiveSetMode);
+    setMainSixSetMode(savedMainSixSetMode);
+    setMainSevenSetMode(savedMainSevenSetMode);
+    setMainEightSetMode(savedMainEightSetMode);
+    setMainNineSetMode(savedMainNineSetMode);
+    setMainZeroSetEnabled((s.mainZeroSetEnabled ?? legacyMainDiv5Enabled) && savedMainZeroSetMode !== "off");
     setMaxMainZeroSetCount(Math.max(0, Math.min(4, s.mainZeroSetCount ?? legacyMainDiv5Count)));
-    setMainOneSetEnabled(s.mainOneSetEnabled ?? typeof s.mainOneSetCount === "number");
+    setMainOneSetEnabled((s.mainOneSetEnabled ?? typeof s.mainOneSetCount === "number") && savedMainOneSetMode !== "off");
     setMaxMainOneSetCount(Math.max(0, Math.min(5, s.mainOneSetCount ?? 0)));
-    setMainTwoSetEnabled(s.mainTwoSetEnabled ?? typeof s.mainTwoSetCount === "number");
+    setMainTwoSetEnabled((s.mainTwoSetEnabled ?? typeof s.mainTwoSetCount === "number") && savedMainTwoSetMode !== "off");
     setMaxMainTwoSetCount(Math.max(0, Math.min(5, s.mainTwoSetCount ?? 0)));
-    setMainThreeSetEnabled(s.mainThreeSetEnabled ?? typeof s.mainThreeSetCount === "number");
+    setMainThreeSetEnabled((s.mainThreeSetEnabled ?? typeof s.mainThreeSetCount === "number") && savedMainThreeSetMode !== "off");
     setMaxMainThreeSetCount(Math.max(0, Math.min(5, s.mainThreeSetCount ?? 0)));
-    setMainFourSetEnabled(s.mainFourSetEnabled ?? typeof s.mainFourSetCount === "number");
+    setMainFourSetEnabled((s.mainFourSetEnabled ?? typeof s.mainFourSetCount === "number") && savedMainFourSetMode !== "off");
     setMaxMainFourSetCount(Math.max(0, Math.min(5, s.mainFourSetCount ?? 0)));
-    setMainFiveSetEnabled(s.mainFiveSetEnabled ?? legacyMainDiv5Enabled);
+    setMainFiveSetEnabled((s.mainFiveSetEnabled ?? legacyMainDiv5Enabled) && savedMainFiveSetMode !== "off");
     setMaxMainFiveSetCount(Math.max(0, Math.min(5, s.mainFiveSetCount ?? legacyMainDiv5Count)));
-    setMainSixSetEnabled(s.mainSixSetEnabled ?? typeof s.mainSixSetCount === "number");
+    setMainSixSetEnabled((s.mainSixSetEnabled ?? typeof s.mainSixSetCount === "number") && savedMainSixSetMode !== "off");
     setMaxMainSixSetCount(Math.max(0, Math.min(4, s.mainSixSetCount ?? 0)));
-    setMainSevenSetEnabled(s.mainSevenSetEnabled ?? typeof s.mainSevenSetCount === "number");
+    setMainSevenSetEnabled((s.mainSevenSetEnabled ?? typeof s.mainSevenSetCount === "number") && savedMainSevenSetMode !== "off");
     setMaxMainSevenSetCount(Math.max(0, Math.min(4, s.mainSevenSetCount ?? 0)));
-    setMainEightSetEnabled(s.mainEightSetEnabled ?? typeof s.mainEightSetCount === "number");
+    setMainEightSetEnabled((s.mainEightSetEnabled ?? typeof s.mainEightSetCount === "number") && savedMainEightSetMode !== "off");
     setMaxMainEightSetCount(Math.max(0, Math.min(4, s.mainEightSetCount ?? 0)));
-    setMainNineSetEnabled(s.mainNineSetEnabled ?? typeof s.mainNineSetCount === "number");
+    setMainNineSetEnabled((s.mainNineSetEnabled ?? typeof s.mainNineSetCount === "number") && savedMainNineSetMode !== "off");
     setMaxMainNineSetCount(Math.max(0, Math.min(4, s.mainNineSetCount ?? 0)));
     const nextMainBucketBoosts: MainBucketBoostState = {
       main0: { ...defaultMainBucketBoosts.main0 },
@@ -8757,8 +10209,11 @@ function AppInner(): JSX.Element {
         ? s.scoringGenerationInfluence
         : "off",
     );
+    setDrawBucketPatternInfluenceEnabled(!!s.drawBucketPatternInfluenceEnabled);
     setD1TerminalMomentumSgiEnabled(!!s.d1TerminalMomentumSgiEnabled);
     setAcceptanceNeedsHardExclude(!!(s as any).acceptanceNeedsHardExclude);
+    setBucketCoveragePlannerEnabled(!!s.bucketCoveragePlannerEnabled);
+    setBucketCoveragePlannerIgnoreUndrawn(s.bucketCoveragePlannerIgnoreUndrawn !== false);
     setSelectedBoostEnabled(s.selectedBoostEnabled ?? false);
     setSelectedBoostFactor(s.selectedBoostFactor ?? 2);
     setOgaSpokeCount(s.ogaSpokeCount ?? 9);
@@ -8777,12 +10232,19 @@ function AppInner(): JSX.Element {
     setAllowedTrendRatios(Array.from(new Set((s.allowedTrendRatios ?? []).filter((tag) => /^\d+-\d+-\d+$/.test(tag)))));
     setPreviousNeighbourConstraintNumbers(normalizePreviousNeighbourConstraintNumbers(s.previousNeighbourConstraintNumbers ?? []));
     setLatestNeighbourSupportEnabled(!!s.latestNeighbourSupportEnabled);
+    setLatestNeighbourSupportMode(normalizeLatestNeighbourSupportMode(s.latestNeighbourSupportMode));
     setStrictDroughtQuotaMode(
       s.strictDroughtQuotaMode === "manual" || s.strictDroughtQuotaMode === "advised"
         ? s.strictDroughtQuotaMode
         : "off",
     );
     setStrictDroughtQuotaManualMin(Math.max(0, Math.min(8, Math.round(s.strictDroughtQuotaManualMin ?? 1))));
+    setEmpiricalDroughtQuotaMode(
+      s.empiricalDroughtQuotaMode === "manual" || s.empiricalDroughtQuotaMode === "advised"
+        ? s.empiricalDroughtQuotaMode
+        : "off",
+    );
+    setEmpiricalDroughtQuotaManualMin(Math.max(0, Math.min(8, Math.round(s.empiricalDroughtQuotaManualMin ?? 1))));
     setRepeatWindowSizeW(s.repeatWindowSizeW ?? 12);
     setMinFromRecentUnionM(s.minFromRecentUnionM ?? 0);
     setSumFilter(s.sumFilter ?? { enabled: false, min: 0, max: 0, includeSupp: true });
@@ -8792,7 +10254,9 @@ function AppInner(): JSX.Element {
     setSelectedWindowPatterns(s.selectedWindowPatterns ?? []);
     setInsightsEnabled(s.insightsEnabled ?? false);
     setDgaHeatmapView(s.dgaHeatmapView === 'monthlyBucketState' ? 'monthlyBucketState' : 'temperature');
-    setTempMetric(s.tempMetric ?? 'hybrid');
+    setTempMetric(normalizeTemperatureMetricMode(s.tempMetric));
+    setMonthlyBucketTemperatureOverlayMode(normalizeTemperatureOverlayMode(s.monthlyBucketTemperatureOverlayMode));
+    setMonthlyBucketTemperatureMetric(normalizeTemperatureMetricMode(s.monthlyBucketTemperatureMetric, "recency"));
     setShowHeatmapLetters(s.showHeatmapLetters ?? false);
     setShowMbsHoverSparkline(s.showMbsHoverSparkline ?? true);
     setDgaMonthlyBucketStateOpacity(clampDgaMonthlyBucketStateOpacity(s.dgaMonthlyBucketStateOpacity ?? 1));
@@ -8825,372 +10289,6 @@ function AppInner(): JSX.Element {
     }
   }
 }
-
-// Bucket color palette – matches Monthly Draw Summary frequency chips
-const _stripColorForTimes = (times: number): string => {
-  const palette: Record<number, string> = {
-    0: "rgba(117,117,117,0.70)",
-    1: "rgba(66,165,245,0.70)",
-    2: "rgba(102,187,106,0.70)",
-    3: "rgba(38,198,218,0.70)",
-    4: "rgba(251,192,45,0.70)",
-    5: "rgba(251,140,0,0.72)",
-    6: "rgba(244,81,30,0.72)",
-    7: "rgba(229,57,53,0.74)",
-  };
-  return palette[times] ?? "rgba(142,36,170,0.74)";
-};
-const _stripBucketColor = (n: number, buckets: MonthlyBucketSets | null | undefined): string | undefined => {
-  if (!buckets) return undefined;
-  if (buckets.undrawn.has(n)) return _stripColorForTimes(0);
-  if (buckets.times1.has(n)) return _stripColorForTimes(1);
-  if (buckets.times2.has(n)) return _stripColorForTimes(2);
-  if (buckets.times3.has(n)) return _stripColorForTimes(3);
-  if (buckets.times4.has(n)) return _stripColorForTimes(4);
-  if (buckets.times5.has(n)) return _stripColorForTimes(5);
-  if (buckets.times6.has(n)) return _stripColorForTimes(6);
-  if (buckets.times7.has(n)) return _stripColorForTimes(7);
-  if (buckets.times8.has(n)) return _stripColorForTimes(8);
-  return undefined;
-};
-
-const _formatDgaScoringScore = (score: number): string => (
-  Number.isFinite(score) ? score.toFixed(1).replace(/\.0$/, "") : "0"
-);
-
-const _formatDgaSuppSuggestionTitle = (suggestion: DgaSuppSuggestion): string => {
-  const suppSet = new Set(suggestion.supp);
-  const rows = suggestion.evidence
-    .filter((row) => suppSet.has(row.number))
-    .map((row) => `${row.number}: WFMQYH supp ${row.activeSuppCount}/${row.activeDrawCount}, all-history supp ${row.fullSuppCount}/${row.fullDrawCount}`);
-  const pair = suggestion.selectedPairEvidence;
-  const activeGap = pair.activeLastPairSuppGap === null ? "never in WFMQYH" : `last exact pair gap ${pair.activeLastPairSuppGap}`;
-  const fullGap = pair.fullLastPairSuppGap === null ? "never in all history" : `last exact pair gap ${pair.fullLastPairSuppGap}`;
-  return [
-    `Suggested supplementary numbers: ${suggestion.supp.join(", ")}`,
-    ...rows,
-    `Exact pair evidence: ${pair.pair.join("-")} · WFMQYH ${pair.activePairSuppCount}/${pair.activeDrawCount} (${activeGap}) · all-history ${pair.fullPairSuppCount}/${pair.fullDrawCount} (${fullGap})`,
-    `Selected-8 pair coverage: WFMQYH ${suggestion.pairCoverage.activeObservedPairs}/${suggestion.pairCoverage.totalPairs}, all-history ${suggestion.pairCoverage.fullObservedPairs}/${suggestion.pairCoverage.totalPairs}.`,
-    suggestion.reason,
-  ].join("\n");
-};
-
-// DGASimulateStrip – select numbers to simulate in the Next column of the DGA grid
-interface DGASimulateStripProps {
-  selectedNumbers: number[];
-  onChange: (nums: number[]) => void;
-  cellSize?: number;
-  monthlyBuckets?: MonthlyBucketSets | null;
-  scoringNumberDiagnostics?: Record<number, DGAScoringNumberDiagnostic>;
-  suppSuggestion?: DgaSuppSuggestion | null;
-  excludedNumbers?: number[];
-  hoveredNumber?: number | null;
-  onHoverNumber?: (value: number | null) => void;
-  includeHeaderSpacer?: boolean;
-  topOffsetPx?: number;
-  testIdPrefix?: string;
-}
-const DGASimulateStrip: React.FC<DGASimulateStripProps> = ({
-  selectedNumbers,
-  onChange,
-  cellSize,
-  monthlyBuckets,
-  scoringNumberDiagnostics,
-  suppSuggestion,
-  excludedNumbers = [],
-  hoveredNumber,
-  onHoverNumber,
-  includeHeaderSpacer = true,
-  topOffsetPx = 0,
-  testIdPrefix = "dga-simulate-strip",
-}) => {
-  const SIMULATION_NUMBER_LIMIT = 8;
-  const userExcludedNumbers = useMemo(() => normalizeUserExclusionLocks(excludedNumbers), [excludedNumbers]);
-  const userExcludedSet = useMemo(() => new Set(userExcludedNumbers), [userExcludedNumbers]);
-  const activeSelectedNumbers = useMemo(
-    () => removeUserExcludedNumbers(selectedNumbers, userExcludedNumbers),
-    [selectedNumbers, userExcludedNumbers],
-  );
-  const selectionCountLabel = activeSelectedNumbers.length > SIMULATION_NUMBER_LIMIT
-    ? `${activeSelectedNumbers.length} selected · first ${SIMULATION_NUMBER_LIMIT} simulate`
-    : `${activeSelectedNumbers.length}/${SIMULATION_NUMBER_LIMIT}`;
-  const suppSuggestionTitle = suppSuggestion ? _formatDgaSuppSuggestionTitle(suppSuggestion) : "";
-  const userExclusionReminder = useMemo(
-    () => formatUserExclusionReminder(userExcludedNumbers),
-    [userExcludedNumbers],
-  );
-  const tableCellSize = Math.max(18, Math.floor(cellSize ?? 20));
-  const tableCellLineHeight = `${tableCellSize}px`;
-
-  const handleToggle = (n: number) => {
-    if (userExcludedSet.has(n)) return;
-    if (activeSelectedNumbers.includes(n)) {
-      onChange(activeSelectedNumbers.filter((x) => x !== n));
-    } else {
-      onChange([...activeSelectedNumbers, n]);
-    }
-  };
-
-  return (
-    <div style={{ marginTop: 0 }} data-testid={testIdPrefix}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 0, paddingTop: 0, paddingBottom: 0, alignItems: "flex-start" }}>
-        <div style={{ border: 0, background: "transparent", paddingTop: topOffsetPx }}>
-          <table style={{ borderCollapse: "collapse", borderSpacing: 0, fontSize: 11 }}>
-            {includeHeaderSpacer && (
-              <thead>
-                <tr>
-                  <th
-                    style={{
-                      height: tableCellSize,
-                      minHeight: tableCellSize,
-                      lineHeight: tableCellLineHeight,
-                      padding: 0,
-                      border: 0,
-                      boxSizing: "border-box",
-                      background: "transparent",
-                    }}
-                  ></th>
-                </tr>
-              </thead>
-            )}
-            <tbody>
-              {Array.from({ length: 45 }, (_, i) => i + 1).map((n) => {
-                const isUserExcluded = userExcludedSet.has(n);
-                const checked = !isUserExcluded && activeSelectedNumbers.includes(n);
-                const disabled = isUserExcluded;
-                const isHovered = hoveredNumber === n;
-                const bucketColor = _stripBucketColor(n, monthlyBuckets);
-                const bgColor = checked ? "#1565c0" : (bucketColor ?? "transparent");
-                const textColor = checked || bucketColor ? "#fff" : "#333";
-                const diagnostic = scoringNumberDiagnostics?.[n];
-                const diagnosticTitle = diagnostic
-                  ? `Numbers diagnostic rank #${diagnostic.rank}/45 · score ${_formatDgaScoringScore(diagnostic.score)} (mains + supps; diagnostic support, not probability).`
-                  : "Numbers diagnostic rank unavailable.";
-                const actionTitle = isUserExcluded
-                  ? `Number ${n} is unavailable because it is excluded. Clear the active exclusion or turn off the rule before selecting it here.`
-                  : checked
-                    ? `Remove ${n} from user-selected numbers`
-                    : `Add ${n} to user-selected numbers`;
-
-                return (
-                  <tr key={n}>
-                    <td
-                      style={{
-                        height: tableCellSize,
-                        minHeight: tableCellSize,
-                        lineHeight: tableCellLineHeight,
-                        padding: 0,
-                        border: 0,
-                        boxSizing: "border-box",
-                        background: "transparent",
-                      }}
-                    >
-                      <label
-                        onMouseEnter={() => onHoverNumber?.(n)}
-                        onMouseLeave={() => onHoverNumber?.(null)}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 4,
-                          minWidth: 28,
-                          height: tableCellSize,
-                          boxSizing: "border-box",
-                          cursor: disabled ? "not-allowed" : "pointer",
-                          opacity: disabled ? 0.4 : 1,
-                          background: isHovered ? "rgba(21,101,192,0.10)" : "transparent",
-                          borderRadius: 6,
-                          boxShadow: isHovered ? "inset 0 0 0 1px rgba(21,101,192,0.30)" : "none",
-                          padding: "0 4px 0 2px",
-                        }}
-                        title={`${actionTitle}\n${diagnosticTitle}`}
-                      >
-                        <input
-                          data-testid={`${testIdPrefix}-number-${n}`}
-                          type="checkbox"
-                          checked={checked}
-                          disabled={disabled}
-                          aria-label={isUserExcluded
-                            ? `Number ${n} is unavailable because it is excluded`
-                            : diagnostic
-                              ? `${checked ? "Remove" : "Add"} ${n} to user-selected numbers; Numbers diagnostic rank ${diagnostic.rank} of 45`
-                              : undefined}
-                          onChange={() => handleToggle(n)}
-                          style={{ margin: 0 }}
-                        />
-                        <span
-                          style={{
-                            fontSize: 11,
-                            minWidth: 20,
-                            textAlign: "center",
-                            display: "inline-block",
-                            background: bgColor,
-                            color: textColor,
-                            borderRadius: 3,
-                            padding: (checked || bucketColor) ? "0 3px" : undefined,
-                            boxShadow: isHovered ? "0 0 0 2px rgba(13,71,161,0.35)" : undefined,
-                            fontWeight: isHovered ? 800 : 600,
-                          }}
-                        >
-                          {n}
-                        </span>
-                      </label>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        {selectedNumbers.length > 0 && (
-          <>
-            <button
-              type="button"
-              onClick={() => onChange([])}
-              style={{ marginTop: 4, fontSize: 10, lineHeight: 1.1, padding: "1px 5px", cursor: "pointer", alignSelf: "flex-start" }}
-              title="Clear user-selected numbers"
-            >
-              Clear
-            </button>
-          </>
-        )}
-        {userExclusionReminder && (
-          <span
-            style={{ marginTop: 4, maxWidth: 92, color: "#64748b", fontSize: 10, lineHeight: 1.25 }}
-            title={`${userExclusionReminder}. Clear the manual exclusion or turn off the rule that excludes them before selecting them here.`}
-          >
-            exclusions active
-          </span>
-        )}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 4,
-            marginTop: 4,
-            whiteSpace: "nowrap",
-          }}
-        >
-          <span
-            style={{
-              fontSize: 10,
-              fontWeight: 700,
-              color: activeSelectedNumbers.length > SIMULATION_NUMBER_LIMIT ? "#9a3412" : "#546e7a",
-              background: activeSelectedNumbers.length > SIMULATION_NUMBER_LIMIT ? "#fff7ed" : "#f3f7fb",
-              border: `1px solid ${activeSelectedNumbers.length > SIMULATION_NUMBER_LIMIT ? "#fed7aa" : "#d8e3ef"}`,
-              borderRadius: 999,
-              padding: "1px 6px",
-              fontVariantNumeric: "tabular-nums",
-            }}
-            title={activeSelectedNumbers.length > SIMULATION_NUMBER_LIMIT ? `Shared user selection has ${activeSelectedNumbers.length} numbers; DGA simulation uses the first ${SIMULATION_NUMBER_LIMIT}.` : `${activeSelectedNumbers.length} of ${SIMULATION_NUMBER_LIMIT} selected for DGA simulation`}
-            aria-label={`${selectionCountLabel} selected`}
-          >
-            {selectionCountLabel}
-          </span>
-        </div>
-        {activeSelectedNumbers.length === SIMULATION_NUMBER_LIMIT && (
-          <div
-            data-testid={`${testIdPrefix}-supp-suggestion`}
-            style={{
-              marginTop: 4,
-              maxWidth: 118,
-              border: `1px solid ${suppSuggestion ? "#b7e4c7" : "#e2e8f0"}`,
-              background: suppSuggestion ? "#f0fdf4" : "#f8fafc",
-              color: suppSuggestion ? "#14532d" : "#64748b",
-              borderRadius: 7,
-              padding: "4px 5px",
-              fontSize: 10,
-              lineHeight: 1.2,
-            }}
-            title={suppSuggestion ? suppSuggestionTitle : "No supplementary-role count signal was found for these eight selected numbers. DGA uses the existing first-six main, next-two supplementary order."}
-          >
-            <b style={{ display: "block", fontSize: 10 }}>
-              {suppSuggestion ? "Auto supps" : "Supps"}
-            </b>
-            {suppSuggestion
-              ? `${suppSuggestion.supp.join(", ")}`
-              : "no count signal"}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
-// UserExclusionsStrip component (kept local)
-type Orientation = "horizontal" | "vertical";
-type LabelPosition = "bottom" | "right";
-interface UserExclusionsStripProps {
-  excludedNumbers: number[];
-  setExcludedNumbers: (updater: (prev: number[]) => number[]) => void;
-  title?: string;
-  orientation?: Orientation;
-  labelPosition?: LabelPosition;
-  showClearButton?: boolean;
-  cellSize?: number;
-  monthlyBuckets?: MonthlyBucketSets | null;
-}
-const UserExclusionsStrip: React.FC<UserExclusionsStripProps> = ({
-  excludedNumbers, setExcludedNumbers, title, orientation = "horizontal", labelPosition = "bottom", showClearButton = false, cellSize, monthlyBuckets,
-}) => {
-  const containerStyle: React.CSSProperties =
-    orientation === "horizontal"
-      ? { display: "flex", gap: 8, overflowX: "auto", whiteSpace: "nowrap", paddingTop: 6, paddingBottom: 4, borderTop: "1px dashed #ddd", marginTop: title ? 6 : 0 }
-      : { display: "flex", flexDirection: "column", gap: 0, paddingTop: 7, paddingBottom: 0, marginTop: cellSize ? 2 : 0 };
-  const labelStyleColumnBase: React.CSSProperties = { display: "inline-flex", flexDirection: "column", alignItems: "center", minWidth: 28 };
-  const labelStyleRowBase: React.CSSProperties = { display: "inline-flex", alignItems: "center", gap: 6, minWidth: 28 };
-  const sizeStyles: React.CSSProperties = orientation === "vertical" && cellSize ? { height: cellSize, lineHeight: `${cellSize}px`, justifyContent: "center" } : {};
-  return (
-    <div style={{ marginTop: 8 }}>
-      {title && <b>{title}</b>}
-      <div style={containerStyle}>
-        {Array.from({ length: 45 }, (_, i) => i + 1).map((n) => {
-          const checked = excludedNumbers.includes(n);
-          const bucketColor = _stripBucketColor(n, monthlyBuckets);
-          const handleToggle = () => {
-            setExcludedNumbers((prev) =>
-              prev.includes(n) ? prev.filter((x) => x !== n) : [...prev, n]
-            );
-          };
-          const numSpan = (
-            <span style={{
-              fontSize: 11,
-              lineHeight: "normal",
-              background: bucketColor ?? "transparent",
-              color: bucketColor ? "#fff" : "#333",
-              borderRadius: 3,
-              padding: bucketColor ? "0 3px" : undefined,
-              minWidth: 20,
-              textAlign: "center",
-              display: "inline-block",
-            }}>
-              {n}
-            </span>
-          );
-          if (labelPosition === "bottom") {
-            return (
-              <label key={n} style={{ ...labelStyleColumnBase, ...sizeStyles }} title={`Exclude ${n}`}>
-                <input type="checkbox" checked={checked} onChange={handleToggle} style={{ margin: 0 }} />
-                {numSpan}
-              </label>
-            );
-          } else {
-            return (
-              <label key={n} style={{ ...labelStyleRowBase, ...sizeStyles }} title={`Exclude ${n}`}>
-                <input type="checkbox" checked={checked} onChange={handleToggle} style={{ margin: 0 }} />
-                {numSpan}
-              </label>
-            );
-          }
-        })}
-        {showClearButton && (
-          <div style={{ display: "flex", alignItems: "center", marginLeft: orientation === "horizontal" ? 8 : 0 }}>
-            <button type="button" onClick={() => setExcludedNumbers(() => [])} title="Clear user exclusions" style={{ padding: "4px 8px", fontSize: 12, marginLeft: 8 }}>Clear</button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
 
 function WindfallApp(): JSX.Element {
   return (

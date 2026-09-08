@@ -90,4 +90,18 @@ describe("HIG contributor guardrails", () => {
     expect(cssSource).toContain(".windfall-generator-panel");
     expect(higGuideSource).toContain("disclosure affordance");
   });
+
+  it("keeps table titles and header groups sticky without changing DGA geometry tables", () => {
+    const dgaSource = readRepoFile("src/components/DGAVisualizer.tsx");
+    const dgaMonthlyBucketSource = readRepoFile("src/components/DGAMonthlyBucketStateGrid.tsx");
+    const cssSource = readRepoFile("src/index.css");
+    const higGuideSource = readRepoFile("docs/HIG_UI_GUIDE.md");
+
+    expect(cssSource).toContain("--wf-table-scroll-max-height");
+    expect(cssSource).toContain("table:not(.windfall-table--custom-layout) > thead");
+    expect(cssSource).toContain(".windfall-section[open]:has(> .windfall-section__body table)");
+    expect(dgaSource).toContain('className="windfall-table--custom-layout"');
+    expect(dgaMonthlyBucketSource).toContain('className="windfall-table--custom-layout"');
+    expect(higGuideSource).toContain("complete `thead` as one sticky header group");
+  });
 });

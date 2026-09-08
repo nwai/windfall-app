@@ -124,6 +124,7 @@ export interface AppPresetSnapshot {
   hotColdExcludedNumbers?: number[];
   droughtBreakSelectedNumbers?: number[];
   pasteWeightedForcedNumbers?: number[];
+  signalConfluenceForcedNumbers?: number[];
   // Derived prediction-provenance evidence captured only when requested.
   // These describe what generation saw at snapshot time; they are not restored as controls.
   autoExcludedFromSelection?: number[];
@@ -203,26 +204,36 @@ export interface AppPresetSnapshot {
   // Main ending-digit constraints
   mainZeroSetEnabled?: boolean;
   mainZeroSetCount?: number;
+  mainZeroSetMode?: "off" | "atLeast" | "exactly" | "atMost";
   mainFiveSetEnabled?: boolean;
   mainFiveSetCount?: number;
+  mainFiveSetMode?: "off" | "atLeast" | "exactly" | "atMost";
   mainDiv5Enabled?: boolean;
   mainDiv5Count?: number;
   mainOneSetEnabled?: boolean;
   mainOneSetCount?: number;
+  mainOneSetMode?: "off" | "atLeast" | "exactly" | "atMost";
   mainTwoSetEnabled?: boolean;
   mainTwoSetCount?: number;
+  mainTwoSetMode?: "off" | "atLeast" | "exactly" | "atMost";
   mainThreeSetEnabled?: boolean;
   mainThreeSetCount?: number;
+  mainThreeSetMode?: "off" | "atLeast" | "exactly" | "atMost";
   mainFourSetEnabled?: boolean;
   mainFourSetCount?: number;
+  mainFourSetMode?: "off" | "atLeast" | "exactly" | "atMost";
   mainSixSetEnabled?: boolean;
   mainSixSetCount?: number;
+  mainSixSetMode?: "off" | "atLeast" | "exactly" | "atMost";
   mainSevenSetEnabled?: boolean;
   mainSevenSetCount?: number;
+  mainSevenSetMode?: "off" | "atLeast" | "exactly" | "atMost";
   mainEightSetEnabled?: boolean;
   mainEightSetCount?: number;
+  mainEightSetMode?: "off" | "atLeast" | "exactly" | "atMost";
   mainNineSetEnabled?: boolean;
   mainNineSetCount?: number;
+  mainNineSetMode?: "off" | "atLeast" | "exactly" | "atMost";
   mainBucketBoosts?: Partial<Record<MainEndingDigitBucketKey, number | MainBucketBoostSnapshot>>;
   mainDecadeBiases?: Partial<Record<MainDecadeBucketKey, number>>;
   digitWidthConstraintEnabled?: boolean;
@@ -240,6 +251,7 @@ export interface AppPresetSnapshot {
 
   // Scoring System Diagnostics generation evidence weighting
   scoringGenerationInfluence?: "off" | "light" | "normal" | "strong";
+  drawBucketPatternInfluenceEnabled?: boolean;
   d1TerminalMomentumSgiEnabled?: boolean;
   d1TerminalMomentumInternalStrength?: "off" | "light" | "normal" | "strong";
   d1TerminalMomentumStageMode?: "early-unique" | "terminal-momentum" | "closed-review" | "unavailable";
@@ -252,6 +264,8 @@ export interface AppPresetSnapshot {
   acceptanceNeedsEnabled?: boolean;
   acceptanceNeedsCounts?: Partial<PresetMonthlyFrequencyConstraints>;
   acceptanceNeedsHardExclude?: boolean;
+  bucketCoveragePlannerEnabled?: boolean;
+  bucketCoveragePlannerIgnoreUndrawn?: boolean;
 
   // Generation-time boost for user selected numbers
   selectedBoostEnabled?: boolean;
@@ -270,6 +284,7 @@ export interface AppPresetSnapshot {
   recentMatchBias?: number;
   previousNeighbourConstraintNumbers?: number[];
   latestNeighbourSupportEnabled?: boolean;
+  latestNeighbourSupportMode?: "pm1" | "pm1pm2";
   strictDroughtQuotaMode?: "off" | "manual" | "advised";
   strictDroughtQuotaManualMin?: number;
   strictDroughtQuotaEffectiveMin?: number;
@@ -289,6 +304,24 @@ export interface AppPresetSnapshot {
   strictDroughtQuotaAdviceOneToThreeLift?: number;
   strictDroughtQuotaAdviceZeroHitRate?: number;
   strictDroughtQuotaAdviceExpectedRandomZeroHitRate?: number;
+  empiricalDroughtQuotaMode?: "off" | "manual" | "advised";
+  empiricalDroughtQuotaManualMin?: number;
+  empiricalDroughtQuotaEffectiveMin?: number;
+  empiricalDroughtQuotaEligibleNumbers?: number[];
+  empiricalDroughtQuotaAdviceShouldApply?: boolean;
+  empiricalDroughtQuotaAdviceRecommendedMin?: number;
+  empiricalDroughtQuotaAdviceConfidence?: "low" | "moderate" | "strong";
+  empiricalDroughtQuotaAdviceSourceLabel?: string;
+  empiricalDroughtQuotaAdviceReason?: string;
+  empiricalDroughtQuotaAdviceTraceLabel?: string;
+  empiricalDroughtQuotaAdviceTrials?: number;
+  empiricalDroughtQuotaAdviceAverageHits?: number;
+  empiricalDroughtQuotaAdviceExpectedRandomAverageHits?: number;
+  empiricalDroughtQuotaAdviceOneToThreeHitRate?: number;
+  empiricalDroughtQuotaAdviceExpectedRandomOneToThreeHitRate?: number;
+  empiricalDroughtQuotaAdviceOneToThreeLift?: number;
+  empiricalDroughtQuotaAdviceZeroHitRate?: number;
+  empiricalDroughtQuotaAdviceExpectedRandomZeroHitRate?: number;
   maxLastDrawMatchesEnabled?: boolean;
   maxLastDrawMatchesValue?: number;
   repeatWindowSizeW?: number;
@@ -301,6 +334,8 @@ export interface AppPresetSnapshot {
   insightsEnabled?: boolean;
   dgaHeatmapView?: "temperature" | "monthlyBucketState";
   tempMetric?: "ema" | "recency" | "hybrid";
+  monthlyBucketTemperatureOverlayMode?: "off" | "compact" | "detailed";
+  monthlyBucketTemperatureMetric?: "ema" | "recency" | "hybrid";
   showHeatmapLetters?: boolean;
   showMbsHoverSparkline?: boolean;
   dgaMonthlyBucketStateOpacity?: number;
@@ -428,6 +463,23 @@ function normalizeProbabilityOverlay(value: unknown): PresetProbabilityOverlay |
   return { pAtLeastRaw, pAtLeastWeighted, targetRaw, targetWeighted };
 }
 
+function normalizeMainDigitCountMode(value: unknown): "off" | "atLeast" | "exactly" | "atMost" {
+  return value === "off" || value === "atLeast" || value === "exactly" || value === "atMost"
+    ? value
+    : "atMost";
+}
+
+function normalizeTemperatureMetricMode(
+  value: unknown,
+  fallback: "ema" | "recency" | "hybrid" = "hybrid",
+): "ema" | "recency" | "hybrid" {
+  return value === "ema" || value === "recency" || value === "hybrid" ? value : fallback;
+}
+
+function normalizeTemperatureOverlayMode(value: unknown): "off" | "compact" | "detailed" {
+  return value === "compact" || value === "detailed" ? value : "off";
+}
+
 export function normalizeAppPresetSnapshot(snapshot: AppPresetSnapshot): AppPresetSnapshot {
   const userSelectedNumbers = normalizeWeightedTargetNumbers(snapshot.userSelectedNumbers);
 
@@ -450,18 +502,36 @@ export function normalizeAppPresetSnapshot(snapshot: AppPresetSnapshot): AppPres
     acceptanceNeedsEnabled: !!snapshot.acceptanceNeedsEnabled,
     acceptanceNeedsCounts: normalizeMonthlyCounts(snapshot.acceptanceNeedsCounts),
     acceptanceNeedsHardExclude: !!snapshot.acceptanceNeedsHardExclude,
+    bucketCoveragePlannerEnabled: !!snapshot.bucketCoveragePlannerEnabled,
+    bucketCoveragePlannerIgnoreUndrawn: snapshot.bucketCoveragePlannerIgnoreUndrawn !== false,
+    mainZeroSetMode: normalizeMainDigitCountMode(snapshot.mainZeroSetMode),
+    mainOneSetMode: normalizeMainDigitCountMode(snapshot.mainOneSetMode),
+    mainTwoSetMode: normalizeMainDigitCountMode(snapshot.mainTwoSetMode),
+    mainThreeSetMode: normalizeMainDigitCountMode(snapshot.mainThreeSetMode),
+    mainFourSetMode: normalizeMainDigitCountMode(snapshot.mainFourSetMode),
+    mainFiveSetMode: normalizeMainDigitCountMode(snapshot.mainFiveSetMode),
+    mainSixSetMode: normalizeMainDigitCountMode(snapshot.mainSixSetMode),
+    mainSevenSetMode: normalizeMainDigitCountMode(snapshot.mainSevenSetMode),
+    mainEightSetMode: normalizeMainDigitCountMode(snapshot.mainEightSetMode),
+    mainNineSetMode: normalizeMainDigitCountMode(snapshot.mainNineSetMode),
     hotColdForcedNumbers: normalizeWeightedTargetNumbers(snapshot.hotColdForcedNumbers),
     hotColdExcludedNumbers: normalizeWeightedTargetNumbers(snapshot.hotColdExcludedNumbers),
     droughtBreakSelectedNumbers: normalizeWeightedTargetNumbers(snapshot.droughtBreakSelectedNumbers).slice(0, 3),
     pasteWeightedForcedNumbers: normalizeWeightedTargetNumbers(snapshot.pasteWeightedForcedNumbers),
+    signalConfluenceForcedNumbers: normalizeWeightedTargetNumbers(snapshot.signalConfluenceForcedNumbers),
     previousNeighbourConstraintNumbers: normalizeWeightedTargetNumbers(snapshot.previousNeighbourConstraintNumbers).slice(0, 8),
     latestNeighbourSupportEnabled: !!snapshot.latestNeighbourSupportEnabled,
+    latestNeighbourSupportMode: snapshot.latestNeighbourSupportMode === "pm1pm2" ? "pm1pm2" : "pm1",
     strictDroughtQuotaMode: snapshot.strictDroughtQuotaMode === "manual" || snapshot.strictDroughtQuotaMode === "advised"
       ? snapshot.strictDroughtQuotaMode
       : "off",
     strictDroughtQuotaManualMin: clampInteger(snapshot.strictDroughtQuotaManualMin, 0, 8, 1),
+    empiricalDroughtQuotaMode: snapshot.empiricalDroughtQuotaMode === "manual" || snapshot.empiricalDroughtQuotaMode === "advised"
+      ? snapshot.empiricalDroughtQuotaMode
+      : "off",
+    empiricalDroughtQuotaManualMin: clampInteger(snapshot.empiricalDroughtQuotaManualMin, 0, 8, 1),
     maxLastDrawMatchesEnabled: !!snapshot.maxLastDrawMatchesEnabled,
-    maxLastDrawMatchesValue: clampInteger(snapshot.maxLastDrawMatchesValue, 0, 6, DEFAULT_LAST_DRAW_MATCH_CAP),
+    maxLastDrawMatchesValue: clampInteger(snapshot.maxLastDrawMatchesValue, 0, 8, DEFAULT_LAST_DRAW_MATCH_CAP),
     numCandidates: clampInteger(snapshot.numCandidates, 1, 1000, DEFAULT_NUM_CANDIDATES),
     batchSize: clampInteger(snapshot.batchSize, 1, 100000, DEFAULT_BATCH_SIZE),
     batchSessionRuns: clampInteger(snapshot.batchSessionRuns, 1, 200, DEFAULT_BATCH_SESSION_RUNS),
@@ -475,6 +545,7 @@ export function normalizeAppPresetSnapshot(snapshot: AppPresetSnapshot): AppPres
     scoringGenerationInfluence: snapshot.scoringGenerationInfluence === "light" || snapshot.scoringGenerationInfluence === "normal" || snapshot.scoringGenerationInfluence === "strong"
       ? snapshot.scoringGenerationInfluence
       : "off",
+    drawBucketPatternInfluenceEnabled: !!snapshot.drawBucketPatternInfluenceEnabled,
     d1TerminalMomentumSgiEnabled: !!snapshot.d1TerminalMomentumSgiEnabled,
     d1TerminalMomentumInternalStrength: snapshot.d1TerminalMomentumInternalStrength === "light" || snapshot.d1TerminalMomentumInternalStrength === "normal" || snapshot.d1TerminalMomentumInternalStrength === "strong"
       ? snapshot.d1TerminalMomentumInternalStrength
@@ -486,6 +557,10 @@ export function normalizeAppPresetSnapshot(snapshot: AppPresetSnapshot): AppPres
       .map((value) => Number(value))
       .filter((value) => Number.isInteger(value) && value >= 0 && value <= 9)))
       .sort((left, right) => left - right),
+    dgaHeatmapView: snapshot.dgaHeatmapView === "monthlyBucketState" ? "monthlyBucketState" : "temperature",
+    tempMetric: normalizeTemperatureMetricMode(snapshot.tempMetric),
+    monthlyBucketTemperatureOverlayMode: normalizeTemperatureOverlayMode(snapshot.monthlyBucketTemperatureOverlayMode),
+    monthlyBucketTemperatureMetric: normalizeTemperatureMetricMode(snapshot.monthlyBucketTemperatureMetric, "recency"),
     showMbsHoverSparkline: snapshot.showMbsHoverSparkline ?? true,
     pickSixSource: normalizePickSixSource(snapshot.pickSixSource),
     pickSixManual: normalizePickSixManual(snapshot.pickSixManual),

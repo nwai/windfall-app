@@ -56,6 +56,29 @@ describe("latestNeighbourStageMatchCompatibility", () => {
     expect(result.traceLine).toContain("compatible: yes");
   });
 
+  it("names widened latest-neighbour mode honestly in the compatibility trace", () => {
+    const history = [
+      draw("2026-06-01", [1, 2, 3, 4, 5, 6]),
+      draw("2026-06-03", [10, 20, 30, 40, 12, 22], [5, 15]),
+    ];
+    const buckets = emptyBuckets();
+    buckets.undrawn = new Set([8, 9, 11, 13, 14]);
+
+    const result = buildLatestNeighbourStageMatchCompatibilityTrace({
+      enabled: true,
+      history,
+      analysisBuckets: buckets,
+      compatibilityBuckets: buckets,
+      counts: constraints({ undrawn: 1 }),
+      countSourceLabel: "Stage-Match constructive counts",
+      mode: "pm1pm2",
+    });
+
+    expect(result.traceLine).toContain("LD±1/±2 + Stage-Match compatibility");
+    expect(result.traceLine).toContain("eligible +/-1/+/-2");
+    expect(result.traceLine).toContain("bucket coverage 0x:");
+  });
+
   it("reports incompatible when all slots are claimed by a bucket that contains no eligible targets", () => {
     const history = [
       draw("2026-06-01", [1, 2, 3, 4, 5, 6]),

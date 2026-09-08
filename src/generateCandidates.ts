@@ -12,6 +12,11 @@ import {
 import { scoreMonthEndCarryOverCandidate } from "./lib/monthEndCarryOver";
 import { MONTHLY_BUCKET_KEYS, type MonthlyBucketKey } from "./lib/monthlyDrawSummary";
 import {
+  analyzeBucketCoveragePlanner,
+  buildBucketCoverageGenerationPlan,
+  formatBucketCoveragePlannerTrace,
+} from "./lib/monthlyBucketCoveragePlanner";
+import {
   buildOddEvenRatioQuotas,
   summarizeOddEvenRatios,
   type OddEvenRatioOption,
@@ -30,7 +35,7 @@ import {
 import {
   analyzeLatestNeighbourSupport,
   candidateSatisfiesLatestNeighbourSupport,
-  LATEST_NEIGHBOUR_SUPPORT_TRACE_TAG,
+  latestNeighbourSupportTraceTag,
   type LatestNeighbourSupportOptions,
 } from "./lib/latestNeighbourSupport";
 export {
@@ -47,13 +52,16 @@ export type {
 /** Trend classification union (avoid missing type) */
 export type TrendClass = 'UP' | 'DOWN' | 'FLAT';
 
-export interface StrictDroughtQuotaGenerationOptions {
+export interface DroughtQuotaGenerationOptions {
   enabled?: boolean;
   minCount?: number;
   shortlist?: number[];
   rankMultipliers?: Record<number, number>;
   sourceLabel?: string;
 }
+
+export interface StrictDroughtQuotaGenerationOptions extends DroughtQuotaGenerationOptions {}
+export interface EmpiricalDroughtQuotaGenerationOptions extends DroughtQuotaGenerationOptions {}
 
 export interface GenerateCandidatesResult {
   candidates: CandidateSet[];
@@ -71,6 +79,7 @@ export interface GenerateCandidatesResult {
     repeatUnion: number;
     latestNeighbourSupport: number;
     strictDroughtQuota: number;
+    empiricalDroughtQuota: number;
     trendRatio: number;
     sumRange: number;
     patternConstraint: number;
@@ -95,12 +104,59 @@ export interface GenerateCandidatesResult {
 
 export type GenerateCandidatesProgressSetter = (result: GenerateCandidatesResult) => void;
 
+type MainDigitCountMode = "atLeast" | "exactly" | "atMost";
+
 interface MainDigitConstraintOptions {
   maxCount?: number;
+  countMode?: MainDigitCountMode;
+  targetCount?: number;
   boost?: number;
   singleDigitBoost?: number;
   twoDigitBoost?: number;
 }
+
+const MAIN_DIGIT_COUNT_MODES = new Set<MainDigitCountMode>(["atLeast", "exactly", "atMost"]);
+
+interface NormalizedMainDigitCountRule {
+  mode: MainDigitCountMode;
+  count: number;
+}
+
+const normalizeMainDigitCountRule = (
+  options?: MainDigitConstraintOptions,
+): NormalizedMainDigitCountRule | null => {
+  const explicitMode = options?.countMode;
+  if (explicitMode && MAIN_DIGIT_COUNT_MODES.has(explicitMode)) {
+    const rawCount = options.targetCount ?? options.maxCount;
+    const numericCount = typeof rawCount === "number" ? rawCount : Number(rawCount);
+    return {
+      mode: explicitMode,
+      count: Math.max(0, Math.round(Number.isFinite(numericCount) ? numericCount : 0)),
+    };
+  }
+
+  const legacyMaxCount = typeof options?.maxCount === "number" ? options.maxCount : Number(options?.maxCount);
+  if (Number.isFinite(legacyMaxCount) && legacyMaxCount >= 0) {
+    return {
+      mode: "atMost",
+      count: Math.max(0, Math.round(legacyMaxCount)),
+    };
+  }
+
+  return null;
+};
+
+const violatesMainDigitCountRule = (digitCount: number, rule: NormalizedMainDigitCountRule): boolean => {
+  if (rule.mode === "atLeast") return digitCount < rule.count;
+  if (rule.mode === "exactly") return digitCount !== rule.count;
+  return digitCount > rule.count;
+};
+
+const formatMainDigitCountRule = (rule: NormalizedMainDigitCountRule): string => {
+  if (rule.mode === "atLeast") return `at least=${rule.count}`;
+  if (rule.mode === "exactly") return `exactly=${rule.count}`;
+  return `at most=${rule.count}`;
+};
 
 type MainDecadeBiases = Partial<Record<'decade0x' | 'decade1x' | 'decade2x' | 'decade3x' | 'decade4x', number>>;
 
@@ -212,6 +268,12 @@ export function generateCandidates(
     boostPenalize?: boolean;
     selectedNumbersByBucket?: { undrawn: number[]; times1: number[]; times2: number[]; times3: number[]; times4: number[]; times5: number[]; times6: number[]; times7: number[]; times8: number[] };
     selectedNumberBiasEnabled?: boolean;
+    bucketCoveragePlanner?: {
+      enabled?: boolean;
+      ignoredBucketKeys?: MonthlyBucketKey[];
+      maxFullCoverage?: number;
+      maxSampledCoverage?: number;
+    };
   },
   attemptMultiplier?: number,
   ogaSpokeCount?: number,
@@ -228,10 +290,12 @@ export function generateCandidates(
   d1TerminalMomentumProfile?: D1TerminalMomentumGenerationProfile,
   /** Optional progress callback used by the worker to expose accepted partial results. */
   progressSetter?: GenerateCandidatesProgressSetter,
-  /** Default-off experimental rule requiring at least one eligible latest-draw +/-1 support number. */
+  /** Default-off experimental rule requiring at least one eligible latest-draw neighbour support number. */
   latestNeighbourSupportOptions?: LatestNeighbourSupportOptions,
   /** Default-off strict drought-break shortlist quota, optionally advised by SDSR. */
   strictDroughtQuotaOptions?: StrictDroughtQuotaGenerationOptions,
+  /** Default-off empirical drought-hazard shortlist quota. */
+  empiricalDroughtQuotaOptions?: EmpiricalDroughtQuotaGenerationOptions,
 ): GenerateCandidatesResult {
 
   if (DEBUG) {
@@ -286,6 +350,7 @@ export function generateCandidates(
     repeatUnion: 0,
     latestNeighbourSupport: 0,
     strictDroughtQuota: 0,
+    empiricalDroughtQuota: 0,
     trendRatio: 0,
     sumRange: 0,
     patternConstraint: 0,
@@ -335,7 +400,7 @@ export function generateCandidates(
   };
 
   const warnings: string[] = [];
-  const hasSplitFiveBucketConstraint = typeof mainZeroOptions?.maxCount === 'number' || typeof mainFiveOptions?.maxCount === 'number';
+  const hasSplitFiveBucketConstraint = normalizeMainDigitCountRule(mainZeroOptions) !== null || normalizeMainDigitCountRule(mainFiveOptions) !== null;
   const clampMainDigitBoost = (boost: number | undefined): number => {
     const numericBoost = typeof boost === "number" ? boost : Number(boost);
     return Math.max(0, Math.min(5, Number.isFinite(numericBoost) ? numericBoost : 0));
@@ -372,7 +437,7 @@ export function generateCandidates(
     return boost > 0 ? 1 + boost * 0.5 : 1;
   };
   const hasActiveTerminalCoordinationRule = (options?: MainDigitConstraintOptions): boolean => (
-    typeof options?.maxCount === "number" ||
+    normalizeMainDigitCountRule(options) !== null ||
     clampMainDigitBoost(options?.boost) > 0 ||
     clampMainDigitBoost(options?.singleDigitBoost) > 0 ||
     clampMainDigitBoost(options?.twoDigitBoost) > 0
@@ -491,6 +556,40 @@ export function generateCandidates(
     }
   }
 
+  const empiricalDroughtQuotaRawMin = Math.max(
+    0,
+    Math.min(8, Math.floor(Number(empiricalDroughtQuotaOptions?.minCount ?? 0))),
+  );
+  const empiricalDroughtQuotaNumbers = Array.from(
+    new Set((empiricalDroughtQuotaOptions?.shortlist ?? [])
+      .map((number) => Math.round(Number(number)))
+      .filter((number) => number >= 1 && number <= 45 && !fullExcludedSet.has(number)))
+  );
+  const empiricalDroughtQuotaMin = empiricalDroughtQuotaOptions?.enabled
+    ? Math.min(empiricalDroughtQuotaRawMin, empiricalDroughtQuotaNumbers.length, 8)
+    : 0;
+  const empiricalDroughtQuotaActive = empiricalDroughtQuotaMin > 0 && empiricalDroughtQuotaNumbers.length > 0;
+  const empiricalDroughtQuotaSet = new Set(empiricalDroughtQuotaNumbers);
+  const empiricalDroughtQuotaMultiplier = (n: number): number => {
+    if (!empiricalDroughtQuotaActive) return 1;
+    const raw = empiricalDroughtQuotaOptions?.rankMultipliers?.[n] ?? 1;
+    return Math.max(0.1, Math.min(4, Number.isFinite(raw) ? raw : 1));
+  };
+  if (empiricalDroughtQuotaOptions?.enabled) {
+    if (empiricalDroughtQuotaRawMin > empiricalDroughtQuotaMin) {
+      traceSetter(
+        `[TRACE] Empirical drought quota requested minimum ${empiricalDroughtQuotaRawMin}, effective minimum ${empiricalDroughtQuotaMin} after exclusions/current shortlist size.`
+      );
+    }
+    if (empiricalDroughtQuotaActive) {
+      traceSetter(
+        `[TRACE] Empirical drought quota active: minimum ${empiricalDroughtQuotaMin} from current shortlist ${empiricalDroughtQuotaNumbers.length}${empiricalDroughtQuotaOptions.sourceLabel ? ` (${empiricalDroughtQuotaOptions.sourceLabel})` : ""} [${empiricalDroughtQuotaNumbers.join(", ")}]`
+      );
+    } else {
+      traceSetter("[TRACE] Empirical drought quota enabled but inactive: no eligible shortlist numbers or quota is 0.");
+    }
+  }
+
   const latestNeighbourSupport = analyzeLatestNeighbourSupport(history, monthlyBucketOptions?.buckets, {
     ...latestNeighbourSupportOptions,
     terminalRuleActive: {
@@ -500,10 +599,11 @@ export function generateCandidates(
     excludedNumbers: fullExcludedNumbers,
   });
   const latestNeighbourSupportSet = new Set(latestNeighbourSupport.targetNumbers);
+  const latestNeighbourTraceTag = latestNeighbourSupportTraceTag(latestNeighbourSupport.mode);
   if (latestNeighbourSupport.enabled) {
     traceSetter(`[TRACE] ${latestNeighbourSupport.traceSummary}`);
     for (const warning of latestNeighbourSupport.warnings) {
-      traceSetter(`[TRACE] ${LATEST_NEIGHBOUR_SUPPORT_TRACE_TAG} warning: ${warning}`);
+      traceSetter(`[TRACE] ${latestNeighbourTraceTag} warning: ${warning}`);
     }
   }
 
@@ -598,6 +698,45 @@ export function generateCandidates(
   if (forcedClean.length !== forcedNumbers.length) {
     const removed = forcedNumbers.filter(n => fullExcludedSet.has(n));
     traceSetter(`[TRACE] Forced numbers intersected exclusions; removed: [${removed.join(", ")}]`);
+  }
+
+  const bucketCoveragePreview = analyzeBucketCoveragePlanner({
+    enabled: !!monthlyBucketOptions?.bucketCoveragePlanner?.enabled,
+    constraints: monthlyBucketOptions?.constraints,
+    buckets: monthlyBucketOptions?.buckets,
+    ignoredBucketKeys: monthlyBucketOptions?.bucketCoveragePlanner?.ignoredBucketKeys,
+    excludedNumbers: fullExcludedNumbers,
+    forcedNumbers: forcedClean,
+    requestedPoolSize: num,
+    candidateSlots: 8,
+    maxFullCoverage: monthlyBucketOptions?.bucketCoveragePlanner?.maxFullCoverage,
+    maxSampledCoverage: monthlyBucketOptions?.bucketCoveragePlanner?.maxSampledCoverage,
+  });
+  const bucketCoveragePlan = buildBucketCoverageGenerationPlan(bucketCoveragePreview);
+  let bucketCoveragePlannedAttempts = 0;
+  let bucketCoverageFallbacks = 0;
+  const bucketCoverageAcceptedSignatures = new Set<string>();
+  const recordBucketCoverageAcceptedSignature = (nums: readonly number[]) => {
+    if (!bucketCoveragePlan || !monthlyBucketOptions?.constraints || !monthlyBucketOptions.buckets) return;
+    const bucketSignature = MONTHLY_BUCKET_KEYS
+      .filter((key) => {
+        const row = bucketCoveragePreview.rows.find((previewRow) => previewRow.key === key);
+        return (monthlyBucketOptions.constraints[key] ?? 0) > 0 && !row?.ignoredForCoverage;
+      })
+      .map((key) => {
+        const picked = nums
+          .filter((n) => monthlyBucketOptions.buckets[key].has(n))
+          .sort((a, b) => a - b);
+        return `${key}:${picked.join("-")}`;
+      })
+      .join("|");
+    if (bucketSignature) bucketCoverageAcceptedSignatures.add(bucketSignature);
+  };
+  if (bucketCoveragePreview.enabled) {
+    traceSetter(`[TRACE] ${formatBucketCoveragePlannerTrace(bucketCoveragePreview)}`);
+    if (!bucketCoveragePlan) {
+      traceSetter("[TRACE] Bucket Coverage Planner disabled for this run; standard random monthly constructive fill will be used.");
+    }
   }
 
   // Pre-calc last draw for quick overlap metrics
@@ -761,6 +900,9 @@ export function generateCandidates(
       if (strictDroughtQuotaActive && strictDroughtQuotaSet.has(n)) {
         factor *= strictDroughtQuotaMultiplier(n);
       }
+      if (empiricalDroughtQuotaActive && empiricalDroughtQuotaSet.has(n)) {
+        factor *= empiricalDroughtQuotaMultiplier(n);
+      }
       if (factor < 1) {
         // Probabilistic inclusion: e.g. factor=0.3 → 30 % chance of 1 rep
         if (Math.random() < factor) out.push(n);
@@ -841,7 +983,8 @@ export function generateCandidates(
       const scoringBias = scoringInfluenceMultiplier(n, scoringGenerationProfile);
       const d1TerminalBias = d1TerminalMomentumMultiplier(n, d1TerminalMomentumProfile);
       const strictDroughtBias = strictDroughtQuotaActive && strictDroughtQuotaSet.has(n) ? strictDroughtQuotaMultiplier(n) : 1;
-      const reps = Math.max(1, Math.round(selectedBias * carryOverBias * scoringBias * d1TerminalBias * strictDroughtBias));
+      const empiricalDroughtBias = empiricalDroughtQuotaActive && empiricalDroughtQuotaSet.has(n) ? empiricalDroughtQuotaMultiplier(n) : 1;
+      const reps = Math.max(1, Math.round(selectedBias * carryOverBias * scoringBias * d1TerminalBias * strictDroughtBias * empiricalDroughtBias));
       for (let i = 0; i < reps; i++) weighted.push(n);
     }
     const picked: number[] = [];
@@ -876,6 +1019,8 @@ export function generateCandidates(
 
     let main: number[] = [...forcedMain];
     let supp: number[] = [...forcedSupp];
+    const plannedBucketPicks = bucketCoveragePlan?.next(attempts - 1, Math.random) ?? null;
+    let usedPlannedBucketPick = false;
 
     // Constructive bucket fill (monthly) — pick as many as available up to requested counts
     if (monthlyBucketOptions?.constraints && monthlyBucketOptions?.buckets) {
@@ -884,15 +1029,30 @@ export function generateCandidates(
       const tryFill = (bucketKey: MonthlyBucketKey, needed: number) => {
         if (needed <= 0) return;
         if (main.length + supp.length >= maxSlots) return;
+        const currentBucketHits = [...main, ...supp].filter((n) => buckets[bucketKey].has(n)).length;
+        const remainingNeed = Math.max(0, needed - currentBucketHits);
+        if (remainingNeed <= 0) return;
         const avail = Array.from(buckets[bucketKey]).filter((n) =>
           !fullExcludedSet.has(n) && !main.includes(n) && !supp.includes(n)
         );
-        const take = Math.min(needed, avail.length, maxSlots - main.length - supp.length);
+        const take = Math.min(remainingNeed, avail.length, maxSlots - main.length - supp.length);
         if (take <= 0) return;
+        const planned = plannedBucketPicks?.[bucketKey] ?? [];
+        const plannedValid = planned.filter((n) => avail.includes(n));
+        let picks: number[];
+        if (plannedValid.length >= take) {
+          picks = plannedValid.slice(0, take);
+          usedPlannedBucketPick = true;
+        } else {
+          if (plannedBucketPicks && planned.length > 0) bucketCoverageFallbacks += 1;
+          picks = [];
+        }
         const preferredSet = monthlySelectedNumberBiasEnabled
           ? new Set((monthlySelectedNumbersByBucket?.[bucketKey] ?? []).filter((n) => avail.includes(n)))
           : new Set<number>();
-        const picks = sampleMonthlyBucketWithSelectionBias(avail, take, preferredSet);
+        if (picks.length < take) {
+          picks = sampleMonthlyBucketWithSelectionBias(avail, take, preferredSet);
+        }
         for (const n of picks) {
           if (main.length < 6) main.push(n);
           else if (supp.length < 2) supp.push(n);
@@ -900,6 +1060,9 @@ export function generateCandidates(
       };
       for (const bucketKey of MONTHLY_BUCKET_KEYS) {
         tryFill(bucketKey, constraints[bucketKey]);
+      }
+      if (usedPlannedBucketPick) {
+        bucketCoveragePlannedAttempts += 1;
       }
     }
 
@@ -919,6 +1082,28 @@ export function generateCandidates(
           continue;
         }
         for (const n of strictPicks) {
+          if (main.length < 6) main.push(n);
+          else if (supp.length < 2) supp.push(n);
+        }
+      }
+    }
+
+    if (empiricalDroughtQuotaActive) {
+      const seededHits = [...main, ...supp].filter((n) => empiricalDroughtQuotaSet.has(n)).length;
+      const remainingNeeded = empiricalDroughtQuotaMin - seededHits;
+      if (remainingNeeded > 0) {
+        const availableSlots = 8 - main.length - supp.length;
+        if (availableSlots < remainingNeeded) {
+          stats.empiricalDroughtQuota++;
+          continue;
+        }
+        const empiricalPool = empiricalDroughtQuotaNumbers.filter((n) => !main.includes(n) && !supp.includes(n));
+        const empiricalPicks = drawWeightedUnique(empiricalPool, remainingNeeded, true);
+        if (empiricalPicks.length < remainingNeeded) {
+          stats.empiricalDroughtQuota++;
+          continue;
+        }
+        for (const n of empiricalPicks) {
           if (main.length < 6) main.push(n);
           else if (supp.length < 2) supp.push(n);
         }
@@ -1039,6 +1224,13 @@ export function generateCandidates(
         continue;
       }
     }
+    if (empiricalDroughtQuotaActive) {
+      const empiricalHits = nums8.filter((n) => empiricalDroughtQuotaSet.has(n)).length;
+      if (empiricalHits < empiricalDroughtQuotaMin) {
+        stats.empiricalDroughtQuota++;
+        continue;
+      }
+    }
 
     // NEW: Sum range constraint (before other filters)
     if (sumCfg.enabled) {
@@ -1060,22 +1252,22 @@ export function generateCandidates(
     }
 
     const mainDigitConstraints = [
-      { digit: 0, maxCount: mainZeroOptions?.maxCount, statKey: "mainZeroSet" as const },
-      { digit: 5, maxCount: mainFiveOptions?.maxCount, statKey: "mainFiveSet" as const },
-      { digit: 1, maxCount: mainOneOptions?.maxCount, statKey: "mainOneSet" as const },
-      { digit: 2, maxCount: mainTwoOptions?.maxCount, statKey: "mainTwoSet" as const },
-      { digit: 3, maxCount: mainThreeOptions?.maxCount, statKey: "mainThreeSet" as const },
-      { digit: 4, maxCount: mainFourOptions?.maxCount, statKey: "mainFourSet" as const },
-      { digit: 6, maxCount: mainSixOptions?.maxCount, statKey: "mainSixSet" as const },
-      { digit: 7, maxCount: mainSevenOptions?.maxCount, statKey: "mainSevenSet" as const },
-      { digit: 8, maxCount: mainEightOptions?.maxCount, statKey: "mainEightSet" as const },
-      { digit: 9, maxCount: mainNineOptions?.maxCount, statKey: "mainNineSet" as const },
+      { digit: 0, rule: normalizeMainDigitCountRule(mainZeroOptions), statKey: "mainZeroSet" as const },
+      { digit: 5, rule: normalizeMainDigitCountRule(mainFiveOptions), statKey: "mainFiveSet" as const },
+      { digit: 1, rule: normalizeMainDigitCountRule(mainOneOptions), statKey: "mainOneSet" as const },
+      { digit: 2, rule: normalizeMainDigitCountRule(mainTwoOptions), statKey: "mainTwoSet" as const },
+      { digit: 3, rule: normalizeMainDigitCountRule(mainThreeOptions), statKey: "mainThreeSet" as const },
+      { digit: 4, rule: normalizeMainDigitCountRule(mainFourOptions), statKey: "mainFourSet" as const },
+      { digit: 6, rule: normalizeMainDigitCountRule(mainSixOptions), statKey: "mainSixSet" as const },
+      { digit: 7, rule: normalizeMainDigitCountRule(mainSevenOptions), statKey: "mainSevenSet" as const },
+      { digit: 8, rule: normalizeMainDigitCountRule(mainEightOptions), statKey: "mainEightSet" as const },
+      { digit: 9, rule: normalizeMainDigitCountRule(mainNineOptions), statKey: "mainNineSet" as const },
     ];
     let failedMainDigitConstraint = false;
-    for (const { digit, maxCount, statKey } of mainDigitConstraints) {
-      if (typeof maxCount !== 'number' || maxCount < 0) continue;
+    for (const { digit, rule, statKey } of mainDigitConstraints) {
+      if (!rule) continue;
       const digitCount = digitConstraintNumbers.filter(n => n % 10 === digit).length;
-      if (digitCount > maxCount) {
+      if (violatesMainDigitCountRule(digitCount, rule)) {
         stats[statKey]++;
         failedMainDigitConstraint = true;
         break;
@@ -1242,6 +1434,7 @@ if (patternOptions?.constraints?.length && patternOptions?.mode === 'restrict') 
     const candidateKey = `${main.join(',')};${supp.join(',')}`;
     if (seenKeys.has(candidateKey)) { continue; }
     seenKeys.add(candidateKey);
+    recordBucketCoverageAcceptedSignature(nums8);
 
     let patternMatches = 0;
     if (patternOptions?.constraints?.length) {
@@ -1294,19 +1487,19 @@ if (patternOptions?.constraints?.length && patternOptions?.mode === 'restrict') 
     traceSetter(`[TRACE] Divisible-by-5 rule: candidate max=${div5Options.maxMainCount} rejects=${stats.div5}`);
   }
    [
-    { label: "0-ending candidate rule {10,20,30,40}", maxCount: mainZeroOptions?.maxCount, rejects: stats.mainZeroSet },
-    { label: "5-ending candidate rule {5,15,25,35,45}", maxCount: mainFiveOptions?.maxCount, rejects: stats.mainFiveSet },
-    { label: "1-ending candidate rule {1,11,21,31,41}", maxCount: mainOneOptions?.maxCount, rejects: stats.mainOneSet },
-    { label: "2-ending candidate rule {2,12,22,32,42}", maxCount: mainTwoOptions?.maxCount, rejects: stats.mainTwoSet },
-    { label: "3-ending candidate rule {3,13,23,33,43}", maxCount: mainThreeOptions?.maxCount, rejects: stats.mainThreeSet },
-    { label: "4-ending candidate rule {4,14,24,34,44}", maxCount: mainFourOptions?.maxCount, rejects: stats.mainFourSet },
-    { label: "6-ending candidate rule {6,16,26,36}", maxCount: mainSixOptions?.maxCount, rejects: stats.mainSixSet },
-    { label: "7-ending candidate rule {7,17,27,37}", maxCount: mainSevenOptions?.maxCount, rejects: stats.mainSevenSet },
-    { label: "8-ending candidate rule {8,18,28,38}", maxCount: mainEightOptions?.maxCount, rejects: stats.mainEightSet },
-    { label: "9-ending candidate rule {9,19,29,39}", maxCount: mainNineOptions?.maxCount, rejects: stats.mainNineSet },
-  ].forEach(({ label, maxCount, rejects }) => {
-    if (typeof maxCount === 'number' && maxCount >= 0) {
-      traceSetter(`[TRACE] ${label}: max=${maxCount} rejects=${rejects}`);
+    { label: "0-ending candidate rule {10,20,30,40}", rule: normalizeMainDigitCountRule(mainZeroOptions), rejects: stats.mainZeroSet },
+    { label: "5-ending candidate rule {5,15,25,35,45}", rule: normalizeMainDigitCountRule(mainFiveOptions), rejects: stats.mainFiveSet },
+    { label: "1-ending candidate rule {1,11,21,31,41}", rule: normalizeMainDigitCountRule(mainOneOptions), rejects: stats.mainOneSet },
+    { label: "2-ending candidate rule {2,12,22,32,42}", rule: normalizeMainDigitCountRule(mainTwoOptions), rejects: stats.mainTwoSet },
+    { label: "3-ending candidate rule {3,13,23,33,43}", rule: normalizeMainDigitCountRule(mainThreeOptions), rejects: stats.mainThreeSet },
+    { label: "4-ending candidate rule {4,14,24,34,44}", rule: normalizeMainDigitCountRule(mainFourOptions), rejects: stats.mainFourSet },
+    { label: "6-ending candidate rule {6,16,26,36}", rule: normalizeMainDigitCountRule(mainSixOptions), rejects: stats.mainSixSet },
+    { label: "7-ending candidate rule {7,17,27,37}", rule: normalizeMainDigitCountRule(mainSevenOptions), rejects: stats.mainSevenSet },
+    { label: "8-ending candidate rule {8,18,28,38}", rule: normalizeMainDigitCountRule(mainEightOptions), rejects: stats.mainEightSet },
+    { label: "9-ending candidate rule {9,19,29,39}", rule: normalizeMainDigitCountRule(mainNineOptions), rejects: stats.mainNineSet },
+  ].forEach(({ label, rule, rejects }) => {
+    if (rule) {
+      traceSetter(`[TRACE] ${label}: ${formatMainDigitCountRule(rule)} rejects=${rejects}`);
     }
   });
   if (digitWidthTargets.enabled) {
@@ -1320,7 +1513,16 @@ if (patternOptions?.constraints?.length && patternOptions?.mode === 'restrict') 
       return sum + [...candidate.main, ...candidate.supp].filter((number) => latestNeighbourSupportSet.has(number)).length;
     }, 0);
     traceSetter(
-      `[TRACE] ${LATEST_NEIGHBOUR_SUPPORT_TRACE_TAG} results: eligible=${latestNeighbourSupport.targetNumbers.length} rejects=${stats.latestNeighbourSupport} accepted-hits=${hits} (${(hits / acceptedCandidateCount).toFixed(2)} per accepted candidate)`
+      `[TRACE] ${latestNeighbourTraceTag} results: eligible=${latestNeighbourSupport.targetNumbers.length} rejects=${stats.latestNeighbourSupport} accepted-hits=${hits} (${(hits / acceptedCandidateCount).toFixed(2)} per accepted candidate)`
+    );
+  }
+  if (bucketCoveragePreview.enabled) {
+    const denominator = bucketCoveragePreview.mode === "full" ? bucketCoveragePreview.burden : bucketCoverageAcceptedSignatures.size;
+    const coverageText = bucketCoveragePreview.mode === "full"
+      ? `${bucketCoverageAcceptedSignatures.size}/${Math.max(1, denominator)} accepted coverage signature${bucketCoverageAcceptedSignatures.size === 1 ? "" : "s"}`
+      : `${bucketCoverageAcceptedSignatures.size} accepted sampled coverage signature${bucketCoverageAcceptedSignatures.size === 1 ? "" : "s"}`;
+    traceSetter(
+      `[TRACE] Bucket Coverage Planner results: mode ${bucketCoveragePreview.mode}; planned attempts ${bucketCoveragePlannedAttempts}; ${coverageText}; planner fallbacks ${bucketCoverageFallbacks}. Final filters can still reduce coverage.`
     );
   }
   if (strictDroughtQuotaOptions?.enabled) {
@@ -1330,6 +1532,15 @@ if (patternOptions?.constraints?.length && patternOptions?.mode === 'restrict') 
     ), 0);
     traceSetter(
       `[TRACE] Strict drought quota results: effective minimum ${strictDroughtQuotaMin}; eligible=${strictDroughtQuotaNumbers.length}; rejects=${stats.strictDroughtQuota}; accepted-hits=${hits} (${(hits / acceptedCandidateCount).toFixed(2)} per accepted candidate)`
+    );
+  }
+  if (empiricalDroughtQuotaOptions?.enabled) {
+    const acceptedCandidateCount = Math.max(1, candidates.length);
+    const hits = candidates.reduce((sum, candidate) => (
+      sum + [...candidate.main, ...candidate.supp].filter((number) => empiricalDroughtQuotaSet.has(number)).length
+    ), 0);
+    traceSetter(
+      `[TRACE] Empirical drought quota results: effective minimum ${empiricalDroughtQuotaMin}; eligible=${empiricalDroughtQuotaNumbers.length}; rejects=${stats.empiricalDroughtQuota}; accepted-hits=${hits} (${(hits / acceptedCandidateCount).toFixed(2)} per accepted candidate)`
     );
   }
   if (activeMainDigitBoosts.length > 0) {

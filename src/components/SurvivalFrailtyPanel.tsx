@@ -1,276 +1,178 @@
-/**
- * SurvivalFrailtyPanel Component
- *
- * Implements frailty model for recurrent events (repeated appearances/disappearances)
- * Uses gamma frailty approximation
- */
-
-import React, { useState, useMemo } from "react";
-import { Draw } from "../types";
+import React, { useMemo, useState } from "react";
+import type { Draw } from "../types";
+import { filterRealDrawHistory } from "../lib/realDrawHistory";
+import { sortDrawsChronologically } from "../lib/recentDraws";
 
 interface SurvivalFrailtyPanelProps {
   history: Draw[];
-  excludedNumbers?: number[];
-}
-
-interface FrailtyResult {
-  number: number;
-  frailty: number; // unobserved heterogeneity factor
-  eventCount: number; // number of recurrent events
-  avgInterEventTime: number;
-  hazardRate: number;
-  nextEventProb: number;
-}
-
-// add prop exclusionsSlot?: React.ReactNode and render it in the toolbar area:
-export const SurvivalFrailtyPanel: React.FC<{
-  history: Draw[];
   excludedNumbers: number[];
   exclusionsSlot?: React.ReactNode;
-}> = ({ history, excludedNumbers, exclusionsSlot }) => {
-  const [isCalculated, setIsCalculated] = useState(false);
-  const [results, setResults] = useState<FrailtyResult[]>([]);
-  const [sortBy, setSortBy] = useState<"frailty" | "number">("frailty");
-  const [theta, setTheta] = useState<number>(1.0); // frailty variance parameter
+}
 
-  const numbers = useMemo(
-    () => Array.from({ length: 45 }, (_, i) => i + 1).filter(n => !excludedNumbers.includes(n)),
-    [excludedNumbers]
+interface GapDispersionRow {
+  number: number;
+  appearances: number;
+  completedGaps: number;
+  meanGap: number | null;
+  medianGap: number | null;
+  interquartileRange: number | null;
+  coefficientOfVariation: number | null;
+  currentDrought: number;
+  droughtToMedian: number | null;
+}
+
+type GapSortKey = "number" | "currentDrought" | "droughtToMedian" | "coefficientOfVariation";
+
+const quantile = (sorted: readonly number[], q: number): number | null => {
+  if (sorted.length === 0) return null;
+  const position = (sorted.length - 1) * q;
+  const lower = Math.floor(position);
+  const upper = Math.ceil(position);
+  if (lower === upper) return sorted[lower];
+  const fraction = position - lower;
+  return sorted[lower] + ((sorted[upper] - sorted[lower]) * fraction);
+};
+
+const buildGapDispersionRows = (history: readonly Draw[], excludedNumbers: readonly number[]): GapDispersionRow[] => {
+  const excluded = new Set(excludedNumbers);
+  const rows: GapDispersionRow[] = [];
+
+  for (let number = 1; number <= 45; number += 1) {
+    if (excluded.has(number)) continue;
+    const eventIndices: number[] = [];
+    history.forEach((draw, index) => {
+      if (draw.main.includes(number) || draw.supp.includes(number)) eventIndices.push(index);
+    });
+    const gaps = eventIndices.slice(1).map((index, position) => index - eventIndices[position]);
+    const sortedGaps = [...gaps].sort((left, right) => left - right);
+    const meanGap = gaps.length > 0 ? gaps.reduce((sum, gap) => sum + gap, 0) / gaps.length : null;
+    const medianGap = quantile(sortedGaps, 0.5);
+    const q1 = quantile(sortedGaps, 0.25);
+    const q3 = quantile(sortedGaps, 0.75);
+    const sampleVariance = gaps.length > 1 && meanGap !== null
+      ? gaps.reduce((sum, gap) => sum + ((gap - meanGap) ** 2), 0) / (gaps.length - 1)
+      : null;
+    const coefficientOfVariation = sampleVariance !== null && meanGap && meanGap > 0
+      ? Math.sqrt(sampleVariance) / meanGap
+      : null;
+    const lastSeen = eventIndices[eventIndices.length - 1];
+    const currentDrought = lastSeen === undefined ? history.length : history.length - lastSeen - 1;
+
+    rows.push({
+      number,
+      appearances: eventIndices.length,
+      completedGaps: gaps.length,
+      meanGap,
+      medianGap,
+      interquartileRange: q1 !== null && q3 !== null ? q3 - q1 : null,
+      coefficientOfVariation,
+      currentDrought,
+      droughtToMedian: medianGap && medianGap > 0 ? currentDrought / medianGap : null,
+    });
+  }
+
+  return rows;
+};
+
+const formatDecimal = (value: number | null, digits = 2): string => (
+  value === null || !Number.isFinite(value) ? "-" : value.toFixed(digits)
+);
+
+export const SurvivalFrailtyPanel: React.FC<SurvivalFrailtyPanelProps> = ({
+  history,
+  excludedNumbers,
+  exclusionsSlot,
+}) => {
+  const [sortBy, setSortBy] = useState<GapSortKey>("currentDrought");
+  const realHistory = useMemo(
+    () => sortDrawsChronologically(filterRealDrawHistory(history, "gap-dispersion diagnostics").history),
+    [history],
   );
-
-  /**
-   * Calculate gamma frailty model
-   * Frailty represents unobserved heterogeneity - numbers with different "propensities" to appear
-   */
-  const calculateFrailtyModel = () => {
-    const newResults: FrailtyResult[] = [];
-
-    for (const num of numbers) {
-      // Find all appearances (recurrent events)
-      const events: number[] = [];
-      history.forEach((draw, idx) => {
-        if (draw.main.includes(num) || draw.supp.includes(num)) {
-          events.push(idx);
-        }
-      });
-
-      const eventCount = events.length;
-
-      // Calculate inter-event times
-      const interEventTimes: number[] = [];
-      for (let i = 1; i < events.length; i++) {
-        interEventTimes.push(events[i] - events[i - 1]);
-      }
-
-      const avgInterEventTime = interEventTimes.length > 0
-        ? interEventTimes.reduce((s, t) => s + t, 0) / interEventTimes.length
-        : 0;
-
-      // Estimate frailty parameter (gamma distributed)
-      // Higher frailty = higher propensity for events
-      // Formula: frailty_i ~ Gamma(1/theta, 1/theta)
-      // Estimate based on observed vs expected event rate
-      const expectedRate = eventCount / history.length;
-      const observedVariance = interEventTimes.length > 1
-        ? calculateVariance(interEventTimes)
-        : 0;
-
-      // Frailty estimate (simplified)
-      // Numbers that appear more consistently (lower variance) have lower frailty
-      const frailty = expectedRate > 0 && avgInterEventTime > 0
-        ? 1 + (observedVariance / (avgInterEventTime * avgInterEventTime) - 1) * theta
-        : 1;
-
-      // Hazard rate with frailty
-      const baseHazard = 1 / (avgInterEventTime || 1);
-      const hazardRate = baseHazard * Math.max(0.1, frailty);
-
-      // Probability of next event in next draw
-      const nextEventProb = 1 - Math.exp(-hazardRate);
-
-      newResults.push({
-        number: num,
-        frailty: Math.max(0.1, frailty),
-        eventCount,
-        avgInterEventTime,
-        hazardRate,
-        nextEventProb,
-      });
-    }
-
-    setResults(newResults);
-    setIsCalculated(true);
-  };
-
-  const sortedResults = useMemo(() => {
-    const sorted = [...results];
-    if (sortBy === "frailty") {
-      sorted.sort((a, b) => b.frailty - a.frailty);
-    } else {
-      sorted.sort((a, b) => a.number - b.number);
-    }
-    return sorted;
-  }, [results, sortBy]);
-
-  const calculateVariance = (values: number[]): number => {
-    if (values.length < 2) return 0;
-    const mean = values.reduce((s, v) => s + v, 0) / values.length;
-    const variance = values.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / values.length;
-    return variance;
-  };
+  const rows = useMemo(
+    () => buildGapDispersionRows(realHistory, excludedNumbers),
+    [excludedNumbers, realHistory],
+  );
+  const sortedRows = useMemo(() => [...rows].sort((left, right) => {
+    if (sortBy === "number") return left.number - right.number;
+    const leftValue = left[sortBy] ?? Number.NEGATIVE_INFINITY;
+    const rightValue = right[sortBy] ?? Number.NEGATIVE_INFINITY;
+    return rightValue - leftValue || left.number - right.number;
+  }), [rows, sortBy]);
 
   return (
-  <section style={{ border: "1px solid #ccc", borderRadius: 8, padding: 12, marginTop: 10 }}>
-    <h4>Frailty / Recurrent Events (WIP)</h4>
-    <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
-      <button /* onClick={...} */>Recalculate</button>
-      {exclusionsSlot && <div style={{ flex: "1 1 100%", marginTop: 6 }}>{exclusionsSlot}</div>}
-      <span style={{ marginLeft: "auto" }}>
-        Sort by:
-        <select style={{ marginLeft: 6 }}>
-          <option value="number">Number</option>
-          <option value="hazard">Hazard</option>
-        </select>
-      </span>
-    </div>
-
-      <p style={{ color: "#666", fontSize: "0.9rem" }}>
-        Models repeated appearances/disappearances using gamma frailty to capture unobserved heterogeneity.
-        Numbers with higher frailty have more variable appearance patterns.
-      </p>
-
-      {/* Model Info */}
-      <div style={{ marginBottom: "1rem", padding: "1rem", background: "#fff3cd", borderRadius: "4px", fontSize: "0.85rem" }}>
-        <strong>About Frailty Models:</strong>
-        <ul style={{ marginTop: "0.5rem", marginBottom: 0, paddingLeft: "1.5rem" }}>
-          <li>Captures unobserved heterogeneity (different "propensities" to appear)</li>
-          <li>Gamma frailty is standard for recurrent event analysis</li>
-          <li>High frailty: More variable, less predictable patterns</li>
-          <li>Low frailty: More consistent, regular appearance patterns</li>
-        </ul>
-      </div>
-
-      {/* Controls */}
-      <div style={{ marginBottom: "1rem", padding: "1rem", background: "#f5f5f5", borderRadius: "4px" }}>
-        <div style={{ marginBottom: "1rem" }}>
-          <label>
-            Frailty Variance (θ):
-            <input
-              type="range"
-              min="0.1"
-              max="5"
-              step="0.1"
-              value={theta}
-              onChange={(e) => setTheta(parseFloat(e.target.value))}
-              style={{ marginLeft: "0.5rem", width: "200px" }}
-            />
-            <span style={{ marginLeft: "0.5rem", fontWeight: "bold" }}>{theta.toFixed(1)}</span>
-          </label>
-          <div style={{ fontSize: "0.8rem", color: "#666", marginTop: "0.25rem" }}>
-            Higher θ = more heterogeneity between numbers
+    <section style={{ border: "1px solid #d2d2d7", borderRadius: 8, padding: 12, marginTop: 12, background: "#fff" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <h4 style={{ margin: 0 }}>Recurrent Gap Dispersion Diagnostic</h4>
+          <div style={{ color: "#6e6e73", fontSize: 12, marginTop: 4 }}>
+            Descriptive completed-gap variation across {realHistory.length} real draws, mains + supps.
           </div>
         </div>
-
-        <button
-          onClick={calculateFrailtyModel}
-          disabled={history.length < 50}
-          style={{
-            padding: "0.5rem 1rem",
-            background: isCalculated ? "#28a745" : "#007bff",
-            color: "white",
-            border: "none",
-            borderRadius: "4px",
-            cursor: "pointer",
-          }}
-        >
-          {isCalculated ? "✓ Recalculate" : "Calculate Frailty Model"}
-        </button>
-
-        {history.length < 50 && (
-          <span style={{ marginLeft: "1rem", color: "#dc3545", fontSize: "0.9rem" }}>
-            Need at least 50 draws
-          </span>
-        )}
+        <label style={{ display: "grid", gap: 4, color: "#515154", fontSize: 12, fontWeight: 700 }}>
+          Sort by
+          <select
+            value={sortBy}
+            onChange={(event) => setSortBy(event.target.value as GapSortKey)}
+            style={{ minHeight: 34, border: "1px solid #c7c7cc", borderRadius: 6, background: "#fff", padding: "4px 8px" }}
+          >
+            <option value="currentDrought">Current drought</option>
+            <option value="droughtToMedian">Drought / median gap</option>
+            <option value="coefficientOfVariation">Gap variability</option>
+            <option value="number">Number</option>
+          </select>
+        </label>
       </div>
 
-      {/* Results Table */}
-      {isCalculated && results.length > 0 && (
-        <>
-          <div style={{ marginBottom: "1rem" }}>
-            <label>
-              Sort by:
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value as "frailty" | "number")}
-                style={{ marginLeft: "0.5rem", padding: "0.25rem" }}
-              >
-                <option value="frailty">Frailty (High to Low)</option>
-                <option value="number">Number</option>
-              </select>
-            </label>
-          </div>
+      <div style={{ marginTop: 10, borderLeft: "3px solid #73777f", background: "#f5f5f7", padding: "9px 11px", color: "#3a3a3c", fontSize: 12, lineHeight: 1.45 }}>
+        This is not a fitted gamma-frailty model and it does not report next-draw probability. The former frailty percentage was removed because gap variance alone cannot identify a valid frailty distribution or calibrated event hazard.
+      </div>
 
-          <div style={{ maxHeight: "500px", overflowY: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem" }}>
-              <thead style={{ position: "sticky", top: 0, background: "#f8f9fa" }}>
-                <tr>
-                  <th style={{ padding: "0.5rem", textAlign: "left", borderBottom: "2px solid #dee2e6" }}>Number</th>
-                  <th style={{ padding: "0.5rem", textAlign: "right", borderBottom: "2px solid #dee2e6" }}>Frailty</th>
-                  <th style={{ padding: "0.5rem", textAlign: "right", borderBottom: "2px solid #dee2e6" }}>Events</th>
-                  <th style={{ padding: "0.5rem", textAlign: "right", borderBottom: "2px solid #dee2e6" }}>Avg Gap</th>
-                  <th style={{ padding: "0.5rem", textAlign: "right", borderBottom: "2px solid #dee2e6" }}>Hazard Rate</th>
-                  <th style={{ padding: "0.5rem", textAlign: "right", borderBottom: "2px solid #dee2e6" }}>Next Event %</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedResults.map((result) => {
-                  const frailtyColor = result.frailty > 1.5 ? "#dc3545" :
-                                      result.frailty > 1.0 ? "#ffc107" : "#28a745";
+      {exclusionsSlot ? <div style={{ marginTop: 10 }}>{exclusionsSlot}</div> : null}
 
-                  return (
-                    <tr key={result.number} style={{ borderBottom: "1px solid #dee2e6" }}>
-                      <td style={{ padding: "0.5rem", fontWeight: "bold" }}>
-                        {result.number}
-                      </td>
-                      <td style={{ padding: "0.5rem", textAlign: "right", color: frailtyColor, fontWeight: "bold" }}>
-                        {result.frailty.toFixed(2)}
-                      </td>
-                      <td style={{ padding: "0.5rem", textAlign: "right" }}>
-                        {result.eventCount}
-                      </td>
-                      <td style={{ padding: "0.5rem", textAlign: "right" }}>
-                        {result.avgInterEventTime.toFixed(1)}
-                      </td>
-                      <td style={{ padding: "0.5rem", textAlign: "right" }}>
-                        {result.hazardRate.toFixed(3)}
-                      </td>
-                      <td style={{ padding: "0.5rem", textAlign: "right" }}>
-                        {(result.nextEventProb * 100).toFixed(1)}%
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+      <div style={{ overflow: "auto", maxHeight: 460, border: "1px solid #d2d2d7", borderRadius: 6, marginTop: 10 }}>
+        <table style={{ width: "100%", minWidth: 760, borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
+          <thead>
+            <tr>
+              {["Number", "Appearances", "Completed gaps", "Mean gap", "Median gap", "Gap IQR", "Gap CV", "Current drought", "Drought / median"].map((label) => (
+                <th key={label} style={{ position: "sticky", top: 0, zIndex: 1, padding: "7px 8px", background: "#f5f5f7", borderBottom: "1px solid #d2d2d7", textAlign: label === "Number" ? "left" : "right" }}>
+                  {label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {sortedRows.map((row) => (
+              <tr key={row.number}>
+                <td style={cellLeftStyle}><b>{row.number}</b></td>
+                <td style={cellRightStyle}>{row.appearances}</td>
+                <td style={cellRightStyle}>{row.completedGaps}</td>
+                <td style={cellRightStyle}>{formatDecimal(row.meanGap, 1)}</td>
+                <td style={cellRightStyle}>{formatDecimal(row.medianGap, 1)}</td>
+                <td style={cellRightStyle}>{formatDecimal(row.interquartileRange, 1)}</td>
+                <td style={cellRightStyle}>{formatDecimal(row.coefficientOfVariation)}</td>
+                <td style={cellRightStyle}>{row.currentDrought}</td>
+                <td style={cellRightStyle}>{formatDecimal(row.droughtToMedian)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
 
-          {/* Summary */}
-          <div style={{ marginTop: "1rem", padding: "1rem", background: "#f8f9fa", borderRadius: "4px" }}>
-            <strong>Summary:</strong>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "0.5rem", marginTop: "0.5rem", fontSize: "0.9rem" }}>
-              <div>High Frailty (&gt;1.5): <strong>{results.filter(r => r.frailty > 1.5).length}</strong></div>
-              <div>Medium (1.0-1.5): <strong>{results.filter(r => r.frailty >= 1.0 && r.frailty <= 1.5).length}</strong></div>
-              <div>Low (&lt;1.0): <strong>{results.filter(r => r.frailty < 1.0).length}</strong></div>
-            </div>
-          </div>
-        </>
-      )}
-
-      {!isCalculated && (
-        <div style={{ padding: "2rem", textAlign: "center", color: "#6c757d" }}>
-          Calculate frailty model to see results
-        </div>
-      )}
+      <div style={{ marginTop: 8, color: "#6e6e73", fontSize: 11, lineHeight: 1.45 }}>
+        Gap = draw-index distance between consecutive appearances. IQR is the middle 50% gap width. CV is sample standard deviation divided by mean gap. Drought / median is descriptive maturity only; values above 1 mean the current drought exceeds that number&apos;s historical median completed gap.
+      </div>
     </section>
   );
+};
+
+const cellLeftStyle: React.CSSProperties = {
+  padding: "7px 8px",
+  borderBottom: "1px solid #ececef",
+  textAlign: "left",
+};
+
+const cellRightStyle: React.CSSProperties = {
+  ...cellLeftStyle,
+  textAlign: "right",
+  fontVariantNumeric: "tabular-nums",
 };

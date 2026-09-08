@@ -1,4 +1,5 @@
 import type { DrawRow } from "./drawHistory";
+import { isParseableDrawDate } from "./strictDrawValidation";
 
 const DRAW_HISTORY_CACHE_KEY = "draw-history:reviewed:v1";
 
@@ -12,12 +13,23 @@ function isValidRow(value: unknown): value is DrawRow {
     return false;
   }
   const candidate = value as Record<string, unknown>;
-  return (
+  if (!(
     typeof candidate.date === "string" &&
     Array.isArray(candidate.mains) &&
     Array.isArray(candidate.supps) &&
     candidate.mains.every((entry) => typeof entry === "number" && Number.isInteger(entry)) &&
     candidate.supps.every((entry) => typeof entry === "number" && Number.isInteger(entry))
+  )) return false;
+
+  const mains = candidate.mains as number[];
+  const supps = candidate.supps as number[];
+  const allNumbers = [...mains, ...supps];
+  return (
+    isParseableDrawDate(candidate.date)
+    && mains.length === 6
+    && supps.length === 2
+    && allNumbers.every((number) => number >= 1 && number <= 45)
+    && new Set(allNumbers).size === 8
   );
 }
 
@@ -25,12 +37,16 @@ export function saveCachedDrawHistory(rows: DrawRow[]): void {
   if (typeof window === "undefined" || !window.localStorage) {
     return;
   }
+  const realRows = rows.filter((row) => !row.isSimulated && isValidRow(row));
+  if (realRows.length === 0) {
+    window.localStorage.removeItem(DRAW_HISTORY_CACHE_KEY);
+    return;
+  }
   const payload: CachedDrawHistoryPayload = {
-    rows: rows.map((row) => ({
+    rows: realRows.map((row) => ({
       date: row.date,
       mains: row.mains.slice(),
       supps: row.supps.slice(),
-      isSimulated: row.isSimulated,
     })),
     updatedAt: new Date().toISOString(),
   };
@@ -52,8 +68,13 @@ export function loadCachedDrawHistory(): DrawRow[] | null {
     if (!Array.isArray(parsed.rows)) {
       return null;
     }
-    const rows = parsed.rows.filter(isValidRow);
-    return rows.length > 0 ? rows : null;
+    if (parsed.rows.length === 0 || !parsed.rows.every(isValidRow)) {
+      return null;
+    }
+    const realRows = parsed.rows.filter((row) => !row.isSimulated);
+    return realRows.length > 0
+      ? realRows.map((row) => ({ date: row.date, mains: [...row.mains], supps: [...row.supps] }))
+      : null;
   } catch {
     return null;
   }

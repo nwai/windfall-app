@@ -68,8 +68,11 @@ export interface ExportSettings {
     times4: number; times5: number; times6: number; times7: number; times8: number;
   };
   minRecentMatches: number;
+  maxLastDrawMatchesEnabled?: boolean;
+  maxLastDrawMatchesValue?: number;
   recentMatchBias: number;
   previousNeighbourConstraintNumbers?: number[];
+  latestNeighbourSupportMode?: "pm1" | "pm1pm2";
   entropyEnabled: boolean;
   entropyThreshold: number;
   hammingEnabled: boolean;
@@ -81,6 +84,24 @@ export interface ExportSettings {
   /** Whether SDE1 is enabled */
   enableSDE1: boolean;
 }
+
+const clampOverlapCount = (value: unknown): number => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.max(0, Math.min(8, Math.trunc(numeric))) : 0;
+};
+
+const formatLastDrawOverlapExport = (settings: ExportSettings): string => {
+  const min = clampOverlapCount(settings.minRecentMatches);
+  const maxEnabled = settings.maxLastDrawMatchesEnabled === true;
+  const max = clampOverlapCount(settings.maxLastDrawMatchesValue);
+  const bias = settings.recentMatchBias;
+  if (min === 0 && !maxEnabled) return `rule=off | bias=${bias}`;
+  if (maxEnabled && min > 0 && max === min) return `rule=exactly ${min} | bias=${bias}`;
+  if (maxEnabled && min === 0) return `rule=at most ${max} | bias=${bias}`;
+  if (!maxEnabled && min > 0) return `rule=at least ${min} | bias=${bias}`;
+  if (maxEnabled && min > max) return `rule=conflicting ${min}-${max} | bias=${bias}`;
+  return `rule=between ${min}-${max} | bias=${bias}`;
+};
 
 export interface GeneratedCandidatesPanelProps {
   onGenerate: () => void;
@@ -115,6 +136,10 @@ export interface GeneratedCandidatesPanelProps {
   manualSimSelected: number[];
   setManualSimSelected: React.Dispatch<React.SetStateAction<number[]>>;
   onManualSimulationChanged?: (next: number[]) => void;
+  manualNextDrawDate?: string;
+  manualSaveDisabledReason?: string;
+  isSavingManualAsNextDraw?: boolean;
+  onSaveManualAsNextDraw?: (numbers: number[]) => void;
 
   activeOGABand?: { lower: number; upper: number } | null;
 
@@ -219,6 +244,10 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
   manualSimSelected,
   setManualSimSelected,
   onManualSimulationChanged,
+  manualNextDrawDate,
+  manualSaveDisabledReason,
+  isSavingManualAsNextDraw = false,
+  onSaveManualAsNextDraw,
   activeOGABand,
   ogaScoresRef,
   forcedNumbers = [],
@@ -1895,12 +1924,16 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
              ? `(${es.trendRatioFilter.allowedRatios.length}): [${es.trendRatioFilter.allowedRatios.join(", ")}] | lookback=${es.trendRatioFilter.lookback} | threshold=${es.trendRatioFilter.threshold} | historical coverage=${es.trendRatioFilter.coveragePercent.toFixed(2)}%`
              : "none (all trend ratios allowed)"
          );
-         tag("Recent matches", `min=${es.minRecentMatches} | bias=${es.recentMatchBias}`);
+         tag("Last-draw overlap", formatLastDrawOverlapExport(es));
          tag(
            "Latest ±1/±2 required targets",
            es.previousNeighbourConstraintNumbers?.length
              ? `[${es.previousNeighbourConstraintNumbers.join(", ")}]`
              : "none",
+         );
+         tag(
+           "Automatic latest support mode",
+           es.latestNeighbourSupportMode === "pm1pm2" ? "LD±1/±2" : "LD±1",
          );
          tag("Monthly boostPenalize", es.monthlyBoostPenalize ? "ON" : "OFF");
 
@@ -1967,7 +2000,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
        const text = formatCandidateRowsForPasteWeightedGenerator(copyRows);
        try {
          await writeTextToClipboard(text);
-         showCopyPasteStatus(`Copied ${copyRows.length} candidate main row${copyRows.length === 1 ? "" : "s"} for Paste-Weighted input.`);
+         showCopyPasteStatus(`Copied ${copyRows.length} candidate row${copyRows.length === 1 ? "" : "s"} for Paste-Weighted input.`);
        } catch (error) {
          showCopyPasteStatus(`Copy failed: ${error instanceof Error ? error.message : "clipboard unavailable"}`);
        }
@@ -2098,12 +2131,12 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                  disabled={generationSessionCount === 0 || isGenerating || !onExportGenerationSession}
                  onClick={onExportGenerationSession}
                  aria-label="Export generation session to Portfolio Compression and Paste-Weighted Candidate Generator"
-                 title="Exports stored session rows through the existing shared receiver. Portfolio receives mains plus supps; Paste-Weighted receives mains only."
+                 title="Exports stored session rows through the existing shared receiver. Portfolio and Paste-Weighted receive mains plus supps where available."
                >
                  Export session
                </HigButton>
                <InfoHelp label="Generation session help">
-                 While active, displayed generated candidates are stored locally and candidates with the same six main numbers as an existing session row are rejected. Export sends stored rows to Portfolio Compression as mains plus supps and to Paste-Weighted as six-main rows, then clears the session storage. Export does not change whether capture is active.
+                 While active, displayed generated candidates are stored locally and candidates with the same six main numbers as an existing session row are rejected. Export sends stored rows to Portfolio Compression and Paste-Weighted as mains plus supps where available, then clears the session storage. Export does not change whether capture is active.
                </InfoHelp>
              </div>
            )}
@@ -2119,8 +2152,8 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
              variant="secondary"
              disabled={candidates.length === 0}
              onClick={copyCandidatesForPasteWeightedGenerator}
-             aria-label="Copy generated candidate mains as comma-separated rows for the Paste-Weighted Candidate Generator"
-             title="Copies the current table rows as six-main-number comma-separated lines, ready for Paste-Weighted Candidate Generator input."
+             aria-label="Copy generated candidate rows as comma-separated rows for the Paste-Weighted Candidate Generator"
+             title="Copies the current table rows as comma-separated mains plus supplementary lines, ready for Paste-Weighted Candidate Generator input."
            >
              Copy candidates
            </HigButton>
@@ -3242,11 +3275,15 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
         )}
 
          <ManualSim
-           manualSimSelected={manualSimSelected}
+          manualSimSelected={manualSimSelected}
           toggleManualPick={toggleManualPick}
           followUserSelected={manualPrizeCheckFollowsUserSelected}
           onFollowUserSelectedChange={setManualPrizeCheckFollowsUserSelected}
           syncedUserSelectedNumbers={syncedManualPrizeCheckNumbers}
+          manualNextDrawDate={manualNextDrawDate}
+          manualSaveDisabledReason={manualSaveDisabledReason}
+          isSavingManualAsNextDraw={isSavingManualAsNextDraw}
+          onSaveManualAsNextDraw={onSaveManualAsNextDraw}
           excludedNumbers={userExcludedNumbers}
           numberToBucket={numberToBucket}
           currentDist={currentDist}
@@ -3655,6 +3692,10 @@ const ManualSim: React.FC<{
   followUserSelected: boolean;
   onFollowUserSelectedChange: (checked: boolean) => void;
   syncedUserSelectedNumbers: number[];
+  manualNextDrawDate?: string;
+  manualSaveDisabledReason?: string;
+  isSavingManualAsNextDraw?: boolean;
+  onSaveManualAsNextDraw?: (numbers: number[]) => void;
   excludedNumbers?: readonly number[];
   numberToBucket: Map<number, number> | null;
   currentDist: number[] | null;
@@ -3665,6 +3706,10 @@ const ManualSim: React.FC<{
   followUserSelected,
   onFollowUserSelectedChange,
   syncedUserSelectedNumbers,
+  manualNextDrawDate,
+  manualSaveDisabledReason,
+  isSavingManualAsNextDraw = false,
+  onSaveManualAsNextDraw,
   excludedNumbers = [],
   numberToBucket,
   currentDist,
@@ -3678,6 +3723,17 @@ const ManualSim: React.FC<{
     () => formatUserExclusionReminder(excludedNumbers),
     [excludedNumbers],
   );
+  const canSaveAsNextDraw = Boolean(onSaveManualAsNextDraw)
+    && manualSimSelected.length === 8
+    && !manualSaveDisabledReason
+    && !isSavingManualAsNextDraw;
+  const saveAsNextDrawTitle = manualSimSelected.length < 8
+    ? "Select 8 numbers in Manual Prize Check before saving as a draw."
+    : manualSaveDisabledReason
+      ? manualSaveDisabledReason
+      : manualNextDrawDate
+        ? `Save these 8 numbers as the next draw history row for ${manualNextDrawDate}.`
+        : "Save these 8 numbers as the next draw history row.";
 
   const postDist = React.useMemo((): number[] | null => {
     if (!showBeforeAfter) return null;
@@ -3724,6 +3780,29 @@ const ManualSim: React.FC<{
             />
             Use User Selected
           </label>
+          {onSaveManualAsNextDraw && (
+            <button
+              type="button"
+              onClick={() => onSaveManualAsNextDraw(manualSimSelected)}
+              disabled={!canSaveAsNextDraw}
+              style={{
+                minHeight: 30,
+                padding: "4px 10px",
+                border: canSaveAsNextDraw ? "1px solid #111827" : "1px solid #cbd5e1",
+                borderRadius: 8,
+                background: canSaveAsNextDraw ? "#111827" : "#f8fafc",
+                color: canSaveAsNextDraw ? "#fff" : "#94a3b8",
+                fontSize: 11,
+                fontWeight: 850,
+                whiteSpace: "nowrap",
+                cursor: canSaveAsNextDraw ? "pointer" : "not-allowed",
+                boxShadow: canSaveAsNextDraw ? "0 1px 2px rgba(15, 23, 42, 0.18)" : "none",
+              }}
+              title={saveAsNextDrawTitle}
+            >
+              {isSavingManualAsNextDraw ? "Saving..." : manualNextDrawDate ? `Save as Next Draw ${manualNextDrawDate}` : "Save as Next Draw"}
+            </button>
+          )}
       </div>
       {followUserSelected && (
         <div role="status" style={{ marginBottom: 8, color: "#475569", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "6px 8px", fontSize: 11 }}>

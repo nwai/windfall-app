@@ -6,6 +6,7 @@
 import { useRef, useCallback, useEffect } from "react";
 import type { GenerateCandidatesResult } from "../generateCandidates";
 import type { GenerateWorkerArgs } from "../workers/generateWorker";
+import type { MonthlyBucketKey } from "../lib/monthlyDrawSummary";
 
 /** Serialise monthly bucket Sets → arrays for structured clone transfer */
 export function serializeMonthlyBuckets(
@@ -37,6 +38,12 @@ export function serializeMonthlyBuckets(
           times8: number[];
         };
         selectedNumberBiasEnabled?: boolean;
+        bucketCoveragePlanner?: {
+          enabled?: boolean;
+          ignoredBucketKeys?: MonthlyBucketKey[];
+          maxFullCoverage?: number;
+          maxSampledCoverage?: number;
+        };
       }
     | undefined
 ): GenerateWorkerArgs["monthlyBucketOptions"] | undefined {
@@ -70,6 +77,7 @@ export function serializeMonthlyBuckets(
         }
       : undefined,
     selectedNumberBiasEnabled: opts.selectedNumberBiasEnabled,
+    bucketCoveragePlanner: opts.bucketCoveragePlanner,
   };
 }
 
@@ -200,6 +208,7 @@ export function useGenerateWorker() {
                       }
                     : undefined,
                   selectedNumberBiasEnabled: args.monthlyBucketOptions.selectedNumberBiasEnabled,
+                  bucketCoveragePlanner: args.monthlyBucketOptions.bucketCoveragePlanner,
                 }
               : undefined;
             const result = generateCandidates(
@@ -218,7 +227,8 @@ export function useGenerateWorker() {
                   latestPartialRef.current = partialResult;
                 },
                 args.latestNeighbourSupportOptions,
-                args.strictDroughtQuotaOptions
+                args.strictDroughtQuotaOptions,
+                args.empiricalDroughtQuotaOptions
             );
             latestPartialRef.current = null;
             onResult(result);

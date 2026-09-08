@@ -11,7 +11,8 @@ describe("Prediction Journal app wiring", () => {
     expect(app).toContain('import { PredictionJournalPanel, type PredictionJournalDraftRequest } from "./components/PredictionJournalPanel";');
     expect(app).toContain('panelId="prediction-journal"');
     expect(app.indexOf('id="workflow-validation"')).toBeLessThan(app.indexOf('panelId="prediction-journal"'));
-    expect(app.indexOf('panelId="prediction-journal"')).toBeLessThan(app.indexOf('panelId="backtest-validation"'));
+    expect(app.indexOf('panelId="hot-cold-ranking"')).toBeLessThan(app.indexOf('panelId="prediction-journal"'));
+    expect(app.indexOf('panelId="prediction-journal"')).toBeLessThan(app.indexOf('id="workflow-generation"'));
     expect(app).toContain("getSetupSnapshot={() => buildSnapshot({ includePanelFavorites: true, includeDerivedPredictionEvidence: true })}");
     expect(app).toContain("handleViewPredictionEntries");
     expect(app).toContain("View Entries");
@@ -41,6 +42,7 @@ describe("Prediction Journal app wiring", () => {
 
     expect(snapshotBlock).toContain("includeDerivedPredictionEvidence");
     expect(snapshotBlock).toContain("snapshot.generationForcedNumbers");
+    expect(snapshotBlock).toContain("signalConfluenceForcedNumbers: [...signalConfluenceForcedNumbers]");
     expect(snapshotBlock).toContain("snapshot.generationExcludedNumbers");
     expect(snapshotBlock).toContain("snapshot.allExcludedNumbers");
     expect(snapshotBlock).toContain("snapshot.dgaSuggestedMainNumbers");

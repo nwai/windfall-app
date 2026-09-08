@@ -145,4 +145,120 @@ describe("generateCandidates monthly constructive selection bias", () => {
     expect(run.result.candidates).toHaveLength(1);
     expect(run.result.candidates[0].supp).toEqual([3, 4]);
   });
+
+  it("cycles full bucket coverage combinations when the planner is enabled", () => {
+    const trace: string[] = [];
+    const monthlyOptions = createMonthlyBucketOptions(2, [], false);
+    monthlyOptions.buckets.times1 = new Set<number>([1, 2, 3, 4, 5, 6, 7, 8]);
+    const result = withFixedRandom(0, () => (generateCandidates as (...innerArgs: any[]) => ReturnType<typeof generateCandidates>)(
+      28,
+      [],
+      knobs,
+      (msg: string) => trace.push(msg),
+      [],
+      [],
+      false,
+      0,
+      [],
+      [21, 22, 23, 24, 25, 26],
+      [],
+      undefined,
+      0,
+      0,
+      1,
+      0,
+      [],
+      0,
+      0,
+      0,
+      0,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        ...monthlyOptions,
+        bucketCoveragePlanner: { enabled: true },
+      },
+      1,
+    ));
+
+    expect(result.candidates).toHaveLength(28);
+    const pairSignatures = new Set(result.candidates.map((candidate) => candidate.supp.join(",")));
+    expect(pairSignatures.size).toBe(28);
+    expect(trace.join("\n")).toContain("Bucket Coverage Planner Full coverage");
+    expect(trace.join("\n")).toContain("accepted coverage signature");
+  });
+
+  it("keeps undrawn requirements random when they are ignored by the coverage planner", () => {
+    const trace: string[] = [];
+    const monthlyOptions = createMonthlyBucketOptions(2, [], false);
+    monthlyOptions.constraints.undrawn = 4;
+    monthlyOptions.buckets.undrawn = new Set<number>([9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
+    monthlyOptions.buckets.times1 = new Set<number>([1, 2, 3, 4, 5, 6, 7, 8]);
+    const result = withFixedRandom(0, () => (generateCandidates as (...innerArgs: any[]) => ReturnType<typeof generateCandidates>)(
+      28,
+      [],
+      knobs,
+      (msg: string) => trace.push(msg),
+      [],
+      [],
+      false,
+      0,
+      [],
+      [31, 32],
+      [],
+      undefined,
+      0,
+      0,
+      1,
+      0,
+      [],
+      0,
+      0,
+      0,
+      0,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        ...monthlyOptions,
+        bucketCoveragePlanner: { enabled: true, ignoredBucketKeys: ["undrawn"] },
+      },
+      1,
+    ));
+
+    expect(result.candidates).toHaveLength(28);
+    const pairSignatures = new Set(result.candidates.map((candidate) => candidate.supp.join(",")));
+    expect(pairSignatures.size).toBe(28);
+    expect(trace.join("\n")).toContain("0x req 4, random fill");
+    expect(trace.join("\n")).toContain("Bucket Coverage Planner Full coverage");
+  });
 });

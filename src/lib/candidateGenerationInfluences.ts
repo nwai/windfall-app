@@ -33,6 +33,8 @@ export interface GenerationProvenanceInput {
   tricky: boolean;
   ratios: string[];
   minRecentMatches: number;
+  maxLastDrawMatchesEnabled?: boolean;
+  maxLastDrawMatchesValue?: number;
   recentMatchBias: number;
   repeatWindowSizeW: number;
   minFromRecentUnionM: number;
@@ -49,6 +51,23 @@ export interface GenerationProvenanceInput {
   decadeBias: string;
   monthlyRepeatBias: string;
 }
+
+const clampOverlapCount = (value: unknown): number => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.max(0, Math.min(8, Math.trunc(numeric))) : 0;
+};
+
+const formatLastDrawOverlap = (input: GenerationProvenanceInput): string => {
+  const min = clampOverlapCount(input.minRecentMatches);
+  const maxEnabled = input.maxLastDrawMatchesEnabled === true;
+  const max = clampOverlapCount(input.maxLastDrawMatchesValue);
+  if (min === 0 && !maxEnabled) return "off";
+  if (maxEnabled && min > 0 && max === min) return `exactly ${min}`;
+  if (maxEnabled && min === 0) return `at most ${max}`;
+  if (!maxEnabled && min > 0) return `at least ${min}`;
+  if (maxEnabled && min > max) return `conflicting ${min}-${max}`;
+  return `between ${min}-${max}`;
+};
 
 const DEFAULT_SUM_FILTER: SumFilterConfig = {
   enabled: false,
@@ -146,7 +165,7 @@ export function buildGenerationProvenance(input: GenerationProvenanceInput): str
     `Jaccard=${input.jaccard}`,
     `Tricky=${input.tricky ? "on" : "off"}`,
     `Ratios=${input.ratios.length ? input.ratios.join(" ") : "none"}`,
-    `RecMin=${input.minRecentMatches}`,
+    `LastDrawOverlap=${formatLastDrawOverlap(input)}`,
     `RecBias=${input.recentMatchBias}`,
     `Repeat W=${input.repeatWindowSizeW} M=${input.minFromRecentUnionM}`,
     `GPWF=${input.gpwf ? "on" : "off"}`,

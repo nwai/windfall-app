@@ -1,0 +1,345 @@
+.signal-confluence-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.signal-confluence-panel__intro {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: var(--wf-card-radius, 14px);
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.signal-confluence-panel__kicker {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.08);
+  color: #334155;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.signal-confluence-panel__intro p {
+  margin: 8px 0 0;
+  max-width: 820px;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.signal-confluence-panel__summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.signal-confluence-panel__metric {
+  padding: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 12px;
+  background: rgba(248, 250, 252, 0.92);
+}
+
+.signal-confluence-panel__metric-label {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.signal-confluence-panel__metric-value {
+  margin-top: 4px;
+  color: #0f172a;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.signal-confluence-panel__metric-detail {
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.signal-confluence-panel__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.signal-confluence-panel__action-note {
+  flex: 1 1 320px;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.signal-confluence-panel__control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.signal-confluence-panel__select {
+  min-height: 32px;
+  border: 1px solid rgba(15, 23, 42, 0.18);
+  border-radius: 9px;
+  background: #ffffff;
+  color: #0f172a;
+  font: inherit;
+  padding: 0 28px 0 10px;
+}
+
+.signal-confluence-panel__table-scroll {
+  max-height: 620px;
+  overflow: auto;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.signal-confluence-panel__table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12px;
+}
+
+.signal-confluence-panel__table thead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.signal-confluence-panel__table th {
+  padding: 10px 8px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 800;
+  text-align: left;
+  text-transform: uppercase;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.12);
+}
+
+.signal-confluence-panel__sort-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  min-height: 26px;
+  margin: -4px -6px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 800;
+  text-align: left;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+.signal-confluence-panel__sort-button:hover,
+.signal-confluence-panel__sort-button:focus-visible {
+  background: rgba(15, 23, 42, 0.08);
+  outline: none;
+}
+
+.signal-confluence-panel__table td {
+  padding: 9px 8px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  vertical-align: top;
+}
+
+.signal-confluence-panel__row--excluded {
+  background: rgba(148, 163, 184, 0.08);
+  color: #64748b;
+}
+
+.signal-confluence-panel__number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 32px;
+  border: 1px solid rgba(15, 23, 42, 0.16);
+  border-radius: 999px;
+  background: #ffffff;
+  color: #0f172a;
+  font-weight: 800;
+}
+
+.signal-confluence-panel__number-button {
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+  transition: transform 140ms ease, border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
+}
+
+.signal-confluence-panel__number-button:hover:not(:disabled),
+.signal-confluence-panel__number-button:focus-visible {
+  border-color: rgba(37, 99, 235, 0.5);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  outline: none;
+}
+
+.signal-confluence-panel__number-button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.signal-confluence-panel__number-button--active {
+  border-color: rgba(16, 185, 129, 0.8);
+  background: #ecfdf5;
+  color: #047857;
+  box-shadow: inset 0 0 0 1px rgba(16, 185, 129, 0.24);
+}
+
+.signal-confluence-panel__number-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.signal-confluence-panel__state-stack,
+.signal-confluence-panel__chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.signal-confluence-panel__state,
+.signal-confluence-panel__chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  max-width: 100%;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.signal-confluence-panel__state--forced,
+.signal-confluence-panel__state--selected {
+  background: rgba(16, 185, 129, 0.14);
+  color: #047857;
+}
+
+.signal-confluence-panel__state--confluence {
+  background: rgba(37, 99, 235, 0.12);
+  color: #1d4ed8;
+}
+
+.signal-confluence-panel__state--excluded,
+.signal-confluence-panel__chip--caution {
+  background: rgba(244, 63, 94, 0.12);
+  color: #be123c;
+}
+
+.signal-confluence-panel__state--bucket {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.42);
+}
+
+.signal-confluence-panel__chip {
+  background: rgba(37, 99, 235, 0.1);
+  color: #1d4ed8;
+}
+
+.signal-confluence-panel__chip--latest-neighbour {
+  background: rgba(236, 72, 153, 0.13);
+  color: #be185d;
+}
+
+.signal-confluence-panel__chip--weekday-neighbour {
+  background: rgba(79, 70, 229, 0.12);
+  color: #3730a3;
+}
+
+.signal-confluence-panel__chip--drought {
+  background: rgba(245, 158, 11, 0.16);
+  color: #92400e;
+}
+
+.signal-confluence-panel__chip--shared-selection {
+  background: rgba(20, 184, 166, 0.14);
+  color: #0f766e;
+}
+
+.signal-confluence-panel__chip--active-frequency {
+  background: rgba(99, 102, 241, 0.12);
+  color: #4338ca;
+}
+
+.signal-confluence-panel__chip--terminal-bucket {
+  background: rgba(217, 70, 239, 0.12);
+  color: #a21caf;
+}
+
+.signal-confluence-panel__chip--temperature {
+  background: rgba(239, 68, 68, 0.12);
+  color: #b91c1c;
+}
+
+.signal-confluence-panel__chip--scoring-numbers {
+  background: rgba(2, 132, 199, 0.12);
+  color: #0369a1;
+}
+
+.signal-confluence-panel__chip--selection-insights {
+  background: rgba(34, 197, 94, 0.13);
+  color: #15803d;
+}
+
+.signal-confluence-panel__chip--next-draw-evidence {
+  background: rgba(15, 23, 42, 0.1);
+  color: #334155;
+}
+
+.signal-confluence-panel__empty {
+  padding: 20px;
+  text-align: center;
+  color: #64748b;
+}
+
+.signal-confluence-panel__footnote {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+@media (max-width: 900px) {
+  .signal-confluence-panel__intro {
+    display: grid;
+  }
+
+  .signal-confluence-panel__summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .signal-confluence-panel__summary {
+    grid-template-columns: 1fr;
+  }
+}

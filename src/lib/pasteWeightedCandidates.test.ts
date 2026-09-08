@@ -75,6 +75,26 @@ describe("parsePastedCandidateNumbers", () => {
       duplicateNumbers: [4],
       outOfRangeNumbers: [46],
       expectedSixNumbers: false,
+      expectedCandidateNumbers: false,
+    });
+  });
+
+  it("accepts eight-number generated-candidate rows as full paste evidence", () => {
+    const parsed = parsePastedCandidateNumbers([
+      "1,2,3,4,5,6,22,28",
+      "1,3,5,7,9,11,13,15",
+    ].join("\n"));
+
+    expect(parsed.acceptedRows).toBe(2);
+    expect(parsed.totalCountedNumbers).toBe(16);
+    expect(parsed.counts.find((item) => item.number === 22)).toMatchObject({ count: 1 });
+    expect(parsed.counts.find((item) => item.number === 28)).toMatchObject({ count: 1 });
+    expect(parsed.rows[0]).toMatchObject({
+      numbers: [1, 2, 3, 4, 5, 6, 22, 28],
+      mainNumbers: [1, 2, 3, 4, 5, 6],
+      supplementaryNumbers: [22, 28],
+      expectedSixNumbers: false,
+      expectedCandidateNumbers: true,
     });
   });
 
@@ -97,18 +117,20 @@ describe("parsePastedCandidateNumbers", () => {
     expect(parsed.counts.some((item) => item.number === 2)).toBe(false);
   });
 
-  it("derives odd/even ratio evidence from exact six-number pasted main rows", () => {
+  it("derives odd/even ratio evidence from six-main rows and first-six values in eight-number rows", () => {
     const parsed = parsePastedCandidateNumbers([
       "1,3,5,2,4,6",
       "1,3,5,7,2,4",
       "2,4,6,8,10,12",
+      "1,3,5,7,9,11,2,4",
       "1,2,3,4,5",
     ].join("\n"));
 
     expect(parsed.oddEvenRatios).toEqual([
-      { ratio: "0:6", count: 1, percent: 33 },
-      { ratio: "3:3", count: 1, percent: 33 },
-      { ratio: "4:2", count: 1, percent: 33 },
+      { ratio: "0:6", count: 1, percent: 25 },
+      { ratio: "3:3", count: 1, percent: 25 },
+      { ratio: "4:2", count: 1, percent: 25 },
+      { ratio: "6:0", count: 1, percent: 25 },
     ]);
   });
 });

@@ -17,9 +17,12 @@ describe("App truthfulness provenance wiring", () => {
     expect(appSource).toContain('data-testid="draw-history-provenance"');
     expect(appSource).toContain("Data provenance:");
     expect(appSource).toContain("Active window:");
-    expect(appSource).toContain("<ChurnPredictor dataset={churnDataset} totalDraws={activeWindowProvenance.realDraws}");
-    expect(appSource).toContain("<ReturnPredictor dataset={churnDataset} totalDraws={activeWindowProvenance.realDraws}");
-    expect(appSource).toContain("Advanced Survival Analysis & Churn/Return Diagnostic Models");
+    expect(appSource).not.toContain("<ChurnPredictor");
+    expect(appSource).not.toContain("<ReturnPredictor");
+    expect(appSource).not.toContain("<ConsensusPanel");
+    expect(appSource).not.toContain("<SurvivalCoxPanel");
+    expect(appSource).toContain("Advanced Survival &amp; State Diagnostics");
+    expect(appSource).toContain("did not have comparable temporally labelled out-of-sample evidence");
     expect(appSource).not.toContain("Advanced Survival Analysis & Churn/Return Prediction Models");
   });
 });

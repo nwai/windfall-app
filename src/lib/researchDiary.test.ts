@@ -46,6 +46,16 @@ describe("researchDiary", () => {
     expect(context.monthDrawCount).toBe(14);
   });
 
+  it("does not skip an unrecorded scheduled draw just because the wall clock moved past it", () => {
+    const context = computeResearchDiaryNextDrawContext(
+      [draw("2026-08-26")],
+      { now: "2026-08-31T09:00:00+10:00" },
+    );
+
+    expect(context.nextDrawDate).toBe("2026-08-28");
+    expect(context.weekday).toBe("Friday");
+  });
+
   it("matches only active targeted diary entries for the next draw context", () => {
     const context = computeResearchDiaryNextDrawContext([draw("2026-07-03")], {
       now: "2026-07-06T09:00:00+10:00",

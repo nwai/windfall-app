@@ -23,11 +23,18 @@ export function selectRowsForCandidateExport<TCandidate>(
   return rows.filter((row) => row.matched === true);
 }
 
-export function formatCandidateRowsForPasteWeightedGenerator<TCandidate extends { main: readonly number[] }>(
+const isValidLotteryNumber = (number: number): boolean => (
+  Number.isInteger(number) && number >= 1 && number <= 45
+);
+
+export function formatCandidateRowsForPasteWeightedGenerator<TCandidate extends { main: readonly number[]; supp?: readonly number[] }>(
   rows: readonly GeneratedCandidateViewRow<TCandidate>[],
 ): string {
   return rows
-    .map(({ c }) => c.main.join(","))
+    .map(({ c }) => [...c.main, ...(c.supp ?? [])]
+      .filter(isValidLotteryNumber)
+      .slice(0, 8)
+      .join(","))
     .join("\n");
 }
 

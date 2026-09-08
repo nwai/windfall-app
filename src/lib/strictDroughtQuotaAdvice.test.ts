@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import type { Draw } from "../types";
 import {
+  buildEmpiricalDroughtQuotaAdvice,
+  buildEmpiricalDroughtQuotaShortlist,
   buildStrictDroughtQuotaAdvice,
   buildStrictDroughtQuotaShortlist,
 } from "./strictDroughtQuotaAdvice";
@@ -61,7 +63,35 @@ describe("strict drought quota advice", () => {
     expect(advice.source).toBe("exact-stage");
     expect(advice.sourceLabel).toBe("5D month D3");
     expect(advice.trials).toBeGreaterThanOrEqual(6);
+    expect(advice.recommendedMinCount).toBeLessThanOrEqual(1);
     expect(advice.expectedRandomOneToThreeHitRate).toBeGreaterThan(0);
+    expect(advice.countSummaries.find((row) => row.minCount === 1)?.expectedRandomRate).toBeGreaterThan(0);
     expect(advice.distribution["0"] + advice.distribution["1"] + advice.distribution["2"] + advice.distribution["3"] + advice.distribution["4+"]).toBe(advice.trials);
+  });
+
+  it("builds an empirical drought shortlist and no-lookahead count advice", () => {
+    const history = [
+      ...monthRows(2026, 1, 0),
+      ...monthRows(2026, 2, 3),
+      ...monthRows(2026, 3, 6),
+      ...monthRows(2026, 4, 9),
+      ...monthRows(2026, 5, 12),
+      ...monthRows(2026, 6, 15),
+      ...monthRows(2026, 7, 18),
+    ];
+
+    const shortlist = buildEmpiricalDroughtQuotaShortlist(history, { topK: 6 });
+    const advice = buildEmpiricalDroughtQuotaAdvice(history, {
+      minHistory: 5,
+      topK: 6,
+      currentShortlistSize: shortlist.numbers.length,
+    });
+
+    expect(shortlist.numbers).toHaveLength(6);
+    expect(Object.keys(shortlist.rankMultipliers)).toHaveLength(6);
+    expect(advice.trials).toBeGreaterThan(0);
+    expect(advice.recommendedMinCount).toBeLessThanOrEqual(1);
+    expect(advice.countSummaries.map((row) => row.minCount)).toContain(1);
+    expect(advice.expectedRandomOneToThreeHitRate).toBeGreaterThan(0);
   });
 });

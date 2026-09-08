@@ -48,8 +48,8 @@ const appendTextRows = (current: string, rows: readonly string[]): string => {
 };
 
 const formatKeptPasteWeightedRow = (row: KeptGeneratedCandidateRow): string | null => {
-  const main = row.main.filter((number) => Number.isInteger(number) && number >= 1 && number <= 45);
-  return main.length === 6 ? main.join(",") : null;
+  const numbers = [...row.main, ...row.supp].filter((number) => Number.isInteger(number) && number >= 1 && number <= 45);
+  return numbers.length === 6 || numbers.length === 8 ? numbers.join(",") : null;
 };
 
 const headingStyle: React.CSSProperties = {
@@ -193,8 +193,8 @@ const pastedRowRawStyle: React.CSSProperties = {
 
 const describePastedRowIssues = (row: PastedCandidateRow): string[] => {
   const issues: string[] = [];
-  if (row.numbers.length !== 6) {
-    issues.push(`${row.numbers.length} unique valid number${row.numbers.length === 1 ? "" : "s"}; expected exactly 6`);
+  if (!row.expectedCandidateNumbers) {
+    issues.push(`${row.numbers.length} unique valid number${row.numbers.length === 1 ? "" : "s"}; expected exactly 6 mains or 8 mains + supps`);
   }
   if (row.duplicateNumbers.length > 0) {
     issues.push(`duplicate value${row.duplicateNumbers.length === 1 ? "" : "s"} counted once: ${row.duplicateNumbers.join(", ")}`);
@@ -301,7 +301,7 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
   const maxCount = countsForDisplay[0]?.count ?? 0;
   const rowsWithIssues = parsed.rows.filter((row) => (
     row.numbers.length > 0
-    && (!row.expectedSixNumbers || row.duplicateNumbers.length > 0 || row.outOfRangeNumbers.length > 0)
+    && (!row.expectedCandidateNumbers || row.duplicateNumbers.length > 0 || row.outOfRangeNumbers.length > 0)
   ));
   const needsOddEvenSelection = oddEvenEnabled && activeSelectedOddEvenRatios.length === 0;
   const needsStageIdmState = stageIdmEnabled && !stageIdmAvailable;
@@ -456,7 +456,7 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
       <div style={headingStyle}>
         <div>
           <div style={mutedStyle}>
-            Paste candidate rows, count valid numbers, then generate six-number candidates weighted by those empirical counts.
+            Paste six-number rows or eight-number candidate rows. All valid values count for weights; generation still creates six-main candidates.
           </div>
         </div>
         <label style={{ fontSize: 12, fontWeight: 700, color: "#334155" }}>
@@ -515,7 +515,7 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
       {rowsWithIssues.length > 0 && (
         <div style={{ ...mutedStyle, color: "#92400e", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 6, padding: 8, display: "grid", gap: 8 }}>
           <div>
-            {rowsWithIssues.length === 1 ? "1 row needs attention." : `${rowsWithIssues.length} rows need attention.`} Duplicate values are counted once per row; rows with fewer or more than six valid numbers are still used for weighting but marked as imperfect input.
+            {rowsWithIssues.length === 1 ? "1 row needs attention." : `${rowsWithIssues.length} rows need attention.`} Duplicate values are counted once per row; rows with a count other than six or eight valid numbers are still used for weighting but marked as imperfect input.
           </div>
           <div style={{ fontWeight: 800, fontSize: 12, color: "#78350f" }}>Rows needing review</div>
           <div style={rowIssueListStyle} aria-label="Pasted rows needing attention">
@@ -528,7 +528,7 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
               >
                 <div style={pastedRowIssueMetaStyle}>
                   <span>Line {row.lineNumber}</span>
-                  <span>{row.numbers.length}/6 unique valid</span>
+                  <span>{row.numbers.length} unique valid</span>
                 </div>
                 <div style={pastedRowRawStyle}>{row.raw}</div>
                 <div style={{ fontSize: 11, lineHeight: 1.35 }}>
@@ -697,7 +697,7 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
               />
               Odd/even mains
             </label>
-            <div style={mutedStyle}>Mains only. Ratios come from exact six-number pasted rows.</div>
+            <div style={mutedStyle}>Mains only. Six-number rows use all numbers; eight-number rows use the first six numbers as mains.</div>
             {oddEvenRatioOptions.length > 0 ? (
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                 {oddEvenRatioOptions.map((option) => (
@@ -723,7 +723,7 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
                 ))}
               </div>
             ) : (
-              <div style={mutedStyle}>Paste exact six-number rows to reveal mains-only ratios.</div>
+              <div style={mutedStyle}>Paste valid six- or eight-number rows to reveal mains-only ratios.</div>
             )}
           </div>
           <div style={{ ...constraintControlStyle, gridColumn: "1 / -1" }}>

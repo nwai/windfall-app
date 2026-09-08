@@ -41,7 +41,7 @@ function withSeededRandom<T>(seed: number, run: () => T): T {
   }
 }
 
-describe("generateCandidates strict drought quota", () => {
+describe("generateCandidates drought quotas", () => {
   it("constructively seeds the requested minimum from the eligible strict drought shortlist", () => {
     const trace: string[] = [];
     const result = withSeededRandom(20260812, () =>
@@ -114,5 +114,80 @@ describe("generateCandidates strict drought quota", () => {
     expect(result.rejectionStats.strictDroughtQuota).toBe(0);
     expect(trace.join(" ")).toContain("effective minimum 2");
     expect(trace.join(" ")).toContain("Strict drought quota results");
+  });
+
+  it("constructively seeds the requested minimum from the eligible empirical drought shortlist", () => {
+    const trace: string[] = [];
+    const result = withSeededRandom(20260813, () =>
+      generateCandidates(
+        6,
+        [],
+        knobs,
+        (message) => trace.push(message),
+        [4],
+        [],
+        false,
+        0,
+        [],
+        [],
+        [],
+        undefined,
+        0,
+        0,
+        1,
+        0,
+        [],
+        0,
+        0,
+        0,
+        0,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        200,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        {
+          enabled: true,
+          minCount: 2,
+          shortlist: [4, 5, 6],
+          rankMultipliers: { 4: 2, 5: 1.7, 6: 1.4 },
+          sourceLabel: "test",
+        },
+      )
+    );
+
+    expect(result.candidates).toHaveLength(6);
+    for (const candidate of result.candidates) {
+      const numbers = [...candidate.main, ...candidate.supp];
+      expect(numbers.filter((number) => number === 5 || number === 6)).toHaveLength(2);
+      expect(numbers).not.toContain(4);
+    }
+    expect(result.rejectionStats.empiricalDroughtQuota).toBe(0);
+    expect(trace.join(" ")).toContain("Empirical drought quota active");
+    expect(trace.join(" ")).toContain("Empirical drought quota results");
   });
 });

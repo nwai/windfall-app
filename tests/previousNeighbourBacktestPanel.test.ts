@@ -27,6 +27,8 @@ describe("PreviousNeighbourBacktestPanel", () => {
 
     expect(html).toContain("Previous Draw ±1/±2 Directional Pattern Lab");
     expect(html).toContain("Live hand-off read + latest ±1/±2 targets");
+    expect(html).toContain("No repeated fingerprints in this WFMQYH window");
+    expect(html).toContain("Try a larger WFMQYH window for recurrence evidence");
     expect(html).toContain("hit-side wins / miss-side wins / ties");
     expect(html).toContain("Possible latest-draw ±1/±2 numbers");
     expect(html).toContain("All targets from 2026-01-12");

@@ -45,7 +45,6 @@ describe("app-wide user exclusion lock wiring", () => {
       "setHotColdForcedNumbers((current) => pruneSelectionUnavailableNumbers(current));",
       "setDroughtBreakSelectedNumbers((current) => pruneSelectionUnavailableNumbers(current, MAX_DROUGHT_BREAK_FORCED_NUMBERS));",
       "setUserSelectedNumbers((current) => pruneSelectionUnavailableNumbers(current));",
-      "setManualSimSelected((current) => normalizeManualPrizeCheckNumbers(current, selectionUnavailableNumbers));",
       "setSelectedCarryOverBoostNumbers((current) => pruneSelectionUnavailableNumbers(current));",
     ];
 
@@ -54,6 +53,8 @@ describe("app-wide user exclusion lock wiring", () => {
     pruneTargets.forEach((expectedSource) => {
       expect(APP_SOURCE).toContain(expectedSource);
     });
+    expect(APP_SOURCE).toContain("setManualSimSelected((current) => keepExistingNumberListWhenEqual(");
+    expect(APP_SOURCE).toContain("normalizeManualPrizeCheckNumbers(current, selectionUnavailableNumbers)");
     expect(APP_SOURCE).toContain("() => removeUserExcludedNumbers(normalizeDgaSelectedNumbers(userSelectedNumbers), selectionUnavailableNumbers)");
   });
 

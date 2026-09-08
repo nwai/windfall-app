@@ -1,6 +1,7 @@
 export interface MainConstraintSelection<BucketKey extends string = string> {
   bucketKey: BucketKey;
   enabled: boolean;
+  mode?: "off" | "atLeast" | "exactly" | "atMost";
   count: number;
   boost?: number;
   singleDigitBoost?: number;
@@ -16,17 +17,18 @@ export interface DerivedMainConstraintExclusions<BucketKey extends string = stri
 }
 
 /**
- * When the enabled main-number bucket maxima add up to more than the available
- * main slots, buckets that are off or set to zero can be safely treated as
- * exclusions to tighten generation — unless a bucket still has an explicit
- * generation boost, in which case it must remain eligible for sampling.
+ * When the enabled at-most bucket caps add up to more than the available main
+ * slots, buckets that are off or capped at zero can be safely treated as
+ * exclusions to tighten generation. At-least and exact quota rows are enforced
+ * by the generator and are intentionally not treated as maxima here.
  */
 export function deriveMainConstraintExclusions<BucketKey extends string>(
   rows: ReadonlyArray<MainConstraintSelection<BucketKey>>,
   bucketMap: Record<BucketKey, readonly number[]>,
   requiredMainCount: number = 6
 ): DerivedMainConstraintExclusions<BucketKey> {
-  const activeRows = rows.filter((row) => row.enabled);
+  const isAtMostRow = (row: MainConstraintSelection<BucketKey>) => row.enabled && (row.mode ?? "atMost") === "atMost";
+  const activeRows = rows.filter(isAtMostRow);
   const totalSelectedMax = activeRows.reduce((sum, row) => sum + Math.max(0, row.count), 0);
   const hasPositiveActiveBucket = activeRows.some((row) => row.count > 0);
   const shouldApply = hasPositiveActiveBucket && totalSelectedMax > requiredMainCount;
@@ -35,14 +37,14 @@ export function deriveMainConstraintExclusions<BucketKey extends string>(
     return {
       shouldApply: false,
       totalSelectedMax,
-      activeBucketKeys: rows.filter((row) => row.enabled && row.count > 0).map((row) => row.bucketKey),
+      activeBucketKeys: rows.filter((row) => isAtMostRow(row) && row.count > 0).map((row) => row.bucketKey),
       excludedBucketKeys: [],
       excludedNumbers: [],
     };
   }
 
   const activeBucketKeys = rows
-    .filter((row) => row.enabled && row.count > 0)
+    .filter((row) => isAtMostRow(row) && row.count > 0)
     .map((row) => row.bucketKey);
   const excludedBucketKeys = rows
     .filter((row) => {
@@ -51,7 +53,7 @@ export function deriveMainConstraintExclusions<BucketKey extends string>(
         row.singleDigitBoost ?? 0,
         row.twoDigitBoost ?? 0,
       ) > 0;
-      return (!row.enabled || row.count === 0) && !hasPositiveBoost;
+      return (!row.enabled || ((row.mode ?? "atMost") === "atMost" && row.count === 0)) && !hasPositiveBoost;
     })
     .map((row) => row.bucketKey);
   const excludedNumbers = Array.from(

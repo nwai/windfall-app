@@ -28,6 +28,11 @@ describe("Candidate Generation Influences constraints layout", () => {
     );
 
     expect(constraintsBlock).toContain("Ending Digit Limits");
+    expect(constraintsBlock).toContain("Choose Off, At least, Exactly, or At most for each terminal digit");
+    expect(constraintsBlock).toContain("<span>Mode</span>");
+    expect(constraintsBlock).toContain("<span>Count</span>");
+    expect(constraintsBlock).toContain("1-digit boost");
+    expect(constraintsBlock).toContain("2-digit boost");
     expect(constraintsBlock).toContain("Decade Bias");
     expect(constraintsBlock).toContain("Shape / Bucket Quotas");
     expect(constraintsBlock).toContain("Monthly Timing Bias");

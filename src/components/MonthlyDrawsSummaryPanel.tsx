@@ -11,6 +11,7 @@ import {
   numbersFromMonthlySelections,
   projectMonthlyBucketCounts,
   pruneMonthlySelections,
+  resolveMonthlyStageDrawContext,
   sampleMonthlyNumbers,
   type AvgBucketEntry,
   type MonthlyBucketKey,
@@ -28,6 +29,19 @@ import {
   formatUserExclusionReminder,
   normalizeUserExclusionLocks,
 } from "../lib/userExclusionLocks";
+import {
+  analyzeMonthlyBucketMixCombinatorics,
+  formatBigInt,
+  formatBucketMixCounts,
+  getLatestDrawBucketOriginMix,
+  type MonthlyBucketMixCombinatoricsRow,
+  type MonthlyBucketMixCounts,
+} from "../lib/monthlyBucketMixCombinatorics";
+import {
+  analyzeMonthlyBucketMixReplay,
+  type BucketMixReplayRow,
+  type BucketMixReplayScope,
+} from "../lib/monthlyBucketMixReplay";
 import type { Sde1Hc3ContextAdvice } from "../lib/sde1Hc3ContextAdvice";
 
 export type {
@@ -59,6 +73,7 @@ interface MonthlyDrawsSummaryPanelProps {
 
 type DrawLimit = number | "all";
 type SelectedByBucket = MonthlyBucketSelections;
+type BucketMixSortDirection = "desc" | "asc";
 
 const emptySelections = (): SelectedByBucket => ({
   undrawn: [],
@@ -152,6 +167,7 @@ const stageMatchPlaybookSignature = (rows: readonly StageMatchAcceptancePlaybook
       .map((row) => [
         row.targetUndrawnCount,
         row.historicalMonthLabel,
+        row.variantRank,
         row.scoreAfter,
         numberListSignature(row.acceptanceNeedsBucketCounts),
         numberListSignature(row.projectedDistribution),
@@ -161,7 +177,7 @@ const stageMatchPlaybookSignature = (rows: readonly StageMatchAcceptancePlaybook
 );
 
 const stageMatchRowKey = (row: StageMatchAcceptancePlaybookRow): string => (
-  `${row.targetUndrawnCount}-${row.historicalMonthLabel}`
+  `${row.targetUndrawnCount}-${row.historicalMonthLabel}-${row.variantRank}`
 );
 
 const bucketMeta: { key: MonthlyBucketKey; times: number; label: string }[] = MONTHLY_BUCKET_KEYS.map((key, index) => ({
@@ -302,6 +318,56 @@ const formatSigned = (value: number): string => (value > 0 ? `+${value}` : Strin
 const formatDecimal = (value: number): string => (
   Number.isInteger(value) ? String(value) : value.toFixed(1)
 );
+
+const formatSharePercent = (share: number): string => {
+  if (!Number.isFinite(share) || share <= 0) return "0%";
+  const percent = share * 100;
+  if (percent < 0.01) return "<0.01%";
+  if (percent < 1) return `${percent.toFixed(2)}%`;
+  return `${percent.toFixed(1)}%`;
+};
+
+const formatSignedPercentPoints = (value: number): string => {
+  if (!Number.isFinite(value) || value === 0) return "0.0pp";
+  const points = value * 100;
+  return `${points > 0 ? "+" : ""}${points.toFixed(1)}pp`;
+};
+
+const formatReplayPValue = (value: number | null): string => {
+  if (value === null || !Number.isFinite(value)) return "n/a";
+  if (value < 0.001) return "<0.001";
+  return value.toFixed(3);
+};
+
+const replayConfidenceLabel = (row: BucketMixReplayRow): string => {
+  if (row.confidence === "fixed") return "fixed";
+  if (row.confidence === "thin") return "thin";
+  if (row.confidence === "watch") return "watch";
+  return "usable";
+};
+
+const replayConfidenceColor = (row: BucketMixReplayRow): string => {
+  if (row.confidence === "fixed") return "#64748b";
+  if (row.confidence === "thin") return "#92400e";
+  if (row.confidence === "watch") return "#155a8a";
+  return "#166534";
+};
+
+const compareBigInt = (left: bigint, right: bigint): number => (
+  left === right ? 0 : left > right ? 1 : -1
+);
+
+const bucketMixRowMatchesCounts = (
+  row: MonthlyBucketMixCombinatoricsRow,
+  counts: Record<MonthlyBucketKey, number> | null | undefined,
+): boolean => (
+  !!counts && MONTHLY_BUCKET_KEYS.every((key) => row.counts[key] === counts[key])
+);
+
+const formatCompactBucketMixCounts = (counts: Record<MonthlyBucketKey, number>): string => {
+  const activeKeys = MONTHLY_BUCKET_KEYS.filter((key) => counts[key] > 0);
+  return formatBucketMixCounts(counts as MonthlyBucketMixCounts, activeKeys.length ? activeKeys : MONTHLY_BUCKET_KEYS);
+};
 
 const StatCard: React.FC<{ label: string; value: string; detail?: string; tone?: "neutral" | "good" | "warn" | "bad" }> = ({
   label,
@@ -544,6 +610,8 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
   const [selectedNumberBiasEnabled, setSelectedNumberBiasEnabled] = useState<boolean>(false);
   const [stageMatchApplyMessage, setStageMatchApplyMessage] = useState<string>("");
   const [stageMatchAppliedKey, setStageMatchAppliedKey] = useState<string>("");
+  const [bucketMixSortDirection, setBucketMixSortDirection] = useState<BucketMixSortDirection>("desc");
+  const [bucketMixReplayScope, setBucketMixReplayScope] = useState<BucketMixReplayScope>("same-month-length");
   const userExcludedKey = normalizeUserExclusionLocks(excludedNumbers).join(",");
   const userExcludedNumbers = useMemo(
     () => (userExcludedKey ? userExcludedKey.split(",").map(Number) : []),
@@ -586,6 +654,12 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
     expectedDrawCountOverride: stageExpectedDrawCount,
     today,
   }), [averageDrawCountFilter, history, stageExpectedDrawCount, today]);
+  const stageDrawContext = useMemo(() => resolveMonthlyStageDrawContext(history, {
+    drawLimitPerMonth: "all",
+    averageDrawCountFilter,
+    expectedDrawCountOverride: stageExpectedDrawCount,
+    today,
+  }), [averageDrawCountFilter, history, stageExpectedDrawCount, today]);
   const stageMatchPlaybookSignatureValue = useMemo(
     () => stageMatchPlaybook
       ? [
@@ -617,6 +691,76 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
   const activeBucketSetsSignature = useMemo(() => bucketSetsSignature(activeBucketSets), [activeBucketSets]);
   const activeBucketLabelsSignature = useMemo(() => bucketLabelsSignature(activeBucketLabels), [activeBucketLabels]);
   const avgBucketPayload = summary.eligibleRows.length ? summary.bucketAverages : [];
+  const bucketMixCombinatorics = useMemo(() => (
+    analyzeMonthlyBucketMixCombinatorics(activeBucketSets, {
+      acceptanceNeeds: constraints,
+      stageMatchRows: stageMatchPlaybook?.rows ?? null,
+    })
+  ), [activeBucketSets, activeBucketSetsSignature, constraints, stageMatchPlaybook]);
+  const latestDrawOriginMix = useMemo(() => getLatestDrawBucketOriginMix(history), [history]);
+  const sortedBucketMixRows = useMemo(() => {
+    const direction = bucketMixSortDirection === "desc" ? -1 : 1;
+    return [...bucketMixCombinatorics.rows].sort((left, right) => {
+      const combinationCompare = compareBigInt(left.actualCombinations, right.actualCombinations);
+      if (combinationCompare !== 0) return combinationCompare * direction;
+      return MONTHLY_BUCKET_KEYS.reduce((result, key) => (
+        result !== 0 ? result : right.counts[key] - left.counts[key]
+      ), 0);
+    });
+  }, [bucketMixCombinatorics.rows, bucketMixSortDirection]);
+  const largestBucketMix = useMemo(() => (
+    [...bucketMixCombinatorics.rows].sort((left, right) => compareBigInt(right.actualCombinations, left.actualCombinations))[0] ?? null
+  ), [bucketMixCombinatorics.rows]);
+  const bucketMixReplayTargetDrawCount = stageIdealDrawState?.expectedDrawCount
+    ?? stageMatchPlaybook?.expectedDrawCount
+    ?? stageDrawContext?.expectedDrawCount
+    ?? (typeof stageExpectedDrawCount === "number" ? stageExpectedDrawCount : null);
+  const bucketMixReplayRequestedScope: BucketMixReplayScope = bucketMixReplayScope === "same-month-length" && bucketMixReplayTargetDrawCount
+    ? "same-month-length"
+    : "all-month-lengths";
+  const bucketMixReplayScopeFallbackMessage = bucketMixReplayScope === "same-month-length" && !bucketMixReplayTargetDrawCount
+    ? "Same-month-length replay needs a resolved planning-month draw count, so this view is temporarily using all month lengths."
+    : "";
+  const bucketMixReplayPrimary = useMemo(() => (
+    analyzeMonthlyBucketMixReplay(history, {
+      scope: bucketMixReplayRequestedScope,
+      targetMonthLabel: summary.effectiveMonthLabel,
+      targetMonthDrawCount: bucketMixReplayTargetDrawCount,
+    })
+  ), [
+    bucketMixReplayRequestedScope,
+    bucketMixReplayTargetDrawCount,
+    history,
+    summary.effectiveMonthLabel,
+  ]);
+  const bucketMixReplayNoBaselineFallback = bucketMixReplayRequestedScope === "same-month-length" && bucketMixReplayPrimary.rows.length === 0;
+  const bucketMixReplayFallback = useMemo(() => (
+    bucketMixReplayNoBaselineFallback
+      ? analyzeMonthlyBucketMixReplay(history, {
+        scope: "all-month-lengths",
+        targetMonthLabel: summary.effectiveMonthLabel,
+        targetMonthDrawCount: bucketMixReplayTargetDrawCount,
+      })
+      : null
+  ), [
+    bucketMixReplayNoBaselineFallback,
+    bucketMixReplayTargetDrawCount,
+    history,
+    summary.effectiveMonthLabel,
+  ]);
+  const bucketMixReplay = bucketMixReplayFallback ?? bucketMixReplayPrimary;
+  const bucketMixReplayNoBaselineMessage = bucketMixReplayNoBaselineFallback && bucketMixReplayTargetDrawCount
+    ? `No ${bucketMixReplayTargetDrawCount}D baseline months are available, so this view is temporarily using all month lengths.`
+    : "";
+  const bestReplayRow = useMemo(() => (
+    bucketMixReplay.rows
+      .filter((row) => !row.fixedStructural && row.trials >= 3)
+      .sort((left, right) => (
+        right.liftTop3 - left.liftTop3 ||
+        right.trials - left.trials ||
+        left.drawOrdinal - right.drawOrdinal
+      ))[0] ?? null
+  ), [bucketMixReplay.rows]);
   const avgBucketPayloadSignature = useMemo(() => avgBucketsSignature(avgBucketPayload), [avgBucketPayload]);
   const idealDrawStatePayload = useMemo<MonthlyIdealDrawState | null>(() => {
     if (!summary.idealDraw || !summary.eligibleRows.length) return null;
@@ -797,7 +941,7 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
     setSimulateResult(null);
     setStageMatchAppliedKey(stageMatchRowKey(row));
     setStageMatchApplyMessage([
-      `Applied ${row.historicalMonthLabel} U${row.targetUndrawnCount} playbook: ${selected}/${requested} bucket placeholders selected.`,
+      `Applied ${row.historicalMonthLabel} U${row.targetUndrawnCount} path #${row.variantRank}: ${selected}/${requested} bucket placeholders selected.`,
       shortBuckets.length ? `Short buckets: ${shortBuckets.join(", ")}.` : "",
       "Swap exact numbers if desired, or turn on Use counts when constructing candidates to enforce the bucket quantities.",
     ].filter(Boolean).join(" "));
@@ -1030,7 +1174,7 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
                 <div>
                   <strong style={{ color: "#0f172a" }}>Stage-Match Acceptance Playbook</strong>
                   <div style={{ color: "#64748b", fontSize: 12, maxWidth: 760, lineHeight: 1.45 }}>
-                    Historical stage paths from prior comparable months. Apply loads editable bucket placeholders into Acceptance Needs; it is a diagnostic shortcut, not a probability claim.
+                    Historical stage paths from prior comparable months. Multiple paths can share the same target undrawn count. Apply loads editable bucket placeholders into Acceptance Needs; it is a diagnostic shortcut, not a probability claim.
                   </div>
                 </div>
                 {stageMatchPlaybook && (
@@ -1043,11 +1187,11 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
               {stageMatchPlaybook ? (
                 <>
                   <div style={{ overflowX: "auto", maxHeight: 290, border: "1px solid #e2e8f0", borderRadius: 8 }}>
-                    <table style={{ width: "100%", minWidth: 960, borderCollapse: "collapse" }}>
+                    <table style={{ width: "100%", minWidth: 1040, borderCollapse: "collapse" }}>
                       <thead style={{ position: "sticky", top: 0, background: "#f8fafc", zIndex: 1 }}>
                         <tr>
                           <th style={thStyle}>Target Undrawn</th>
-                          <th style={thStyle}>Best Historical Stage</th>
+                          <th style={thStyle}>Historical Stage Path</th>
                           <th style={thStyle}>Support</th>
                           <th style={thStyle}>Needs To Draw Now</th>
                           <th style={thStyle}>Projected After Draw</th>
@@ -1067,6 +1211,9 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
                             </td>
                             <td style={{ ...tdStyle, fontWeight: 800 }}>
                               {row.historicalMonthLabel} · D{stageMatchPlaybook.targetStageDrawCount}
+                              <div style={{ marginTop: 2, color: "#64748b", fontSize: 11, fontWeight: 800 }}>
+                                Path #{row.variantRank} of {row.totalUndrawnVariantCount}
+                              </div>
                             </td>
                             <td style={{ ...tdStyle, color: "#475569", fontVariantNumeric: "tabular-nums" }}>
                               {row.supportCount}/{row.totalComparableCount}
@@ -1134,6 +1281,339 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
                   Stage-match playbook unavailable: no prior comparable months reached this planning stage.
                 </div>
               )}
+            </div>
+          </div>
+
+          <div style={sectionStyle}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "flex-start", flexWrap: "wrap", marginBottom: 8 }}>
+              <div>
+                <strong style={{ color: "#0f172a" }}>Bucket Mix Combinatorics Explorer</strong>
+                <div style={{ color: "#64748b", fontSize: 12, maxWidth: 780, lineHeight: 1.45 }}>
+                  Lists every valid 8-number bucket mix available from the active month state. Actual combinations is the exact count of number sets represented by that mix, not a forecast.
+                </div>
+              </div>
+              <div style={{ color: "#475569", fontSize: 12, fontWeight: 800, textAlign: "right", lineHeight: 1.4 }}>
+                <div>{summary.effectiveMonthLabel || "No active month"} · {summary.effectiveMonthDrawCount} counted draw{summary.effectiveMonthDrawCount === 1 ? "" : "s"}</div>
+                <div>{bucketMixCombinatorics.totalMixes} mixes · {formatBigInt(bucketMixCombinatorics.totalCombinations)} candidate sets</div>
+              </div>
+            </div>
+
+            <div style={statGridStyle}>
+              <StatCard
+                label="Largest mix"
+                value={largestBucketMix ? formatSharePercent(largestBucketMix.shareOfAvailable) : "0%"}
+                detail={largestBucketMix ? formatBucketMixCounts(largestBucketMix.counts, bucketMixCombinatorics.visibleBucketKeys) : "No valid mix"}
+              />
+              <StatCard
+                label="Active buckets"
+                value={String(bucketMixCombinatorics.visibleBucketKeys.length)}
+                detail={bucketMixCombinatorics.visibleBucketKeys.map((key) => bucketLabelForTimes(MONTHLY_BUCKET_KEYS.indexOf(key))).join(" · ")}
+              />
+              <StatCard
+                label="Acceptance Needs"
+                value={bucketMixCombinatorics.acceptanceNeedsActive ? "checked" : "off"}
+                detail={bucketMixCombinatorics.acceptanceNeedsActive ? "Rows are labelled, not filtered" : "No active selected bucket minimums"}
+              />
+              <StatCard
+                label="Latest draw origin"
+                value={latestDrawOriginMix ? latestDrawOriginMix.drawDate : "none"}
+                detail={latestDrawOriginMix ? formatBucketMixCounts(latestDrawOriginMix.counts, bucketMixCombinatorics.visibleBucketKeys) : "Enter draw history to compare"}
+              />
+            </div>
+
+            {latestDrawOriginMix?.warnings.length ? (
+              <div style={{ marginTop: 8, color: "#92400e", fontSize: 12, lineHeight: 1.45 }}>
+                {latestDrawOriginMix.warnings.join(" ")}
+              </div>
+            ) : null}
+
+            <div style={{ marginTop: 10, overflowX: "auto", maxHeight: 360, border: "1px solid #e2e8f0", borderRadius: 8 }}>
+              <table
+                data-testid="bucket-mix-combinatorics-table"
+                style={{ width: "100%", minWidth: Math.max(760, 500 + bucketMixCombinatorics.visibleBucketKeys.length * 72), borderCollapse: "collapse" }}
+              >
+                <thead style={{ position: "sticky", top: 0, background: "#f8fafc", zIndex: 1 }}>
+                  <tr>
+                    <th style={thStyle}>Rank</th>
+                    {bucketMixCombinatorics.visibleBucketKeys.map((key) => {
+                      const times = MONTHLY_BUCKET_KEYS.indexOf(key);
+                      return (
+                        <th key={key} style={{ ...thStyle, textAlign: "center" }}>
+                          {bucketLabelForTimes(times)}
+                        </th>
+                      );
+                    })}
+                    <th style={{ ...thStyle, textAlign: "right" }}>
+                      <button
+                        type="button"
+                        className="windfall-table-sort-button"
+                        onClick={() => setBucketMixSortDirection((current) => current === "desc" ? "asc" : "desc")}
+                        aria-label={`Sort Actual combinations ${bucketMixSortDirection === "desc" ? "ascending" : "descending"}`}
+                        title="Sort by exact number-set count"
+                        style={{
+                          color: "#0f172a",
+                          fontWeight: 900,
+                          padding: 0,
+                          cursor: "pointer",
+                          font: "inherit",
+                        }}
+                      >
+                        Actual combinations {bucketMixSortDirection === "desc" ? "↓" : "↑"}
+                      </button>
+                    </th>
+                    <th style={{ ...thStyle, textAlign: "right" }}>Share</th>
+                    <th style={thStyle}>Acceptance</th>
+                    <th style={thStyle}>Stage path</th>
+                    <th style={thStyle}>Latest</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedBucketMixRows.map((row, index) => {
+                    const latestMatch = bucketMixRowMatchesCounts(row, latestDrawOriginMix?.counts);
+                    return (
+                      <tr
+                        key={MONTHLY_BUCKET_KEYS.map((key) => row.counts[key]).join("-")}
+                        style={{ background: latestMatch ? "#fff7ed" : index % 2 === 0 ? "#fff" : "#f8fafc" }}
+                      >
+                        <td style={{ ...tdStyle, fontWeight: 900, fontVariantNumeric: "tabular-nums", color: "#475569" }}>{index + 1}</td>
+                        {bucketMixCombinatorics.visibleBucketKeys.map((key) => {
+                          const times = MONTHLY_BUCKET_KEYS.indexOf(key);
+                          return (
+                            <td key={key} style={{ ...tdStyle, textAlign: "center" }}>
+                              <BucketChip times={times} value={row.counts[key]} muted={row.counts[key] === 0} />
+                            </td>
+                          );
+                        })}
+                        <td style={{ ...tdStyle, textAlign: "right", fontWeight: 900, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+                          {formatBigInt(row.actualCombinations)}
+                        </td>
+                        <td style={{ ...tdStyle, textAlign: "right", fontWeight: 800, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+                          {formatSharePercent(row.shareOfAvailable)}
+                        </td>
+                        <td style={tdStyle}>
+                          {row.meetsAcceptanceNeeds === null ? (
+                            <span style={{ color: "#94a3b8", fontWeight: 800 }}>Off</span>
+                          ) : row.meetsAcceptanceNeeds ? (
+                            <span style={{ color: "#166534", fontWeight: 900 }}>Meets</span>
+                          ) : (
+                            <span
+                              style={{ color: "#92400e", fontWeight: 800 }}
+                              title={row.acceptanceNeedsShortfall.map((key) => bucketLabelForTimes(MONTHLY_BUCKET_KEYS.indexOf(key))).join(", ")}
+                            >
+                              Short {row.acceptanceNeedsShortfall.length}
+                            </span>
+                          )}
+                        </td>
+                        <td style={tdStyle}>
+                          {row.stageMatchSupportCount ? (
+                            <span
+                              style={{ color: "#155a8a", fontWeight: 900 }}
+                              title={row.stageMatchLabels.join(", ")}
+                            >
+                              {row.stageMatchSupportCount} match{row.stageMatchSupportCount === 1 ? "" : "es"}
+                            </span>
+                          ) : (
+                            <span style={{ color: "#94a3b8" }}>none</span>
+                          )}
+                        </td>
+                        <td style={tdStyle}>
+                          {latestMatch ? (
+                            <span style={{
+                              display: "inline-flex",
+                              minHeight: 24,
+                              alignItems: "center",
+                              borderRadius: 999,
+                              padding: "2px 8px",
+                              background: "#ffedd5",
+                              border: "1px solid #fed7aa",
+                              color: "#9a3412",
+                              fontWeight: 900,
+                              whiteSpace: "nowrap",
+                            }}>
+                              Latest draw
+                            </span>
+                          ) : (
+                            <span style={{ color: "#94a3b8" }}>—</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{ marginTop: 8, color: "#64748b", fontSize: 12, lineHeight: 1.45 }}>
+              Larger combination counts mean a bucket mix occupies more of the available 8-number space. They do not prove the next draw will use that mix; use the latest-draw marker and later backtests as evidence, not certainty.
+            </div>
+          </div>
+
+          <div style={sectionStyle}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "flex-start", flexWrap: "wrap", marginBottom: 8 }}>
+              <div>
+                <strong style={{ color: "#0f172a" }}>Bucket Mix Replay / Draw-Ordinal Backtest</strong>
+                <div style={{ color: "#64748b", fontSize: 12, maxWidth: 780, lineHeight: 1.45 }}>
+                  No-lookahead replay of historical draws. Each draw is ranked against the bucket-mix leaderboard that existed before that draw landed.
+                </div>
+              </div>
+              <label style={{ ...controlLabelStyle, alignItems: "flex-end" }}>
+                Replay scope
+                <select
+                  value={bucketMixReplay.scope}
+                  onChange={(event) => setBucketMixReplayScope(event.target.value as BucketMixReplayScope)}
+                  style={{ ...selectStyle, minHeight: 32 }}
+                >
+                  <option value="same-month-length" disabled={!bucketMixReplayTargetDrawCount}>
+                    Same month length{bucketMixReplay.targetMonthDrawCount ? ` (${bucketMixReplay.targetMonthDrawCount}D)` : ""}
+                  </option>
+                  <option value="all-month-lengths">All month lengths</option>
+                </select>
+              </label>
+            </div>
+
+            <div style={statGridStyle}>
+              <StatCard
+                label="Replay baseline"
+                value={`${bucketMixReplay.baselineMonthCount} month${bucketMixReplay.baselineMonthCount === 1 ? "" : "s"}`}
+                detail={`${bucketMixReplay.trialCount} target draw${bucketMixReplay.trialCount === 1 ? "" : "s"} · ${bucketMixReplay.scope === "same-month-length" ? "same-length" : "pooled lengths"}`}
+              />
+              <StatCard
+                label="Latest scored draw"
+                value={bucketMixReplay.latestTrial ? bucketMixReplay.latestTrial.drawDate : "none"}
+                detail={bucketMixReplay.latestTrial
+                  ? `D${bucketMixReplay.latestTrial.drawOrdinal} · rank ${bucketMixReplay.latestTrial.actualRank}/${bucketMixReplay.latestTrial.totalMixes} · ${formatCompactBucketMixCounts(bucketMixReplay.latestTrial.actualCounts)}`
+                  : "No latest valid draw available"}
+              />
+              <StatCard
+                label="Best Top-3 lift"
+                value={bestReplayRow ? formatSignedPercentPoints(bestReplayRow.liftTop3) : "n/a"}
+                detail={bestReplayRow
+                  ? `D${bestReplayRow.drawOrdinal} ${bestReplayRow.monthLengthLabel} · ${formatSharePercent(bestReplayRow.top3HitRate)} observed vs ${formatSharePercent(bestReplayRow.expectedTop3Rate)} expected`
+                  : "No non-fixed replay row yet"}
+              />
+              <StatCard
+                label="Evidence state"
+                value={bucketMixReplay.rows.some((row) => row.confidence === "usable") ? "usable rows" : bucketMixReplay.rows.length ? "thin/watch" : "none"}
+                detail={bucketMixReplay.rows.some((row) => row.fixedStructural) ? "D1 is structurally fixed at Undrawn 8" : "No fixed D1 row in scope"}
+              />
+            </div>
+
+            {bucketMixReplay.warnings.length > 0 && (
+              <div style={{ marginTop: 8, color: "#92400e", fontSize: 12, lineHeight: 1.45 }}>
+                {[bucketMixReplayScopeFallbackMessage, bucketMixReplayNoBaselineMessage, ...bucketMixReplay.warnings].filter(Boolean).join(" ")}
+              </div>
+            )}
+            {!bucketMixReplay.warnings.length && (bucketMixReplayScopeFallbackMessage || bucketMixReplayNoBaselineMessage) && (
+              <div style={{ marginTop: 8, color: "#92400e", fontSize: 12, lineHeight: 1.45 }}>
+                {[bucketMixReplayScopeFallbackMessage, bucketMixReplayNoBaselineMessage].filter(Boolean).join(" ")}
+              </div>
+            )}
+
+            {bucketMixReplay.rows.length ? (
+              <div style={{ marginTop: 10, overflowX: "auto", maxHeight: 380, border: "1px solid #e2e8f0", borderRadius: 8 }}>
+                <table
+                  data-testid="bucket-mix-replay-table"
+                  style={{ width: "100%", minWidth: 1180, borderCollapse: "collapse" }}
+                >
+                  <thead style={{ position: "sticky", top: 0, background: "#f8fafc", zIndex: 1 }}>
+                    <tr>
+                      <th style={thStyle}>Draw</th>
+                      <th style={thStyle}>Length</th>
+                      <th style={{ ...thStyle, textAlign: "right" }}>Trials</th>
+                      <th style={thStyle}>Most common actual mix</th>
+                      <th style={{ ...thStyle, textAlign: "right" }}>Mode share</th>
+                      <th style={{ ...thStyle, textAlign: "right" }}>Top-1 obs / exp</th>
+                      <th style={{ ...thStyle, textAlign: "right" }}>Top-3 obs / exp</th>
+                      <th style={{ ...thStyle, textAlign: "right" }}>Top-5 obs / exp</th>
+                      <th style={{ ...thStyle, textAlign: "right" }}>Top-3 lift</th>
+                      <th style={{ ...thStyle, textAlign: "right" }}>Avg rank</th>
+                      <th style={{ ...thStyle, textAlign: "right" }}>p</th>
+                      <th style={thStyle}>Read</th>
+                      <th style={thStyle}>Latest</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {bucketMixReplay.rows.map((row, index) => (
+                      <tr
+                        key={row.key}
+                        style={{ background: row.hasLatestDraw ? "#fff7ed" : index % 2 === 0 ? "#fff" : "#f8fafc" }}
+                      >
+                        <td style={{ ...tdStyle, fontWeight: 900, whiteSpace: "nowrap" }}>
+                          D{row.drawOrdinal}
+                          {row.fixedStructural && (
+                            <span style={{ marginLeft: 6, color: "#64748b", fontSize: 11, fontWeight: 900 }}>fixed</span>
+                          )}
+                        </td>
+                        <td style={{ ...tdStyle, fontWeight: 800, color: "#475569", whiteSpace: "nowrap" }}>{row.monthLengthLabel}</td>
+                        <td style={{ ...tdStyle, textAlign: "right", fontWeight: 900, fontVariantNumeric: "tabular-nums" }}>{row.trials}</td>
+                        <td style={{ ...tdStyle, fontWeight: 800, minWidth: 210 }}>{formatCompactBucketMixCounts(row.mostCommonMix)}</td>
+                        <td style={{ ...tdStyle, textAlign: "right", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+                          {row.mostCommonMixCount}/{row.trials} · {formatSharePercent(row.mostCommonMixRate)}
+                        </td>
+                        <td style={{ ...tdStyle, textAlign: "right", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+                          {formatSharePercent(row.top1HitRate)} / {formatSharePercent(row.expectedTop1Rate)}
+                        </td>
+                        <td style={{ ...tdStyle, textAlign: "right", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+                          {formatSharePercent(row.top3HitRate)} / {formatSharePercent(row.expectedTop3Rate)}
+                        </td>
+                        <td style={{ ...tdStyle, textAlign: "right", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+                          {formatSharePercent(row.top5HitRate)} / {formatSharePercent(row.expectedTop5Rate)}
+                        </td>
+                        <td style={{
+                          ...tdStyle,
+                          textAlign: "right",
+                          fontWeight: 900,
+                          fontVariantNumeric: "tabular-nums",
+                          whiteSpace: "nowrap",
+                          color: row.liftTop3 > 0 ? "#166534" : row.liftTop3 < 0 ? "#b42318" : "#64748b",
+                        }}>
+                          {formatSignedPercentPoints(row.liftTop3)}
+                        </td>
+                        <td style={{ ...tdStyle, textAlign: "right", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+                          {formatDecimal(row.averageActualRank)}
+                        </td>
+                        <td
+                          style={{ ...tdStyle, textAlign: "right", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}
+                          title="One-sided normal approximation for Top-3 observed hits versus combinatorial random expectation. Treat cautiously when trials are thin."
+                        >
+                          {formatReplayPValue(row.pTop3)}
+                        </td>
+                        <td style={{ ...tdStyle, fontWeight: 900, color: replayConfidenceColor(row), whiteSpace: "nowrap" }}>
+                          {replayConfidenceLabel(row)}
+                        </td>
+                        <td style={tdStyle}>
+                          {row.hasLatestDraw ? (
+                            <span style={{
+                              display: "inline-flex",
+                              minHeight: 24,
+                              alignItems: "center",
+                              borderRadius: 999,
+                              padding: "2px 8px",
+                              background: "#ffedd5",
+                              border: "1px solid #fed7aa",
+                              color: "#9a3412",
+                              fontWeight: 900,
+                              whiteSpace: "nowrap",
+                            }}>
+                              Latest draw
+                            </span>
+                          ) : (
+                            <span style={{ color: "#94a3b8" }}>-</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div style={{ marginTop: 10, color: "#64748b", fontSize: 12 }}>
+                No replay rows are available for the selected scope.
+              </div>
+            )}
+
+            <div style={{ marginTop: 8, color: "#64748b", fontSize: 12, lineHeight: 1.45 }}>
+              Top-k expected rates are calculated from the combinatorial share available before each historical draw. D1 is fixed because every first monthly draw starts from Undrawn 8. Replay results are diagnostic only and do not affect candidate generation.
             </div>
           </div>
 

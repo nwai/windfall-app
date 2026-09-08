@@ -5,6 +5,8 @@ import { computeDroughtHazard } from "../lib/droughtHazard";
 import { getHeatmapColumnOpacity, normalizeHeatmapContextWindow } from "../lib/heatmapContextWindow";
 import { parseDrawDateToEpoch, sortDrawsChronologically } from "../lib/recentDraws";
 
+export type TemperatureOverlayMode = "off" | "compact" | "detailed";
+
 export interface TemperatureHeatmapProps {
   history: Draw[];
   displayHistory?: Draw[];
@@ -42,6 +44,8 @@ export interface TemperatureHeatmapProps {
   // Letter overlay
   showBucketLetters?: boolean;
   bucketLetters?: string[];
+  temperatureOverlayMode?: TemperatureOverlayMode;
+  temperatureOverlayMetricLabel?: string;
 
   // Draw slot x-axis overlay
   showDrawSlotAxis?: boolean;
@@ -77,7 +81,24 @@ const DEFAULT_BUCKET_COLORS = [
 "#e53935", // volcanic
 ];
 const DEFAULT_BUCKET_LETTERS = ["pR","F","pF","<C","C>","tT","W","H","tR","V"];
+const COMPACT_TEMPERATURE_LETTERS = ["C","C","C","C","C","N","W","H","H","H"];
+const DEFAULT_TEMPERATURE_STOPS = Array.from({ length: DEFAULT_BUCKET_LABELS.length - 1 }, (_, i) => (i + 1) / DEFAULT_BUCKET_LABELS.length);
 const DRAW_SLOT_COLUMN_BORDER_COLOR = "rgba(226,232,240,0.86)";
+
+export const getTemperatureOverlayLetter = (bucketIndex: number, mode: TemperatureOverlayMode): string => {
+  if (mode === "off") return "";
+  const safeIndex = Math.max(0, Math.min(DEFAULT_BUCKET_LABELS.length - 1, Math.floor(bucketIndex)));
+  if (mode === "compact") return COMPACT_TEMPERATURE_LETTERS[safeIndex] ?? "?";
+  return DEFAULT_BUCKET_LETTERS[safeIndex] ?? "?";
+};
+
+export const getTemperatureOverlayBucketIndex = (value: number): number => {
+  const safeValue = Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
+  for (let i = 0; i < DEFAULT_TEMPERATURE_STOPS.length; i += 1) {
+    if (safeValue <= DEFAULT_TEMPERATURE_STOPS[i]) return i;
+  }
+  return DEFAULT_TEMPERATURE_STOPS.length;
+};
 
 const monthLabelForDraw = (draw: Draw): string => {
   const date = new Date(parseDrawDateToEpoch(draw.date));
@@ -116,6 +137,8 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
   overlayNumbers = [],
   showBucketLetters = false,
   bucketLetters,
+  temperatureOverlayMode = "off",
+  temperatureOverlayMetricLabel,
   showDrawSlotAxis = false,
   bucketAssignments,
   bucketColors,
@@ -278,6 +301,19 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
     return out;
   }, [bucketAssignments, bucketIndexSeries, buckets, heightNumbers, T, valueSeries, analysisT, stops]);
 
+  const temperatureOverlayBucketIndexSeries = useMemo(() => {
+    const out: number[][] = Array.from({ length: heightNumbers }, () => Array(T).fill(0));
+    if (temperatureOverlayMode === "off") return out;
+    const latestAnalysisIndex = Math.max(0, analysisT - 1);
+    for (let n = 0; n < heightNumbers; n++) {
+      for (let t = 0; t < T; t++) {
+        const sourceIndex = Math.min(t, latestAnalysisIndex);
+        out[n][t] = getTemperatureOverlayBucketIndex(valueSeries[n]?.[sourceIndex] ?? 0);
+      }
+    }
+    return out;
+  }, [analysisT, heightNumbers, T, temperatureOverlayMode, valueSeries]);
+
   // Canvas size
   const widthPx = useMemo(() => T * cellSize + gutter * 2, [T, cellSize, gutter]);
   const heightPx = useMemo(
@@ -317,6 +353,37 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
           const letter = letters[assigned] ?? "?";
           ctx.fillStyle = getContrastTextColor(color);
           ctx.fillText(letter, x + cellSize / 2, y + cellSize / 2);
+        }
+        if (temperatureOverlayMode !== "off") {
+          const tempBucket = temperatureOverlayBucketIndexSeries[n]?.[t] ?? 0;
+          const tempLetter = getTemperatureOverlayLetter(tempBucket, temperatureOverlayMode);
+          if (tempLetter) {
+            const isMultiLetterBadge = tempLetter.length > 1;
+            const maxBadgeWidth = Math.max(8, cellSize - 8);
+            const maxBadgeHeight = Math.max(8, cellSize - 9);
+            const badgeWidth = Math.max(
+              8,
+              Math.min(maxBadgeWidth, Math.floor(cellSize * (isMultiLetterBadge ? 0.64 : 0.48))),
+            );
+            const badgeHeight = Math.max(8, Math.min(maxBadgeHeight, Math.floor(cellSize * 0.44)));
+            const badgeX = x + (cellSize - badgeWidth) / 2;
+            const badgeY = y + (cellSize - badgeHeight) / 2;
+            const badgeColor = DEFAULT_BUCKET_COLORS[tempBucket] ?? DEFAULT_BUCKET_COLORS[DEFAULT_BUCKET_COLORS.length - 1];
+            ctx.save();
+            ctx.globalAlpha = Math.min(1, Math.max(0.45, cellOpacity));
+            ctx.fillStyle = "rgba(255,255,255,0.62)";
+            ctx.fillRect(badgeX, badgeY, badgeWidth, badgeHeight);
+            ctx.strokeStyle = "rgba(15, 23, 42, 0.14)";
+            ctx.lineWidth = 0.5;
+            ctx.strokeRect(badgeX + 0.25, badgeY + 0.25, badgeWidth - 0.5, badgeHeight - 0.5);
+            ctx.globalAlpha = Math.min(1, Math.max(0.78, cellOpacity));
+            ctx.fillStyle = badgeColor;
+            ctx.font = `800 ${Math.max(7, Math.min(9, Math.floor(cellSize * (isMultiLetterBadge ? 0.31 : 0.38))))}px Helvetica, Arial, sans-serif`;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(tempLetter, badgeX + badgeWidth / 2, badgeY + badgeHeight / 2 + 0.2);
+            ctx.restore();
+          }
         }
         ctx.globalAlpha = 1;
       }
@@ -387,6 +454,7 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
     canvasRef, widthPx, heightPx, gutter, heightNumbers, T, cellSize,
     valueSeries, colors, stops, overlayNumbers,
     showBucketLetters, letters, effectiveBucketIndexSeries, contextWindow, dimmedWindowOpacity, highlightedColumns,
+    temperatureOverlayMode, temperatureOverlayBucketIndexSeries,
     showDrawSlotAxis, drawSlotAxisLabels,
   ]);
 
@@ -501,6 +569,15 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
             const hoveredBucketLabel = hoverDrawIndex !== null
               ? labels[effectiveBucketIndexSeries[hoverN - 1]?.[hoverDrawIndex] ?? 0] ?? null
               : null;
+            const hoveredTemperatureBucketIndex = hoverDrawIndex !== null
+              ? temperatureOverlayBucketIndexSeries[hoverN - 1]?.[hoverDrawIndex] ?? null
+              : null;
+            const hoveredTemperatureLabel = hoveredTemperatureBucketIndex !== null
+              ? DEFAULT_BUCKET_LABELS[hoveredTemperatureBucketIndex] ?? null
+              : null;
+            const hoveredTemperatureLetter = hoveredTemperatureBucketIndex !== null
+              ? getTemperatureOverlayLetter(hoveredTemperatureBucketIndex, temperatureOverlayMode)
+              : "";
             const hoveredDrawLabel = hoverDrawIndex !== null
               ? hoveredDraw?.isSimulated
                 ? `Simulated next draw (${hoveredDraw.date})`
@@ -515,6 +592,12 @@ export const TemperatureHeatmap: React.FC<TemperatureHeatmapProps> = ({
                 {hoveredBucketLabel && hoveredDrawLabel ? (
                   <div style={{ color: "#555", marginBottom: 4 }}>
                     Cell bucket @ <b>{hoveredDrawLabel}</b>: <b>{hoveredBucketLabel}</b>
+                  </div>
+                ) : null}
+                {temperatureOverlayMode !== "off" && hoveredTemperatureLabel ? (
+                  <div style={{ color: "#555", marginBottom: 4 }}>
+                    Temperature badge: <b>{hoveredTemperatureLetter}</b> {hoveredTemperatureLabel}
+                    {temperatureOverlayMetricLabel ? ` (${temperatureOverlayMetricLabel})` : ""}
                   </div>
                 ) : null}
                 <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>

@@ -44,6 +44,7 @@ describe("PasteWeightedCandidatesPanel", () => {
 
     expect(html).toContain("Paste-Weighted Candidate Generator");
     expect(html).toContain("Paste candidate rows");
+    expect(html).toContain("six-number rows or eight-number candidate rows");
     expect(html).toContain("Candidate rows");
     expect(html).toContain("Paste constraints");
     expect(html).toContain("Ending 5");
@@ -117,7 +118,7 @@ describe("PasteWeightedCandidatesPanel", () => {
     });
 
     const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
-    expect(textarea.value).toBe("10,11,12,13,14,15\n1,2,3,4,5,6");
+    expect(textarea.value).toBe("10,11,12,13,14,15\n1,2,3,4,5,6,7,8");
 
     await act(async () => {
       root.render(React.createElement(PasteWeightedCandidatesPanel, {
@@ -126,7 +127,7 @@ describe("PasteWeightedCandidatesPanel", () => {
       }));
     });
 
-    expect(textarea.value).toBe("10,11,12,13,14,15\n1,2,3,4,5,6");
+    expect(textarea.value).toBe("10,11,12,13,14,15\n1,2,3,4,5,6,7,8");
 
     const clearButton = Array.from(container.querySelectorAll("button"))
       .find((button) => button.textContent === "Clear pasted rows");
