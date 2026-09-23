@@ -1,7 +1,8 @@
 import { Draw } from "../types";
 import type { DrawRow } from "./drawHistory";
+import { auditHistorySchedule, drawScheduleDateError } from "./historyScheduleAudit";
 
-export type DrawHistoryIssueKind = "exactDuplicate" | "sameDateConflict" | "sameNumbersDifferentDate";
+export type DrawHistoryIssueKind = "exactDuplicate" | "sameDateConflict" | "sameNumbersDifferentDate" | "drawDate" | "missingDrawDates";
 export type DrawHistoryIssueSeverity = "error" | "warning";
 
 export interface DrawHistoryIssue {
@@ -22,6 +23,7 @@ export interface DrawHistoryReview {
   exactDuplicateIssues: DrawHistoryIssue[];
   sameDateConflictIssues: DrawHistoryIssue[];
   sameNumbersDifferentDateIssues: DrawHistoryIssue[];
+  scheduleIssues: DrawHistoryIssue[];
   autoDropIndices: number[];
 }
 
@@ -265,7 +267,26 @@ export function analyzeDrawHistoryRows(rows: DrawRow[]): DrawHistoryReview {
     });
   });
 
-  const issues = [...exactDuplicateIssues, ...sameDateConflictIssues, ...sameNumbersDifferentDateIssues].sort(
+  const schedule = auditHistorySchedule(rows);
+  const scheduleIssues: DrawHistoryIssue[] = [...schedule.invalidDateRows, ...schedule.offScheduleRows].map((index) => ({
+    id: `schedule-${index}`,
+    kind: "drawDate",
+    severity: "error",
+    title: "Draw date needs review",
+    description: drawScheduleDateError(rows[index].date)!,
+    rowIndices: [index],
+  }));
+  if (schedule.missingDates.length) {
+    scheduleIssues.push({
+      id: "missing-scheduled-dates",
+      kind: "missingDrawDates",
+      severity: "warning",
+      title: "Scheduled dates absent from loaded history",
+      description: `${schedule.missingDates.join(", ")}. Check the source CSV. Missing results can distort draw ordinals and transition comparisons; no results have been invented or dates changed.`,
+      rowIndices: [],
+    });
+  }
+  const issues = [...exactDuplicateIssues, ...sameDateConflictIssues, ...sameNumbersDifferentDateIssues, ...scheduleIssues].sort(
     (left, right) => (left.rowIndices[0] ?? 0) - (right.rowIndices[0] ?? 0),
   );
 
@@ -275,6 +296,7 @@ export function analyzeDrawHistoryRows(rows: DrawRow[]): DrawHistoryReview {
     exactDuplicateIssues,
     sameDateConflictIssues,
     sameNumbersDifferentDateIssues,
+    scheduleIssues,
     autoDropIndices: Array.from(new Set(autoDropIndices)).sort((left, right) => left - right),
   };
 }

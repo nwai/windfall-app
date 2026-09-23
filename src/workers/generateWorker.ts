@@ -11,6 +11,7 @@
  */
 
 import { generateCandidates } from "../generateCandidates";
+import { seededRandom } from "../lib/settingsTransparency";
 import type {
   EmpiricalDroughtQuotaGenerationOptions,
   GenerateCandidateRatioOption,
@@ -20,7 +21,10 @@ import type {
 import type { ScoringGenerationProfile } from "../lib/scoringGenerationInfluence";
 import type { LatestNeighbourSupportOptions } from "../lib/latestNeighbourSupport";
 import type { D1TerminalMomentumGenerationProfile } from "../lib/d1TerminalMomentumInfluence";
+import type { DroughtEvidenceGovernorProfile } from "../lib/droughtEvidenceGovernor";
+import type { MonthlyBucketTransitionGovernorProfile } from "../lib/monthlyBucketTransitionGovernor";
 import type { MonthlyBucketKey } from "../lib/monthlyDrawSummary";
+import type { RepeatedTerminalDigitFamilyOptions } from "../lib/repeatedTerminalDigitFamilies";
 
 /** Monthly bucket options with arrays instead of Sets (for structured clone) */
 interface SerializedMonthlyBucketOptions {
@@ -69,6 +73,7 @@ interface DigitWidthConstraintOptions {
 }
 
 export interface GenerateWorkerArgs {
+  randomSeed?: number;
   num: number;
   history: any[];
   knobs: any;
@@ -115,7 +120,7 @@ export interface GenerateWorkerArgs {
   monthlyRepeatBiasWeights?: Record<number, number>;
   /** Per-number month-end carry-over weights for active early-month numbers. */
   monthEndCarryOverWeights?: Record<number, number>;
-  /** Serializable Scoring Diagnostics evidence profile for generation weighting. */
+  /** Serializable Numbers diagnostic evidence profile for generation weighting. */
   scoringGenerationProfile?: ScoringGenerationProfile;
   /** Serializable D1 terminal momentum profile for soft generation weighting. */
   d1TerminalMomentumProfile?: D1TerminalMomentumGenerationProfile;
@@ -125,6 +130,12 @@ export interface GenerateWorkerArgs {
   strictDroughtQuotaOptions?: StrictDroughtQuotaGenerationOptions;
   /** Default-off empirical drought-hazard shortlist quota. */
   empiricalDroughtQuotaOptions?: EmpiricalDroughtQuotaGenerationOptions;
+  /** Default-off automatic drought evidence weighting. Soft boost only. */
+  droughtEvidenceGovernorProfile?: DroughtEvidenceGovernorProfile;
+  /** Default-off automatic monthly bucket transition weighting. Soft boost only. */
+  monthlyBucketTransitionGovernorProfile?: MonthlyBucketTransitionGovernorProfile;
+  /** Default-off hard rule for repeated terminal digit families. */
+  repeatedTerminalDigitFamiliesOptions?: RepeatedTerminalDigitFamilyOptions;
 }
 
 function deserializeMonthlyBuckets(
@@ -243,7 +254,11 @@ ctx.addEventListener("message", (e: MessageEvent) => {
       progressSetter,
       args.latestNeighbourSupportOptions,
       args.strictDroughtQuotaOptions,
-      args.empiricalDroughtQuotaOptions
+      args.empiricalDroughtQuotaOptions,
+      args.droughtEvidenceGovernorProfile,
+      args.monthlyBucketTransitionGovernorProfile,
+      args.repeatedTerminalDigitFamiliesOptions,
+      args.randomSeed === undefined ? Math.random : seededRandom(args.randomSeed),
     );
 
     ctx.postMessage({ type: "result", id, result });

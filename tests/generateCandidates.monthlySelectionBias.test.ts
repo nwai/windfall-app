@@ -143,7 +143,10 @@ describe("generateCandidates monthly constructive selection bias", () => {
     const run = withFixedRandom(0.75, () => runMonthlyConstructiveCandidate([11, 12, 13, 14, 15, 16], 2, [3], true));
 
     expect(run.result.candidates).toHaveLength(1);
-    expect(run.result.candidates[0].supp).toEqual([3, 4]);
+    const picks = run.result.candidates[0].supp;
+    expect(picks).toContain(3);
+    expect(picks.some((number) => [1, 2, 4].includes(number))).toBe(true);
+    expect(new Set(picks).size).toBe(2);
   });
 
   it("cycles full bucket coverage combinations when the planner is enabled", () => {

@@ -3,8 +3,17 @@
 
 import { normalizeBatesParameters, type BatesParameterSet } from "./batesWeightsCore";
 import { normalizeFavoritePanelIds } from "./panelFavorites";
+import {
+  normalizeRepeatedTerminalDigitFamilyMode,
+  normalizeRepeatedTerminalDigitFamilyScope,
+  repeatedTerminalDigitFamilyMaxForScope,
+  type RepeatedTerminalDigitFamilyMode,
+  type RepeatedTerminalDigitFamilyScope,
+} from "./repeatedTerminalDigitFamilies";
 import type { SelectionInsightsSnapshot } from "./selectionInsights";
+import { normalizeDroughtEvidenceGovernorMode, normalizeDroughtEvidenceGovernorSettings, type DroughtEvidenceGovernorMode, type DroughtEvidenceGovernorSettings } from "./droughtEvidenceGovernor";
 import { normalizeWeightedTargetNumbers, normalizeWeightedTargets } from "./weightedTargets";
+import { normalizeMonthlyBucketTransitionGovernorMode, type MonthlyBucketTransitionGovernorMode } from "./monthlyBucketTransitionGovernor";
 
 export type UUID = string;
 export type PresetVersion = 1;
@@ -86,6 +95,8 @@ export interface AppPreset {
 }
 
 export interface AppPresetSnapshot {
+  effectiveSettingsLedger?: import("./settingsTransparency").EffectiveSettingsLedger;
+  lastWorkerGenerationSeed?: number | null;
   // Window / range
   drawWindowMode: "lastN" | "range";
   rangeFrom: number;
@@ -239,6 +250,10 @@ export interface AppPresetSnapshot {
   digitWidthConstraintEnabled?: boolean;
   digitWidthSingleDigitPercent?: number;
   digitWidthScope?: "main" | "mainAndSupp";
+  repeatedTerminalFamiliesEnabled?: boolean;
+  repeatedTerminalFamiliesMode?: RepeatedTerminalDigitFamilyMode;
+  repeatedTerminalFamiliesCount?: number;
+  repeatedTerminalFamiliesScope?: RepeatedTerminalDigitFamilyScope;
   // Legacy fields kept for backward-compatible imports
   requireDiv5?: boolean;
   maxDiv5?: number;
@@ -251,6 +266,21 @@ export interface AppPresetSnapshot {
 
   // Scoring System Diagnostics generation evidence weighting
   scoringGenerationInfluence?: "off" | "light" | "normal" | "strong";
+  droughtEvidenceGovernorMode?: DroughtEvidenceGovernorMode;
+  droughtEvidenceGovernorSettings?: DroughtEvidenceGovernorSettings;
+  droughtEvidenceGovernorNumberMultipliers?: Record<number, number>;
+  droughtEvidenceGovernorActive?: boolean;
+  droughtEvidenceGovernorSummaryLabel?: string;
+  droughtEvidenceGovernorActiveFamilies?: Array<"strict" | "empirical">;
+  droughtEvidenceGovernorBoostedNumbers?: number[];
+  droughtEvidenceGovernorTraceLabel?: string;
+  monthlyBucketTransitionGovernorMode?: MonthlyBucketTransitionGovernorMode;
+  monthlyBucketTransitionGovernorActive?: boolean;
+  monthlyBucketTransitionGovernorSummaryLabel?: string;
+  monthlyBucketTransitionGovernorInternalStrength?: "off" | "light" | "normal" | "strong";
+  monthlyBucketTransitionGovernorBoostedNumbers?: number[];
+  monthlyBucketTransitionGovernorTraceLabel?: string;
+  monthlyBucketTransitionGovernorNumberMultipliers?: Record<number, number>;
   drawBucketPatternInfluenceEnabled?: boolean;
   d1TerminalMomentumSgiEnabled?: boolean;
   d1TerminalMomentumInternalStrength?: "off" | "light" | "normal" | "strong";
@@ -325,6 +355,7 @@ export interface AppPresetSnapshot {
   maxLastDrawMatchesEnabled?: boolean;
   maxLastDrawMatchesValue?: number;
   repeatWindowSizeW?: number;
+  repeatWindowAuto?: boolean;
   minFromRecentUnionM?: number;
   sumFilter?: { enabled: boolean; min: number; max: number; includeSupp: boolean };
   patternConstraintMode?: "boost" | "restrict";
@@ -337,6 +368,7 @@ export interface AppPresetSnapshot {
   monthlyBucketTemperatureOverlayMode?: "off" | "compact" | "detailed";
   monthlyBucketTemperatureMetric?: "ema" | "recency" | "hybrid";
   showHeatmapLetters?: boolean;
+  showHeatmapHoverLabels?: boolean;
   showMbsHoverSparkline?: boolean;
   dgaMonthlyBucketStateOpacity?: number;
   ogaRefMode?: "window" | "all";
@@ -346,6 +378,9 @@ export interface AppPresetSnapshot {
   ogaPreferredDeciles?: { index: number; weight: number }[];
   traceVerbose?: boolean;
   monthEndCarryOverBiasEnabled?: boolean;
+  monthEndCarryOverAutoEnabled?: boolean;
+  latestNeighbourBoostEnabled?: boolean;
+  droughtQuotaBoostEnabled?: boolean;
   monthEndCarryOverStrength?: "light" | "normal" | "strong";
   monthEndCarryOverIncludeMonthEndUndrawn?: boolean;
   monthEndCarryOverIncludeBoundaryRepeats?: boolean;
@@ -482,6 +517,8 @@ function normalizeTemperatureOverlayMode(value: unknown): "off" | "compact" | "d
 
 export function normalizeAppPresetSnapshot(snapshot: AppPresetSnapshot): AppPresetSnapshot {
   const userSelectedNumbers = normalizeWeightedTargetNumbers(snapshot.userSelectedNumbers);
+  const repeatedTerminalFamiliesScope = normalizeRepeatedTerminalDigitFamilyScope(snapshot.repeatedTerminalFamiliesScope);
+  const repeatedTerminalFamiliesMode = normalizeRepeatedTerminalDigitFamilyMode(snapshot.repeatedTerminalFamiliesMode);
 
   const normalized: AppPresetSnapshot = {
     ...snapshot,
@@ -542,9 +579,21 @@ export function normalizeAppPresetSnapshot(snapshot: AppPresetSnapshot): AppPres
     mrbEnabled: !!snapshot.mrbEnabled,
     mrbIncludeSupp: snapshot.mrbIncludeSupp ?? true,
     mrbBucketBoosts: normalizeMRBBoosts(snapshot.mrbBucketBoosts),
+    repeatedTerminalFamiliesEnabled: !!snapshot.repeatedTerminalFamiliesEnabled,
+    repeatedTerminalFamiliesMode,
+    repeatedTerminalFamiliesCount: clampInteger(
+      snapshot.repeatedTerminalFamiliesCount,
+      0,
+      repeatedTerminalDigitFamilyMaxForScope(repeatedTerminalFamiliesScope),
+      1,
+    ),
+    repeatedTerminalFamiliesScope,
     scoringGenerationInfluence: snapshot.scoringGenerationInfluence === "light" || snapshot.scoringGenerationInfluence === "normal" || snapshot.scoringGenerationInfluence === "strong"
       ? snapshot.scoringGenerationInfluence
       : "off",
+    droughtEvidenceGovernorMode: normalizeDroughtEvidenceGovernorMode(snapshot.droughtEvidenceGovernorMode),
+    droughtEvidenceGovernorSettings: normalizeDroughtEvidenceGovernorSettings(snapshot.droughtEvidenceGovernorSettings),
+    monthlyBucketTransitionGovernorMode: normalizeMonthlyBucketTransitionGovernorMode(snapshot.monthlyBucketTransitionGovernorMode),
     drawBucketPatternInfluenceEnabled: !!snapshot.drawBucketPatternInfluenceEnabled,
     d1TerminalMomentumSgiEnabled: !!snapshot.d1TerminalMomentumSgiEnabled,
     d1TerminalMomentumInternalStrength: snapshot.d1TerminalMomentumInternalStrength === "light" || snapshot.d1TerminalMomentumInternalStrength === "normal" || snapshot.d1TerminalMomentumInternalStrength === "strong"
@@ -561,6 +610,8 @@ export function normalizeAppPresetSnapshot(snapshot: AppPresetSnapshot): AppPres
     tempMetric: normalizeTemperatureMetricMode(snapshot.tempMetric),
     monthlyBucketTemperatureOverlayMode: normalizeTemperatureOverlayMode(snapshot.monthlyBucketTemperatureOverlayMode),
     monthlyBucketTemperatureMetric: normalizeTemperatureMetricMode(snapshot.monthlyBucketTemperatureMetric, "recency"),
+    showHeatmapLetters: !!snapshot.showHeatmapLetters,
+    showHeatmapHoverLabels: snapshot.showHeatmapHoverLabels ?? true,
     showMbsHoverSparkline: snapshot.showMbsHoverSparkline ?? true,
     pickSixSource: normalizePickSixSource(snapshot.pickSixSource),
     pickSixManual: normalizePickSixManual(snapshot.pickSixManual),

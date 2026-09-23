@@ -12,6 +12,7 @@ import {
 } from "../lib/drawHistoryReview";
 import { validateDrawEntry } from "../lib/drawHistoryValidation";
 import { showToast } from "../lib/toastBus";
+import { HigButton } from "./shared/HigControls";
 
 interface DrawHistoryIntegrityPanelProps {
   rows: DrawRow[];
@@ -121,6 +122,11 @@ export const DrawHistoryIntegrityPanel = ({
       return;
     }
 
+    if (rows.some((row, index) => index !== editingIndex && normalizeHistoryDate(row.date) === normalizeHistoryDate(validated.row.date))) {
+      setEditError("Another draw already uses this date. Resolve that record before changing this draw's date.");
+      return;
+    }
+
     const nextRows = replaceHistoryRowAtIndex(rows, editingIndex, validated.row);
     commitRows(nextRows, `Updated draw ${currentRow.date}.`);
   }, [commitRows, editDate, editMains, editSupps, editingIndex, mainCount, maxNumber, minNumber, rows, suppCount]);
@@ -171,7 +177,7 @@ export const DrawHistoryIntegrityPanel = ({
         <div>
           <div style={{ fontWeight: 700 }}>Smart History Review</div>
           <div style={{ fontSize: 12, color: "#556" }}>
-            Auto-fix exact duplicates, then review same-date conflicts or unusually repeated number sets before they skew analysis.
+            Review draw dates, missing scheduled dates, duplicates, and conflicting results before using history as evidence.
           </div>
         </div>
         {review.autoDropIndices.length > 0 && (
@@ -196,7 +202,23 @@ export const DrawHistoryIntegrityPanel = ({
 
       {review.issues.length === 0 && (
         <div style={{ marginTop: 12, color: "#2f6b2f", fontSize: 13 }}>
-          No duplicate or suspicious draw-history collisions were detected in the currently loaded history.
+          No date, schedule-gap, duplicate, or conflicting-result issues were detected in the loaded history.
+        </div>
+      )}
+
+      {review.scheduleIssues.length > 0 && (
+        <div style={{ display: "grid", gap: 8, marginTop: 12 }} role="status">
+          {review.scheduleIssues.map((issue) => (
+            <div key={issue.id} style={cardStyle}>
+              <strong>{issue.title}</strong>
+              <p style={{ fontSize: 13, margin: "6px 0", overflowWrap: "anywhere" }}>{issue.description}</p>
+              {issue.rowIndices.map((index) => (
+                <HigButton size="compact" key={index} onClick={() => beginEdit(index)} aria-label={`Edit date for ${rows[index].date}`}>
+                  Edit {rows[index].date}
+                </HigButton>
+              ))}
+            </div>
+          ))}
         </div>
       )}
 
@@ -278,6 +300,7 @@ export const DrawHistoryIntegrityPanel = ({
                 {Array.from({ length: mainCount }).map((_, slot) => (
                   <input
                     key={`integrity-main-${slot}`}
+                    aria-label={`Main number ${slot + 1}`}
                     inputMode="numeric"
                     pattern="[0-9]*"
                     value={editMains[slot] ?? ""}
@@ -293,6 +316,7 @@ export const DrawHistoryIntegrityPanel = ({
                 {Array.from({ length: suppCount }).map((_, slot) => (
                   <input
                     key={`integrity-supp-${slot}`}
+                    aria-label={`Supplementary number ${slot + 1}`}
                     inputMode="numeric"
                     pattern="[0-9]*"
                     value={editSupps[slot] ?? ""}
@@ -303,10 +327,10 @@ export const DrawHistoryIntegrityPanel = ({
               </div>
             </div>
           </div>
-          {editError && <div style={{ color: "crimson", marginTop: 8 }}>{editError}</div>}
+          {editError && <div role="alert" style={{ color: "crimson", marginTop: 8 }}>{editError}</div>}
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
-            <button type="button" onClick={applyEdit}>Save correction</button>
-            <button type="button" onClick={() => setEditingIndex(null)}>Cancel</button>
+            <HigButton variant="primary" size="compact" onClick={applyEdit}>Save correction</HigButton>
+            <HigButton size="compact" onClick={() => setEditingIndex(null)}>Cancel</HigButton>
           </div>
         </div>
       )}

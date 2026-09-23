@@ -3,6 +3,7 @@ import type {
   PredictionScoreResult,
   ScoredPredictionJournalEntry,
 } from "./predictionJournal";
+import { monthlyBucketTransitionGovernorModeLabel, normalizeMonthlyBucketTransitionGovernorMode } from "./monthlyBucketTransitionGovernor";
 
 export const PREDICTION_JOURNAL_FINDINGS_VERSION = 1 as const;
 
@@ -217,6 +218,24 @@ const collectSignals = (entry: ScoredPredictionJournalEntry): FindingSignal[] =>
   if (drought?.allSelectedFromShortlist) addSignal(signals, "Drought provenance", "All picked numbers from drought shortlist");
   if (drought?.selectedStrictDroughtNumbers.length) addSignal(signals, "Drought provenance", "Picked strict drought 6+ number");
   if (drought?.selectedEmpiricalHazardNumbers.length) addSignal(signals, "Drought provenance", "Picked empirical hazard number");
+  const droughtGovernor = entry.setupSnapshot?.droughtEvidenceGovernorMode === "auto" || entry.setupSnapshot?.droughtEvidenceGovernorMode === "manual"
+    ? entry.setupSnapshot
+    : null;
+  if (droughtGovernor) {
+    addSignal(signals, "Watched signal", `Drought Evidence Governor ${droughtGovernor.droughtEvidenceGovernorSummaryLabel ?? droughtGovernor.droughtEvidenceGovernorMode}`);
+    if (droughtGovernor.droughtEvidenceGovernorActive) {
+      addSignal(signals, "Watched signal", "Drought Evidence Governor active boost");
+    }
+  }
+  const monthlyTransitionGovernor = normalizeMonthlyBucketTransitionGovernorMode(entry.setupSnapshot?.monthlyBucketTransitionGovernorMode) !== "off"
+    ? entry.setupSnapshot
+    : null;
+  if (monthlyTransitionGovernor) {
+    addSignal(signals, "Watched signal", `Monthly Bucket Transition Governor ${monthlyTransitionGovernor.monthlyBucketTransitionGovernorSummaryLabel ?? monthlyBucketTransitionGovernorModeLabel(monthlyTransitionGovernor.monthlyBucketTransitionGovernorMode)}`);
+    if (monthlyTransitionGovernor.monthlyBucketTransitionGovernorActive) {
+      addSignal(signals, "Watched signal", "Monthly Bucket Transition Governor active boost");
+    }
+  }
 
   const strictDroughtQuota = entry.provenance?.strictDroughtQuota;
   if (strictDroughtQuota && strictDroughtQuota.mode !== "off") {

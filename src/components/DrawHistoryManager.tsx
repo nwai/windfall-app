@@ -2,6 +2,7 @@ import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
   broadcastDrawHistoryUpdated,
   downloadCsvFallback,
+  isFilePickerCancelError,
   parseCsv,
   pickCsvFile,
   readCsvFromHandle,
@@ -29,7 +30,8 @@ import {
   type DrawHistoryValidationOptions,
 } from "../lib/drawHistoryValidation";
 import { showToast } from "../lib/toastBus";
-import { MONTH_LABELS_EXCLUDED_FROM_HISTORY_BASELINES } from "../lib/monthlyAverageScope";
+import { getExcludedMonthLabelsForHistoryBaselines } from "../lib/monthlyAverageScope";
+import { parseDrawDateToEpoch } from "../lib/recentDraws";
 
 type Props = {
   onDrawsUpdated?: (rows: DrawRow[], summaryMessage?: string) => void;
@@ -128,6 +130,16 @@ export default function DrawHistoryManager({
   const supportsFileSystemAccess = typeof window !== "undefined" && "showOpenFilePicker" in window;
   const localRows = useMemo(() => sortHistoryRows(currentRows, "desc"), [currentRows]);
   const summary = useMemo(() => buildDrawHistorySummary(localRows), [localRows]);
+  const excludedBaselineMonths = useMemo(() => getExcludedMonthLabelsForHistoryBaselines(
+    localRows.filter(row => !row.isSimulated),
+    row => {
+      const epoch = parseDrawDateToEpoch(row.date);
+      if (!epoch || !Number.isFinite(epoch)) return null;
+      const date = new Date(epoch);
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+    },
+    row => row.date,
+  ), [localRows]);
   const validationOptions = useMemo<DrawHistoryValidationOptions>(() => ({
     mainCount,
     suppCount,
@@ -158,8 +170,8 @@ export default function DrawHistoryManager({
     });
   }, []);
 
-  const persistRows = useCallback(async (rowsToSave: DrawRow[], successMessage: string) => {
-    if (busyRef.current) return;
+  const persistRows = useCallback(async (rowsToSave: DrawRow[], successMessage: string): Promise<boolean> => {
+    if (busyRef.current) return false;
     busyRef.current = true;
     setError(null);
     setStatus("Saving draw history...");
@@ -176,7 +188,11 @@ export default function DrawHistoryManager({
             setFileHandle(handle);
             fileName = (await handle.getFile()).name;
             setLastFileName(fileName);
-          } catch {
+          } catch (caught) {
+            if (isFilePickerCancelError(caught)) {
+              setStatus("Save cancelled. Draw history was not changed.");
+              return false;
+            }
             handle = null;
           }
         }
@@ -213,9 +229,11 @@ export default function DrawHistoryManager({
 
       onDrawsUpdated?.(orderedRows.filter((row) => !row.isSimulated), successMessage);
       showToast(successMessage);
+      return true;
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
       setStatus(null);
+      return false;
     } finally {
       busyRef.current = false;
     }
@@ -252,6 +270,11 @@ export default function DrawHistoryManager({
       setStatus(`Selected CSV target: ${file.name}`);
       setError(null);
     } catch (caught) {
+      if (isFilePickerCancelError(caught)) {
+        setStatus("CSV target selection cancelled.");
+        setError(null);
+        return;
+      }
       setError(caught instanceof Error ? caught.message : String(caught));
       setStatus(null);
     }
@@ -280,7 +303,8 @@ export default function DrawHistoryManager({
     }
 
     const nextRows = sortHistoryRows([validated.row, ...localRows.filter((row) => !row.isSimulated)], "desc");
-    await persistRows(nextRows, `Saved draw ${validated.row.date}.`);
+    const saved = await persistRows(nextRows, `Saved draw ${validated.row.date}.`);
+    if (!saved) return;
     broadcastDrawHistoryUpdated({ rows: nextRows, added: validated.row });
     resetEntry();
   }, [date, localRows, mains, persistRows, resetEntry, supps, validationOptions]);
@@ -360,7 +384,7 @@ export default function DrawHistoryManager({
 
   const integrityTone = summary.sameDateConflictIssues > 0 || summary.exactDuplicateIssues > 0
     ? "bad"
-    : summary.repeatedNumberSetIssues > 0
+    : summary.issueCount > 0
       ? "warn"
       : "good";
   const dataTone = summary.simulatedRows > 0 ? "bad" : summary.totalRows > 0 ? "good" : "warn";
@@ -377,9 +401,8 @@ export default function DrawHistoryManager({
             {lastFileName ? `CSV target: ${lastFileName}` : "No CSV write target selected."}
           </div>
           <div style={{ ...subtleTextStyle, marginTop: 3 }}>
-            Windfall All History baselines exclude the opening partial month
-            {" "}
-            ({MONTH_LABELS_EXCLUDED_FROM_HISTORY_BASELINES.join(", ")}).
+            Baseline opening-month exclusion: {excludedBaselineMonths.join(", ") || "none"}.
+            {" "}A late-start opening month is omitted from baseline calculations only. All real history remains available; this check does not certify internal gaps or month completion.
           </div>
         </div>
         <div style={buttonRowStyle}>

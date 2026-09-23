@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildRankedSignalConfluenceMentions,
   buildSignalConfluenceRows,
+  filterSignalConfluenceRows,
   normalizeSignalConfluenceNumbers,
   rankedStrength,
   sortSignalConfluenceRows,
@@ -47,6 +49,38 @@ describe("signal confluence ledger", () => {
   it("normalizes valid lottery numbers and grades ranked support monotonically", () => {
     expect(normalizeSignalConfluenceNumbers([9, 9, 0, 46, 3, "4"])).toEqual([3, 9]);
     expect(rankedStrength(0, 8)).toBeGreaterThan(rankedStrength(7, 8));
+  });
+
+  it("preserves source order when assigning ranked shortlist labels", () => {
+    const mentions = buildRankedSignalConfluenceMentions(
+      [44, 3, 44, 21, 0, 46],
+      "drought",
+      "Strict drought shortlist",
+      "Strict",
+      3,
+    );
+
+    expect(mentions.map((mention) => ({ number: mention.number, label: mention.label }))).toEqual([
+      { number: 44, label: "Strict #1" },
+      { number: 3, label: "Strict #2" },
+      { number: 21, label: "Strict #3" },
+    ]);
+    expect(mentions[0].strength).toBeGreaterThan(mentions[2].strength ?? 0);
+  });
+
+  it("shows all 45 rows only in All 45 mode while retaining active-state exceptions in supported mode", () => {
+    const rows = buildSignalConfluenceRows([
+      { number: 7, family: "drought", source: "strict", label: "Strict #1", strength: 1 },
+    ], {
+      excludedNumbers: [14],
+    });
+
+    const supportedRows = filterSignalConfluenceRows(rows, "supported-only");
+    const allRows = filterSignalConfluenceRows(rows, "all-45");
+
+    expect(supportedRows.map((row) => row.number)).toEqual(expect.arrayContaining([7, 14]));
+    expect(supportedRows.some((row) => row.number === 25)).toBe(false);
+    expect(allRows).toHaveLength(45);
   });
 
   it("sorts the Support column by raw mentions while keeping active exclusions below available numbers", () => {

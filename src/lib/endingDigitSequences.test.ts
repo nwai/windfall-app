@@ -8,6 +8,7 @@ import {
   buildEndingDigitMonthOptions,
   predictNextEndingDigitSequence,
 } from "./endingDigitSequences";
+import { analyzeTerminalDigitStageSplit } from "./terminalDigitStageSplit";
 
 describe("analyzeEndingDigitSequences", () => {
   const history: Draw[] = [
@@ -189,6 +190,101 @@ describe("analyzeD1TerminalMomentum", () => {
     expect(analysis?.stageMode).toBe("early-unique");
     expect(analysis?.targetDrawNumber).toBe(2);
     expect(analysis?.totalDrawsInMonth).toBe(13);
+  });
+});
+
+describe("analyzeTerminalDigitStageSplit", () => {
+  const scheduledDraws = (
+    year: number,
+    month: number,
+    buildNumbers: (drawOrdinal: number) => { main: number[]; supp: number[] },
+  ): Draw[] => {
+    const draws: Draw[] = [];
+    let ordinal = 0;
+    for (let day = 1; day <= 31; day += 1) {
+      const date = new Date(year, month - 1, day);
+      if (date.getMonth() !== month - 1) break;
+      if (![1, 3, 5].includes(date.getDay())) continue;
+      ordinal += 1;
+      const numbers = buildNumbers(ordinal);
+      draws.push({
+        date: `${month}/${day}/${String(year).slice(-2)}`,
+        main: numbers.main,
+        supp: numbers.supp,
+      });
+    }
+    return draws;
+  };
+
+  const quietThenNine = (ordinal: number): { main: number[]; supp: number[] } => (
+    ordinal <= 6
+      ? { main: [1, 2, 3, 4, 5, 6], supp: [7, 8] }
+      : { main: [9, 19, 29, 39, 1, 2], supp: [3, 4] }
+  );
+
+  it("uses complete calendar months and keeps the open month out of historical evidence", () => {
+    const january = scheduledDraws(2026, 1, quietThenNine);
+    const february = scheduledDraws(2026, 2, quietThenNine);
+    const marchPrefix = scheduledDraws(2026, 3, quietThenNine).slice(0, 6);
+    const analysis = analyzeTerminalDigitStageSplit(
+      [...january, ...february, ...marchPrefix],
+      { includeSupp: true, earlyDrawCount: 6, resampleCount: 200, randomSeed: 11 },
+    );
+
+    expect(analysis.eligibleMonthCount).toBe(2);
+    expect(analysis.excludedIncompleteMonthCount).toBe(1);
+    expect(analysis.monthRows.every((row) => row.selectedDigits.join(",") === "0,9")).toBe(true);
+    expect(analysis.ratio).toBeGreaterThan(2);
+    expect(analysis.currentMonth?.monthKey).toBe("2026-03");
+    expect(analysis.currentMonth?.hasCompleteEarlyBlock).toBe(true);
+    expect(analysis.currentMonth?.selectedDigits).toEqual([0, 9]);
+    expect(analysis.confidenceInterval).not.toBeNull();
+    expect(analysis.randomComparisonPValue).not.toBeNull();
+  });
+
+  it("distinguishes repeated occurrences from draw presence", () => {
+    const history = [
+      ...scheduledDraws(2026, 1, quietThenNine),
+      ...scheduledDraws(2026, 2, quietThenNine),
+    ];
+    const occurrences = analyzeTerminalDigitStageSplit(history, {
+      earlyDrawCount: 6,
+      metric: "occurrences",
+      resampleCount: 0,
+    });
+    const presence = analyzeTerminalDigitStageSplit(history, {
+      earlyDrawCount: 6,
+      metric: "draw-presence",
+      resampleCount: 0,
+    });
+
+    expect(occurrences.ratio).toBeGreaterThan(1);
+    expect(presence.ratio).toBeLessThan(1);
+    expect(occurrences.actual).toBeGreaterThan(presence.actual);
+  });
+
+  it("refuses to relabel a mid-month WFMQYH slice as D1", () => {
+    const partialWindow = scheduledDraws(2026, 3, quietThenNine).slice(2, 8);
+    const analysis = analyzeTerminalDigitStageSplit(partialWindow, {
+      earlyDrawCount: 6,
+      resampleCount: 0,
+    });
+
+    expect(analysis.eligibleMonthCount).toBe(0);
+    expect(analysis.currentMonth?.hasCompleteEarlyBlock).toBe(false);
+    expect(analysis.currentMonth?.note).toContain("unbroken D1-to-current prefix");
+  });
+
+  it("builds a dynamic D3-D10 cutoff comparison without naming a winner", () => {
+    const history = [
+      ...scheduledDraws(2026, 1, quietThenNine),
+      ...scheduledDraws(2026, 2, quietThenNine),
+    ];
+    const analysis = analyzeTerminalDigitStageSplit(history, { earlyDrawCount: 6, resampleCount: 0 });
+
+    expect(analysis.cutoffRows.map((row) => row.earlyDrawCount)).toEqual([3, 4, 5, 6, 7, 8, 9, 10]);
+    expect(analysis.cutoffRows.find((row) => row.earlyDrawCount === 6)?.eligibleMonths).toBe(2);
+    expect(analysis.warnings.join(" ")).toContain("not corrected for trying several split points");
   });
 });
 

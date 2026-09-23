@@ -1,5 +1,6 @@
 import type { Draw } from "../types";
 import type { AppPresetSnapshot } from "./presets";
+import { monthlyBucketTransitionGovernorModeLabel, normalizeMonthlyBucketTransitionGovernorMode } from "./monthlyBucketTransitionGovernor";
 
 export const RESEARCH_DIARY_STORAGE_KEY = "windfall:research-diary:v1";
 
@@ -294,8 +295,10 @@ export function summarizeResearchDiarySetup(snapshot: AppPresetSnapshot | null |
   const setup = snapshot as Partial<AppPresetSnapshot> & Record<string, any>;
   const knobs = (setup.knobs && typeof setup.knobs === "object" ? setup.knobs : {}) as Record<string, unknown>;
   const generation = [
-    `Scoring influence: ${setup.scoringGenerationInfluence ?? "off"}`,
+    `Numbers diagnostic influence: ${setup.scoringGenerationInfluence ?? "off"}`,
     `Latest ${setup.latestNeighbourSupportMode === "pm1pm2" ? "+/-1/+/-2" : "+/-1"} support: ${setup.latestNeighbourSupportEnabled ? "on" : "off"}`,
+    `Drought Evidence Governor: ${(setup.droughtEvidenceGovernorMode === "auto" || setup.droughtEvidenceGovernorMode === "manual") ? (setup.droughtEvidenceGovernorSummaryLabel ?? setup.droughtEvidenceGovernorMode) : "off"}`,
+    `Monthly Bucket Transition Governor: ${normalizeMonthlyBucketTransitionGovernorMode(setup.monthlyBucketTransitionGovernorMode) !== "off" ? (setup.monthlyBucketTransitionGovernorSummaryLabel ?? monthlyBucketTransitionGovernorModeLabel(setup.monthlyBucketTransitionGovernorMode)) : "off"}`,
     `Month-end carry-over: ${setup.monthEndCarryOverBiasEnabled ? (setup.monthEndCarryOverStrength ?? "normal") : "off"}`,
     `Use counts when constructing candidates: ${setup.monthlyConstructiveEnabled ? "on" : "off"}`,
     `Acceptance needs counts: ${formatAcceptanceNeedsCounts(setup.acceptanceNeedsCounts)}`,

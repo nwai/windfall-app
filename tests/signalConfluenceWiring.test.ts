@@ -38,6 +38,10 @@ describe("Signal Confluence / Number Consensus Ledger wiring", () => {
     expect(html).toContain("NDEE source");
     expect(html).toContain("not run");
     expect(html).toContain("Click a supported number pill");
+    expect(html).toContain('aria-label="Ledger row visibility"');
+    expect(html).toContain("Supported only");
+    expect(html).toContain("All 45");
+    expect(html).not.toContain("Hide zero-support numbers");
   });
 
   it("renders Signal Confluence forced numbers as explicit user-controlled state", () => {

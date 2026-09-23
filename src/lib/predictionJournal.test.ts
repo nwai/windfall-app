@@ -202,6 +202,14 @@ describe("predictionJournal", () => {
       knobs: { enableSDE1: true, enableHC3: false },
       sumFilter: { enabled: true, min: 120, max: 220, includeSupp: true },
       scoringGenerationInfluence: "normal",
+      droughtEvidenceGovernorMode: "manual",
+      droughtEvidenceGovernorSummaryLabel: "Manual · strict · 1 boosted",
+      droughtEvidenceGovernorSettings: { strictBuckets: ["undrawn"], empiricalBuckets: [], carryOverEnabled: false,
+        strictMultiplier: 1.2, empiricalMultiplier: 1, numberOverrides: { 31: 1.17 } },
+      droughtEvidenceGovernorNumberMultipliers: { 31: 1.17 },
+      monthlyBucketTransitionGovernorMode: "normal",
+      monthlyBucketTransitionGovernorSummaryLabel: "Manual normal · applied normal · 2 boosted",
+      monthlyBucketTransitionGovernorNumberMultipliers: { 17: 1.25, 22: 1.25 },
       monthEndCarryOverBiasEnabled: true,
       monthEndCarryOverStrength: "strong",
       monthlyConstructiveEnabled: true,
@@ -277,6 +285,8 @@ describe("predictionJournal", () => {
     });
 
     expect(entry.setupSnapshot).toEqual(setupSnapshot);
+    expect(entry.setupSummary?.generation).toContain("Drought Evidence Governor: Manual · strict · 1 boosted");
+    expect(entry.setupSummary?.generation).toContain("Monthly Bucket Transition Governor: Manual normal · applied normal · 2 boosted");
     expect(entry.provenance).toMatchObject({
       version: 1,
       selectedNumbers: [20, 31, 44],
@@ -338,7 +348,7 @@ describe("predictionJournal", () => {
       window: "WFMQYH Custom 13",
       oddEvenRatios: "5:3, 4:4",
       generation: expect.arrayContaining([
-        "Scoring influence: normal",
+        "Numbers diagnostic influence: normal",
         "Strict drought quota: SDSR-advised min 2 (All D4 rows, 25 trials)",
         "Month-end carry-over: strong",
         "Use counts when constructing candidates: on",

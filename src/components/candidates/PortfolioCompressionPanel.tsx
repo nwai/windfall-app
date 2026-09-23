@@ -20,11 +20,13 @@ import {
   compressPortfolioCandidates,
   type PortfolioCompressionNumber,
 } from "../../lib/portfolioCompression";
+import { buildCoreAndHedgePortfolio } from "../../lib/portfolioConcentration";
 import type {
   PortfolioWindowShapeEvidenceRow,
   PortfolioWindowShapeStatus,
 } from "../../lib/portfolioWindowShape";
 import { normalizeUserSelectedNumbers } from "../../lib/userSelectedNumbers";
+import { PortfolioConcentrationCard } from "./PortfolioConcentrationCard";
 
 export interface PortfolioCandidateSource {
   id: string;
@@ -490,6 +492,8 @@ export const PortfolioCompressionPanel: React.FC<PortfolioCompressionPanelProps>
   const [backtestMinTrainingDraws, setBacktestMinTrainingDraws] = useState(initialBacktestMinTrainingDraws);
   const [backtestMonteCarloIterations, setBacktestMonteCarloIterations] = useState(initialBacktestMonteCarloIterations);
   const [backtestResult, setBacktestResult] = useState<PortfolioBacktestResult | null>(null);
+  const [concentrationLineCount, setConcentrationLineCount] = useState(6);
+  const [concentrationCoreRetention, setConcentrationCoreRetention] = useState<4 | 5>(4);
   const [enabledEvidenceSignals, setEnabledEvidenceSignals] = useState<Record<EvidenceSignalKey, boolean>>({
     generatedFrequency: false,
     pasteWeightedFrequency: false,
@@ -501,6 +505,13 @@ export const PortfolioCompressionPanel: React.FC<PortfolioCompressionPanelProps>
     selectedBoosts: false,
   });
   const result = useMemo(() => compressPortfolioCandidates(pasteText), [pasteText]);
+  const concentrationResult = useMemo(
+    () => buildCoreAndHedgePortfolio(result.rows, {
+      lineCount: concentrationLineCount,
+      coreRetention: concentrationCoreRetention,
+    }),
+    [concentrationCoreRetention, concentrationLineCount, result.rows],
+  );
   const adjacentComboEvidence = useMemo(
     () => buildPortfolioAdjacentComboEvidence(
       adjacentComboHistory,
@@ -1084,10 +1095,10 @@ export const PortfolioCompressionPanel: React.FC<PortfolioCompressionPanelProps>
     <section className="windfall-ledger-panel windfall-generator-panel" aria-label="Portfolio Compression / 12-Game Distiller">
       <div style={headingStyle}>
         <div>
-          <div style={mutedStyle}>V1 count compression. Counts show how many pasted games contain each number.</div>
+          <div style={mutedStyle}>Count compression and transparent portfolio concentration from supplied rows.</div>
         </div>
         <div style={{ ...mutedStyle, fontWeight: 800, color: "#334155" }}>
-          Count-only evidence
+          Observed portfolio evidence
         </div>
       </div>
 
@@ -1421,6 +1432,17 @@ export const PortfolioCompressionPanel: React.FC<PortfolioCompressionPanelProps>
           </div>
         )}
       </div>
+
+      <PortfolioConcentrationCard
+        result={concentrationResult}
+        lineCount={concentrationLineCount}
+        onLineCountChange={setConcentrationLineCount}
+        coreRetention={concentrationCoreRetention}
+        onCoreRetentionChange={setConcentrationCoreRetention}
+        onSimulateLine={onSimulateCore}
+        activeSimulatedKey={activeSimulatedKey}
+        copyText={copyText}
+      />
 
       <div style={{ display: "grid", gap: 6 }}>
         <div style={{ fontWeight: 800, fontSize: 13 }}>Alternates</div>

@@ -18,5 +18,10 @@ describe("Generated Candidates IDM wiring", () => {
     expect(appSource).toContain("handleStageIdealDrawStateChange");
     expect(monthlySummaryCall).toContain("onStageIdealDrawStateChange={handleStageIdealDrawStateChange}");
     expect(generatedCandidatesCall).toContain("stageIdealDrawState={stageIdealDrawState}");
+    expect(appSource).toContain("appliedBucketMixTarget");
+    expect(appSource).toContain("handleAppliedBucketMixTargetChange");
+    expect(monthlySummaryCall).toContain("onAppliedBucketMixTargetChange={handleAppliedBucketMixTargetChange}");
+    expect(generatedCandidatesCall).toContain("idmTargetComposition={activeReadinessIdmTarget?.composition ?? null}");
+    expect(generatedCandidatesCall).toContain("idmTargetSourceLabel={activeReadinessIdmTarget?.sourceLabel}");
   });
 });

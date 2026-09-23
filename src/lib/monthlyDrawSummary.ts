@@ -47,6 +47,15 @@ export interface MonthlyConstraintPayload {
   selectedNumberBiasEnabled?: boolean;
 }
 
+export interface AppliedBucketMixTarget {
+  counts: MonthlyFrequencyConstraints;
+  label: string;
+  source: "bucket-mix-combinatorics";
+  workingMonthLabel: string;
+  expectedDrawCount: number;
+  targetStageDrawCount: number;
+}
+
 export interface MonthlyNumberCount {
   n: number;
   c: number;
@@ -59,6 +68,7 @@ export interface MonthlyFrequencyCount {
 
 export interface MonthlyDrawMonthRow {
   monthLabel: string;
+  firstDrawTimestamp?: number;
   drawCount: number;
   totalDrawCount: number;
   numbers: MonthlyNumberCount[];
@@ -476,7 +486,7 @@ export function analyzeMonthlyDrawSummary(
 
   const averageDrawCountFilter = options.averageDrawCountFilter ?? "all";
   const pastRows = observedRows.filter((row) => row.monthLabel !== effectiveMonth.monthLabel);
-  const baselineRows = filterRowsForHistoryBaselines(pastRows, (row) => row.monthLabel);
+  const baselineRows = filterRowsForHistoryBaselines(pastRows, (row) => row.monthLabel, row => row.firstDrawTimestamp);
   const eligibleRows = baselineRows.filter((row) => (
     averageDrawCountFilter === "all" || row.totalDrawCount === averageDrawCountFilter
   ));
@@ -656,7 +666,7 @@ export function analyzeStageIdealDrawModel(
   }
 
   const pastRows = fullRows.filter((row) => row.monthLabel < workingMonthLabel);
-  const baselineRows = filterRowsForHistoryBaselines(pastRows, (row) => row.monthLabel);
+  const baselineRows = filterRowsForHistoryBaselines(pastRows, (row) => row.monthLabel, row => row.firstDrawTimestamp);
   const comparableItems = baselineRows
     .filter((row) => row.totalDrawCount === expectedDrawCount)
     .map((row) => grouped.get(row.monthLabel) ?? [])
@@ -778,7 +788,7 @@ export function analyzeStageMatchAcceptancePlaybook(
   });
 
   const pastRows = fullRows.filter((row) => row.monthLabel < workingMonthLabel);
-  const baselineRows = filterRowsForHistoryBaselines(pastRows, (row) => row.monthLabel);
+  const baselineRows = filterRowsForHistoryBaselines(pastRows, (row) => row.monthLabel, row => row.firstDrawTimestamp);
   const comparableItems = baselineRows
     .filter((row) => row.totalDrawCount === expectedDrawCount)
     .map((row) => ({
@@ -1272,6 +1282,7 @@ function buildMonthRow(args: {
   return {
     monthLabel: args.monthLabel,
     drawCount: args.draws.length,
+    firstDrawTimestamp: args.draws[0]?.timestamp,
     totalDrawCount: args.totalDrawCount,
     numbers,
     frequencyCounts,

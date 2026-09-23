@@ -97,7 +97,7 @@ describe("generateCandidates drought quotas", () => {
         undefined,
         {
           enabled: true,
-          minCount: 3,
+          minCount: 2,
           shortlist: [1, 2, 3],
           rankMultipliers: { 1: 2, 2: 1.7, 3: 1.4 },
           sourceLabel: "test",

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { normalizeDroughtEvidenceGovernorSettings } from "./droughtEvidenceGovernor";
 import {
   DEFAULT_PRESET_ACCEPTANCE_NEEDS_COUNTS,
   DEFAULT_PRESET_MRB_BUCKET_BOOSTS,
@@ -46,6 +47,27 @@ function baseSnapshot(overrides: Partial<AppPresetSnapshot> = {}): AppPresetSnap
 }
 
 describe("normalizeAppPresetSnapshot", () => {
+  it.each(["off", "auto", "light", "normal", "strong"] as const)("restores monthly transition mode %s and its recorded applied weights", (mode) => {
+    const restored = normalizeAppPresetSnapshot(JSON.parse(JSON.stringify(baseSnapshot({
+      monthlyBucketTransitionGovernorMode: mode, monthlyBucketTransitionGovernorNumberMultipliers: { 17: 1.25 },
+    }))));
+    expect(restored.monthlyBucketTransitionGovernorMode).toBe(mode);
+    expect(restored.monthlyBucketTransitionGovernorNumberMultipliers).toEqual({ 17: 1.25 });
+    expect(normalizeAppPresetSnapshot(baseSnapshot()).monthlyBucketTransitionGovernorMode).toBe("off");
+  });
+  it("round trips Manual governor controls without enabling them in legacy snapshots", () => {
+    const settings = normalizeDroughtEvidenceGovernorSettings({ strictBuckets: ["undrawn"], empiricalBuckets: [],
+      carryOverEnabled: false, strictMultiplier: 1.3, numberOverrides: { 21: 1.17 } });
+    const restored = normalizeAppPresetSnapshot(JSON.parse(JSON.stringify(baseSnapshot({
+      droughtEvidenceGovernorMode: "manual", droughtEvidenceGovernorSettings: settings,
+    }))));
+    expect(restored.droughtEvidenceGovernorMode).toBe("manual");
+    expect(restored.droughtEvidenceGovernorSettings).toEqual(settings);
+    const legacy = normalizeAppPresetSnapshot(baseSnapshot());
+    expect(legacy.droughtEvidenceGovernorMode).toBe("off");
+    expect(legacy.droughtEvidenceGovernorSettings?.strictMultiplier).toBe(1);
+    expect(legacy.droughtEvidenceGovernorSettings?.carryOverEnabled).toBe(true);
+  });
   it("fills new preset-controlled state for older snapshots", () => {
     const normalized = normalizeAppPresetSnapshot(baseSnapshot());
 
@@ -72,10 +94,17 @@ describe("normalizeAppPresetSnapshot", () => {
     expect(normalized.pickSixSource).toBe("manual");
     expect(normalized.pickSixManual).toEqual(DEFAULT_PRESET_PICK_SIX_MANUAL);
     expect(normalized.mainTwoSetMode).toBe("atMost");
+    expect(normalized.repeatedTerminalFamiliesEnabled).toBe(false);
+    expect(normalized.repeatedTerminalFamiliesMode).toBe("atLeast");
+    expect(normalized.repeatedTerminalFamiliesCount).toBe(1);
+    expect(normalized.repeatedTerminalFamiliesScope).toBe("mainAndSupp");
     expect(normalized.dgaHeatmapView).toBe("temperature");
     expect(normalized.tempMetric).toBe("hybrid");
     expect(normalized.monthlyBucketTemperatureOverlayMode).toBe("off");
     expect(normalized.monthlyBucketTemperatureMetric).toBe("recency");
+    expect(normalized.showHeatmapLetters).toBe(false);
+    expect(normalized.showHeatmapHoverLabels).toBe(true);
+    expect(normalized.showMbsHoverSparkline).toBe(true);
   });
 
   it("sanitizes malformed imported values before they reach UI state", () => {
@@ -103,10 +132,17 @@ describe("normalizeAppPresetSnapshot", () => {
         latestNeighbourSupportMode: "pm1pm2",
         mainTwoSetMode: "exactly",
         mainSevenSetMode: "banana" as any,
+        repeatedTerminalFamiliesEnabled: "yes" as any,
+        repeatedTerminalFamiliesMode: "exactly",
+        repeatedTerminalFamiliesCount: 99,
+        repeatedTerminalFamiliesScope: "main",
         dgaHeatmapView: "banana" as any,
         tempMetric: "banana" as any,
         monthlyBucketTemperatureOverlayMode: "detailed",
         monthlyBucketTemperatureMetric: "banana" as any,
+        showHeatmapLetters: "yes" as any,
+        showHeatmapHoverLabels: false,
+        showMbsHoverSparkline: false,
       }),
     );
 
@@ -132,9 +168,16 @@ describe("normalizeAppPresetSnapshot", () => {
     expect(normalized.latestNeighbourSupportMode).toBe("pm1pm2");
     expect(normalized.mainTwoSetMode).toBe("exactly");
     expect(normalized.mainSevenSetMode).toBe("atMost");
+    expect(normalized.repeatedTerminalFamiliesEnabled).toBe(true);
+    expect(normalized.repeatedTerminalFamiliesMode).toBe("exactly");
+    expect(normalized.repeatedTerminalFamiliesCount).toBe(3);
+    expect(normalized.repeatedTerminalFamiliesScope).toBe("main");
     expect(normalized.dgaHeatmapView).toBe("temperature");
     expect(normalized.tempMetric).toBe("hybrid");
     expect(normalized.monthlyBucketTemperatureOverlayMode).toBe("detailed");
     expect(normalized.monthlyBucketTemperatureMetric).toBe("recency");
+    expect(normalized.showHeatmapLetters).toBe(true);
+    expect(normalized.showHeatmapHoverLabels).toBe(false);
+    expect(normalized.showMbsHoverSparkline).toBe(false);
   });
 });

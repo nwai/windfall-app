@@ -11,6 +11,7 @@ export interface MonthlyDigitNumberCount {
 
 export interface MonthlyDigitOccurrenceRow {
   monthLabel: string;
+  firstDrawDate?: Date;
   drawCount: number;
   availableDrawCount: number;
   totalOccurrences: number;
@@ -159,13 +160,13 @@ export const analyzeMonthlyDigitOccurrences = (
     .filter((entry): entry is { date: Date; numbers: number[] } => entry !== null)
     .sort((left, right) => left.date.getTime() - right.date.getTime());
 
-  const byMonth = new Map<string, { numbers: number[] }[]>();
+  const byMonth = new Map<string, { numbers: number[]; date: Date }[]>();
   normalized.forEach((entry) => {
     const monthKey = getMonthKey(entry.date);
     if (!byMonth.has(monthKey)) {
       byMonth.set(monthKey, []);
     }
-    byMonth.get(monthKey)?.push({ numbers: entry.numbers });
+    byMonth.get(monthKey)?.push({ numbers: entry.numbers, date: entry.date });
   });
 
   const overallOneDigitCounts = new Map<number, number>();
@@ -208,6 +209,7 @@ export const analyzeMonthlyDigitOccurrences = (
 
       return {
         monthLabel,
+        firstDrawDate: entries[0]?.date,
         drawCount,
         availableDrawCount,
         totalOccurrences,
@@ -230,8 +232,8 @@ export const analyzeMonthlyDigitOccurrences = (
       };
     });
 
-  const averageRows = filterRowsForHistoryBaselines(rows, (row) => row.monthLabel);
-  const averageExcludedMonthLabels = getExcludedMonthLabelsForHistoryBaselines(rows, (row) => row.monthLabel);
+  const averageRows = filterRowsForHistoryBaselines(rows, (row) => row.monthLabel, row => row.firstDrawDate);
+  const averageExcludedMonthLabels = getExcludedMonthLabelsForHistoryBaselines(rows, (row) => row.monthLabel, row => row.firstDrawDate);
 
   const totalDraws = rows.reduce((sum, row) => sum + row.drawCount, 0);
   const totalOneDigitOccurrences = rows.reduce((sum, row) => sum + row.oneDigitOccurrences, 0);
@@ -267,8 +269,9 @@ export const analyzeMonthlyDigitOccurrences = (
   const recentWindowMonths = getRecentWindowMonths(rows.length);
   const recentRows = recentWindowMonths > 0 ? rows.slice(-recentWindowMonths) : [];
   const historicalRows = rows.length > recentWindowMonths ? rows.slice(0, rows.length - recentWindowMonths) : [];
-  const recentRowsForAverage = filterRowsForHistoryBaselines(recentRows, (row) => row.monthLabel);
-  const historicalRowsForAverage = filterRowsForHistoryBaselines(historicalRows, (row) => row.monthLabel);
+  const excludedOpeningMonths = new Set(averageExcludedMonthLabels);
+  const recentRowsForAverage = recentRows.filter(row => !excludedOpeningMonths.has(row.monthLabel));
+  const historicalRowsForAverage = historicalRows.filter(row => !excludedOpeningMonths.has(row.monthLabel));
 
   const recentAvgOneDigitShare = average(recentRowsForAverage.map((row) => row.oneDigitShare));
   const historicalAvgOneDigitShare = average(historicalRowsForAverage.map((row) => row.oneDigitShare));

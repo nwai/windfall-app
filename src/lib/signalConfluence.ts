@@ -50,6 +50,7 @@ export interface BuildSignalConfluenceRowsOptions {
 
 export type SignalConfluenceSortKey = "rank" | "support";
 export type SignalConfluenceSortDirection = "ascending" | "descending";
+export type SignalConfluenceVisibilityMode = "supported-only" | "all-45";
 
 export function isValidSignalConfluenceNumber(value: unknown): value is number {
   return (
@@ -64,6 +65,49 @@ export function isValidSignalConfluenceNumber(value: unknown): value is number {
 export function normalizeSignalConfluenceNumbers(values: readonly unknown[] | null | undefined): number[] {
   if (!Array.isArray(values)) return [];
   return Array.from(new Set(values.filter(isValidSignalConfluenceNumber))).sort((left, right) => left - right);
+}
+
+export function buildRankedSignalConfluenceMentions(
+  numbers: readonly unknown[] | null | undefined,
+  family: SignalConfluenceFamilyKey,
+  source: string,
+  labelPrefix: string,
+  limit = 8,
+): SignalConfluenceMention[] {
+  if (!Array.isArray(numbers)) return [];
+
+  const safeLimit = Math.max(0, Math.floor(Number.isFinite(limit) ? limit : 0));
+  if (safeLimit === 0) return [];
+  const seen = new Set<number>();
+  const rankedNumbers: number[] = [];
+
+  for (const value of numbers) {
+    if (!isValidSignalConfluenceNumber(value) || seen.has(value)) continue;
+    seen.add(value);
+    rankedNumbers.push(value);
+    if (rankedNumbers.length >= safeLimit) break;
+  }
+
+  return rankedNumbers.map((number, index) => ({
+    number,
+    family,
+    source,
+    label: `${labelPrefix} #${index + 1}`,
+    strength: rankedStrength(index, rankedNumbers.length),
+  }));
+}
+
+export function filterSignalConfluenceRows(
+  rows: readonly SignalConfluenceRow[],
+  visibilityMode: SignalConfluenceVisibilityMode,
+): SignalConfluenceRow[] {
+  if (visibilityMode === "all-45") return rows.slice();
+  return rows.filter((row) => (
+    row.rawMentionCount > 0
+    || row.isForced
+    || row.isUserSelected
+    || row.isExcluded
+  ));
 }
 
 export function rankedStrength(rankIndex: number, total: number, floor = 0.35): number {

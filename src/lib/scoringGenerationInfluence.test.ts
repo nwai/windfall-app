@@ -28,7 +28,7 @@ describe("scoring generation influence", () => {
     expect(profile.influence).toBe("normal");
     expect(profile.numberScores[1]).toBeGreaterThan(profile.numberScores[40]);
     expect(profile.numberMultipliers[1]).toBeGreaterThan(profile.numberMultipliers[40]);
-    expect(profile.traceLabel).toContain("Scoring Diagnostics");
+    expect(profile.traceLabel).toContain("Numbers diagnostic");
     expect(profile.traceLabel).toContain("evidence weighting");
     expect(profile.traceLabel).not.toMatch(/predict|probability|guarantee/i);
     expect(JSON.parse(JSON.stringify(profile))).toEqual(profile);

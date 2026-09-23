@@ -7,6 +7,7 @@ import { useRef, useCallback, useEffect } from "react";
 import type { GenerateCandidatesResult } from "../generateCandidates";
 import type { GenerateWorkerArgs } from "../workers/generateWorker";
 import type { MonthlyBucketKey } from "../lib/monthlyDrawSummary";
+import { seededRandom, SETTINGS_MODEL_VERSION } from "../lib/settingsTransparency";
 
 /** Serialise monthly bucket Sets → arrays for structured clone transfer */
 export function serializeMonthlyBuckets(
@@ -104,6 +105,7 @@ type CancelGenerateResult = {
  * Returns generation start/cancel helpers.
  */
 export function useGenerateWorker() {
+  const seedRef = useRef<number | null>(null);
   const workerRef = useRef<Worker | null>(null);
   const latestPartialRef = useRef<GenerateCandidatesResult | null>(null);
   const callbacksRef = useRef<{
@@ -168,6 +170,10 @@ export function useGenerateWorker() {
       onResult: OnResult,
       onError: OnError
     ) => {
+      const randomSeed = args.randomSeed ?? crypto.getRandomValues(new Uint32Array(1))[0];
+      args = { ...args, randomSeed };
+      seedRef.current = randomSeed;
+      onTrace(`[TRACE] Generation random seed ${randomSeed}; model ${SETTINGS_MODEL_VERSION}. Replaying requires the same history and complete settings.`);
       const worker = getWorker();
       latestPartialRef.current = null;
       if (!worker) {
@@ -228,7 +234,11 @@ export function useGenerateWorker() {
                 },
                 args.latestNeighbourSupportOptions,
                 args.strictDroughtQuotaOptions,
-                args.empiricalDroughtQuotaOptions
+                args.empiricalDroughtQuotaOptions,
+                args.droughtEvidenceGovernorProfile,
+                args.monthlyBucketTransitionGovernorProfile,
+                args.repeatedTerminalDigitFamiliesOptions,
+                seededRandom(randomSeed),
             );
             latestPartialRef.current = null;
             onResult(result);
@@ -272,5 +282,5 @@ export function useGenerateWorker() {
     return { cancelled: true, hadPartial: false, accepted: 0, attempts: 0 };
   }, []);
 
-  return { runGenerate, cancelGenerate };
+  return { runGenerate, cancelGenerate, getGenerationSeed: () => seedRef.current };
 }

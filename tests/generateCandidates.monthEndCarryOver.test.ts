@@ -40,6 +40,21 @@ function withFixedRandom<T>(value: number, run: () => T): T {
   }
 }
 
+function countBoundaryPicks(weights?: Record<number, number>): number {
+  const original = Math.random;
+  let seed = 153782;
+  Math.random = () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 0x100000000;
+  };
+  try {
+    return Array.from({ length: 500 }, () => runForcedSuppCandidate(weights))
+      .filter((result) => result.candidates[0]?.supp.includes(44)).length;
+  } finally {
+    Math.random = original;
+  }
+}
+
 function runForcedSuppCandidate(monthEndCarryOverWeights?: Record<number, number>) {
   const excludedNumbers = Array.from({ length: 36 }, (_, index) => index + 8);
   const args: any[] = [
@@ -102,7 +117,7 @@ describe("generateCandidates month-end carry-over weighting", () => {
 
   it("biases the open slot toward current last-to-first boundary repeats when they are in the carry-over pool", () => {
     const history: Draw[] = [
-      draw("2026-01-03", [1, 2, 3, 4, 5, 6], [7, 8]),
+      draw("2026-01-02", [1, 2, 3, 4, 5, 6], [7, 8]),
       draw("2026-01-10", [9, 10, 11, 12, 13, 14], [15, 16]),
       draw("2026-01-17", [17, 18, 19, 20, 21, 22], [23, 24]),
       draw("2026-01-24", [25, 26, 27, 28, 29, 30], [31, 32]),
@@ -116,14 +131,8 @@ describe("generateCandidates month-end carry-over weighting", () => {
       referenceDate: new Date("2026-02-15T00:00:00Z"),
     });
 
-    const withoutCarryOver = withFixedRandom(0.6, () => runForcedSuppCandidate());
-    const withCarryOver = withFixedRandom(0.6, () => runForcedSuppCandidate(weighting.weights));
-
     expect(weighting.boundaryRepeatNumbers).toEqual([44]);
     expect(weighting.weights[44]).toBeGreaterThan(1);
-    expect(withoutCarryOver.candidates).toHaveLength(1);
-    expect(withCarryOver.candidates).toHaveLength(1);
-    expect(withoutCarryOver.candidates[0].supp).toEqual([7, 45]);
-    expect(withCarryOver.candidates[0].supp).toEqual([7, 44]);
+    expect(countBoundaryPicks(weighting.weights)).toBeGreaterThan(countBoundaryPicks());
   });
 });

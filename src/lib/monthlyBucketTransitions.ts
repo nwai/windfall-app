@@ -786,8 +786,8 @@ export const analyzeMonthlyBucketTransitions = (
   const maxNumber = Math.max(1, Math.floor(options.maxNumber ?? DEFAULT_MAX_NUMBER));
   const priorStrength = Math.max(0, options.priorStrength ?? DEFAULT_PRIOR_STRENGTH);
   const allMonths = buildMonthlyBucketTransitionMonths(history, { includeSupp, maxNumber });
-  const excludedOpeningMonthLabels = getExcludedMonthLabelsForHistoryBaselines(allMonths, (month) => month.monthLabel);
-  const baselineMonths = filterRowsForHistoryBaselines(allMonths, (month) => month.monthLabel);
+  const excludedOpeningMonthLabels = getExcludedMonthLabelsForHistoryBaselines(allMonths, (month) => month.monthLabel, month => month.drawStates[0]?.drawDate);
+  const baselineMonths = filterRowsForHistoryBaselines(allMonths, (month) => month.monthLabel, month => month.drawStates[0]?.drawDate);
   const latestObservedMonth = allMonths.length ? allMonths[allMonths.length - 1] : null;
   const planningState = buildPlanningState(latestObservedMonth, maxNumber);
   const monthLengthOptions = [...new Set(baselineMonths.map((month) => month.totalDrawCount))].sort((a, b) => a - b);

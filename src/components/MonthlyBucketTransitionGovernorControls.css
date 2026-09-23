@@ -1,0 +1,45 @@
+.windfall-transition-governor-container { grid-column: 1 / -1; }
+.windfall-transition-governor {
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.windfall-transition-governor__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.windfall-transition-governor__controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 12px;
+  align-items: start;
+}
+.windfall-transition-governor select { width: 100%; min-height: 44px; }
+.windfall-transition-governor__status {
+  border-left: 3px solid #007a79;
+  padding: 4px 12px;
+}
+.windfall-transition-governor__status span,
+.windfall-transition-governor td span,
+.windfall-transition-governor th span { display: block; }
+.windfall-transition-governor .windfall-transition-governor__scroll {
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+}
+.windfall-transition-governor table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.windfall-transition-governor th, .windfall-transition-governor td {
+  text-align: left;
+  padding: 8px;
+  vertical-align: top;
+  border-bottom: 1px solid #e5e7eb;
+  min-width: 110px;
+}
+.windfall-transition-governor thead { position: sticky; top: 0; z-index: 1; background: #f3f4f6; }
+.windfall-transition-governor tbody th span { font-weight: 400; }
+.windfall-transition-governor summary { min-height: 44px; padding: 10px 0; cursor: pointer; }
+.windfall-transition-governor__ledger { color: #005b59; overflow-wrap: anywhere; }

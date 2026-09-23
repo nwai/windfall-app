@@ -11,9 +11,12 @@ describe("MonthlyDrawsSummaryPanel Stage IDM wiring", () => {
     expect(source).toContain("Stage IDM");
     expect(source).toContain("Expected Draw Count");
     expect(source).toContain("Stage-Match Acceptance Playbook");
-    expect(source).toContain("applyStageMatchPlaybookRow");
-    expect(source).toContain("Apply loads editable bucket placeholders into Acceptance Needs");
-    expect(source).toContain("stageMatchAppliedKey");
+    expect(source).toContain("Bucket Mix Combinatorics Explorer");
+    expect(source).toContain("applyBucketMixRow");
+    expect(source).toContain("Load this bucket mix into Acceptance Needs as editable number placeholders");
+    expect(source).toContain("bucketMixAppliedSignature");
     expect(source).toContain("{rowApplied ? \"Applied\" : \"Apply\"}");
+    expect(source).toContain("Matching rows are labelled in Bucket Mix Combinatorics");
+    expect(source).not.toContain("applyStageMatchPlaybookRow");
   });
 });

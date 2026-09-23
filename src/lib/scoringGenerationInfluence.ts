@@ -115,8 +115,8 @@ export function buildScoringGenerationProfile(
     terminalDigitSetScores: rowMap(diagnostics.terminalDigitSetRows, (row) => row.key),
     straightRunScores: rowMap(diagnostics.straightRunRows, (row) => row.key),
     traceLabel: influence === "off"
-      ? "Scoring Diagnostics evidence weighting off."
-      : `Scoring Diagnostics ${influence} evidence weighting active; diagnostic support only, not a calibrated next-draw measure.`,
+      ? "Numbers diagnostic evidence weighting off."
+      : `Numbers diagnostic ${influence} evidence weighting active during number sampling; diagnostic support only, not a calibrated next-draw measure.`,
   };
 }
 
@@ -168,7 +168,7 @@ export function scoreCandidateWithScoringProfile(
     normalizedScore,
     components,
     trace: [
-      `Scoring Diagnostics diagnostic evidence ${Math.round(normalizedScore * 100)}% (${profile.influence}; number ${components.number.toFixed(1)}, ratio ${ratio} ${components.ratio.toFixed(1)}, terminal digits ${setKey} ${components.terminalDigitSet.toFixed(1)}${components.straightRun > 0 ? `, straight run ${components.straightRun.toFixed(1)}` : ""}).`,
+      `Numbers diagnostic evidence ${Math.round(normalizedScore * 100)}% (${profile.influence}; number ${components.number.toFixed(1)}, ratio ${ratio} ${components.ratio.toFixed(1)}, terminal digits ${setKey} ${components.terminalDigitSet.toFixed(1)}${components.straightRun > 0 ? `, straight run ${components.straightRun.toFixed(1)}` : ""}).`,
     ],
   };
 }

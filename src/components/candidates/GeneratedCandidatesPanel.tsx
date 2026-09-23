@@ -36,8 +36,16 @@ import {
 } from "../../lib/monthlyDrawSummary";
 import { computeVirtualRowWindow, type VirtualRowWindow } from "../../lib/virtualRows";
 import { HigButton, InfoHelp } from "../shared/HigControls";
+import type { MonthlyBucketTransitionGovernorProfile } from "../../lib/monthlyBucketTransitionGovernor";
+import { TransitionWatchCard } from "./TransitionWatchCard";
 
 const GENERATED_CANDIDATE_VISIBLE_COLUMN_COUNT = 23;
+export const GENERATED_CANDIDATE_PLAY_COST_CENTS = 67;
+
+export const formatGeneratedCandidatePlayCost = (candidateCount: number): string => {
+  const safeCount = Number.isFinite(candidateCount) ? Math.max(0, Math.trunc(candidateCount)) : 0;
+  return `$${((safeCount * GENERATED_CANDIDATE_PLAY_COST_CENTS) / 100).toFixed(2)}`;
+};
 
 /** Settings snapshot captured at export time — written as ## comment rows in CSV */
 export interface ExportSettings {
@@ -115,6 +123,10 @@ export interface GeneratedCandidatesPanelProps {
   setNumCandidates: (n: number) => void;
   rwr45Enabled?: boolean;
   setRwr45Enabled?: (enabled: boolean) => void;
+  monthlyTransitionWatchProfile?: MonthlyBucketTransitionGovernorProfile;
+  monthlyTransitionInfluenceProfile?: MonthlyBucketTransitionGovernorProfile;
+  monthlyTransitionTargetDrawOrdinal?: number;
+  onReviewMonthlyTransitionEvidence?: () => void;
   generationSessionActive?: boolean;
   generationSessionCount?: number;
   onStartGenerationSession?: () => void;
@@ -167,6 +179,9 @@ export interface GeneratedCandidatesPanelProps {
   monthlyAvgBuckets?: { times: number; avg: number }[];
   monthlyBuckets?: MonthlyBucketSets;
   monthlyIdealDrawState?: MonthlyIdealDrawState | null;
+  idmTargetComposition?: number[] | null;
+  idmTargetSourceLabel?: string;
+  idmTargetDetail?: string;
   stageIdealDrawState?: StageIdealDrawState | null;
   historyForOGA?: Draw[];
   /** Full unfiltered draw history — used for the Historical Prize Backtest so all draws
@@ -228,6 +243,10 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
   setNumCandidates,
   rwr45Enabled = false,
   setRwr45Enabled,
+  monthlyTransitionWatchProfile,
+  monthlyTransitionInfluenceProfile,
+  monthlyTransitionTargetDrawOrdinal,
+  onReviewMonthlyTransitionEvidence,
   generationSessionActive = false,
   generationSessionCount = 0,
   onStartGenerationSession,
@@ -272,6 +291,9 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
   monthlyAvgBuckets = [],
   monthlyBuckets,
   monthlyIdealDrawState = null,
+  idmTargetComposition = null,
+  idmTargetSourceLabel,
+  idmTargetDetail,
   stageIdealDrawState = null,
   historyForOGA,
   fullHistory,
@@ -789,8 +811,8 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
     return Math.max(...valid);
   }, [convergenceScores]);
 
-  // --- Ideal Draw composition (shared exhaustive SSD target from Monthly Draws Summary) ---
-  const idealDrawComp = useMemo((): number[] | null => {
+  // --- Ideal Draw composition used by IDM/Rdy. A Bucket Mix Apply row can override the robust target. ---
+  const robustIdealDrawComp = useMemo((): number[] | null => {
     const sharedIdeal = toNineBucketDistribution(monthlyIdealDrawState?.idealDrawBucketCounts);
     if (sharedIdeal) return sharedIdeal;
     if (!currentDist || !targetDist) return null;
@@ -800,6 +822,17 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
       drawSize: 8,
     }).bucketCounts.map(({ count }) => count);
   }, [currentDist, monthlyIdealDrawState, targetDist]);
+  const appliedIdmTargetComp = useMemo(
+    (): number[] | null => toNineBucketDistribution(idmTargetComposition),
+    [idmTargetComposition],
+  );
+  const idealDrawComp = appliedIdmTargetComp ?? robustIdealDrawComp;
+  const idmTargetSource = appliedIdmTargetComp
+    ? (idmTargetSourceLabel || "Bucket Mix Combinatorics Apply")
+    : "Robust Baseline / Ideal Draw";
+  const idmTargetDescription = appliedIdmTargetComp
+    ? (idmTargetDetail || "applied bucket mix")
+    : (monthlyIdealDrawState?.effectiveMonthLabel ? monthlyIdealDrawState.effectiveMonthLabel : "Monthly Draws Summary robust target");
 
   /** Ideal Draw Match (IDM): similarity between candidate bucket composition and ideal draw.
    *  1.0 = perfect match, 0.0 = completely different. */
@@ -1628,6 +1661,15 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
          ? `${matchedCount}/${sortedCandidates.length}`
          : `${sortedCandidates.length}`;
      const manualSimLabel = `${Math.min(manualSimSelected.length, 8)}/8`;
+     const generatedPlayCostLabel = useMemo(
+       () => formatGeneratedCandidatePlayCost(candidates.length),
+       [candidates.length],
+     );
+     const sessionPlayCostLabel = useMemo(
+       () => formatGeneratedCandidatePlayCost(generationSessionCount),
+       [generationSessionCount],
+     );
+     const showGenerationSessionCost = generationSessionActive || generationSessionCount > 0;
 
      function renderNumberWithCount(n: number, count: number) {
        return (
@@ -2015,6 +2057,17 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
 
      return (
      <section style={panel}>
+       {monthlyTransitionWatchProfile
+         && monthlyTransitionInfluenceProfile
+         && Number.isInteger(monthlyTransitionTargetDrawOrdinal) ? (
+           <TransitionWatchCard
+             evidenceProfile={monthlyTransitionWatchProfile}
+             influenceProfile={monthlyTransitionInfluenceProfile}
+             targetDrawOrdinal={monthlyTransitionTargetDrawOrdinal as number}
+             bypassedByRandomCoverage={rwr45Enabled}
+             onReviewEvidence={onReviewMonthlyTransitionEvidence}
+           />
+         ) : null}
        <header style={hdr}>
           <label style={{ fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6 }}>
            Count
@@ -2100,7 +2153,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                    fontVariantNumeric: "tabular-nums",
                  }}
                >
-                 {generationSessionActive ? "Session active" : "Session off"} · {generationSessionCount} stored
+                 {generationSessionActive ? "Session active" : "Session off"} · {generationSessionCount} stored · {sessionPlayCostLabel}
                </span>
                <HigButton
                  variant={generationSessionActive ? "primary" : "secondary"}
@@ -2136,7 +2189,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                  Export session
                </HigButton>
                <InfoHelp label="Generation session help">
-                 While active, displayed generated candidates are stored locally and candidates with the same six main numbers as an existing session row are rejected. Export sends stored rows to Portfolio Compression and Paste-Weighted as mains plus supps where available, then clears the session storage. Export does not change whether capture is active.
+                 While active, displayed generated candidates are stored locally and candidates with the same six main numbers as an existing session row are rejected. Session cost is the stored session row count multiplied by $0.67 and updates as the session ledger grows. Export sends stored rows to Portfolio Compression and Paste-Weighted as mains plus supps where available, then clears the session storage. Export does not change whether capture is active.
                </InfoHelp>
              </div>
            )}
@@ -2294,6 +2347,8 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
          {[
            { label: "Generated", value: String(candidates.length) },
            { label: "Visible", value: visibleRowsLabel },
+           { label: "Play cost", value: generatedPlayCostLabel },
+           ...(showGenerationSessionCost ? [{ label: "Session cost", value: sessionPlayCostLabel }] : []),
            { label: "Prize-qualified", value: manualSimSelected.length >= 8 ? String(prizeQualifyingCount) : "manual off" },
            { label: "Manual Check", value: manualSimLabel },
            { label: "Sort", value: activeSortLabel },
@@ -2582,8 +2637,10 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
             <div style={{
               fontSize: 12, color: "#333", background: "#f0f4ff", border: "1px solid #c5cae9",
               borderRadius: 5, padding: "6px 10px", marginBottom: 8, display: "flex", alignItems: "center", gap: 8,
+              flexWrap: "wrap",
             }}>
-              <b style={{ color: "#1565c0" }}>Ideal draw composition (IDM target):</b>
+              <b style={{ color: "#1565c0" }}>IDM target:</b>
+              <span style={{ color: "#1e3a8a", fontWeight: 800 }}>{idmTargetSource}</span>
               {MONTHLY_BUCKET_LABELS.map((label, idx) => (
                 <span key={label} style={{
                   background: idx === 0 ? "#f0f0f0" : "#e3f2fd",
@@ -2596,7 +2653,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                 </span>
               ))}
               <span style={{ color: "#888", marginLeft: 4 }}>
-                (draw {idealDrawComp.reduce((a: number, b: number) => a + b, 0)} numbers from these buckets to best match the Monthly Draws Summary robust target{monthlyIdealDrawState?.effectiveMonthLabel ? ` for ${monthlyIdealDrawState.effectiveMonthLabel}` : ""}; descriptive, not predictive)
+                ({idmTargetDescription}; draw {idealDrawComp.reduce((a: number, b: number) => a + b, 0)} numbers from these buckets. Descriptive alignment only, not a win forecast.)
               </span>
             </div>
           )}
@@ -2801,7 +2858,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
           <table style={tbl}>
             <thead>
                <tr style={{ background: "#fafafa" }}>
-                 <th style={th}>#</th>
+                 <th style={th} title="Original generated position; preserved when sorting or filtering.">#</th>
                  <th style={mainTh}>Main (6)</th>
                  <th style={th}>Supp (2)</th>
                  <th style={th}>Manual (M/S)</th>
@@ -2849,7 +2906,6 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                 <tr style={{ height: topPad }} aria-hidden="true"><td colSpan={GENERATED_CANDIDATE_VISIBLE_COLUMN_COUNT} /></tr>
               )}
               {visibleCandidates.map(({ c, origIdx, matched: isMatched }, sliceIdx) => {
-                const displayIdx = startIdx + sliceIdx;
                 const i = origIdx;
                 const isDimmed = filterPinned !== "off" && !isMatched;
                 const isSelRow = i === selectedCandidateIdx;
@@ -2923,7 +2979,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                      onClick={() => onSelectCandidate(i)}
                      title={`#${i + 1} SelHits=${selHits} RecentHits=${recentHits}${previousNeighbourHits !== undefined ? ` Prev±2=${previousNeighbourHits}` : ""}${previousNeighbourDuplicateHits !== undefined ? ` Dup±2=${previousNeighbourDuplicateHits}` : ""}${previousNeighbourDirectionalPattern ? ` Dir±2=${previousNeighbourDirectionalPattern}` : previousNeighbourDirectionalHits !== undefined ? ` Dir±2=${previousNeighbourDirectionalHits}` : ""}${convScore !== null ? ` Conv=${convScore.toFixed(1)}` : ""}${stageIdmScore !== null ? ` StageIDM=${(stageIdmScore * 100).toFixed(1)}%` : ""}`}
                   >
-                    <td style={tdCenter}>{displayIdx + 1}</td>
+                    <td style={tdCenter} title={`Original generated position ${i + 1}`}>{i + 1}</td>
                     <td style={mainTd}>{c.main.map((n: number) => renderNumber(
                       n,
                       isActiveSim ? "main" : undefined,
@@ -3683,7 +3739,68 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
           </div>
        </div>
      </section>
-   );
+  );
+};
+
+const officialDrawConfirmOverlayStyle: React.CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  zIndex: 90,
+  display: "grid",
+  placeItems: "center",
+  padding: 16,
+  background: "rgba(15, 23, 42, 0.28)",
+  backdropFilter: "blur(8px)",
+};
+
+const officialDrawConfirmSheetStyle: React.CSSProperties = {
+  width: "min(520px, 100%)",
+  display: "grid",
+  gap: 14,
+  padding: 18,
+  borderRadius: 14,
+  border: "1px solid rgba(148, 163, 184, 0.45)",
+  background: "rgba(255, 255, 255, 0.96)",
+  boxShadow: "0 22px 60px rgba(15, 23, 42, 0.24)",
+};
+
+const officialDrawSummaryGridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+  gap: 8,
+};
+
+const officialDrawSummaryItemStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 3,
+  padding: "8px 10px",
+  borderRadius: 8,
+  border: "1px solid #e2e8f0",
+  background: "#f8fafc",
+  color: "#0f172a",
+  fontSize: 12,
+};
+
+const officialDrawSummaryLabelStyle: React.CSSProperties = {
+  color: "#64748b",
+  fontSize: 10,
+  fontWeight: 850,
+  textTransform: "uppercase",
+  letterSpacing: 0,
+};
+
+const officialDrawConfirmCheckStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  minHeight: 40,
+  padding: "8px 10px",
+  borderRadius: 8,
+  border: "1px solid #cbd5e1",
+  background: "#fff",
+  color: "#111827",
+  fontSize: 12,
+  fontWeight: 800,
 };
 
 const ManualSim: React.FC<{
@@ -3728,12 +3845,41 @@ const ManualSim: React.FC<{
     && !manualSaveDisabledReason
     && !isSavingManualAsNextDraw;
   const saveAsNextDrawTitle = manualSimSelected.length < 8
-    ? "Select 8 numbers in Manual Prize Check before saving as a draw."
+    ? "Select 8 numbers in Manual Prize Check before saving an official draw result."
     : manualSaveDisabledReason
       ? manualSaveDisabledReason
       : manualNextDrawDate
-        ? `Save these 8 numbers as the next draw history row for ${manualNextDrawDate}.`
-        : "Save these 8 numbers as the next draw history row.";
+        ? `Prepare to save these 8 numbers as the official draw result for ${manualNextDrawDate}.`
+        : "Prepare to save these 8 numbers as an official draw result.";
+  const [showOfficialDrawConfirm, setShowOfficialDrawConfirm] = React.useState(false);
+  const [officialResultConfirmed, setOfficialResultConfirmed] = React.useState(false);
+  const manualMainNumbers = manualSimSelected.slice(0, 6);
+  const manualSuppNumbers = manualSimSelected.slice(6, 8);
+
+  React.useEffect(() => {
+    if (canSaveAsNextDraw) return;
+    setShowOfficialDrawConfirm(false);
+    setOfficialResultConfirmed(false);
+  }, [canSaveAsNextDraw]);
+
+  const openOfficialDrawConfirm = () => {
+    if (!canSaveAsNextDraw) return;
+    setOfficialResultConfirmed(false);
+    setShowOfficialDrawConfirm(true);
+  };
+
+  const closeOfficialDrawConfirm = () => {
+    if (isSavingManualAsNextDraw) return;
+    setShowOfficialDrawConfirm(false);
+    setOfficialResultConfirmed(false);
+  };
+
+  const confirmOfficialDrawSave = () => {
+    if (!canSaveAsNextDraw || !officialResultConfirmed) return;
+    setShowOfficialDrawConfirm(false);
+    setOfficialResultConfirmed(false);
+    onSaveManualAsNextDraw?.(manualSimSelected);
+  };
 
   const postDist = React.useMemo((): number[] | null => {
     if (!showBeforeAfter) return null;
@@ -3781,29 +3927,83 @@ const ManualSim: React.FC<{
             Use User Selected
           </label>
           {onSaveManualAsNextDraw && (
-            <button
-              type="button"
-              onClick={() => onSaveManualAsNextDraw(manualSimSelected)}
+            <HigButton
+              size="compact"
+              variant="secondary"
+              onClick={openOfficialDrawConfirm}
               disabled={!canSaveAsNextDraw}
-              style={{
-                minHeight: 30,
-                padding: "4px 10px",
-                border: canSaveAsNextDraw ? "1px solid #111827" : "1px solid #cbd5e1",
-                borderRadius: 8,
-                background: canSaveAsNextDraw ? "#111827" : "#f8fafc",
-                color: canSaveAsNextDraw ? "#fff" : "#94a3b8",
-                fontSize: 11,
-                fontWeight: 850,
-                whiteSpace: "nowrap",
-                cursor: canSaveAsNextDraw ? "pointer" : "not-allowed",
-                boxShadow: canSaveAsNextDraw ? "0 1px 2px rgba(15, 23, 42, 0.18)" : "none",
-              }}
+              aria-label={manualNextDrawDate
+                ? `Prepare to save official draw result for ${manualNextDrawDate}`
+                : "Prepare to save official draw result"}
               title={saveAsNextDrawTitle}
             >
-              {isSavingManualAsNextDraw ? "Saving..." : manualNextDrawDate ? `Save as Next Draw ${manualNextDrawDate}` : "Save as Next Draw"}
-            </button>
+              {isSavingManualAsNextDraw ? "Saving..." : manualNextDrawDate ? `Save Official Draw Result ${manualNextDrawDate}` : "Save Official Draw Result..."}
+            </HigButton>
           )}
       </div>
+      {showOfficialDrawConfirm && (
+        <div
+          role="presentation"
+          style={officialDrawConfirmOverlayStyle}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="official-draw-confirm-title"
+            style={officialDrawConfirmSheetStyle}
+          >
+            <div style={{ display: "grid", gap: 6 }}>
+              <div id="official-draw-confirm-title" style={{ fontSize: 15, fontWeight: 850, color: "#0f172a" }}>
+                Save official draw result?
+              </div>
+              <div style={{ fontSize: 12, lineHeight: 1.45, color: "#475569" }}>
+                This writes the selected Manual Prize Check values into Windfall draw history. Use this only for official results, not candidate play.
+              </div>
+            </div>
+            <div style={officialDrawSummaryGridStyle}>
+              <div style={officialDrawSummaryItemStyle}>
+                <span style={officialDrawSummaryLabelStyle}>Draw date</span>
+                <strong>{manualNextDrawDate ?? "Next unresolved draw"}</strong>
+              </div>
+              <div style={officialDrawSummaryItemStyle}>
+                <span style={officialDrawSummaryLabelStyle}>Mains</span>
+                <strong>{manualMainNumbers.join(", ")}</strong>
+              </div>
+              <div style={officialDrawSummaryItemStyle}>
+                <span style={officialDrawSummaryLabelStyle}>Supps</span>
+                <strong>{manualSuppNumbers.join(", ")}</strong>
+              </div>
+              <div style={officialDrawSummaryItemStyle}>
+                <span style={officialDrawSummaryLabelStyle}>CSV destination</span>
+                <strong>Loaded history CSV or download fallback</strong>
+              </div>
+            </div>
+            <label style={officialDrawConfirmCheckStyle}>
+              <input
+                type="checkbox"
+                checked={officialResultConfirmed}
+                onChange={(event) => setOfficialResultConfirmed(event.currentTarget.checked)}
+                aria-label="Confirm these are official draw results"
+              />
+              I confirm these are the official draw results.
+            </label>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+              <HigButton size="compact" variant="quiet" onClick={closeOfficialDrawConfirm}>
+                Cancel
+              </HigButton>
+              <HigButton
+                size="compact"
+                variant="primary"
+                onClick={confirmOfficialDrawSave}
+                disabled={!officialResultConfirmed || isSavingManualAsNextDraw}
+                aria-label="Confirm and save official draw result"
+              >
+                Save to history
+              </HigButton>
+            </div>
+          </div>
+        </div>
+      )}
       {followUserSelected && (
         <div role="status" style={{ marginBottom: 8, color: "#475569", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "6px 8px", fontSize: 11 }}>
           Using User Selected order: {syncedUserSelectedNumbers.length}/8 copied. The first six synced values are treated as mains and the last two synced values are treated as supps; turn this off to choose Manual Prize Check slots directly.

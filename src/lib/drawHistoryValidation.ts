@@ -1,5 +1,6 @@
 import { parseCSVorJSON } from "../parseCSVorJSON";
 import type { DrawRow } from "./drawHistory";
+import { drawScheduleDateError } from "./historyScheduleAudit";
 import {
   analyzeDrawHistoryRows,
   formatIsoDateAsMdyy,
@@ -114,6 +115,8 @@ export function validateDrawEntry(
   if (!isoDate) {
     return { ok: false, message: "Choose a valid draw date." };
   }
+  const scheduleError = drawScheduleDateError(isoDate);
+  if (scheduleError) return { ok: false, message: scheduleError };
 
   const mains = parseNumberSlots(input.mains, "Main", options.mainCount, options.minNumber, options.maxNumber);
   if (!mains.ok) return mains;

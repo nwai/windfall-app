@@ -1,0 +1,55 @@
+.windfall-drought-governor {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  color: #252a30;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.windfall-drought-governor p { margin: 0; }
+.windfall-drought-governor__heading,
+.windfall-drought-governor__carryover {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+.windfall-drought-governor label {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  gap: 6px;
+}
+.windfall-drought-governor__context {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+.windfall-drought-governor__families {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: 12px;
+}
+.windfall-drought-governor fieldset {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid #bbc3ca;
+  border-radius: 8px;
+}
+.windfall-drought-governor legend { padding: 0 6px; font-weight: 700; }
+.windfall-drought-governor__buckets { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.windfall-drought-governor__evidence { margin: 0; }
+.windfall-drought-governor__evidence dt { color: #515a62; }
+.windfall-drought-governor__evidence dd { margin: 0 0 4px; font-weight: 600; }
+.windfall-drought-governor__carryover { padding: 10px 0; border-block: 1px solid #d9dde1; }
+.windfall-drought-governor select { min-height: 32px; max-width: 100%; font: inherit; }
+.windfall-drought-governor .windfall-drought-governor__scroll { min-width: 0; max-height: 320px; overflow: auto; }
+.windfall-drought-governor table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.windfall-drought-governor thead { position: sticky; top: 0; z-index: 1; background: #f1f3f4; }
+.windfall-drought-governor th, .windfall-drought-governor td { padding: 6px 8px; text-align: left; border-bottom: 1px solid #e1e4e7; white-space: nowrap; }
+@media (max-width: 640px), (pointer: coarse) {
+  .windfall-drought-governor label, .windfall-drought-governor select { min-height: 44px; }
+}

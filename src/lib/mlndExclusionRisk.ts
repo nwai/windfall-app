@@ -99,8 +99,8 @@ export const buildMlndHistoryScope = (history: Draw[]): MlndHistoryScope => {
   const entries = chronological
     .map((draw) => ({ draw, monthLabel: toMonthLabel(draw) }))
     .filter((entry): entry is { draw: Draw; monthLabel: string } => Boolean(entry.monthLabel));
-  const filteredEntries = filterRowsForHistoryBaselines(entries, (entry) => entry.monthLabel);
-  const excludedMonthLabels = getExcludedMonthLabelsForHistoryBaselines(entries, (entry) => entry.monthLabel);
+  const filteredEntries = filterRowsForHistoryBaselines(entries, (entry) => entry.monthLabel, entry => entry.draw.date);
+  const excludedMonthLabels = getExcludedMonthLabelsForHistoryBaselines(entries, (entry) => entry.monthLabel, entry => entry.draw.date);
   const scopedHistory = filteredEntries.map((entry) => entry.draw);
 
   return {
@@ -416,4 +416,3 @@ export const buildMlndRiskAnalysis = (
     }),
   };
 };
-

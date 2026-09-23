@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  formatGeneratedCandidatePlayCost,
   GeneratedCandidatesPanel,
   type GeneratedCandidatesPanelProps,
 } from "../src/components/candidates/GeneratedCandidatesPanel";
@@ -159,7 +160,7 @@ describe("GeneratedCandidatesPanel", () => {
     expect(document.body.textContent).toContain("exactly 7");
   });
 
-  it("lets the manual prize checker request saving a complete 8-number row as the next draw", async () => {
+  it("requires explicit confirmation before saving a complete Manual Prize Check row as an official draw result", async () => {
     const onSaveManualAsNextDraw = vi.fn();
     const container = document.createElement("div");
     document.body.appendChild(container);
@@ -175,13 +176,37 @@ describe("GeneratedCandidatesPanel", () => {
       });
 
       const button = Array.from(container.querySelectorAll("button"))
-        .find((candidate) => candidate.textContent?.includes("Save as Next Draw")) as HTMLButtonElement | undefined;
+        .find((candidate) => candidate.textContent?.includes("Save Official Draw Result")) as HTMLButtonElement | undefined;
       expect(button).toBeTruthy();
       expect(button?.disabled).toBe(false);
       expect(button?.getAttribute("title")).toContain("2026-09-04");
 
       await act(async () => {
         button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+
+      expect(onSaveManualAsNextDraw).not.toHaveBeenCalled();
+      expect(container.textContent).toContain("Save official draw result?");
+      expect(container.textContent).toContain("This writes the selected Manual Prize Check values into Windfall draw history.");
+      expect(container.textContent).toContain("1, 2, 3, 4, 5, 6");
+      expect(container.textContent).toContain("7, 8");
+
+      const finalSaveButton = Array.from(container.querySelectorAll("button"))
+        .find((candidate) => candidate.textContent === "Save to history") as HTMLButtonElement | undefined;
+      expect(finalSaveButton).toBeTruthy();
+      expect(finalSaveButton?.disabled).toBe(true);
+
+      const checkbox = container.querySelector(
+        'input[aria-label="Confirm these are official draw results"]',
+      ) as HTMLInputElement | null;
+      expect(checkbox).not.toBeNull();
+      await act(async () => {
+        checkbox?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+      expect(finalSaveButton?.disabled).toBe(false);
+
+      await act(async () => {
+        finalSaveButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       });
 
       expect(onSaveManualAsNextDraw).toHaveBeenCalledWith([1, 2, 3, 4, 5, 6, 7, 8]);
@@ -193,7 +218,7 @@ describe("GeneratedCandidatesPanel", () => {
     }
   });
 
-  it("disables Save as Next Draw until Manual Prize Check has 8 numbers", () => {
+  it("disables Save Official Draw Result until Manual Prize Check has 8 numbers", () => {
     const html = renderToStaticMarkup(
       React.createElement(GeneratedCandidatesPanel, buildProps({
         manualSimSelected: [1, 2, 3, 4, 5, 6, 7],
@@ -203,7 +228,7 @@ describe("GeneratedCandidatesPanel", () => {
     );
     const document = new DOMParser().parseFromString(html, "text/html");
     const button = Array.from(document.querySelectorAll("button"))
-      .find((candidate) => candidate.textContent?.includes("Save as Next Draw"));
+      .find((candidate) => candidate.textContent?.includes("Save Official Draw Result"));
 
     expect(button?.getAttribute("disabled")).toBe("");
     expect(button?.getAttribute("title")).toContain("Select 8 numbers");
@@ -531,6 +556,9 @@ describe("GeneratedCandidatesPanel", () => {
     const firstMainCellCompact = () => (
       container.querySelector("tbody tr td:nth-child(2)")?.textContent ?? ""
     ).replace(/\s+/g, "");
+    const firstPositionCell = () => (
+      container.querySelector("tbody tr td:nth-child(1)")?.textContent ?? ""
+    ).trim();
     const prizeHeader = () => Array.from(container.querySelectorAll("th"))
       .find((th) => th.textContent?.includes("Prize"));
 
@@ -544,12 +572,14 @@ describe("GeneratedCandidatesPanel", () => {
 
       expect(container.textContent).toContain("generated order");
       expect(firstMainCellCompact()).toBe("313233343536");
+      expect(firstPositionCell()).toBe("1");
 
       await act(async () => {
         prizeHeader()?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       });
 
       expect(firstMainCellCompact()).toBe("123456");
+      expect(firstPositionCell()).toBe("2");
 
       await act(async () => {
         root.render(React.createElement(GeneratedCandidatesPanel, buildProps({
@@ -559,12 +589,45 @@ describe("GeneratedCandidatesPanel", () => {
       });
 
       expect(firstMainCellCompact()).toBe("313233343536");
+      expect(firstPositionCell()).toBe("1");
     } finally {
       await act(async () => {
         root.unmount();
       });
       container.remove();
     }
+  });
+
+  it("shows the estimated play cost for all generated candidate rows", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(GeneratedCandidatesPanel, buildProps({
+        candidates: [buildCandidate(0), buildCandidate(1), buildCandidate(2)],
+      })),
+    );
+
+    expect(html).toContain("Play cost");
+    expect(html).toContain("$2.01");
+  });
+
+  it("shows dynamic generation session cost separately from the current run cost", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(GeneratedCandidatesPanel, buildProps({
+        candidates: [buildCandidate(0), buildCandidate(1)],
+        generationSessionActive: true,
+        generationSessionCount: 5,
+        onStartGenerationSession: vi.fn(),
+        onEndGenerationSession: vi.fn(),
+        onClearGenerationSession: vi.fn(),
+        onExportGenerationSession: vi.fn(),
+      })),
+    );
+
+    expect(formatGeneratedCandidatePlayCost(354)).toBe("$237.18");
+    expect(html).toContain("Play cost");
+    expect(html).toContain("$1.34");
+    expect(html).toContain("Session cost");
+    expect(html).toContain("$3.35");
+    expect(html).toContain("Session active · 5 stored · $3.35");
   });
 
   it("uses the full 8-number candidate row for both Prize labels and Manual M/S dots", () => {
@@ -630,9 +693,46 @@ describe("GeneratedCandidatesPanel", () => {
       } as any)),
     );
 
-    expect(html).toContain("Ideal draw composition (IDM target):");
+    expect(html).toContain("IDM target:");
+    expect(html).toContain("Robust Baseline / Ideal Draw");
     expect(html).toContain("0x=2");
     expect(html).toContain("1x=5");
+    expect(html).toContain("2x=1");
+  });
+
+  it("uses an applied Bucket Mix target as the active IDM target when supplied", () => {
+    const buckets = monthlyBucketSets({
+      undrawn: [1, 2, 3, 4],
+      times1: [5, 6, 7],
+      times2: [8],
+    });
+    const html = renderToStaticMarkup(
+      React.createElement(GeneratedCandidatesPanel, buildProps({
+        candidates: [
+          {
+            main: [1, 2, 3, 4, 5, 6],
+            supp: [7, 8],
+            ogaScore: 0.42,
+            ogaPercentile: 55,
+          },
+        ],
+        monthlyBuckets: buckets,
+        monthlyIdealDrawState: {
+          bucketSets: buckets,
+          targetDistribution: [4, 8, 12, 10, 6, 3, 1, 1, 0],
+          idealDrawBucketCounts: [2, 5, 1, 0, 0, 0, 0, 0, 0],
+          effectiveMonthLabel: "2026-06",
+          effectiveMonthIsSynthetic: false,
+        },
+        idmTargetComposition: [4, 3, 1, 0, 0, 0, 0, 0, 0],
+        idmTargetSourceLabel: "Bucket Mix Combinatorics Apply",
+        idmTargetDetail: "2026-06 · D8 of 13D · 0x 4 · 1x 3 · 2x 1",
+      } as any)),
+    );
+
+    expect(html).toContain("Bucket Mix Combinatorics Apply");
+    expect(html).toContain("0x=4");
+    expect(html).toContain("1x=3");
     expect(html).toContain("2x=1");
   });
 

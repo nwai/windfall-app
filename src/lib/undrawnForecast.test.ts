@@ -85,4 +85,14 @@ describe("buildUndrawnForecast", () => {
       clean.simulation.topLikelyUndrawn.map((item) => item.number),
     )
   })
+
+  it("uses 13 draws as the maximum recent evidence slice", () => {
+    const history = Array.from({ length: 60 }, (_, index) => (
+      draw(`2026-01-${String(index + 1).padStart(2, "0")}`, [1, 2, 3, 4, 5, 6])
+    ))
+
+    const forecast = buildUndrawnForecast(history, { includeSupp: false, trials: 300, seed: 31 })
+
+    expect(forecast.simulation.recentWindow).toBe(13)
+  })
 })

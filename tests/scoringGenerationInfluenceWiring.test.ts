@@ -6,22 +6,22 @@ const readProjectFile = (path: string): string => (
   readFileSync(resolve(process.cwd(), path), "utf8")
 );
 
-describe("Scoring Diagnostics generation influence wiring", () => {
+describe("Numbers diagnostic generation influence wiring", () => {
   it("defaults the generation influence off and labels it as diagnostic evidence", () => {
     const appSource = readProjectFile("src/App.tsx");
 
     expect(appSource).toContain('useState<ScoringGenerationInfluence>("off")');
-    expect(appSource).toContain("Scoring diagnostics influence");
+    expect(appSource).toContain("Numbers diagnostic influence");
     expect(appSource).toContain("diagnostic evidence weighting");
     expect(appSource).toContain("not a probability");
-    expect(appSource).not.toMatch(/scoring diagnostics influence.*predict/i);
+    expect(appSource).not.toMatch(/numbers diagnostic influence.*predict/i);
   });
 
   it("passes the selected influence into the diagnostics panel and trace", () => {
     const appSource = readProjectFile("src/App.tsx");
 
     expect(appSource).toContain("generationInfluence={scoringGenerationInfluence}");
-    expect(appSource).toContain("Scoring Diagnostics influence changed:");
+    expect(appSource).toContain("Numbers diagnostic influence changed:");
     expect(appSource).toContain("affects generation weighting");
   });
 
@@ -34,6 +34,14 @@ describe("Scoring Diagnostics generation influence wiring", () => {
     expect(workerSource).toContain("scoringGenerationProfile?: ScoringGenerationProfile");
     expect(workerSource).toContain("args.scoringGenerationProfile");
     expect(hookSource).toContain("args.scoringGenerationProfile");
+    expect(appSource).toContain("droughtEvidenceGovernorProfile: activeDroughtEvidenceGovernorProfile");
+    expect(workerSource).toContain("droughtEvidenceGovernorProfile?: DroughtEvidenceGovernorProfile");
+    expect(workerSource).toContain("args.droughtEvidenceGovernorProfile");
+    expect(hookSource).toContain("args.droughtEvidenceGovernorProfile");
+    expect(appSource).toContain("monthlyBucketTransitionGovernorProfile: activeMonthlyBucketTransitionGovernorProfile");
+    expect(workerSource).toContain("monthlyBucketTransitionGovernorProfile?: MonthlyBucketTransitionGovernorProfile");
+    expect(workerSource).toContain("args.monthlyBucketTransitionGovernorProfile");
+    expect(hookSource).toContain("args.monthlyBucketTransitionGovernorProfile");
   });
 
   it("keeps odd/even quota application after score-aware survivor sorting", () => {

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { EffectiveSettings } from "./shared/EffectiveSettings";
 
 import { HigButton, HigField, InfoHelp } from "./shared/HigControls";
 import type { Draw } from "../types";
@@ -2835,6 +2836,7 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
                           </div>
                         ) : null}
                         {entry.provenance ? renderStructuredProvenance(entry.provenance) : null}
+                        {entry.setupSnapshot?.effectiveSettingsLedger && <EffectiveSettings ledger={entry.setupSnapshot.effectiveSettingsLedger} status="Captured setup for this entry; not the current setup." />}
                         {terminalDigitHistory ? renderTerminalDigitHistory(terminalDigitHistory) : null}
                         {historicalPrizeCollision ? renderHistoricalPrizeCollision(historicalPrizeCollision, "entry") : null}
                         {entry.reason ? <div style={{ marginTop: 8, color: "#8a4b00", fontSize: 12 }}>{entry.reason}</div> : null}

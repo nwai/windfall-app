@@ -20,6 +20,14 @@ const baseRow: DrawRow = {
 };
 
 describe("drawHistoryReview", () => {
+  it("surfaces bad dates and missing results but never auto-deletes them", () => {
+    const rows = [{ ...baseRow, date: "4/24/26" }, { ...baseRow, date: "4/28/26" }, { ...baseRow, date: "4/29/26" }];
+    const review = analyzeDrawHistoryRows(rows);
+    expect(review.scheduleIssues.map((issue) => issue.kind)).toEqual(["drawDate", "missingDrawDates"]);
+    expect(review.scheduleIssues[0].description).toContain("Tuesday");
+    expect(review.scheduleIssues[1].description).toContain("2026-04-27");
+    expect(applyAutomaticHistoryCorrections(rows, review)).toEqual(rows);
+  });
   it("normalizes short CSV dates to ISO keys", () => {
     expect(normalizeHistoryDate("10/27/25")).toBe("2025-10-27");
     expect(normalizeHistoryDate("2025-10-27")).toBe("2025-10-27");

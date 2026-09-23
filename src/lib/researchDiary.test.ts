@@ -18,6 +18,10 @@ const draw = (date: string, main: number[] = [1, 2, 3, 4, 5, 6], supp: number[] 
 });
 
 describe("researchDiary", () => {
+  it("records manual monthly transition mode in the diary setup", () => {
+    expect(summarizeResearchDiarySetup({ monthlyBucketTransitionGovernorMode: "light" } as any)?.generation)
+      .toContain("Monthly Bucket Transition Governor: Manual light");
+  });
   it("derives SDE1 and HC3 diary tags from the saved setup snapshot", () => {
     expect(deriveResearchDiaryRuleTagsFromSetup({
       knobs: { enableSDE1: true, enableHC3: true },

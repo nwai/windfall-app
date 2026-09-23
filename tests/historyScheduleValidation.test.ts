@@ -3,11 +3,17 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { parseCSVorJSON } from "../src/parseCSVorJSON";
+import { auditHistorySchedule } from "../src/lib/historyScheduleAudit";
 import { isScheduledDrawDate, parseDrawDateParts } from "../src/lib/planningDrawContext";
 
 const weekdayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
 describe("bundled Windfall history schedule validation", () => {
+  it("has no missing scheduled draws between the first and latest recorded dates", () => {
+    const csv = readFileSync(resolve(process.cwd(), "src/windfall_history_lottolyzer.csv"), "utf8");
+    expect(auditHistorySchedule(parseCSVorJSON(csv)).missingDates).toEqual([]);
+  });
+
   it("keeps real draw rows dated, unique, in range, and on scheduled draw weekdays", () => {
     const csv = readFileSync(resolve(process.cwd(), "src/windfall_history_lottolyzer.csv"), "utf8");
     const rows = parseCSVorJSON(csv);

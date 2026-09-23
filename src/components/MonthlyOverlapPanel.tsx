@@ -5,6 +5,7 @@ import { buildPlanningDrawContext } from "../lib/planningDrawContext";
 
 interface OverlapRow {
   monthLabel: string;
+  firstDrawDate?: string;
   targetDate: string;
   priorDrawCount: number;
   totalDrawsInMonth: number;
@@ -72,6 +73,7 @@ function buildRows(history: Draw[], includeSupp: boolean, targetDrawIndex: numbe
       const undrawnNums = allNumbers.filter((n) => !numbersSeen.has(n));
       rows.push({
         monthLabel: key,
+        firstDrawDate: arr[0]?.rawDate,
         targetDate: "",
         priorDrawCount: arr.length,
         totalDrawsInMonth: arr.length,
@@ -112,6 +114,7 @@ function buildRows(history: Draw[], includeSupp: boolean, targetDrawIndex: numbe
 
     rows.push({
       monthLabel: key,
+      firstDrawDate: arr[0]?.rawDate,
       targetDate: target.rawDate,
       priorDrawCount: idx,
       totalDrawsInMonth: arr.length,
@@ -208,6 +211,7 @@ export const MonthlyOverlapPanel: React.FC<{ history: Draw[]; today?: Date }> = 
     const averageRows = filterRowsForHistoryBaselines(
       rows.filter((r) => !r.isPending && r.monthLabel !== mostRecentLabel),
       (row) => row.monthLabel,
+      row => row.firstDrawDate,
     );
     if (!averageRows.length) return [];
     const groups = new Map<number, OverlapRow[]>();
@@ -237,7 +241,7 @@ export const MonthlyOverlapPanel: React.FC<{ history: Draw[]; today?: Date }> = 
 
   const footerExcludedLabels = useMemo(() => {
     const labels = new Set<string>(
-      getExcludedMonthLabelsForHistoryBaselines(rows, (row) => row.monthLabel),
+      getExcludedMonthLabelsForHistoryBaselines(rows, (row) => row.monthLabel, row => row.firstDrawDate),
     );
     if (mostRecentLabel) labels.add(mostRecentLabel);
     return [...labels].sort((left, right) => left.localeCompare(right));

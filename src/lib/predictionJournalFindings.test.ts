@@ -29,6 +29,19 @@ const scoredEntry = (
 });
 
 describe("buildPredictionJournalFindingsReport", () => {
+  it("keeps manual monthly transition experiments separate from Auto evidence", () => {
+    const report = buildPredictionJournalFindingsReport([1, 2, 3].map((index) => scoredEntry(`monthly-${index}`, {
+      setupSnapshot: { monthlyBucketTransitionGovernorMode: "strong", monthlyBucketTransitionGovernorActive: true } as ScoredPredictionJournalEntry["setupSnapshot"],
+    })));
+    expect(report.groups.some((group) => group.label === "Monthly Bucket Transition Governor Manual strong")).toBe(true);
+  });
+  it("keeps Manual drought governor runs visible as a separate watched signal", () => {
+    const report = buildPredictionJournalFindingsReport([1, 2, 3].map((index) => scoredEntry(`manual-${index}`, {
+      setupSnapshot: { droughtEvidenceGovernorMode: "manual", droughtEvidenceGovernorActive: true,
+        droughtEvidenceGovernorSummaryLabel: "Manual · strict · 1 boosted" } as ScoredPredictionJournalEntry["setupSnapshot"],
+    })));
+    expect(report.groups.some((group) => group.label === "Drought Evidence Governor Manual · strict · 1 boosted")).toBe(true);
+  });
   it("is versioned and excludes unreviewed, archived, and unscored entries by default", () => {
     const report = buildPredictionJournalFindingsReport([
       scoredEntry("reviewed-scored"),
@@ -54,7 +67,7 @@ describe("buildPredictionJournalFindingsReport", () => {
       setupSummary: {
         window: "WFMQYH Custom 13",
         oddEvenRatios: "2:6",
-        generation: ["Scoring influence: off"],
+        generation: ["Numbers diagnostic influence: off"],
         filters: ["SDE1 off", "HC3 off"],
         selections: [],
       },

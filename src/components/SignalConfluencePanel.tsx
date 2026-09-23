@@ -15,7 +15,9 @@ import {
 import { parseDrawDateParts } from "../lib/planningDrawContext";
 import type { PortfolioHotColdEvidenceRow } from "./candidates/PortfolioCompressionPanel";
 import {
+  buildRankedSignalConfluenceMentions,
   buildSignalConfluenceRows,
+  filterSignalConfluenceRows,
   normalizeSignalConfluenceNumbers,
   rankedStrength,
   sortSignalConfluenceRows,
@@ -23,6 +25,7 @@ import {
   type SignalConfluenceRow,
   type SignalConfluenceSortDirection,
   type SignalConfluenceSortKey,
+  type SignalConfluenceVisibilityMode,
 } from "../lib/signalConfluence";
 import { HigButton } from "./shared/HigControls";
 import "./SignalConfluencePanel.css";
@@ -183,23 +186,6 @@ const buildWeekdayNeighbourMentions = (
       detail: `${detail}; target offsets ${Array.from(labels).sort().join("/")}`,
       strength,
     }));
-};
-
-const buildRankedMentions = (
-  numbers: readonly number[],
-  family: SignalConfluenceMention["family"],
-  source: string,
-  labelPrefix: string,
-  limit = 8,
-): SignalConfluenceMention[] => {
-  const normalized = normalizeSignalConfluenceNumbers(numbers).slice(0, limit);
-  return normalized.map((number, index) => ({
-    number,
-    family,
-    source,
-    label: `${labelPrefix} #${index + 1}`,
-    strength: rankedStrength(index, normalized.length),
-  }));
 };
 
 const buildHotColdMentions = (rows: readonly PortfolioHotColdEvidenceRow[]): SignalConfluenceMention[] => {
@@ -448,7 +434,7 @@ export const SignalConfluencePanel: React.FC<SignalConfluencePanelProps> = ({
   maxForcedNumbers = 8,
 }) => {
   const [showTop, setShowTop] = useState(20);
-  const [hideZeroSupport, setHideZeroSupport] = useState(true);
+  const [visibilityMode, setVisibilityMode] = useState<SignalConfluenceVisibilityMode>("supported-only");
   const [sortKey, setSortKey] = useState<SignalConfluenceSortKey>("rank");
   const [supportSortDirection, setSupportSortDirection] = useState<SignalConfluenceSortDirection>("descending");
 
@@ -456,9 +442,9 @@ export const SignalConfluencePanel: React.FC<SignalConfluencePanelProps> = ({
     const mentions: SignalConfluenceMention[] = [
       ...buildLatestNeighbourMentions(latestNeighbourRows, latestNeighbourMode),
       ...buildWeekdayNeighbourMentions(activeHistory, latestNeighbourRows, latestNeighbourMode, targetDrawDate),
-      ...buildRankedMentions(strictDroughtNumbers, "drought", "Strict drought shortlist", "Strict", 8),
-      ...buildRankedMentions(empiricalDroughtNumbers, "drought", "Empirical drought shortlist", "Emp", 8),
-      ...buildRankedMentions(sharedAnalysisSelectionNumbers, "shared-selection", "Shared analysis selection", "Shared", 8),
+      ...buildRankedSignalConfluenceMentions(strictDroughtNumbers, "drought", "Strict drought shortlist", "Strict", 8),
+      ...buildRankedSignalConfluenceMentions(empiricalDroughtNumbers, "drought", "Empirical drought shortlist", "Emp", 8),
+      ...buildRankedSignalConfluenceMentions(sharedAnalysisSelectionNumbers, "shared-selection", "Shared analysis selection", "Shared", 8),
       ...buildActiveFrequencyMentions(activeHistory),
       ...buildHotColdMentions(hotColdRows),
       ...buildDrawBucketPatternMentions(drawBucketPatternRows),
@@ -491,13 +477,13 @@ export const SignalConfluencePanel: React.FC<SignalConfluencePanelProps> = ({
   ]);
 
   const displayRows = useMemo(() => {
-    const filtered = hideZeroSupport ? rows.filter((row) => row.rawMentionCount > 0 || row.isForced || row.isUserSelected || row.isExcluded) : rows;
-    return sortSignalConfluenceRows(
-      filtered,
+    const sorted = sortSignalConfluenceRows(
+      filterSignalConfluenceRows(rows, visibilityMode),
       sortKey,
       sortKey === "support" ? supportSortDirection : "ascending",
-    ).slice(0, showTop);
-  }, [hideZeroSupport, rows, showTop, sortKey, supportSortDirection]);
+    );
+    return visibilityMode === "all-45" ? sorted : sorted.slice(0, showTop);
+  }, [rows, showTop, sortKey, supportSortDirection, visibilityMode]);
 
   const supportFamilyCount = useMemo(() => (
     new Set(rows.flatMap((row) => row.supportMentions.map((mention) => mention.family))).size
@@ -540,9 +526,6 @@ export const SignalConfluencePanel: React.FC<SignalConfluencePanelProps> = ({
             This panel counts where independent-looking app signals mention the same numbers. Related signals are capped by family, so a cluster of similar evidence cannot pretend to be many separate proofs. It changes candidate generation only when you deliberately force a supported number from this table.
           </p>
         </div>
-        <HigButton variant="secondary" size="compact" onClick={() => setHideZeroSupport((current) => !current)}>
-          {hideZeroSupport ? "Show All 45" : "Hide Zero Support"}
-        </HigButton>
       </div>
 
       <div className="signal-confluence-panel__summary">
@@ -572,26 +555,46 @@ export const SignalConfluencePanel: React.FC<SignalConfluencePanelProps> = ({
         <div className="signal-confluence-panel__action-note">
           Click a supported number pill to add or release a Signal Confluence forced inclusion. Excluded numbers and zero-support rows cannot be forced here.
         </div>
-        <label className="signal-confluence-panel__control">
-          Show rows
-          <select
-            className="signal-confluence-panel__select"
-            value={showTop}
-            onChange={(event) => setShowTop(Number(event.target.value))}
-          >
-            <option value={12}>Top 12</option>
-            <option value={20}>Top 20</option>
-            <option value={45}>All 45</option>
-          </select>
-        </label>
-        <label className="signal-confluence-panel__control">
-          <input
-            type="checkbox"
-            checked={hideZeroSupport}
-            onChange={(event) => setHideZeroSupport(event.target.checked)}
-          />
-          Hide zero-support numbers
-        </label>
+        <div className="signal-confluence-panel__visibility-control">
+          <span className="signal-confluence-panel__control-label">Rows shown</span>
+          <div className="signal-confluence-panel__segments" role="group" aria-label="Ledger row visibility">
+            <HigButton
+              variant={visibilityMode === "supported-only" ? "primary" : "quiet"}
+              size="compact"
+              className="signal-confluence-panel__segment"
+              aria-pressed={visibilityMode === "supported-only"}
+              onClick={() => setVisibilityMode("supported-only")}
+            >
+              Supported only
+            </HigButton>
+            <HigButton
+              variant={visibilityMode === "all-45" ? "primary" : "quiet"}
+              size="compact"
+              className="signal-confluence-panel__segment"
+              aria-pressed={visibilityMode === "all-45"}
+              onClick={() => setVisibilityMode("all-45")}
+            >
+              All 45
+            </HigButton>
+          </div>
+          <span className="signal-confluence-panel__control-help">
+            Supported only also keeps active selected, forced, or excluded rows visible so conflicts are not concealed.
+          </span>
+        </div>
+        {visibilityMode === "supported-only" ? (
+          <label className="signal-confluence-panel__control">
+            Supported row limit
+            <select
+              className="signal-confluence-panel__select"
+              value={showTop}
+              onChange={(event) => setShowTop(Number(event.target.value))}
+            >
+              <option value={12}>Top 12</option>
+              <option value={20}>Top 20</option>
+              <option value={45}>All supported</option>
+            </select>
+          </label>
+        ) : null}
       </div>
 
       <div className="signal-confluence-panel__table-scroll">

@@ -5,7 +5,7 @@ import { analyzeMonthlyDigitOccurrences } from "./monthlyDigitOccurrences";
 
 describe("analyzeMonthlyDigitOccurrences", () => {
   const history: Draw[] = [
-    { date: "2024-01-03", main: [1, 7, 10, 20, 31, 42], supp: [8, 15] },
+    { date: "2024-01-01", main: [1, 7, 10, 20, 31, 42], supp: [8, 15] },
     { date: "2024-01-10", main: [2, 9, 11, 22, 33, 44], supp: [3, 40] },
     { date: "2024-02-02", main: [4, 5, 6, 12, 18, 25], supp: [7, 9] },
     { date: "2024-02-09", main: [1, 8, 9, 10, 11, 12], supp: [13, 14] },
@@ -152,7 +152,7 @@ describe("analyzeMonthlyDigitOccurrences", () => {
 
   it("compares recent months against historical monthly averages to produce a bias score", () => {
     const sixMonthHistory: Draw[] = [
-      { date: "2024-01-03", main: [10, 11, 12, 13, 14, 15], supp: [1, 2] },
+      { date: "2024-01-01", main: [10, 11, 12, 13, 14, 15], supp: [1, 2] },
       { date: "2024-02-07", main: [20, 21, 22, 23, 24, 25], supp: [1, 2] },
       { date: "2024-03-06", main: [30, 31, 32, 33, 34, 35], supp: [1, 2] },
       { date: "2024-04-03", main: [1, 2, 3, 10, 20, 30], supp: [4, 5] },

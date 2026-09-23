@@ -16,10 +16,16 @@ describe("history scope wiring", () => {
     expect(appSource).toContain("history={baselineHistory}");
     expect(appSource).toContain("historyScopeLabel={baselineHistoryScopeLabel}");
     expect(appSource).toContain("<TemperatureTransitionPanel");
+    expect(appSource).toContain("activeWindowHistory={realFilteredHistory}");
+    expect(appSource).toContain("selectedNumbers={userSelectedNumbers}");
     expect(appSource).toContain("<BacktestPanel history={baselineHistory} historyScopeLabel={baselineHistoryScopeLabel} />");
     expect(appSource).toContain("<MonteCarloPanel");
     expect(appSource).toContain("history={realFilteredHistory}");
     expect(appSource).toContain("Current WFMQYH window");
+
+    const monteCarloCall = appSource.match(/<MonteCarloPanel[\s\S]*?\/>/)?.[0] ?? "";
+    expect(monteCarloCall).toContain("history={realFilteredHistory}");
+    expect(monteCarloCall).not.toContain("selectedCheckNumbers");
   });
 
   it("documents the difference between WFMQYH, real history, and baseline history", () => {
@@ -29,6 +35,9 @@ describe("history scope wiring", () => {
     expect(manual).toContain("Current WFMQYH window");
     expect(manual).toContain("Real all history");
     expect(manual).toContain("Windfall baseline history");
+    expect(manual).toContain('id="temperature-transition-diagnostics"');
+    expect(manual).toContain("Volcanic Precursor Advisor");
     expect(manual).toContain("Monte Carlo remains a current-window weighting tool");
+    expect(manual).toContain("It runs independently from Survival Analyzer selections");
   });
 });

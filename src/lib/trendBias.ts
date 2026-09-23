@@ -1,7 +1,9 @@
 export type NumberTrend = {
   number: number;
-  fortnight: number; // last 14 draws (count)
-  month: number;     // last 30 draws (count)
+  fortnight: number;
+  month: number;
+  recentDrawCount: number;
+  comparisonDrawCount: number;
 };
 
 export type TrendWeightingOptions =
@@ -16,11 +18,10 @@ export type TrendWeightingOptions =
       clampMax?: number;      // default 1.2
     };
 
-// Compute Δ 14→30 in percentage points (pp)
+// Compare observed rates using the actual available draw denominators.
 export function deltaPP(trend: NumberTrend): number {
-  const r14 = trend.fortnight / 14;
-  const r30 = trend.month / 30;
-  return (r14 - r30) * 100; // percentage points
+  if (trend.recentDrawCount <= 0 || trend.comparisonDrawCount <= 0) return 0;
+  return (trend.fortnight / trend.recentDrawCount - trend.month / trend.comparisonDrawCount) * 100;
 }
 
 // Convert Δpp into a multiplier (weight)

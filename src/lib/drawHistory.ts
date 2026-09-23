@@ -1,3 +1,6 @@
+import { drawScheduleDateError } from "./historyScheduleAudit";
+import { datePartsToIso, parseDrawDateParts } from "./planningDrawContext";
+
 /* Utilities to read, parse, prepend, and write draw history CSV using the File System Access API.
    CSV schema (matches your file):
    - Header: date,main1,main2,main3,main4,main5,main6,supp1,supp2
@@ -46,6 +49,15 @@ export function formatRow(row: DrawRow): string {
 }
 
 export function toCsv(rows: DrawRow[], header: string[] = DEFAULT_HEADER): string {
+  const dates = new Set<string>();
+  for (const row of rows) {
+    if (row.isSimulated) continue;
+    const error = drawScheduleDateError(row.date);
+    if (error) throw new Error(`CSV not saved. ${error} Use Smart History Review to correct this row.`);
+    const key = datePartsToIso(parseDrawDateParts(row.date)!);
+    if (dates.has(key)) throw new Error(`CSV not saved. More than one result uses ${key}. Resolve the duplicate date in Smart History Review.`);
+    dates.add(key);
+  }
   const head = header.length >= 9 ? header.slice(0, 9) : DEFAULT_HEADER;
   return [head.join(","), ...rows.map(formatRow)].join("\n");
 }
@@ -70,6 +82,16 @@ export async function pickCsvFile(existing?: CsvFileHandle): Promise<CsvFileHand
     excludeAcceptAllOption: false,
   });
   return handle;
+}
+
+export function isFilePickerCancelError(caught: unknown): boolean {
+  if (!caught || typeof caught !== "object") {
+    return false;
+  }
+  const value = caught as { name?: unknown; message?: unknown };
+  const name = typeof value.name === "string" ? value.name : "";
+  const message = typeof value.message === "string" ? value.message : "";
+  return name === "AbortError" || /aborted|cancelled|canceled/i.test(message);
 }
 
 export async function readCsvFromHandle(handle: CsvFileHandle): Promise<string> {

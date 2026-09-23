@@ -22,6 +22,7 @@ interface IntraRow {
 
 interface CrossRow {
   monthLabel: string;       // "Month N → Month N+1"
+  firstSourceDate: string;
   endDate: string;
   startDate: string;
   endNums: number[];
@@ -119,6 +120,7 @@ function buildCrossRows(history: Draw[], includeSupp: boolean): CrossRow[] {
 
     rows.push({
       monthLabel: `${monthA} → ${monthB}`,
+      firstSourceDate: itemsA[0].draw.date,
       endDate: endDraw.draw.date || "",
       startDate: startDraw.draw.date || "",
       endNums,
@@ -179,16 +181,16 @@ export const MonthlyFirstLastPanel: React.FC<{ history: Draw[] }> = ({ history }
   const averageRows = useMemo(
     () => (
       mode === "intra"
-        ? filterRowsForHistoryBaselines(intraRows, (row) => row.monthLabel)
-        : filterRowsForHistoryBaselines(crossRows, (row) => row.monthLabel.split(" → ")[0] ?? row.monthLabel)
+        ? filterRowsForHistoryBaselines(intraRows, (row) => row.monthLabel, row => row.firstDate)
+        : filterRowsForHistoryBaselines(crossRows, (row) => row.monthLabel.split(" → ")[0] ?? row.monthLabel, row => row.firstSourceDate)
     ),
     [crossRows, intraRows, mode],
   );
   const averageExcludedMonthLabels = useMemo(
     () => (
       mode === "intra"
-        ? getExcludedMonthLabelsForHistoryBaselines(intraRows, (row) => row.monthLabel)
-        : getExcludedMonthLabelsForHistoryBaselines(crossRows, (row) => row.monthLabel.split(" → ")[0] ?? row.monthLabel)
+        ? getExcludedMonthLabelsForHistoryBaselines(intraRows, (row) => row.monthLabel, row => row.firstDate)
+        : getExcludedMonthLabelsForHistoryBaselines(crossRows, (row) => row.monthLabel.split(" → ")[0] ?? row.monthLabel, row => row.firstSourceDate)
     ),
     [crossRows, intraRows, mode],
   );

@@ -1,5 +1,10 @@
 import type { Draw } from "../types";
 import type { AppPresetSnapshot } from "./presets";
+import { monthlyBucketTransitionGovernorModeLabel, normalizeMonthlyBucketTransitionGovernorMode } from "./monthlyBucketTransitionGovernor";
+import {
+  formatRepeatedTerminalDigitFamilyRule,
+  normalizeRepeatedTerminalDigitFamilyRule,
+} from "./repeatedTerminalDigitFamilies";
 import type { SelectionInsightsSnapshot } from "./selectionInsights";
 
 export const PREDICTION_JOURNAL_STORAGE_KEY = "windfall:prediction-journal:v1";
@@ -997,7 +1002,9 @@ export function buildPredictionJournalDraftFromSetup(snapshot: AppPresetSnapshot
   notes.push(formatDroughtBreakProvenanceNote(draftProvenance.droughtBreakShortlist));
   notes.push(formatStrictDroughtQuotaWatchNote(draftProvenance.strictDroughtQuota));
   notes.push(formatSelectionInsightsProvenanceNote(draftProvenance.selectionInsights));
-  notes.push(`Scoring influence: ${setup.scoringGenerationInfluence ?? "off"}; selected-number boost: ${setup.selectedBoostEnabled ? `ON x${setup.selectedBoostFactor ?? "-"}` : "OFF"}.`);
+  notes.push(`Numbers diagnostic influence: ${setup.scoringGenerationInfluence ?? "off"}; selected-number boost: ${setup.selectedBoostEnabled ? `ON x${setup.selectedBoostFactor ?? "-"}` : "OFF"}.`);
+  notes.push(`Drought Evidence Governor: ${(setup.droughtEvidenceGovernorMode === "auto" || setup.droughtEvidenceGovernorMode === "manual") ? (setup.droughtEvidenceGovernorSummaryLabel ?? setup.droughtEvidenceGovernorMode) : "off"}${setup.droughtEvidenceGovernorActive ? `; boosted ${formatDraftNumbers(setupNumberList(setup, "droughtEvidenceGovernorBoostedNumbers"))}` : ""}.`);
+  notes.push(`Monthly Bucket Transition Governor: ${normalizeMonthlyBucketTransitionGovernorMode(setup.monthlyBucketTransitionGovernorMode) !== "off" ? (setup.monthlyBucketTransitionGovernorSummaryLabel ?? monthlyBucketTransitionGovernorModeLabel(setup.monthlyBucketTransitionGovernorMode)) : "off"}${setup.monthlyBucketTransitionGovernorActive ? `; boosted ${formatDraftNumbers(setupNumberList(setup, "monthlyBucketTransitionGovernorBoostedNumbers"))}` : ""}.`);
   notes.push(formatD1TerminalMomentumSetup(setup));
   notes.push("Review this draft before saving; copied values are starting points, not predictions made by Windfall.");
 
@@ -1024,7 +1031,9 @@ export function summarizePredictionJournalSetup(snapshot: AppPresetSnapshot | nu
     : 8;
   const strictDroughtQuota = buildStrictDroughtQuotaWatch(setup, strictThreshold, shortlistTop);
   const generation: string[] = [
-    `Scoring influence: ${setup.scoringGenerationInfluence ?? "off"}`,
+    `Numbers diagnostic influence: ${setup.scoringGenerationInfluence ?? "off"}`,
+    `Drought Evidence Governor: ${(setup.droughtEvidenceGovernorMode === "auto" || setup.droughtEvidenceGovernorMode === "manual") ? (setup.droughtEvidenceGovernorSummaryLabel ?? setup.droughtEvidenceGovernorMode) : "off"}`,
+    `Monthly Bucket Transition Governor: ${normalizeMonthlyBucketTransitionGovernorMode(setup.monthlyBucketTransitionGovernorMode) !== "off" ? (setup.monthlyBucketTransitionGovernorSummaryLabel ?? monthlyBucketTransitionGovernorModeLabel(setup.monthlyBucketTransitionGovernorMode)) : "off"}`,
     formatD1TerminalMomentumSetup(setup),
     `Latest ${setup.latestNeighbourSupportMode === "pm1pm2" ? "+/-1/+/-2" : "+/-1"} support: ${setup.latestNeighbourSupportEnabled ? "on" : "off"}`,
     formatStrictDroughtQuotaSetup(strictDroughtQuota),
@@ -1041,6 +1050,15 @@ export function summarizePredictionJournalSetup(snapshot: AppPresetSnapshot | nu
   const sumFilter = formatSumFilter(setup.sumFilter);
   if (sumFilter) filters.push(sumFilter);
   if (setup.digitWidthConstraintEnabled) filters.push(`Digit width: ${setup.digitWidthSingleDigitPercent ?? "-"}%`);
+  const repeatedTerminalFamiliesRule = normalizeRepeatedTerminalDigitFamilyRule({
+    enabled: !!setup.repeatedTerminalFamiliesEnabled,
+    mode: setup.repeatedTerminalFamiliesMode,
+    count: setup.repeatedTerminalFamiliesCount,
+    scope: setup.repeatedTerminalFamiliesScope,
+  });
+  if (repeatedTerminalFamiliesRule) {
+    filters.push(`Repeated terminal digit families: ${formatRepeatedTerminalDigitFamilyRule(repeatedTerminalFamiliesRule)}`);
+  }
   const lastDrawOverlap = formatLastDrawOverlapSetup(setup);
   if (lastDrawOverlap) filters.push(lastDrawOverlap);
   if (countList(setup.previousNeighbourConstraintNumbers) > 0) {

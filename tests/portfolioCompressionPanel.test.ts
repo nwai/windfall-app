@@ -39,11 +39,67 @@ describe("PortfolioCompressionPanel", () => {
     expect(html).toContain("Rows counted");
     expect(html).toContain("Valid game rows");
     expect(html).toContain("Top-six core");
+    expect(html).toContain("Core-and-Hedge Portfolio");
+    expect(html).toContain("Add at least one valid 6-number or 8-number portfolio row");
     expect(html).toContain("Alternates");
     expect(html).toContain("Structural Strategy Backtest");
     expect(html).not.toContain("Backtest Portfolio Compression V1");
     expect(panel?.classList.contains("windfall-ledger-panel")).toBe(true);
     expect(html).not.toContain("1,2,3,4,5,6");
+  });
+
+  it("builds, copies, and simulates a transparent concentrated portfolio from real pasted rows", async () => {
+    const copiedText: string[] = [];
+    const simulatedLines: number[][] = [];
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(React.createElement(PortfolioCompressionPanel, {
+        initialPasteText: [
+          "1,2,3,4,5,6,20,21",
+          "1,2,3,4,5,7,20,22",
+          "1,2,3,4,6,8,21,23",
+          "1,2,3,5,7,9,22,24",
+          "1,2,4,6,8,10,23,25",
+          "1,3,5,7,9,11,24,26",
+        ].join("\n"),
+        copyText: (text: string) => copiedText.push(text),
+        onSimulateCore: (numbers: number[]) => simulatedLines.push(numbers),
+      }));
+    });
+
+    expect(container.textContent).toContain("Core-and-Hedge Portfolio");
+    expect(container.textContent).toContain("Lines built6/6");
+    expect(container.textContent).toContain("Primary");
+    expect(container.textContent).toContain("Hedge");
+    expect(container.textContent).toContain("observed portfolio evidence only");
+
+    const copyButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent === "Copy concentrated portfolio");
+    expect(copyButton).toBeDefined();
+    await act(async () => {
+      copyButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(copiedText).toHaveLength(1);
+    expect(copiedText[0].split("\n")).toHaveLength(6);
+    expect(container.textContent).toContain("Copied 6 concentrated portfolio lines");
+
+    const simulateSecondLine = container.querySelector(
+      'button[aria-label^="Simulate concentrated portfolio game 2:"]',
+    ) as HTMLButtonElement | null;
+    expect(simulateSecondLine).toBeTruthy();
+    await act(async () => {
+      simulateSecondLine!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(simulatedLines).toHaveLength(1);
+    expect(simulatedLines[0]).toHaveLength(6);
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
   });
 
   it("renders a frequency-ranked six-number core from pasted portfolio rows", () => {

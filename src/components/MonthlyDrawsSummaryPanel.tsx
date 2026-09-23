@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import type { Draw } from "../types";
+
+export const MONTHLY_DRAWS_STAGE_IDM_TARGET_ID = "monthly-draws-summary-stage-idm";
 import {
   analyzeStageMatchAcceptancePlaybook,
   analyzeMonthlyDrawSummary,
@@ -13,6 +15,7 @@ import {
   pruneMonthlySelections,
   resolveMonthlyStageDrawContext,
   sampleMonthlyNumbers,
+  type AppliedBucketMixTarget,
   type AvgBucketEntry,
   type MonthlyBucketKey,
   type MonthlyBucketSelections,
@@ -20,6 +23,7 @@ import {
   type MonthlyConstraintPayload,
   type MonthlyDrawMonthRow,
   type MonthlyDrawSummary,
+  type MonthlyFrequencyConstraints,
   type MonthlyFrequencyCount,
   type MonthlyIdealDrawState,
   type StageMatchAcceptancePlaybookRow,
@@ -50,6 +54,7 @@ export type {
   MonthlyBucketSets,
   MonthlyConstraintPayload,
   MonthlyFrequencyConstraints,
+  AppliedBucketMixTarget,
   MonthlyIdealDrawState,
   StageIdealDrawState,
 } from "../lib/monthlyDrawSummary";
@@ -66,6 +71,7 @@ interface MonthlyDrawsSummaryPanelProps {
   onAvgBucketsChange?: (avgBuckets: AvgBucketEntry[]) => void;
   onIdealDrawStateChange?: (state: MonthlyIdealDrawState | null) => void;
   onStageIdealDrawStateChange?: (state: StageIdealDrawState | null) => void;
+  onAppliedBucketMixTargetChange?: (target: AppliedBucketMixTarget | null) => void;
   onSimulateNumbers?: (numbers: number[]) => void;
   excludedNumbers?: number[];
   sde1Hc3Advice?: Sde1Hc3ContextAdvice | null;
@@ -178,6 +184,43 @@ const stageMatchPlaybookSignature = (rows: readonly StageMatchAcceptancePlaybook
 
 const stageMatchRowKey = (row: StageMatchAcceptancePlaybookRow): string => (
   `${row.targetUndrawnCount}-${row.historicalMonthLabel}-${row.variantRank}`
+);
+
+const bucketMixCountsSignature = (counts: Record<MonthlyBucketKey, number>): string => (
+  MONTHLY_BUCKET_KEYS.map((key) => counts[key] ?? 0).join("|")
+);
+
+const monthlyFrequencyConstraintsFromBucketMixCounts = (
+  counts: Record<MonthlyBucketKey, number>,
+): MonthlyFrequencyConstraints => (
+  MONTHLY_BUCKET_KEYS.reduce<MonthlyFrequencyConstraints>((acc, key) => {
+    const value = Number(counts[key] ?? 0);
+    acc[key] = Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
+    return acc;
+  }, {
+    undrawn: 0,
+    times1: 0,
+    times2: 0,
+    times3: 0,
+    times4: 0,
+    times5: 0,
+    times6: 0,
+    times7: 0,
+    times8: 0,
+  })
+);
+
+const appliedBucketMixTargetSignature = (target: AppliedBucketMixTarget | null): string => (
+  target
+    ? [
+      target.source,
+      target.workingMonthLabel,
+      target.expectedDrawCount,
+      target.targetStageDrawCount,
+      target.label,
+      bucketMixCountsSignature(target.counts),
+    ].join("::")
+    : "null"
 );
 
 const bucketMeta: { key: MonthlyBucketKey; times: number; label: string }[] = MONTHLY_BUCKET_KEYS.map((key, index) => ({
@@ -597,6 +640,7 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
   onAvgBucketsChange,
   onIdealDrawStateChange,
   onStageIdealDrawStateChange,
+  onAppliedBucketMixTargetChange,
   onSimulateNumbers,
   excludedNumbers = [],
   sde1Hc3Advice = null,
@@ -608,8 +652,9 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
   const [selectedByBucket, setSelectedByBucket] = useState<SelectedByBucket>(() => emptySelections());
   const [simulateResult, setSimulateResult] = useState<number[] | null>(null);
   const [selectedNumberBiasEnabled, setSelectedNumberBiasEnabled] = useState<boolean>(false);
-  const [stageMatchApplyMessage, setStageMatchApplyMessage] = useState<string>("");
-  const [stageMatchAppliedKey, setStageMatchAppliedKey] = useState<string>("");
+  const [bucketMixApplyMessage, setBucketMixApplyMessage] = useState<string>("");
+  const [bucketMixAppliedSignature, setBucketMixAppliedSignature] = useState<string>("");
+  const [appliedBucketMixTarget, setAppliedBucketMixTarget] = useState<AppliedBucketMixTarget | null>(null);
   const [bucketMixSortDirection, setBucketMixSortDirection] = useState<BucketMixSortDirection>("desc");
   const [bucketMixReplayScope, setBucketMixReplayScope] = useState<BucketMixReplayScope>("same-month-length");
   const userExcludedKey = normalizeUserExclusionLocks(excludedNumbers).join(",");
@@ -673,8 +718,9 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
   );
 
   useEffect(() => {
-    setStageMatchApplyMessage("");
-    setStageMatchAppliedKey("");
+    setBucketMixApplyMessage("");
+    setBucketMixAppliedSignature("");
+    setAppliedBucketMixTarget(null);
   }, [stageMatchPlaybookSignatureValue]);
 
   const constraints = useMemo(
@@ -807,12 +853,17 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
     () => stageIdealDrawStateSignature(stageIdealDrawState),
     [stageIdealDrawState],
   );
+  const appliedBucketMixTargetSignatureValue = useMemo(
+    () => appliedBucketMixTargetSignature(appliedBucketMixTarget),
+    [appliedBucketMixTarget],
+  );
   const monthlyConstraintPublishedSignature = useRef<string | null>(null);
   const bucketInfoPublishedSignature = useRef<string | null>(null);
   const bucketSetsPublishedSignature = useRef<string | null>(null);
   const avgBucketsPublishedSignature = useRef<string | null>(null);
   const stageIdealDrawPublishedSignature = useRef<string | null>(null);
   const idealDrawPublishedSignature = useRef<string | null>(null);
+  const appliedBucketMixTargetPublishedSignature = useRef<string | null>(null);
 
   const projectedBucketCounts = useMemo(
     () => projectMonthlyBucketCounts(activeBucketSets, selectedByBucket),
@@ -874,6 +925,17 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
   }, [idealDrawStatePayload, idealDrawStatePayloadSignature, onIdealDrawStateChange]);
 
   useEffect(() => {
+    if (!onAppliedBucketMixTargetChange) return;
+    if (appliedBucketMixTargetPublishedSignature.current === appliedBucketMixTargetSignatureValue) return;
+    appliedBucketMixTargetPublishedSignature.current = appliedBucketMixTargetSignatureValue;
+    onAppliedBucketMixTargetChange(appliedBucketMixTarget);
+  }, [
+    appliedBucketMixTarget,
+    appliedBucketMixTargetSignatureValue,
+    onAppliedBucketMixTargetChange,
+  ]);
+
+  useEffect(() => {
     if (!onConstraintsChange) return;
     if (monthlyConstraintPublishedSignature.current === monthlyConstraintPayloadSignatureValue) return;
     monthlyConstraintPublishedSignature.current = monthlyConstraintPayloadSignatureValue;
@@ -896,7 +958,8 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
       };
     });
     setSimulateResult(null);
-    setStageMatchAppliedKey("");
+    setBucketMixAppliedSignature("");
+    setAppliedBucketMixTarget(null);
   };
 
   const handleUseSelected = () => {
@@ -912,19 +975,22 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
   const clearSelections = () => {
     setSelectedByBucket(emptySelections());
     setSimulateResult(null);
-    setStageMatchApplyMessage("");
-    setStageMatchAppliedKey("");
+    setBucketMixApplyMessage("");
+    setBucketMixAppliedSignature("");
+    setAppliedBucketMixTarget(null);
   };
 
-  const applyStageMatchPlaybookRow = (row: StageMatchAcceptancePlaybookRow) => {
+  const applyBucketMixRow = (row: MonthlyBucketMixCombinatoricsRow) => {
     const next = emptySelections();
     let requested = 0;
     let selected = 0;
     const shortBuckets: string[] = [];
+    const appliedCounts = monthlyFrequencyConstraintsFromBucketMixCounts(row.counts);
+    const appliedLabel = formatBucketMixCounts(row.counts, bucketMixCombinatorics.visibleBucketKeys);
 
-    row.acceptanceNeedsBucketCounts.forEach((count, index) => {
-      const key = MONTHLY_BUCKET_KEYS[index];
-      if (!key || count <= 0) return;
+    MONTHLY_BUCKET_KEYS.forEach((key, index) => {
+      const count = Math.max(0, Math.trunc(row.counts[key] ?? 0));
+      if (count <= 0) return;
       requested += count;
       const available = Array.from(activeBucketSets[key])
         .filter((number) => !userExcludedSet.has(number))
@@ -939,10 +1005,19 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
 
     setSelectedByBucket(next);
     setSimulateResult(null);
-    setStageMatchAppliedKey(stageMatchRowKey(row));
-    setStageMatchApplyMessage([
-      `Applied ${row.historicalMonthLabel} U${row.targetUndrawnCount} path #${row.variantRank}: ${selected}/${requested} bucket placeholders selected.`,
+    setBucketMixAppliedSignature(bucketMixCountsSignature(row.counts));
+    setAppliedBucketMixTarget({
+      counts: appliedCounts,
+      label: appliedLabel,
+      source: "bucket-mix-combinatorics",
+      workingMonthLabel: stageDrawContext?.workingMonthLabel || summary.effectiveMonthLabel,
+      expectedDrawCount: stageDrawContext?.expectedDrawCount ?? summary.effectiveMonthDrawCount,
+      targetStageDrawCount: stageDrawContext?.targetStageDrawCount ?? summary.effectiveMonthDrawCount,
+    });
+    setBucketMixApplyMessage([
+      `Applied bucket mix ${appliedLabel}: ${selected}/${requested} bucket placeholders selected.`,
       shortBuckets.length ? `Short buckets: ${shortBuckets.join(", ")}.` : "",
+      row.stageMatchSupportCount ? `Stage-Match support: ${row.stageMatchSupportCount} path${row.stageMatchSupportCount === 1 ? "" : "s"}.` : "No exact Stage-Match path is attached to this mix.",
       "Swap exact numbers if desired, or turn on Use counts when constructing candidates to enforce the bucket quantities.",
     ].filter(Boolean).join(" "));
   };
@@ -1133,7 +1208,11 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
                 {summary.idealDraw.freePicks > 0 && <span>{summary.idealDraw.freePicks} neutral 8x+ pick{summary.idealDraw.freePicks === 1 ? "" : "s"}</span>}
               </div>
             )}
-            <div style={{ marginTop: 10, borderTop: "1px solid #e2e8f0", paddingTop: 8 }}>
+            <div
+              id={MONTHLY_DRAWS_STAGE_IDM_TARGET_ID}
+              tabIndex={-1}
+              style={{ marginTop: 10, borderTop: "1px solid #e2e8f0", paddingTop: 8 }}
+            >
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 6 }}>
                 <strong style={{ color: "#0f172a" }}>Stage IDM</strong>
                 <label style={{ ...controlLabelStyle, flexDirection: "row", alignItems: "center", gap: 6 }}>
@@ -1174,7 +1253,7 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
                 <div>
                   <strong style={{ color: "#0f172a" }}>Stage-Match Acceptance Playbook</strong>
                   <div style={{ color: "#64748b", fontSize: 12, maxWidth: 760, lineHeight: 1.45 }}>
-                    Historical stage paths from prior comparable months. Multiple paths can share the same target undrawn count. Apply loads editable bucket placeholders into Acceptance Needs; it is a diagnostic shortcut, not a probability claim.
+                    Historical stage paths from prior comparable months. Multiple paths can share the same target undrawn count. Matching rows are labelled in Bucket Mix Combinatorics, where bucket mixes can be applied into Acceptance Needs.
                   </div>
                 </div>
                 {stageMatchPlaybook && (
@@ -1187,7 +1266,7 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
               {stageMatchPlaybook ? (
                 <>
                   <div style={{ overflowX: "auto", maxHeight: 290, border: "1px solid #e2e8f0", borderRadius: 8 }}>
-                    <table style={{ width: "100%", minWidth: 1040, borderCollapse: "collapse" }}>
+                    <table style={{ width: "100%", minWidth: 920, borderCollapse: "collapse" }}>
                       <thead style={{ position: "sticky", top: 0, background: "#f8fafc", zIndex: 1 }}>
                         <tr>
                           <th style={thStyle}>Target Undrawn</th>
@@ -1197,15 +1276,13 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
                           <th style={thStyle}>Projected After Draw</th>
                           <th style={thStyle}>Historical Target</th>
                           <th style={thStyle}>Fit</th>
-                          <th style={thStyle}>Action</th>
                         </tr>
                       </thead>
                       <tbody>
                         {stageMatchPlaybook.rows.map((row) => {
                           const rowKey = stageMatchRowKey(row);
-                          const rowApplied = stageMatchAppliedKey === rowKey;
                           return (
-                          <tr key={rowKey} style={{ background: rowApplied ? "#f0fdf4" : undefined }}>
+                          <tr key={rowKey}>
                             <td style={{ ...tdStyle, fontWeight: 900, fontVariantNumeric: "tabular-nums" }}>
                               U{row.targetUndrawnCount}
                             </td>
@@ -1242,34 +1319,12 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
                                 {row.exact ? "Exact" : "Nearest"} · SSD {row.scoreAfter}
                               </span>
                             </td>
-                            <td style={tdStyle}>
-                              <button
-                                type="button"
-                                onClick={() => applyStageMatchPlaybookRow(row)}
-                                aria-pressed={rowApplied}
-                                style={{
-                                  minHeight: 30,
-                                  whiteSpace: "nowrap",
-                                  borderColor: rowApplied ? "#626e66" : undefined,
-                                  background: rowApplied ? "#16a34a" : undefined,
-                                  color: rowApplied ? "#fff" : undefined,
-                                  fontWeight: rowApplied ? 900 : undefined,
-                                }}
-                              >
-                                {rowApplied ? "Applied" : "Apply"}
-                              </button>
-                            </td>
                           </tr>
                           );
                         })}
                       </tbody>
                     </table>
                   </div>
-                  {stageMatchApplyMessage && (
-                    <div role="status" style={{ marginTop: 8, color: "#475569", fontSize: 12, lineHeight: 1.45 }}>
-                      {stageMatchApplyMessage}
-                    </div>
-                  )}
                   {stageMatchPlaybook.warnings.length > 0 && (
                     <div style={{ marginTop: 8, color: "#92400e", fontSize: 12, lineHeight: 1.45 }}>
                       {stageMatchPlaybook.warnings.join(" ")}
@@ -1364,16 +1419,18 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
                     <th style={{ ...thStyle, textAlign: "right" }}>Share</th>
                     <th style={thStyle}>Acceptance</th>
                     <th style={thStyle}>Stage path</th>
+                    <th style={thStyle}>Action</th>
                     <th style={thStyle}>Latest</th>
                   </tr>
                 </thead>
                 <tbody>
                   {sortedBucketMixRows.map((row, index) => {
                     const latestMatch = bucketMixRowMatchesCounts(row, latestDrawOriginMix?.counts);
+                    const rowApplied = bucketMixAppliedSignature === bucketMixCountsSignature(row.counts);
                     return (
                       <tr
                         key={MONTHLY_BUCKET_KEYS.map((key) => row.counts[key]).join("-")}
-                        style={{ background: latestMatch ? "#fff7ed" : index % 2 === 0 ? "#fff" : "#f8fafc" }}
+                        style={{ background: rowApplied ? "#f0fdf4" : latestMatch ? "#fff7ed" : index % 2 === 0 ? "#fff" : "#f8fafc" }}
                       >
                         <td style={{ ...tdStyle, fontWeight: 900, fontVariantNumeric: "tabular-nums", color: "#475569" }}>{index + 1}</td>
                         {bucketMixCombinatorics.visibleBucketKeys.map((key) => {
@@ -1417,6 +1474,24 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
                           )}
                         </td>
                         <td style={tdStyle}>
+                          <button
+                            type="button"
+                            onClick={() => applyBucketMixRow(row)}
+                            aria-pressed={rowApplied}
+                            title="Load this bucket mix into Acceptance Needs as editable number placeholders"
+                            style={{
+                              minHeight: 30,
+                              whiteSpace: "nowrap",
+                              borderColor: rowApplied ? "#15803d" : undefined,
+                              background: rowApplied ? "#16a34a" : undefined,
+                              color: rowApplied ? "#fff" : undefined,
+                              fontWeight: rowApplied ? 900 : 800,
+                            }}
+                          >
+                            {rowApplied ? "Applied" : "Apply"}
+                          </button>
+                        </td>
+                        <td style={tdStyle}>
                           {latestMatch ? (
                             <span style={{
                               display: "inline-flex",
@@ -1442,6 +1517,12 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
                 </tbody>
               </table>
             </div>
+
+            {bucketMixApplyMessage && (
+              <div role="status" style={{ marginTop: 8, color: "#475569", fontSize: 12, lineHeight: 1.45 }}>
+                {bucketMixApplyMessage}
+              </div>
+            )}
 
             <div style={{ marginTop: 8, color: "#64748b", fontSize: 12, lineHeight: 1.45 }}>
               Larger combination counts mean a bucket mix occupies more of the available 8-number space. They do not prove the next draw will use that mix; use the latest-draw marker and later backtests as evidence, not certainty.

@@ -1772,15 +1772,55 @@ tbody tr:hover {
 .windfall-generation-setup-summary-chip {
   display: inline-flex;
   align-items: center;
-  min-height: 26px;
-  padding: 2px 8px;
+  justify-content: space-between;
+  min-height: 32px;
+  max-width: 100%;
+  gap: 5px;
+  padding: 4px 9px;
   border: 1px solid rgba(10, 99, 206, 0.16);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.78);
   color: var(--wf-text);
   font-size: 12px;
   font-weight: 800;
-  white-space: nowrap;
+  letter-spacing: 0;
+  text-align: left;
+  text-transform: none;
+  white-space: normal;
+}
+
+.windfall-generation-setup-summary-chip:hover {
+  border-color: rgba(10, 99, 206, 0.4);
+  background: #ffffff;
+  color: var(--wf-primary);
+  box-shadow: 0 3px 10px rgba(10, 99, 206, 0.1);
+}
+
+.windfall-generation-setup-summary-chip > span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.windfall-generation-setup-summary-chip__arrow {
+  flex: 0 0 auto;
+  color: var(--wf-primary);
+  font-size: 15px;
+  line-height: 1;
+  transition: transform 80ms ease;
+}
+
+.windfall-generation-setup-summary-chip:hover .windfall-generation-setup-summary-chip__arrow {
+  transform: translateX(1px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .windfall-generation-setup-summary-chip__arrow {
+    transition: none;
+  }
+
+  .windfall-generation-setup-summary-chip:hover .windfall-generation-setup-summary-chip__arrow {
+    transform: none;
+  }
 }
 
 .windfall-influence-card {

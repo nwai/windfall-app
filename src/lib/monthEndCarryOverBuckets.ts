@@ -114,7 +114,7 @@ export function analyzeMonthEndCarryOverBuckets(
   const excludePartialSourceMonths = options.excludePartialSourceMonths ?? true;
   const segments = buildMonthlySegments(history, includeSupp);
   const excludedMonthLabels = excludePartialSourceMonths
-    ? new Set(getExcludedMonthLabelsForHistoryBaselines(segments, (segment) => segment.monthLabel))
+    ? new Set(getExcludedMonthLabelsForHistoryBaselines(segments, (segment) => segment.monthLabel, segment => segment.draws[0]?.date))
     : new Set<string>();
 
   const sourceObservationsByBucket = new Map<MonthEndCarryOverBucket, number>();

@@ -60,9 +60,11 @@ describe("DGA heatmap simulation strip wiring", () => {
     expect(appSource).toContain("mirrorDgaStripToPreviousNeighbour");
     expect(appSource).toContain("applyDgaStripMirrorToPreviousNeighbour");
     expect(appSource).toContain("setPreviousNeighbourConstraintNumbers(");
+    expect(appSource).toContain("dgaStripInvalidPreviousNeighbourTargets");
     expect(gridBlock).toContain("Mirror strip to ±1/±2 builder");
     expect(gridBlock).toContain("aria-pressed={mirrorDgaStripToPreviousNeighbour}");
     expect(gridBlock).toContain("only valid latest-draw ±1/±2 targets");
+    expect(gridBlock).toContain("Invalid for this builder:");
   });
 
   it("keeps the mirror bridge visible above the DGA grid and places constellation before monthly bucket state", () => {
@@ -130,6 +132,31 @@ describe("DGA heatmap simulation strip wiring", () => {
     expect(heatmapBlock).toContain("gutter={DGA_HEATMAP_GUTTER}");
     expect(heatmapBlock).toContain("topOffsetPx={DGA_HEATMAP_GUTTER}");
     expect(heatmapBlock).toContain("includeHeaderSpacer={false}");
+  });
+
+  it("adds a mock next-draw column to the Temperature heatmap from shared strip selections", () => {
+    const appSource = readAppSource();
+    const heatmapStart = appSource.indexOf('title="DGA heatmap"');
+    const gridStart = appSource.indexOf('title="DGA grid"');
+    const heatmapBlock = appSource.slice(heatmapStart, gridStart);
+
+    expect(appSource).toContain("blank Next column for DGA strip mockups");
+    expect(heatmapBlock).toContain("showNextDrawColumn={!isMonthlyBucketHeatmapView}");
+    expect(heatmapBlock).toContain("nextDrawNumbers={!isMonthlyBucketHeatmapView ? dgaStripSelectedNumbers : []}");
+  });
+
+  it("separates heatmap hover labels from the monthly heatmap spark-line toggle", () => {
+    const appSource = readAppSource();
+    const heatmapStart = appSource.indexOf('title="DGA heatmap"');
+    const gridStart = appSource.indexOf('title="DGA grid"');
+    const heatmapBlock = appSource.slice(heatmapStart, gridStart);
+
+    expect(appSource).toContain("showHeatmapHoverLabels");
+    expect(heatmapBlock).toContain("Hover labels:");
+    expect(heatmapBlock).toContain("checked={showHeatmapHoverLabels}");
+    expect(heatmapBlock).toContain("showHoverLabel={showHeatmapHoverLabels}");
+    expect(heatmapBlock).toContain("Heatmap hover spark-line:");
+    expect(heatmapBlock).toContain("showHoverSparkline={!isMonthlyBucketHeatmapView || showMbsHoverSparkline}");
   });
 
   it("aligns the main DGA grid strip to the table header without adding row drift", () => {

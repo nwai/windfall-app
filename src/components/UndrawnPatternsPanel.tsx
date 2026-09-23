@@ -2,6 +2,8 @@ import React, { useMemo, useState } from "react";
 import type { Draw } from "../types";
 import { buildUndrawnForecast } from "../lib/undrawnForecast";
 import { analyzeMonthEndCarryOver } from "../lib/monthEndCarryOver";
+import { sortDrawsChronologically } from "../lib/recentDraws";
+import { HigButton, HigField } from "./shared/HigControls";
 
 interface UndrawnPatternsPanelProps {
   history: Draw[];
@@ -32,6 +34,7 @@ interface UndrawnStats {
   patterns: string[];
   sim: {
     trials: number;
+    recentWindow: number;
     notes: string[];
     meanUndrawn: number;
     undrawnRange95: [number, number];
@@ -62,6 +65,7 @@ interface UndrawnStats {
 }
 
 const TOTAL_NUMBERS = 45;
+const DEFAULT_OBSERVED_DRAW_COUNT = 13;
 const GROUPS = [
   { label: "1-9", range: [1, 9] },
   { label: "10-18", range: [10, 18] },
@@ -125,6 +129,7 @@ function computeStats(history: Draw[], includeSupp: boolean): UndrawnStats {
       patterns: [],
       sim: {
         trials: 0,
+        recentWindow: 0,
         notes: ["No data"],
         meanUndrawn: 0,
         undrawnRange95: [0, 0],
@@ -246,6 +251,7 @@ function computeStats(history: Draw[], includeSupp: boolean): UndrawnStats {
     ],
     sim: {
       trials: forecast.simulation.trials,
+      recentWindow: forecast.simulation.recentWindow,
       notes: forecast.simulation.notes,
       meanUndrawn: forecast.simulation.meanUndrawn,
       undrawnRange95: forecast.simulation.undrawnRange95,
@@ -295,15 +301,32 @@ function computeStats(history: Draw[], includeSupp: boolean): UndrawnStats {
 
 export const UndrawnPatternsPanel: React.FC<UndrawnPatternsPanelProps> = ({ history, windowLabel, loadedDrawCount }) => {
   const [mode, setMode] = useState<"mains" | "all">("mains");
-  const stats = useMemo(() => computeStats(history, mode === "all"), [history, mode]);
+  const [observedDrawCount, setObservedDrawCount] = useState(DEFAULT_OBSERVED_DRAW_COUNT);
+  const effectiveObservedDrawCount = history.length > 0
+    ? Math.min(Math.max(1, observedDrawCount), history.length)
+    : 0;
+  const observedHistory = useMemo(() => {
+    if (effectiveObservedDrawCount <= 0) return [];
+    return sortDrawsChronologically(history).slice(-effectiveObservedDrawCount);
+  }, [effectiveObservedDrawCount, history]);
+  const stats = useMemo(() => computeStats(observedHistory, mode === "all"), [mode, observedHistory]);
   const oddsRange = `${stats.oddEven.range95[0]}–${stats.oddEven.range95[1]}`;
   const effectiveLoadedDrawCount = typeof loadedDrawCount === "number" && Number.isFinite(loadedDrawCount)
     ? Math.max(loadedDrawCount, stats.draws)
     : stats.draws;
   const scopeLabel = windowLabel?.trim() || "Full History";
-  const datasetSummary = effectiveLoadedDrawCount > stats.draws
-    ? `Window: ${scopeLabel} • Analysing ${stats.draws} of ${effectiveLoadedDrawCount} loaded draws • Undrawn per draw: ${stats.undrawnPerDraw} ${mode === "mains" ? "(mains only)" : "(mains + supps)"}`
-    : `Window: ${scopeLabel} • Analysing ${stats.draws} draws • Undrawn per draw: ${stats.undrawnPerDraw} ${mode === "mains" ? "(mains only)" : "(mains + supps)"}`;
+  const usesLocalSubset = stats.draws < history.length;
+  const datasetSummary = usesLocalSubset
+    ? `Window: ${scopeLabel} • Analysing latest ${stats.draws} of ${history.length} active draws${effectiveLoadedDrawCount > history.length ? ` (${effectiveLoadedDrawCount} loaded)` : ""} • Undrawn per draw: ${stats.undrawnPerDraw} ${mode === "mains" ? "(mains only)" : "(mains + supps)"}`
+    : effectiveLoadedDrawCount > stats.draws
+      ? `Window: ${scopeLabel} • Analysing ${stats.draws} of ${effectiveLoadedDrawCount} loaded draws • Undrawn per draw: ${stats.undrawnPerDraw} ${mode === "mains" ? "(mains only)" : "(mains + supps)"}`
+      : `Window: ${scopeLabel} • Analysing ${stats.draws} draws • Undrawn per draw: ${stats.undrawnPerDraw} ${mode === "mains" ? "(mains only)" : "(mains + supps)"}`;
+
+  const updateObservedDrawCount = (value: string) => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    setObservedDrawCount(Math.min(Math.max(1, Math.floor(parsed)), Math.max(1, history.length)));
+  };
 
   return (
     <div className="windfall-evidence-panel" style={{ width: "100%", maxWidth: 1180, margin: "0 auto", display: "flex", flexDirection: "column", gap: 12 }}>
@@ -314,15 +337,41 @@ export const UndrawnPatternsPanel: React.FC<UndrawnPatternsPanelProps> = ({ hist
             {datasetSummary}
           </div>
           <div style={{ color: "#64748b", fontSize: 12, marginTop: 4, maxWidth: 760, lineHeight: 1.45 }}>
-            This panel counts absences <b>draw by draw</b>. In a 12-draw window, the same number can add up to 12 undrawn instances if it stays absent in every draw.
+            Every card uses the newest <b>{stats.draws}</b> draw{stats.draws === 1 ? "" : "s"} inside the active WFMQYH window. A number can add up to {stats.draws} undrawn instance{stats.draws === 1 ? "" : "s"} if it stays absent throughout this local window.
           </div>
           {stats.caveat && <div style={{ color: "#a16207", fontSize: 12, marginTop: 4 }}>{stats.caveat}</div>}
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-          <label style={{ fontSize: 13, color: "#2d3748" }}>Mode:</label>
-          <div style={{ display: "inline-flex", border: "1px solid #cbd5e0", borderRadius: 6, overflow: "hidden" }}>
-            <button type="button" onClick={() => setMode("mains")} style={{ padding: "6px 10px", background: mode === "mains" ? "#2563eb" : "#f8fafc", color: mode === "mains" ? "#fff" : "#1a202c", border: "none", cursor: "pointer" }}>Mains only</button>
-            <button type="button" onClick={() => setMode("all")} style={{ padding: "6px 10px", background: mode === "all" ? "#2563eb" : "#f8fafc", color: mode === "all" ? "#fff" : "#1a202c", border: "none", borderLeft: "1px solid #cbd5e0", cursor: "pointer" }}>Mains + supps</button>
+        <div style={{ display: "flex", alignItems: "end", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+          <HigField
+            label="Observed window"
+            help="Panel-local only. Uses the newest N draws inside the active WFMQYH window and does not change WFMQYH or candidate generation."
+          >
+            <input
+              type="number"
+              min={1}
+              max={Math.max(1, history.length)}
+              step={1}
+              value={effectiveObservedDrawCount || ""}
+              disabled={history.length === 0}
+              aria-label="Observed pattern draw count"
+              onChange={(event) => updateObservedDrawCount(event.target.value)}
+              style={{ width: 78 }}
+            />
+          </HigField>
+          <HigButton
+            size="compact"
+            variant="secondary"
+            disabled={history.length === 0 || effectiveObservedDrawCount === history.length}
+            onClick={() => setObservedDrawCount(Math.max(1, history.length))}
+          >
+            Use all active
+          </HigButton>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, minHeight: 32 }}>
+            <span style={{ fontSize: 13, color: "#2d3748", fontWeight: 700 }}>Mode</span>
+            <div style={{ display: "inline-flex", border: "1px solid #cbd5e0", borderRadius: 6, overflow: "hidden" }}>
+              <button type="button" onClick={() => setMode("mains")} style={{ minHeight: 32, padding: "6px 10px", background: mode === "mains" ? "#2563eb" : "#f8fafc", color: mode === "mains" ? "#fff" : "#1a202c", border: "none", cursor: "pointer" }}>Mains only</button>
+              <button type="button" onClick={() => setMode("all")} style={{ minHeight: 32, padding: "6px 10px", background: mode === "all" ? "#2563eb" : "#f8fafc", color: mode === "all" ? "#fff" : "#1a202c", border: "none", borderLeft: "1px solid #cbd5e0", cursor: "pointer" }}>Mains + supps</button>
+            </div>
           </div>
         </div>
       </div>
@@ -372,6 +421,11 @@ export const UndrawnPatternsPanel: React.FC<UndrawnPatternsPanelProps> = ({ hist
         <div style={cardStyle}>
           <div style={{ fontWeight: 700, marginBottom: 6 }}>Simulation snapshot (relative freq)</div>
           <div style={{ color: "#2d3748", fontSize: 14 }}>Trials: {stats.sim.trials}</div>
+          {stats.sim.recentWindow > 0 && (
+            <div style={{ color: "#4a5568", fontSize: 12, marginTop: 4 }}>
+              Recent evidence slice: latest {stats.sim.recentWindow} of {stats.draws} observed draw{stats.draws === 1 ? "" : "s"}.
+            </div>
+          )}
           {stats.sim.trials > 0 && (
             <div style={{ color: "#4a5568", fontSize: 13, marginTop: 6, lineHeight: 1.45 }}>
               Next undrawn avg: {stats.sim.meanUndrawn.toFixed(1)} • 95% range: {formatRange(stats.sim.undrawnRange95)} • Odd undrawn avg: {stats.sim.meanOddUndrawn.toFixed(1)} • Latest carry-over avg: {stats.sim.meanLatestOverlap.toFixed(1)}

@@ -73,6 +73,7 @@ export interface MonthEndCarryOverWeighting {
 
 interface MonthlySegment {
   monthLabel: string;
+  firstDate: string;
   drawnSets: Set<number>[];
   union: Set<number>;
   undrawn: Set<number>;
@@ -197,6 +198,7 @@ const buildMonthlySegments = (history: Draw[], includeSupp: boolean): MonthlySeg
     if (!active || active.monthLabel !== monthLabel) {
       active = {
         monthLabel,
+        firstDate: draw.date,
         drawnSets: [],
         union: new Set<number>(),
         undrawn: new Set<number>(),
@@ -230,7 +232,7 @@ export function analyzeMonthEndCarryOver(
   const realHistory = filterRealDrawHistory(history, "month-end carry-over diagnostics");
   const segments = buildMonthlySegments(realHistory.history, includeSupp);
   const excludedMonthLabels = new Set(
-    getExcludedMonthLabelsForHistoryBaselines(segments, (segment) => segment.monthLabel),
+    getExcludedMonthLabelsForHistoryBaselines(segments, (segment) => segment.monthLabel, segment => segment.firstDate),
   );
 
   if (segments.length < 2) {
@@ -389,7 +391,7 @@ export function analyzeMonthEndCarryOver(
     notes.push(`Skipped ${skippedGapTransitions} non-consecutive month transition${skippedGapTransitions === 1 ? "" : "s"} in the active window.`);
   }
   if (skippedPartialSourceTransitions > 0) {
-    notes.push(`Excluded ${skippedPartialSourceTransitions} opening partial-month transition${skippedPartialSourceTransitions === 1 ? "" : "s"} from 2024-05 when computing history-wide carry-over averages.`);
+    notes.push(`Excluded ${skippedPartialSourceTransitions} opening partial-month transition${skippedPartialSourceTransitions === 1 ? "" : "s"} when computing history-wide carry-over averages (first recorded draw later than the first scheduled draw).`);
   }
 
   return {

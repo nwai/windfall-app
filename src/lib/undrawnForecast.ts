@@ -242,7 +242,7 @@ export function buildUndrawnForecast(
   }
 
   const draws = cleaned.length
-  const recentWindow = Math.min(draws, Math.max(4, Math.min(12, Math.ceil(draws / 3))))
+  const recentWindow = Math.min(draws, 13)
   const topNumbers = Math.max(1, Math.floor(options.topNumbers ?? DEFAULT_TOP_NUMBERS))
   const trials = Math.max(200, Math.floor(options.trials ?? DEFAULT_TRIALS))
   const rng = seededRng(options.seed ?? 20260531)

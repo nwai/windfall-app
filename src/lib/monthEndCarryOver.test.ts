@@ -98,7 +98,7 @@ describe("analyzeMonthEndCarryOver", () => {
 
   it("reflects supplementary inclusion in early-next-month hit rates", () => {
     const history: Draw[] = [
-      draw("2026-01-03", [1, 2, 3, 4, 5, 6], [45, 44]),
+      draw("2026-01-02", [1, 2, 3, 4, 5, 6], [45, 44]),
       draw("2026-01-10", [7, 8, 9, 10, 11, 12], [43, 42]),
       draw("2026-02-02", [13, 14, 15, 16, 17, 45], [41, 40]),
       draw("2026-02-09", [18, 19, 20, 21, 22, 23], [39, 38]),
@@ -139,7 +139,7 @@ describe("analyzeMonthEndCarryOver", () => {
 
   it("skips non-consecutive month gaps instead of treating them as carry-over transitions", () => {
     const history: Draw[] = [
-      draw("2026-01-03", [1, 2, 3, 4, 5, 6], [7, 8]),
+      draw("2026-01-02", [1, 2, 3, 4, 5, 6], [7, 8]),
       draw("2026-01-10", [9, 10, 11, 12, 13, 14], [15, 16]),
       draw("2026-03-02", [17, 18, 19, 20, 21, 22], [23, 24]),
       draw("2026-03-09", [25, 26, 27, 28, 29, 30], [31, 32]),
@@ -199,7 +199,7 @@ describe("analyzeMonthEndCarryOver", () => {
 
   it("adds last-draw to first-draw month-boundary repeats to the active carry-over pool", () => {
     const history: Draw[] = [
-      draw("2026-01-03", [1, 2, 3, 4, 5, 6], [7, 8]),
+      draw("2026-01-02", [1, 2, 3, 4, 5, 6], [7, 8]),
       draw("2026-01-10", [9, 10, 11, 12, 13, 44], [15, 16]),
       draw("2026-02-03", [44, 17, 18, 19, 20, 21], [22, 23]),
       draw("2026-02-10", [24, 25, 26, 27, 28, 29], [30, 45]),

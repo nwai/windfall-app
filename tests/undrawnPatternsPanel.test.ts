@@ -1,13 +1,74 @@
-import React from "react";
+import React, { act } from "react";
+import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { UndrawnPatternsPanel } from "../src/components/UndrawnPatternsPanel";
 import type { Draw } from "../src/types";
 
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
 const buildDraw = (date: string, main: number[], supp: number[]): Draw => ({ date, main, supp });
 
 describe("UndrawnPatternsPanel", () => {
+  it("defaults the panel-local observed window to the latest 13 active draws", () => {
+    const history = Array.from({ length: 20 }, (_, index) => (
+      buildDraw(
+        `2026-01-${String(index + 1).padStart(2, "0")}`,
+        [1, 2, 3, 4, 5, 6],
+        [7, 8],
+      )
+    ));
+
+    const html = renderToStaticMarkup(
+      React.createElement(UndrawnPatternsPanel, {
+        history,
+        windowLabel: "Custom (20)",
+        loadedDrawCount: history.length,
+      }),
+    );
+
+    expect(html).toContain('aria-label="Observed pattern draw count"');
+    expect(html).toContain('value="13"');
+    expect(html).toContain("Analysing latest 13 of 20 active draws");
+    expect(html).toContain("Every card uses the newest <b>13</b> draws");
+  });
+
+  it("recalculates the cards when the local observed draw count changes", async () => {
+    const history = Array.from({ length: 20 }, (_, index) => (
+      buildDraw(
+        `2026-01-${String(index + 1).padStart(2, "0")}`,
+        [1, 2, 3, 4, 5, 6],
+        [7, 8],
+      )
+    ));
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    try {
+      await act(async () => root.render(React.createElement(UndrawnPatternsPanel, {
+        history,
+        windowLabel: "Custom (20)",
+        loadedDrawCount: history.length,
+      })));
+      const input = container.querySelector<HTMLInputElement>('[aria-label="Observed pattern draw count"]');
+      expect(input).not.toBeNull();
+
+      await act(async () => {
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+        setter?.call(input, "5");
+        input?.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+
+      expect(container.textContent).toContain("Analysing latest 5 of 20 active draws");
+      expect(container.textContent).toContain("Every card uses the newest 5 draws");
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
   it("shows the active WFMQYH window alongside the loaded history size", () => {
     const fullHistory: Draw[] = [
       buildDraw("2026-01-01", [1, 2, 3, 4, 5, 6], [7, 8]),

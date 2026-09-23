@@ -1,4 +1,5 @@
 import { CandidateSet, Draw, Knobs } from "./types";
+import { lastDrawBiasMultiplier } from "./lib/settingsTransparency";
 import { entropy, precomputeHistoryBitmasks, minHammingBit, maxJaccardBit, toBitmask } from "./analytics";
 import { getSDE1FilteredPool } from "./sde1";
 import { getHC3OverlapNumbers, getMostRecentDraw } from "./lib/recentDraws";
@@ -11,6 +12,7 @@ import {
 } from "./lib/digitWidthConstraint";
 import { scoreMonthEndCarryOverCandidate } from "./lib/monthEndCarryOver";
 import { MONTHLY_BUCKET_KEYS, type MonthlyBucketKey } from "./lib/monthlyDrawSummary";
+import { weightedSampleWithoutReplacement } from "./lib/weightedSample";
 import {
   analyzeBucketCoveragePlanner,
   buildBucketCoverageGenerationPlan,
@@ -33,11 +35,26 @@ import {
   type D1TerminalMomentumGenerationProfile,
 } from "./lib/d1TerminalMomentumInfluence";
 import {
+  droughtEvidenceGovernorMultiplier,
+  type DroughtEvidenceGovernorProfile,
+} from "./lib/droughtEvidenceGovernor";
+import {
+  monthlyBucketTransitionGovernorMultiplier,
+  type MonthlyBucketTransitionGovernorProfile,
+} from "./lib/monthlyBucketTransitionGovernor";
+import {
   analyzeLatestNeighbourSupport,
   candidateSatisfiesLatestNeighbourSupport,
   latestNeighbourSupportTraceTag,
   type LatestNeighbourSupportOptions,
 } from "./lib/latestNeighbourSupport";
+import {
+  formatRepeatedTerminalDigitFamilyRule,
+  normalizeRepeatedTerminalDigitFamilyRule,
+  summarizeRepeatedTerminalDigitFamilies,
+  violatesRepeatedTerminalDigitFamilyRule,
+  type RepeatedTerminalDigitFamilyOptions,
+} from "./lib/repeatedTerminalDigitFamilies";
 export {
   applyOddEvenRatioQuotas,
   buildOddEvenRatioQuotas,
@@ -96,6 +113,7 @@ export interface GenerateCandidatesResult {
     mainEightSet: number;
     mainNineSet: number;
     digitWidth: number;
+    repeatedTerminalFamilies: number;
     exclusions: number;
     totalAttempts: number;
     accepted: number;
@@ -296,6 +314,13 @@ export function generateCandidates(
   strictDroughtQuotaOptions?: StrictDroughtQuotaGenerationOptions,
   /** Default-off empirical drought-hazard shortlist quota. */
   empiricalDroughtQuotaOptions?: EmpiricalDroughtQuotaGenerationOptions,
+  /** Default-off Auto or Manual drought weighting. Soft boost only; never a hard quota. */
+  droughtEvidenceGovernorProfile?: DroughtEvidenceGovernorProfile,
+  /** Default-off Auto or manual monthly bucket transition weighting. Soft boost only; never a hard quota. */
+  monthlyBucketTransitionGovernorProfile?: MonthlyBucketTransitionGovernorProfile,
+  /** Default-off hard rule for repeated terminal digit families. */
+  repeatedTerminalDigitFamiliesOptions?: RepeatedTerminalDigitFamilyOptions,
+  rng: () => number = Math.random,
 ): GenerateCandidatesResult {
 
   if (DEBUG) {
@@ -367,6 +392,7 @@ export function generateCandidates(
     mainEightSet: 0,
     mainNineSet: 0,
     digitWidth: 0,
+    repeatedTerminalFamilies: 0,
     exclusions: 0,
     totalAttempts: 0,
     accepted: 0
@@ -400,7 +426,12 @@ export function generateCandidates(
   };
 
   const warnings: string[] = [];
+  const blocked = (message: string): GenerateCandidatesResult => {
+    traceSetter(`[TRACE] Generation blocked: ${message}. Requested constraints were not relaxed.`);
+    return { ...buildResultSnapshot(), quotaWarning: `${message}. Requested constraints were not relaxed.` };
+  };
   const hasSplitFiveBucketConstraint = normalizeMainDigitCountRule(mainZeroOptions) !== null || normalizeMainDigitCountRule(mainFiveOptions) !== null;
+  const repeatedTerminalDigitFamilyRule = normalizeRepeatedTerminalDigitFamilyRule(repeatedTerminalDigitFamiliesOptions);
   const clampMainDigitBoost = (boost: number | undefined): number => {
     const numericBoost = typeof boost === "number" ? boost : Number(boost);
     return Math.max(0, Math.min(5, Number.isFinite(numericBoost) ? numericBoost : 0));
@@ -521,6 +552,9 @@ export function generateCandidates(
 
   // Filter mainPool accordingly
   mainPool = mainPool.filter(n => !fullExcludedSet.has(n));
+  if (minFromRecentUnionM > 0 && (!recentUnion || [...recentUnion].filter(n => !fullExcludedSet.has(n)).length < minFromRecentUnionM)) {
+    return blocked(`Newest-draw pool minimum ${minFromRecentUnionM} exceeds available eligible numbers`);
+  }
 
   const strictDroughtQuotaRawMin = Math.max(
     0,
@@ -532,8 +566,9 @@ export function generateCandidates(
       .filter((number) => number >= 1 && number <= 45 && !fullExcludedSet.has(number)))
   );
   const strictDroughtQuotaMin = strictDroughtQuotaOptions?.enabled
-    ? Math.min(strictDroughtQuotaRawMin, strictDroughtQuotaNumbers.length, 8)
+    ? strictDroughtQuotaRawMin
     : 0;
+  if (strictDroughtQuotaMin > strictDroughtQuotaNumbers.length) return blocked(`Strict drought minimum ${strictDroughtQuotaMin}, eligible ${strictDroughtQuotaNumbers.length}`);
   const strictDroughtQuotaActive = strictDroughtQuotaMin > 0 && strictDroughtQuotaNumbers.length > 0;
   const strictDroughtQuotaSet = new Set(strictDroughtQuotaNumbers);
   const strictDroughtQuotaMultiplier = (n: number): number => {
@@ -566,8 +601,9 @@ export function generateCandidates(
       .filter((number) => number >= 1 && number <= 45 && !fullExcludedSet.has(number)))
   );
   const empiricalDroughtQuotaMin = empiricalDroughtQuotaOptions?.enabled
-    ? Math.min(empiricalDroughtQuotaRawMin, empiricalDroughtQuotaNumbers.length, 8)
+    ? empiricalDroughtQuotaRawMin
     : 0;
+  if (empiricalDroughtQuotaMin > empiricalDroughtQuotaNumbers.length) return blocked(`Empirical drought minimum ${empiricalDroughtQuotaMin}, eligible ${empiricalDroughtQuotaNumbers.length}`);
   const empiricalDroughtQuotaActive = empiricalDroughtQuotaMin > 0 && empiricalDroughtQuotaNumbers.length > 0;
   const empiricalDroughtQuotaSet = new Set(empiricalDroughtQuotaNumbers);
   const empiricalDroughtQuotaMultiplier = (n: number): number => {
@@ -745,24 +781,9 @@ export function generateCandidates(
     ? new Set([...lastDraw.main, ...lastDraw.supp])
     : null;
 
-  // Hostile penalty for recent draw numbers: when minRecentMatches === 0 and
-  // recentMatchBias > 0, penalise numbers from the most recent draw during
-  // weighted pool construction (reduce their sampling weight, but never fully
-  // exclude them).  Penalty factor = 1 / (1 + recentMatchBias), e.g.
-  //   bias 0   → factor 1.0  (no penalty)
-  //   bias 0.5 → factor 0.67
-  //   bias 1   → factor 0.50
-  //   bias 5   → factor 0.17
-  const hostileRecent =
-    minRecentMatches === 0 && recentMatchBias > 0 && lastDrawSet != null;
-  const hostilePenalty = hostileRecent ? 1 / (1 + recentMatchBias) : 1;
-
-  if (hostileRecent) {
-    traceSetter(
-      `[TRACE] Hostile-recent enabled: recentMatchBias=${recentMatchBias}, ` +
-        `penalty factor=${hostilePenalty.toFixed(3)} applied to ${lastDrawSet!.size} last-draw numbers`
-    );
-  }
+  // Soft construction weight only; explicit overlap bounds decide acceptance.
+  const recentMultiplier = lastDrawBiasMultiplier(recentMatchBias, minRecentMatches);
+  if (lastDrawSet && recentMultiplier !== 1) traceSetter(`[TRACE] Last-draw soft bias ${recentMatchBias}: ${recentMultiplier.toFixed(3)}x sampling weight; overlap hard limits unchanged.`);
 
   if (monthlyRepeatBiasWeights) {
     const boostedEntries = Object.entries(monthlyRepeatBiasWeights)
@@ -798,6 +819,12 @@ export function generateCandidates(
   }
   if (scoringGenerationProfile?.enabled) {
     traceSetter(`[TRACE] ${scoringGenerationProfile.traceLabel}`);
+  }
+  if (droughtEvidenceGovernorProfile?.userEnabled) {
+    traceSetter(`[TRACE] ${droughtEvidenceGovernorProfile.traceLabel}`);
+  }
+  if (monthlyBucketTransitionGovernorProfile?.userEnabled) {
+    traceSetter(`[TRACE] ${monthlyBucketTransitionGovernorProfile.traceLabel}`);
   }
   if (d1TerminalMomentumProfile?.userEnabled) {
     traceSetter(`[TRACE] ${d1TerminalMomentumProfile.traceLabel}`);
@@ -860,73 +887,51 @@ export function generateCandidates(
     }
   }
 
-  const buildWeightedPool = (pool: number[], applyMainDigitBoosts: boolean = false) => {
-    const out: number[] = [];
-    for (const n of pool) {
-      let factor = recencyFactor(n);
-      factor *= gpwfFactors[n] ?? 1;
-      if (applyMainDigitBoosts) {
-        factor *= mainDigitBoostMultiplier(n);
-        factor *= mainDecadeBiasMultiplier(n);
-      }
-      if (boostEnabled && selectedBoostSet.has(n)) {
-        factor *= Math.max(1, boostFactor);
-      }
-      // Monthly bucket boost (drawn numbers get frequency-tier boost)
-      const monthlyMult = monthlyBoostMap.get(n);
-      if (monthlyMult) {
-        factor *= monthlyMult;
-      }
-      // Hostile penalty: reduce weight of numbers from the most recent draw.
-      // When the factor drops below 1.0 use fractional probability so the
-      // Hostile penalty: reduce weight of numbers from the most recent draw.
-      if (hostileRecent && lastDrawSet!.has(n)) {
-        factor *= hostilePenalty;
-      }
-      // Monthly repeat bias: boost numbers drawn exactly once this month
-      if (monthlyRepeatBiasWeights) {
-        const repBias = monthlyRepeatBiasWeights[n] ?? 1;
-        if (repBias !== 1) factor *= repBias;
-      }
-      const carryOverBias = monthEndCarryOverWeights?.[n] ?? 1;
-      if (carryOverBias !== 1) {
-        factor *= carryOverBias;
-      }
-      factor *= scoringInfluenceMultiplier(n, scoringGenerationProfile);
-      factor *= d1TerminalMomentumMultiplier(n, d1TerminalMomentumProfile);
-      if (latestNeighbourSupport.active && latestNeighbourSupportSet.has(n)) {
-        factor *= latestNeighbourSupport.supportBoostFactor;
-      }
-      if (strictDroughtQuotaActive && strictDroughtQuotaSet.has(n)) {
-        factor *= strictDroughtQuotaMultiplier(n);
-      }
-      if (empiricalDroughtQuotaActive && empiricalDroughtQuotaSet.has(n)) {
-        factor *= empiricalDroughtQuotaMultiplier(n);
-      }
-      if (factor < 1) {
-        // Probabilistic inclusion: e.g. factor=0.3 → 30 % chance of 1 rep
-        if (Math.random() < factor) out.push(n);
-      } else {
-        const reps = Math.max(1, Math.round(factor));
-        for (let i = 0; i < reps; i++) out.push(n);
-      }
-    }
-    return out;
+  // All factors are fixed for this run; calculate once, not for every attempted row.
+  const weightTrace: string[] = [];
+  const weightLedger = Array.from({ length: 45 }, (_, index) => {
+    const n = index + 1;
+    const components: Record<string, number> = {
+      lambda: recencyFactor(n),
+      GPWF: gpwfFactors[n] ?? 1,
+      selected: boostEnabled && selectedBoostSet.has(n) ? Math.max(1, boostFactor) : 1,
+      monthly: monthlyBoostMap.get(n) ?? 1,
+      lastDraw: lastDrawSet?.has(n) ? recentMultiplier : 1,
+      monthlyRepeat: monthlyRepeatBiasWeights?.[n] ?? 1,
+      carryOver: monthEndCarryOverWeights?.[n] ?? 1,
+      numbersDiagnostic: scoringInfluenceMultiplier(n, scoringGenerationProfile),
+      droughtGovernor: droughtEvidenceGovernorMultiplier(n, droughtEvidenceGovernorProfile),
+      monthlyGovernor: monthlyBucketTransitionGovernorMultiplier(n, monthlyBucketTransitionGovernorProfile),
+      D1: d1TerminalMomentumMultiplier(n, d1TerminalMomentumProfile),
+      neighbour: latestNeighbourSupport.active && latestNeighbourSupportSet.has(n) ? latestNeighbourSupport.supportBoostFactor : 1,
+      strictQuota: strictDroughtQuotaActive && strictDroughtQuotaSet.has(n) ? strictDroughtQuotaMultiplier(n) : 1,
+      empiricalQuota: empiricalDroughtQuotaActive && empiricalDroughtQuotaSet.has(n) ? empiricalDroughtQuotaMultiplier(n) : 1,
+    };
+    const base = Object.values(components).reduce((product, factor) => product * factor, 1);
+    const digit = mainDigitBoostMultiplier(n);
+    const decade = mainDecadeBiasMultiplier(n);
+    const full = base * digit * decade;
+    const safeWeight = (value: number) => Number.isFinite(value) ? Math.max(0, value) : 0;
+    const details = Object.entries({ ...components, digit, decade }).filter(([, value]) => value !== 1)
+      .map(([name, value]) => `${name}=${value.toPrecision(6)}x`).join(", ") || "neutral 1x";
+    const excluded = fullExcludedSet.has(n) || (monthlyBucketOptions?.boostPenalize && monthlyBucketOptions.buckets.undrawn.has(n));
+    weightTrace.push(`[TRACE] Sampling weight ${n}: ${excluded ? "EXCLUDED" : `${safeWeight(full).toPrecision(6)}x`} | ${details} | before row-specific pool normalization and hard filters; not a draw probability`);
+    return { base: safeWeight(base), full: safeWeight(full) };
+  });
+  traceSetter(weightTrace.join("\n"));
+  const buildSamplingWeights = (pool: number[], applyMainDigitBoosts = false): number[] =>
+    pool.map(n => weightLedger[n - 1]?.[applyMainDigitBoosts ? "full" : "base"] ?? 0);
+
+  const sampleWithWeights = (pool: number[], weights: number[], needed: number): number[] => {
+    const eligible = pool.map((number, index) => ({ number, weight: weights[index] }))
+      .filter((item) => Number.isFinite(item.weight) && item.weight > 0);
+    return weightedSampleWithoutReplacement(eligible.map((item) => item.number), eligible.map((item) => item.weight), needed, rng);
   };
 
-  // Weighted sampling without replacement (drops all copies of a drawn number)
+  // Preserve fractional boosts such as 1.17x instead of rounding them to one copy.
   const drawWeightedUnique = (pool: number[], needed: number, applyMainDigitBoosts: boolean = false): number[] => {
     if (needed <= 0 || pool.length === 0) return [];
-    let weighted = buildWeightedPool(pool, applyMainDigitBoosts);
-    const picked: number[] = [];
-    while (picked.length < needed && weighted.length > 0) {
-      const idx = Math.floor(Math.random() * weighted.length);
-      const val = weighted[idx];
-      picked.push(val);
-      // remove all occurrences of val to enforce uniqueness
-      weighted = weighted.filter((n) => n !== val);
-    }
-    return picked;
+    return sampleWithWeights(pool, buildSamplingWeights(pool, applyMainDigitBoosts), needed);
   };
 
   const drawDigitWidthConstrainedUnique = (
@@ -952,21 +957,10 @@ export function generateCandidates(
   const shuffledIntegerRange = (min: number, max: number): number[] => {
     const values = Array.from({ length: Math.max(0, max - min + 1) }, (_, index) => min + index);
     for (let i = values.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
+      const j = Math.floor(rng() * (i + 1));
       [values[i], values[j]] = [values[j], values[i]];
     }
     return values;
-  };
-
-  const sampleWithoutReplacement = (pool: number[], k: number): number[] => {
-    const arr = pool.slice();
-    const res: number[] = [];
-    for (let i = arr.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [arr[i], arr[j]] = [arr[j], arr[i]];
-    }
-    for (let i = 0; i < k && i < arr.length; i++) res.push(arr[i]);
-    return res;
   };
 
   const sampleMonthlyBucketWithSelectionBias = (
@@ -975,26 +969,10 @@ export function generateCandidates(
     preferredSet: ReadonlySet<number>
   ): number[] => {
     if (k <= 0 || pool.length === 0) return [];
-    if (preferredSet.size === 0) return sampleWithoutReplacement(pool, k);
-    let weighted: number[] = [];
-    for (const n of pool) {
-      const selectedBias = preferredSet.has(n) ? MONTHLY_SELECTED_NUMBER_BIAS_REPEATS : 1;
-      const carryOverBias = Math.max(0.1, monthEndCarryOverWeights?.[n] ?? 1);
-      const scoringBias = scoringInfluenceMultiplier(n, scoringGenerationProfile);
-      const d1TerminalBias = d1TerminalMomentumMultiplier(n, d1TerminalMomentumProfile);
-      const strictDroughtBias = strictDroughtQuotaActive && strictDroughtQuotaSet.has(n) ? strictDroughtQuotaMultiplier(n) : 1;
-      const empiricalDroughtBias = empiricalDroughtQuotaActive && empiricalDroughtQuotaSet.has(n) ? empiricalDroughtQuotaMultiplier(n) : 1;
-      const reps = Math.max(1, Math.round(selectedBias * carryOverBias * scoringBias * d1TerminalBias * strictDroughtBias * empiricalDroughtBias));
-      for (let i = 0; i < reps; i++) weighted.push(n);
-    }
-    const picked: number[] = [];
-    while (picked.length < k && weighted.length > 0) {
-      const idx = Math.floor(Math.random() * weighted.length);
-      const val = weighted[idx];
-      picked.push(val);
-      weighted = weighted.filter((n) => n !== val);
-    }
-    return picked;
+    const weights = buildSamplingWeights(pool, true).map((weight, index) => (
+      weight * (preferredSet.has(pool[index]) ? MONTHLY_SELECTED_NUMBER_BIAS_REPEATS : 1)
+    ));
+    return sampleWithWeights(pool, weights, k);
   };
 
   // Pre-compute supp base pool: 1-45 minus static exclusions (constant across iterations)
@@ -1019,7 +997,7 @@ export function generateCandidates(
 
     let main: number[] = [...forcedMain];
     let supp: number[] = [...forcedSupp];
-    const plannedBucketPicks = bucketCoveragePlan?.next(attempts - 1, Math.random) ?? null;
+    const plannedBucketPicks = bucketCoveragePlan?.next(attempts - 1, rng) ?? null;
     let usedPlannedBucketPick = false;
 
     // Constructive bucket fill (monthly) — pick as many as available up to requested counts
@@ -1285,6 +1263,15 @@ export function generateCandidates(
       }
     }
 
+    if (repeatedTerminalDigitFamilyRule) {
+      const repeatedFamilyNumbers = repeatedTerminalDigitFamilyRule.scope === "main" ? main : nums8;
+      const repeatedFamilySummary = summarizeRepeatedTerminalDigitFamilies(repeatedFamilyNumbers);
+      if (violatesRepeatedTerminalDigitFamilyRule(repeatedFamilySummary.repeatedCount, repeatedTerminalDigitFamilyRule)) {
+        stats.repeatedTerminalFamilies++;
+        continue;
+      }
+    }
+
     let oddEvenRatio: string | null = null;
 
     // Odd/Even ratio quota filter
@@ -1324,19 +1311,6 @@ export function generateCandidates(
       // Maximum matches to last draw: reject if candidate shares too many numbers
       if (maxLastDrawMatches !== undefined && matches > maxLastDrawMatches) {
         stats.maxLastDraw++; continue;
-      }
-      // Pro-recency soft filter: only when minRecentMatches > 0 (user wants
-      // recent overlap).  When minRecentMatches === 0 the hostile penalty in
-      // buildWeightedPool already discourages recent-draw numbers, so the
-      // pro-recency filter is skipped to avoid contradiction.
-      //
-      // Formula: prob = (1 - bias) + bias * (matches / 8)
-      //   bias=0 → prob=1 for all candidates (no filtering beyond minRecentMatches)
-      //   bias=1 → prob scales linearly with overlap (strong preference)
-      //   bias=0.1 → very mild preference (mostly uniform acceptance)
-      if (recentMatchBias > 0 && minRecentMatches > 0) {
-        const prob = Math.min(1, (1 - recentMatchBias) + recentMatchBias * (matches / 8));
-        if (Math.random() > prob) { stats.recentBias++; continue; }
       }
     }
 
@@ -1391,7 +1365,7 @@ if (patternOptions?.constraints?.length && patternOptions?.mode === 'restrict') 
         const weightSum = ogaBiasOptions.preferredDeciles.reduce((s, d) => s + Math.max(0, d.weight), 0) || 0;
         const w = match ? Math.max(0, match.weight) : 0;
         const prob = weightSum > 0 ? (w / weightSum) : 0;
-        if (Math.random() <= prob) acceptedByDecile = true;
+        if (rng() <= prob) acceptedByDecile = true;
 
         const selList = (ogaBiasOptions.preferredDeciles ?? []).map(d=>`D${d.index}x${d.weight}`).join(', ');
         traceSetter(`[TRACE] OGA decile check: OGA=${candidateOGA.toFixed(2)} → D${idx} weight=${w} prob=${prob.toFixed(2)} sel=${selList}`);
@@ -1416,7 +1390,7 @@ if (patternOptions?.constraints?.length && patternOptions?.mode === 'restrict') 
             ? (bands.low >= bands.mid && bands.low >= bands.high ? 'low' : (bands.mid >= bands.high ? 'mid' : 'high'))
             : pb;
           const acceptProb = targetBand === 'low' ? bands.low : targetBand === 'mid' ? bands.mid : bands.high;
-          if (Math.random() > acceptProb) { stats.ogaBias++; continue; }
+          if (rng() > acceptProb) { stats.ogaBias++; continue; }
         }
       }
     }
@@ -1507,6 +1481,18 @@ if (patternOptions?.constraints?.length && patternOptions?.mode === 'restrict') 
       `[TRACE] Digit-width rule: ${digitWidthTargets.singleDigitPercent}%/${digitWidthTargets.twoDigitPercent}% ${formatDigitWidthScopeLabel(digitWidthTargets.scope)} -> target ${digitWidthTargets.singleDigitCount}/${digitWidthTargets.twoDigitCount} rejects=${stats.digitWidth}`
     );
   }
+  if (repeatedTerminalDigitFamilyRule) {
+    const acceptedCandidateCount = Math.max(1, candidates.length);
+    const familyCounts = candidates.reduce((sum, candidate) => {
+      const numbers = repeatedTerminalDigitFamilyRule.scope === "main"
+        ? candidate.main
+        : [...candidate.main, ...candidate.supp];
+      return sum + summarizeRepeatedTerminalDigitFamilies(numbers).repeatedCount;
+    }, 0);
+    traceSetter(
+      `[TRACE] Repeated Terminal Digit Families rule: ${formatRepeatedTerminalDigitFamilyRule(repeatedTerminalDigitFamilyRule)} rejects=${stats.repeatedTerminalFamilies}; accepted repeated-family count ${familyCounts} (${(familyCounts / acceptedCandidateCount).toFixed(2)} per candidate)`
+    );
+  }
   if (latestNeighbourSupport.enabled) {
     const acceptedCandidateCount = Math.max(1, candidates.length);
     const hits = candidates.reduce((sum, candidate) => {
@@ -1533,6 +1519,60 @@ if (patternOptions?.constraints?.length && patternOptions?.mode === 'restrict') 
     traceSetter(
       `[TRACE] Strict drought quota results: effective minimum ${strictDroughtQuotaMin}; eligible=${strictDroughtQuotaNumbers.length}; rejects=${stats.strictDroughtQuota}; accepted-hits=${hits} (${(hits / acceptedCandidateCount).toFixed(2)} per accepted candidate)`
     );
+  }
+  if (droughtEvidenceGovernorProfile?.userEnabled) {
+    const acceptedCandidateCount = Math.max(1, candidates.length);
+    const boostedSet = new Set(droughtEvidenceGovernorProfile.boostedNumbers);
+    const candidateCounts = new Map<number, number>();
+    const hits = candidates.reduce((sum, candidate) => (
+      sum + [...candidate.main, ...candidate.supp].filter((number) => {
+        candidateCounts.set(number, (candidateCounts.get(number) ?? 0) + 1);
+        return boostedSet.has(number);
+      }).length
+    ), 0);
+    const activeLabel = droughtEvidenceGovernorProfile.active
+      ? `active families ${droughtEvidenceGovernorProfile.activeFamilies.join("+") || "none"}`
+      : "observe-only";
+    traceSetter(
+      `[TRACE] Drought Evidence Governor results: ${activeLabel}; boosted=${droughtEvidenceGovernorProfile.boostedNumbers.length}; accepted-hits=${hits} (${(hits / acceptedCandidateCount).toFixed(2)} per accepted candidate); soft boost only.`
+    );
+    if (droughtEvidenceGovernorProfile.numberDetails.length > 0) {
+      const ledger = droughtEvidenceGovernorProfile.numberDetails
+        .slice(0, 16)
+        .map((detail) => {
+          const family = detail.families.join("+") || "none";
+          const strict = detail.strictRank
+            ? `strict r${detail.strictRank}${detail.strictDrought !== null ? `/d${detail.strictDrought}` : ""}`
+            : "strict -";
+          const empirical = detail.empiricalRank
+            ? `emp r${detail.empiricalRank}${detail.empiricalDrought !== null ? `/d${detail.empiricalDrought}` : ""}`
+            : "emp -";
+          return `${detail.number} ${family} ${strict} ${empirical} ${detail.bucketLabel} ×${detail.multiplier.toFixed(2)} (${detail.weightSource}) accepted-pool count ${candidateCounts.get(detail.number) ?? 0}`;
+        })
+        .join(" | ");
+      traceSetter(`[TRACE] Drought Evidence Governor ledger: ${ledger}`);
+    }
+  }
+  if (monthlyBucketTransitionGovernorProfile?.userEnabled) {
+    const acceptedCandidateCount = Math.max(1, candidates.length);
+    const boostedSet = new Set(monthlyBucketTransitionGovernorProfile.boostedNumbers);
+    const candidateCounts = new Map<number, number>();
+    const hits = candidates.reduce((sum, candidate) => (
+      sum + [...candidate.main, ...candidate.supp].filter((number) => {
+        if (!boostedSet.has(number)) return false;
+        candidateCounts.set(number, (candidateCounts.get(number) ?? 0) + 1);
+        return true;
+      }).length
+    ), 0);
+    traceSetter(
+      `[TRACE] Monthly Bucket Transition Governor results: ${monthlyBucketTransitionGovernorProfile.active ? `active ${monthlyBucketTransitionGovernorProfile.internalStrength}` : "observe-only"}; boosted=${monthlyBucketTransitionGovernorProfile.boostedNumbers.length}; accepted-hits=${hits} (${(hits / acceptedCandidateCount).toFixed(2)} per accepted candidate); soft boost only.`
+    );
+    if (monthlyBucketTransitionGovernorProfile.numberDetails.length > 0) {
+      const ledger = monthlyBucketTransitionGovernorProfile.numberDetails
+        .map((detail) => `${detail.number} ${detail.bucketLabel} ×${detail.multiplier.toFixed(2)} ${detail.reason} accepted-pool count ${candidateCounts.get(detail.number) ?? 0}`)
+        .join(" | ");
+      traceSetter(`[TRACE] Monthly Bucket Transition Governor ledger: ${ledger}`);
+    }
   }
   if (empiricalDroughtQuotaOptions?.enabled) {
     const acceptedCandidateCount = Math.max(1, candidates.length);

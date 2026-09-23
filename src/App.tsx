@@ -7,6 +7,9 @@
 //
 // Keep existing imports; removed unused ones previously.
 import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
+import { useSettingsPersistence } from "./hooks/useSettingsPersistence";
+import { EffectiveSettings } from "./components/shared/EffectiveSettings";
+import { SETTINGS_MODEL_VERSION, lastDrawBiasMultiplier, effectiveSettingsTrace, withRestoredSettingSources, type EffectiveSettingsLedger } from "./lib/settingsTransparency";
 import "./App.css";
 
 import { LotteryPlatformShell } from "./components/lottery/LotteryPlatformShell";
@@ -88,7 +91,11 @@ import { showToast } from "./lib/toastBus";
 import { GlobalZoneWeighting } from "./components/GlobalZoneWeighting";
 import DrawHistoryManager from "./components/DrawHistoryManager";
 import DrawHistoryIntegrityPanel from "./components/DrawHistoryIntegrityPanel";
-import { HeatmapLegendBar } from "./components/HeatmapLegendBar";
+import {
+  HeatmapLegendBar,
+  normalizeHeatmapLegendHiddenIndexes,
+  toggleHeatmapLegendHiddenIndex,
+} from "./components/HeatmapLegendBar";
 import {
   buildMonthlyBucketDrawSeries,
   MONTHLY_BUCKET_HEATMAP_COLORS,
@@ -127,6 +134,19 @@ import {
   buildScoringGenerationProfile,
   type ScoringGenerationInfluence,
 } from "./lib/scoringGenerationInfluence";
+import {
+  buildDroughtEvidenceGovernorProfile,
+  normalizeDroughtEvidenceGovernorMode,
+  normalizeDroughtEvidenceGovernorSettings,
+  type DroughtEvidenceGovernorMode,
+} from "./lib/droughtEvidenceGovernor";
+import { DroughtEvidenceGovernorControls } from "./components/DroughtEvidenceGovernorControls";
+import { MonthlyBucketTransitionGovernorControls } from "./components/MonthlyBucketTransitionGovernorControls";
+import {
+  buildMonthlyBucketTransitionGovernorProfile,
+  normalizeMonthlyBucketTransitionGovernorMode,
+  type MonthlyBucketTransitionGovernorMode,
+} from "./lib/monthlyBucketTransitionGovernor";
 import { analyzeDrawBucketPatterns, buildDrawBucketPatternLeaderboard, DEFAULT_RECENT_DRAW_BUCKET_WINDOW } from "./lib/drawBucketPatterns";
 import { normalizeReadinessWeights, type ReadinessWeights } from "./lib/candidateGenerationInfluences";
 import { PredictionJournalPanel, type PredictionJournalDraftRequest } from "./components/PredictionJournalPanel";
@@ -157,7 +177,7 @@ import { NextHotBlocksPanel } from "./components/NextHotBlocksPanel";
 import { TattslottoTicketGridReplayPanel } from "./components/TattslottoTicketGridReplayPanel";
 import UndrawnPatternsPanel from "./components/UndrawnPatternsPanel";
 import MonthlyOverlapPanel from "./components/MonthlyOverlapPanel";
-import MonthlyDrawsSummaryPanel, { type MonthlyConstraintPayload, type MonthlyFrequencyConstraints, type MonthlyBucketSets, type MonthlyIdealDrawState, type StageIdealDrawState } from "./components/MonthlyDrawsSummaryPanel";
+import MonthlyDrawsSummaryPanel, { MONTHLY_DRAWS_STAGE_IDM_TARGET_ID, type AppliedBucketMixTarget, type MonthlyConstraintPayload, type MonthlyFrequencyConstraints, type MonthlyBucketSets, type MonthlyIdealDrawState, type StageIdealDrawState } from "./components/MonthlyDrawsSummaryPanel";
 import { computeIdealMonthlyDraw, type MonthlyBucketKey } from "./lib/monthlyDrawSummary";
 import MonthlyBucketTransitionLabPanel from "./components/MonthlyBucketTransitionLabPanel";
 import MonthlyFirstLastPanel from "./components/MonthlyFirstLastPanel";
@@ -188,6 +208,7 @@ import { deriveMainConstraintExclusions } from "./lib/mainConstraintExclusions";
 import {
   broadcastDrawHistoryUpdated,
   downloadCsvFallback,
+  isFilePickerCancelError,
   parseCsv,
   pickCsvFile,
   readCsvFromHandle,
@@ -216,6 +237,15 @@ import {
   formatDigitWidthScopeLabel,
   type DigitWidthConstraintScope,
 } from "./lib/digitWidthConstraint";
+import {
+  formatRepeatedTerminalDigitFamilyRule,
+  normalizeRepeatedTerminalDigitFamilyMode,
+  normalizeRepeatedTerminalDigitFamilyRule,
+  normalizeRepeatedTerminalDigitFamilyScope,
+  repeatedTerminalDigitFamilyMaxForScope,
+  type RepeatedTerminalDigitFamilyMode,
+  type RepeatedTerminalDigitFamilyScope,
+} from "./lib/repeatedTerminalDigitFamilies";
 import {
   normalizeHotColdGenerationNumbers,
   toggleHotColdExcludeSelection,
@@ -374,7 +404,7 @@ const RDY_WEIGHT_COPY: Record<RdyWeightKey, {
   idm: {
     shortLabel: "IDM",
     label: "Ideal Draw Match",
-    help: "Bucket composition similarity to the Monthly Draws Summary ideal draw. Descriptive alignment only, not a win forecast.",
+    help: "Bucket composition similarity to the active IDM target shown here. A Bucket Mix Apply row overrides the robust ideal draw target. Descriptive alignment only, not a win forecast.",
   },
   conv: {
     shortLabel: "Conv",
@@ -597,6 +627,7 @@ const scoreCandidateConvergence = (
 interface ApplyReadinessHardFiltersContext {
   monthlyBuckets: MonthlyBucketSets | null | undefined;
   monthlyIdealDrawState: MonthlyIdealDrawState | null;
+  idmTargetComposition?: number[] | null;
   monthlyAvgBuckets: { times: number; avg: number }[];
   historyForOga: Draw[];
   ogaRefScores: number[];
@@ -627,7 +658,8 @@ const applyReadinessHardFiltersToCandidates = (
   const currentDistribution = distributionFromBucketMap(numberToBucket);
   const targetDistribution = toNineBucketDistribution(context.monthlyIdealDrawState?.targetDistribution)
     ?? targetDistributionFromMonthlyAverages(context.monthlyAvgBuckets);
-  const idealDrawComposition = toNineBucketDistribution(context.monthlyIdealDrawState?.idealDrawBucketCounts)
+  const idealDrawComposition = toNineBucketDistribution(context.idmTargetComposition)
+    ?? toNineBucketDistribution(context.monthlyIdealDrawState?.idealDrawBucketCounts)
     ?? (currentDistribution && targetDistribution
       ? computeIdealMonthlyDraw({
         currentDistribution,
@@ -636,25 +668,29 @@ const applyReadinessHardFiltersToCandidates = (
       }).bucketCounts.map(({ count }) => count)
       : null);
 
-  const needsMonthlyScores = filters.idm.enabled || filters.conv.enabled;
-  const monthlyScoresAvailable = !needsMonthlyScores || !!(numberToBucket && currentDistribution && targetDistribution && idealDrawComposition);
-  if (!monthlyScoresAvailable) {
+  const idmScoresAvailable = !filters.idm.enabled || !!(numberToBucket && idealDrawComposition);
+  const convScoresAvailable = !filters.conv.enabled || !!(numberToBucket && currentDistribution && targetDistribution);
+  if (!idmScoresAvailable) {
     if (filters.idm.enabled) skipped.push("IDM skipped: monthly bucket ideal state unavailable");
+  }
+  if (!convScoresAvailable) {
     if (filters.conv.enabled) skipped.push("Conv skipped: monthly bucket target state unavailable");
   }
 
   const idmScores = new Map<number, number>();
   const convRawScores = new Map<number, number>();
   let maxAbsConv = 0;
-  if (monthlyScoresAvailable && numberToBucket && currentDistribution && targetDistribution && idealDrawComposition) {
-    const preDrawDistance = sumSquaredDistance(currentDistribution, targetDistribution);
+  const preDrawDistance = currentDistribution && targetDistribution
+    ? sumSquaredDistance(currentDistribution, targetDistribution)
+    : 0;
+  if (numberToBucket && (idmScoresAvailable || convScoresAvailable)) {
     candidates.forEach((candidate, index) => {
       const numbers = [...candidate.main, ...candidate.supp];
-      if (filters.idm.enabled) {
+      if (filters.idm.enabled && idmScoresAvailable && idealDrawComposition) {
         const idmScore = scoreCandidateIdealDrawMatch(numbers, numberToBucket, idealDrawComposition);
         if (idmScore !== null) idmScores.set(index, idmScore);
       }
-      if (filters.conv.enabled) {
+      if (filters.conv.enabled && convScoresAvailable && currentDistribution && targetDistribution) {
         const convScore = scoreCandidateConvergence(numbers, numberToBucket, currentDistribution, targetDistribution, preDrawDistance);
         if (convScore !== null) {
           convRawScores.set(index, convScore);
@@ -685,14 +721,14 @@ const applyReadinessHardFiltersToCandidates = (
   }
 
   const filtered = candidates.filter((_candidate, index) => {
-    if (filters.idm.enabled && monthlyScoresAvailable) {
+    if (filters.idm.enabled && idmScoresAvailable) {
       const idmScore = idmScores.get(index);
       if (idmScore === undefined || idmScore * 100 < filters.idm.thresholdPercent) {
         rejects.idm += 1;
         return false;
       }
     }
-    if (filters.conv.enabled && monthlyScoresAvailable) {
+    if (filters.conv.enabled && convScoresAvailable) {
       const rawConv = convRawScores.get(index);
       const convPercent = maxAbsConv > 0 && rawConv !== undefined ? (Math.abs(rawConv) / maxAbsConv) * 100 : 0;
       if (rawConv === undefined || convPercent < filters.conv.thresholdPercent) {
@@ -728,6 +764,21 @@ const ACTIVE_SETUP_PROVENANCE_TARGET_IDS = {
 } as const;
 type ActiveSetupProvenanceTarget = keyof typeof ACTIVE_SETUP_PROVENANCE_TARGET_IDS;
 const ACTIVE_SETUP_SHAPE_BUCKET_CARD_ID = "windfall-generation-shape-bucket-quotas";
+const MONTHLY_TRANSITION_GOVERNOR_TARGET_ID = "windfall-monthly-transition-governor";
+const GENERATION_SETUP_SUMMARY_TARGET_IDS = {
+  forcedExcluded: "windfall-generation-forced-excluded-report",
+  ratios: "windfall-generation-odd-even-ratios",
+  numbersDiagnostic: "windfall-generation-numbers-diagnostic",
+  droughtGovernor: "windfall-generation-drought-governor",
+  monthlyTransition: MONTHLY_TRANSITION_GOVERNOR_TARGET_ID,
+  d1Sgi: "windfall-generation-d1-sgi",
+  latestNeighbour: "windfall-generation-latest-neighbour-support",
+  readinessFilters: "windfall-generation-readiness-hard-filters",
+  carryOver: "windfall-generation-month-end-carry-over",
+  stageIdm: MONTHLY_DRAWS_STAGE_IDM_TARGET_ID,
+  bucketPlan: "windfall-generation-bucket-coverage-planner",
+} as const;
+type GenerationSetupSummaryTarget = keyof typeof GENERATION_SETUP_SUMMARY_TARGET_IDS;
 
 const formatTracePairs = (pairs: Array<[string, number | string]>): string => (
   pairs.map(([label, value]) => `${label}:${value}`).join(" · ")
@@ -801,6 +852,7 @@ const formatGenerationTraceLines = (options: {
       ["end8", stats.mainEightSet],
       ["end9", stats.mainNineSet],
       ["digitWidth", stats.digitWidth],
+      ["repFamilies", stats.repeatedTerminalFamilies],
     ])}`,
     `[TRACE] ${label} Rejects · shape/recency: ${formatTracePairs([
       ["oddEven", stats.oddEven],
@@ -955,6 +1007,45 @@ const monthlyFrequencyConstraintsSignature = (constraints: MonthlyFrequencyConst
   constraints ? MONTHLY_FREQUENCY_KEYS.map((key) => `${key}:${constraints[key]}`).join("|") : "null"
 );
 
+interface ReadinessIdmTarget {
+  composition: number[];
+  sourceLabel: string;
+  detail: string;
+  traceLabel: string;
+}
+
+const monthlyFrequencyConstraintsToDistribution = (
+  counts: MonthlyFrequencyConstraints | null | undefined,
+): number[] | null => {
+  if (!counts) return null;
+  const distribution = MONTHLY_FREQUENCY_KEYS.map((key) => {
+    const value = Number(counts[key] ?? 0);
+    return Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
+  });
+  return distribution.some((value) => value > 0) ? distribution : null;
+};
+
+const formatBucketComposition = (composition: readonly number[] | null | undefined): string => {
+  if (!composition?.length) return "unavailable";
+  const parts = MONTHLY_FREQUENCY_KEYS
+    .map((key, index) => ({ label: MONTHLY_FREQUENCY_SHORT_LABELS[key], count: composition[index] ?? 0 }))
+    .filter(({ count }) => count > 0)
+    .map(({ label, count }) => `${label} ${count}`);
+  return parts.length ? parts.join(" · ") : "all zero";
+};
+
+const appliedBucketMixTargetAppSignature = (target: AppliedBucketMixTarget | null | undefined): string => (
+  target
+    ? [
+      target.source,
+      target.workingMonthLabel,
+      target.expectedDrawCount,
+      target.targetStageDrawCount,
+      monthlyFrequencyConstraintsSignature(target.counts),
+    ].join("::")
+    : "null"
+);
+
 const monthlyBucketSetsSignature = (sets: MonthlyBucketSets | null | undefined): string => (
   sets
     ? MONTHLY_FREQUENCY_KEYS
@@ -1089,6 +1180,18 @@ const mainDigitCountModeOptions: Array<{ value: MainDigitCountMode; label: strin
   { value: "exactly", label: "Exactly" },
   { value: "atMost", label: "At most" },
 ];
+
+const repeatedTerminalFamilyModeOptions: Array<{ value: "off" | RepeatedTerminalDigitFamilyMode; label: string }> = [
+  { value: "off", label: "Off" },
+  { value: "atLeast", label: "At least" },
+  { value: "exactly", label: "Exactly" },
+  { value: "atMost", label: "At most" },
+];
+
+const repeatedTerminalFamilyScopeLabels: Record<RepeatedTerminalDigitFamilyScope, string> = {
+  main: "Mains only",
+  mainAndSupp: "Mains + supps",
+};
 
 const lastDrawOverlapModeOptions: Array<{ value: Exclude<LastDrawOverlapRuleMode, "customRange">; label: string }> = [
   { value: "off", label: "Off" },
@@ -1283,7 +1386,7 @@ function monthLabelForHistoryScope(draw: Draw): string | null {
 }
 
 function AppInner(): JSX.Element {
-  const { runGenerate, cancelGenerate } = useGenerateWorker();
+  const { runGenerate, cancelGenerate, getGenerationSeed } = useGenerateWorker();
   const [history, setHistory] = useState<Draw[]>([]);
   const [startupHistoryChoice, setStartupHistoryChoice] = useState<InitialDrawHistoryChoice | null>(null);
   const realHistoryResult = useMemo(
@@ -1302,8 +1405,8 @@ function AppInner(): JSX.Element {
     const rows = realHistory
       .map((draw) => ({ draw, monthLabel: monthLabelForHistoryScope(draw) }))
       .filter((row): row is { draw: Draw; monthLabel: string } => Boolean(row.monthLabel));
-    const excludedMonthLabels = getExcludedMonthLabelsForHistoryBaselines(rows, (row) => row.monthLabel);
-    const historyForBaselines = filterRowsForHistoryBaselines(rows, (row) => row.monthLabel).map((row) => row.draw);
+    const excludedMonthLabels = getExcludedMonthLabelsForHistoryBaselines(rows, (row) => row.monthLabel, row => row.draw.date);
+    const historyForBaselines = filterRowsForHistoryBaselines(rows, (row) => row.monthLabel, row => row.draw.date).map((row) => row.draw);
     return {
       history: historyForBaselines,
       excludedMonthLabels,
@@ -1393,6 +1496,10 @@ function AppInner(): JSX.Element {
   const [digitWidthConstraintEnabled, setDigitWidthConstraintEnabled] = useState<boolean>(false);
   const [digitWidthSingleDigitPercent, setDigitWidthSingleDigitPercent] = useState<number>(0);
   const [digitWidthConstraintScope, setDigitWidthConstraintScope] = useState<DigitWidthConstraintScope>("main");
+  const [repeatedTerminalFamiliesEnabled, setRepeatedTerminalFamiliesEnabled] = useState<boolean>(false);
+  const [repeatedTerminalFamiliesMode, setRepeatedTerminalFamiliesMode] = useState<RepeatedTerminalDigitFamilyMode>("atLeast");
+  const [repeatedTerminalFamiliesCount, setRepeatedTerminalFamiliesCount] = useState<number>(1);
+  const [repeatedTerminalFamiliesScope, setRepeatedTerminalFamiliesScope] = useState<RepeatedTerminalDigitFamilyScope>("mainAndSupp");
   const [acceptanceNeedsEnabled, setAcceptanceNeedsEnabled] = useState<boolean>(false);
   const [acceptanceNeedsCounts, setAcceptanceNeedsCounts] = useState<MonthlyFrequencyConstraints>(() => zeroMonthlyFrequencyConstraints());
   const [acceptanceNeedsHardExclude, setAcceptanceNeedsHardExclude] = useState<boolean>(false);
@@ -1401,6 +1508,9 @@ function AppInner(): JSX.Element {
   const [attemptMultiplier, setAttemptMultiplier] = useState<number>(DEFAULT_ATTEMPT_MULTIPLIER);
   const [overgenFactor, setOvergenFactor] = useState<number>(50);
   const [scoringGenerationInfluence, setScoringGenerationInfluence] = useState<ScoringGenerationInfluence>("off");
+  const [droughtEvidenceGovernorMode, setDroughtEvidenceGovernorMode] = useState<DroughtEvidenceGovernorMode>("off");
+  const [droughtEvidenceGovernorSettings, setDroughtEvidenceGovernorSettings] = useState(() => normalizeDroughtEvidenceGovernorSettings());
+  const [monthlyBucketTransitionGovernorMode, setMonthlyBucketTransitionGovernorMode] = useState<MonthlyBucketTransitionGovernorMode>("off");
   const [d1TerminalMomentumSgiEnabled, setD1TerminalMomentumSgiEnabled] = useState<boolean>(false);
 
   // Sum range filter state used in Candidate Generation Influences
@@ -1740,9 +1850,9 @@ function AppInner(): JSX.Element {
     if (!traceVerbose) return;
     const label = formatScoringInfluenceLabel(scoringGenerationInfluence);
     const detail = scoringGenerationInfluence === "off"
-      ? "diagnostic evidence weighting off; generation is no longer weighted by Scoring Diagnostics."
+      ? "diagnostic evidence weighting off; generation is no longer weighted by Numbers diagnostic ranks."
       : `${label} diagnostic evidence weighting affects generation weighting; legal filters and selected quotas still apply.`;
-    setTrace((t) => [...t, `[TRACE] Scoring Diagnostics influence changed: ${detail}`]);
+    setTrace((t) => [...t, `[TRACE] Numbers diagnostic influence changed: ${detail}`]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scoringGenerationInfluence]);
   const [numCandidates, setNumCandidatesState] = useState<number>(DEFAULT_GENERATED_CANDIDATE_COUNT);
@@ -1776,6 +1886,7 @@ function AppInner(): JSX.Element {
   const [monthlyBucketSetsAlways, setMonthlyBucketSetsAlways] = useState<MonthlyBucketSets | null>(null);
   const [monthlyIdealDrawState, setMonthlyIdealDrawState] = useState<MonthlyIdealDrawState | null>(null);
   const [stageIdealDrawState, setStageIdealDrawState] = useState<StageIdealDrawState | null>(null);
+  const [appliedBucketMixTarget, setAppliedBucketMixTarget] = useState<AppliedBucketMixTarget | null>(null);
 
   const handleMonthlyConstraintsChange = useCallback((payload: MonthlyConstraintPayload | null) => {
     setMonthlyConstraintPayload((previous) => (
@@ -1825,6 +1936,47 @@ function AppInner(): JSX.Element {
     ));
   }, []);
 
+  const handleAppliedBucketMixTargetChange = useCallback((target: AppliedBucketMixTarget | null) => {
+    setAppliedBucketMixTarget((previous) => (
+      appliedBucketMixTargetAppSignature(previous) === appliedBucketMixTargetAppSignature(target)
+        ? previous
+        : target
+    ));
+  }, []);
+
+  const activeReadinessIdmTarget = useMemo<ReadinessIdmTarget | null>(() => {
+    const appliedComposition = monthlyFrequencyConstraintsToDistribution(appliedBucketMixTarget?.counts);
+    if (appliedComposition) {
+      const detail = [
+        appliedBucketMixTarget?.workingMonthLabel ? `${appliedBucketMixTarget.workingMonthLabel}` : "",
+        appliedBucketMixTarget?.targetStageDrawCount
+          ? `D${appliedBucketMixTarget.targetStageDrawCount} of ${appliedBucketMixTarget.expectedDrawCount}D`
+          : "",
+        formatBucketComposition(appliedComposition),
+      ].filter(Boolean).join(" · ");
+      return {
+        composition: appliedComposition,
+        sourceLabel: "Bucket Mix Combinatorics Apply",
+        detail,
+        traceLabel: `Bucket Mix Apply (${detail})`,
+      };
+    }
+
+    const robustComposition = toNineBucketDistribution(monthlyIdealDrawState?.idealDrawBucketCounts);
+    if (robustComposition) {
+      const monthLabel = monthlyIdealDrawState?.effectiveMonthLabel ? `${monthlyIdealDrawState.effectiveMonthLabel} · ` : "";
+      const detail = `${monthLabel}${formatBucketComposition(robustComposition)}`;
+      return {
+        composition: robustComposition,
+        sourceLabel: "Robust Baseline / Ideal Draw",
+        detail,
+        traceLabel: `Robust Baseline / Ideal Draw (${detail})`,
+      };
+    }
+
+    return null;
+  }, [appliedBucketMixTarget, monthlyIdealDrawState]);
+
   // Readiness (Rdy) score weights — user-configurable in Candidate Generation Influences.
   // Defaults are deliberately neutral; users must opt in before Rdy weighting can influence diagnostics.
   const [rdyWeights, setRdyWeights] = useState<ReadinessWeights>(cloneDefaultRdyWeights);
@@ -1846,13 +1998,13 @@ function AppInner(): JSX.Element {
   const [mrbBucketBoosts, setMrbBucketBoosts] = useState<import("./lib/numberBiases").MRBBucketBoosts>({
     undrawn: 1, times1: 1, times2: 1, times3: 1, times4: 1, times5: 1, times6: 1, times7: 1, times8: 1,
   });
-  const [monthEndCarryOverBiasEnabled, setMonthEndCarryOverBiasEnabled] = useState<boolean>(false);
+  const [monthEndCarryOverManualEnabled, setMonthEndCarryOverBiasEnabled] = useState<boolean>(false);
+  const [monthEndCarryOverAutoEnabled, setMonthEndCarryOverAutoEnabled] = useState(false);
   const [monthEndCarryOverStrength, setMonthEndCarryOverStrength] = useState<MonthEndCarryOverStrength>("normal");
   const [monthEndCarryOverIncludeMonthEndUndrawn, setMonthEndCarryOverIncludeMonthEndUndrawn] = useState<boolean>(true);
   const [monthEndCarryOverIncludeBoundaryRepeats, setMonthEndCarryOverIncludeBoundaryRepeats] = useState<boolean>(true);
   const [selectedCarryOverBoostNumbers, setSelectedCarryOverBoostNumbers] = useState<number[]>([]);
   const [selectedCarryOverBoostMode, setSelectedCarryOverBoostMode] = useState<SelectedCarryOverBoostMode>("strong");
-  const monthEndCarryOverBiasTouchedRef = useRef(false);
   const scoringGenerationInfluenceTraceReadyRef = useRef(false);
 
   // Keep MiAN tied to the user's selected Acceptance needs only. When MiAN is
@@ -1948,11 +2100,14 @@ function AppInner(): JSX.Element {
   const [shapeBucketQuotasExpanded, setShapeBucketQuotasExpanded] = useState<boolean>(false);
   const [recencyLatestDrawExpanded, setRecencyLatestDrawExpanded] = useState<boolean>(false);
   const [hardFiltersExpanded, setHardFiltersExpanded] = useState<boolean>(false);
+  const [activeSetupSummaryExpanded, setActiveSetupSummaryExpanded] = useState<boolean>(false);
   const [minRecentMatches, setMinRecentMatches] = useState<number>(0);
   const [maxLastDrawMatchesEnabled, setMaxLastDrawMatchesEnabled] = useState<boolean>(false);
   const [maxLastDrawMatchesValue, setMaxLastDrawMatchesValue] = useState<number>(3);
   const [previousNeighbourConstraintNumbers, setPreviousNeighbourConstraintNumbers] = useState<number[]>([]);
   const [latestNeighbourSupportEnabled, setLatestNeighbourSupportEnabled] = useState<boolean>(false);
+  const [latestNeighbourBoostEnabled, setLatestNeighbourBoostEnabled] = useState(false);
+  const [droughtQuotaBoostEnabled, setDroughtQuotaBoostEnabled] = useState(false);
   const [latestNeighbourSupportMode, setLatestNeighbourSupportMode] = useState<LatestNeighbourSupportMode>("pm1");
   const [strictDroughtQuotaMode, setStrictDroughtQuotaMode] = useState<StrictDroughtQuotaControlMode>("off");
   const [strictDroughtQuotaManualMin, setStrictDroughtQuotaManualMin] = useState<number>(1);
@@ -2042,13 +2197,16 @@ function AppInner(): JSX.Element {
   const [trendSelectedNumbers, setTrendSelectedNumbers] = useState<number[]>([]);
   const [focusNumber, setFocusNumber] = useState<number | null>(null);
   const [showHeatmapLetters, setShowHeatmapLetters] = useState(false);
+  const [showHeatmapHoverLabels, setShowHeatmapHoverLabels] = useState(true);
   const [showMbsHoverSparkline, setShowMbsHoverSparkline] = useState(true);
+  const [hiddenDgaTemperatureBuckets, setHiddenDgaTemperatureBuckets] = useState<number[]>([]);
   const [tempMetric, setTempMetric] = useState<TemperatureMetricMode>("hybrid");
   const [dgaHeatmapView, setDgaHeatmapView] = useState<DgaHeatmapViewMode>("temperature");
   const [monthlyBucketTemperatureOverlayMode, setMonthlyBucketTemperatureOverlayMode] = useState<TemperatureOverlayMode>("off");
   const [monthlyBucketTemperatureMetric, setMonthlyBucketTemperatureMetric] = useState<TemperatureMetricMode>("recency");
   const [dgaMonthlyBucketStateOpacity, setDgaMonthlyBucketStateOpacity] = useState<number>(1);
   const [repeatWindowSizeW, setRepeatWindowSizeW] = useState<number>(12);
+  const [repeatWindowAuto, setRepeatWindowAuto] = useState(true);
   const [minFromRecentUnionM, setMinFromRecentUnionM] = useState<number>(0);
   const [presets, setPresets] = useState<AppPreset[]>(() => listPresets());
   const [selectedPresetId, setSelectedPresetId] = useState<string>("");
@@ -2089,25 +2247,13 @@ function AppInner(): JSX.Element {
     });
   }, []);
 
-  // ──── Auto-save / auto-restore settings ────
-  // Restore saved settings on mount (before first render with defaults)
-  const hasRestoredRef = useRef(false);
+  const restoredSettingsLedgerRef = useRef<EffectiveSettingsLedger | null>(null);
+  const settingsPersistence = useSettingsPersistence<AppPresetSnapshot>(
+    "app:autosave:v1", () => buildSnapshot(), (snapshot) => applySnapshot(snapshot),
+  );
   useEffect(() => {
-    if (hasRestoredRef.current) return;
-    hasRestoredRef.current = true;
-    try {
-      const raw = localStorage.getItem("app:autosave:v1");
-      if (!raw) return;
-      const snapshot = JSON.parse(raw) as AppPresetSnapshot;
-      // Defer apply so all state initializers finish first
-      setTimeout(() => applySnapshot(snapshot), 0);
-    } catch {
-      // Silently ignore corrupt autosave
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Auto-save dirty flag ref (used by the interval below)
+    if (settingsPersistence.error) showToast(settingsPersistence.error);
+  }, [settingsPersistence.error]);
 
   const [insightsEnabled, setInsightsEnabled] = useState<boolean>(false); // default OFF
   // OGA band state for panel (optional)
@@ -2118,27 +2264,6 @@ function AppInner(): JSX.Element {
     setTraceMaybe(t => [...t, insightsEnabled ? "[TRACE] Selection Insights: ON" : "[TRACE] Selection Insights: OFF"]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [insightsEnabled]);
-
-  // ──── Debounced auto-save: persist settings to localStorage ────
-  // Uses an interval that checks a dirty flag. Any state change marks dirty,
-  // and the next interval tick saves the snapshot.
-  const autoSaveDirtyRef = useRef(false);
-  // Mark dirty on every render (cheap – just a ref assignment)
-  autoSaveDirtyRef.current = true;
-  useEffect(() => {
-    const id = setInterval(() => {
-      if (!autoSaveDirtyRef.current) return;
-      autoSaveDirtyRef.current = false;
-      try {
-        const snapshot = buildSnapshot();
-        localStorage.setItem("app:autosave:v1", JSON.stringify(snapshot));
-      } catch {
-        // Silently ignore quota errors
-      }
-    }, 2000); // check every 2 seconds
-    return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const commitHistory = useCallback((nextHistory: Draw[]) => {
     setHistory(nextHistory);
@@ -2174,13 +2299,9 @@ function AppInner(): JSX.Element {
     setTraceMaybe((t) => [...t, `[TRACE] No startup draw history loaded. ${choice.reason}`]);
   }, [commitHistory]);
 
-  useEffect(() => {
-    if (history.length > 0) setCustomDrawCount(history.length);
-  }, [history]);
-
   function getActiveWindowSize() {
     if (!windowEnabled) return history.length;
-    if (windowMode === "Custom") return customDrawCount;
+    if (windowMode === "Custom") return Math.min(history.length, Math.max(1, Math.trunc(customDrawCount) || 1));
     const windowOption = WINDOW_OPTIONS.find((opt) => opt.key === windowMode);
     if (!windowOption || windowOption.size === null) return history.length;
     return Math.min(windowOption.size, history.length);
@@ -2560,6 +2681,29 @@ function AppInner(): JSX.Element {
     scope: digitWidthConstraintScope,
   }), [digitWidthConstraintEnabled, digitWidthSingleDigitPercent, digitWidthConstraintScope]);
 
+  const repeatedTerminalFamiliesMax = repeatedTerminalDigitFamilyMaxForScope(repeatedTerminalFamiliesScope);
+  const repeatedTerminalFamiliesRule = useMemo(() => normalizeRepeatedTerminalDigitFamilyRule({
+    enabled: repeatedTerminalFamiliesEnabled,
+    mode: repeatedTerminalFamiliesMode,
+    count: repeatedTerminalFamiliesCount,
+    scope: repeatedTerminalFamiliesScope,
+  }), [
+    repeatedTerminalFamiliesCount,
+    repeatedTerminalFamiliesEnabled,
+    repeatedTerminalFamiliesMode,
+    repeatedTerminalFamiliesScope,
+  ]);
+  const repeatedTerminalFamiliesSummary = repeatedTerminalFamiliesRule
+    ? formatRepeatedTerminalDigitFamilyRule(repeatedTerminalFamiliesRule)
+    : "off";
+
+  useEffect(() => {
+    setRepeatedTerminalFamiliesCount((current) => {
+      const next = Math.max(0, Math.min(repeatedTerminalDigitFamilyMaxForScope(repeatedTerminalFamiliesScope), Math.round(current)));
+      return next === current ? current : next;
+    });
+  }, [repeatedTerminalFamiliesScope]);
+
   const mainDigitGenerationOptions = useMemo(() => ({
     main0: buildMainDigitGenerationOption(mainZeroSetEnabled, mainZeroSetMode, maxMainZeroSetCount, effectiveMainBucketBoosts.main0),
     main1: buildMainDigitGenerationOption(mainOneSetEnabled, mainOneSetMode, maxMainOneSetCount, effectiveMainBucketBoosts.main1),
@@ -2667,6 +2811,7 @@ function AppInner(): JSX.Element {
     };
   }, [activeRepeatMonthlyBuckets, activeRepeatMonthlyConstraints, repeatUnionNumbers]);
   const repeatUnionRawCandidateMax = Math.min(8, repeatUnionUniqueCount);
+  const repeatUnionInputMax = repeatUnionRawCandidateMax;
   const repeatUnionCandidateMax = Math.min(
     repeatUnionRawCandidateMax,
     repeatUnionMonthlyFeasibility?.maxFeasibleHits ?? repeatUnionRawCandidateMax,
@@ -2706,18 +2851,10 @@ function AppInner(): JSX.Element {
 
   // Default the repeat pool to the latest observed month, capped by the active WFMQYH window.
   useEffect(() => {
-    if (activeWindowSize > 0) {
+    if (repeatWindowAuto && activeWindowSize > 0) {
       setRepeatWindowSizeW(repeatWindowDefaultFromLatestMonth);
     }
-  }, [activeWindowSize, repeatWindowDefaultFromLatestMonth]);
-
-  useEffect(() => {
-    setMinFromRecentUnionM((previous) => {
-      const safePrevious = Number.isFinite(previous) ? Math.max(0, Math.trunc(previous)) : 0;
-      const next = Math.min(safePrevious, repeatUnionCandidateMax);
-      return next === previous ? previous : next;
-    });
-  }, [repeatUnionCandidateMax]);
+  }, [activeWindowSize, repeatWindowDefaultFromLatestMonth, repeatWindowAuto]);
 
   useEffect(() => {
     const previousWindowDefault = lastWindowDefaultNumCandidatesRef.current;
@@ -2865,7 +3002,7 @@ function AppInner(): JSX.Element {
     const raw = strictDroughtQuotaMode === "advised"
       ? strictDroughtQuotaAdvice.recommendedMinCount
       : strictDroughtQuotaManualMin;
-    return Math.max(0, Math.min(8, strictDroughtQuotaEligibleNumbers.length, Math.floor(raw)));
+    return Math.max(0, Math.min(8, Math.floor(raw)));
   }, [
     strictDroughtQuotaAdvice.recommendedMinCount,
     strictDroughtQuotaEligibleNumbers.length,
@@ -2877,7 +3014,7 @@ function AppInner(): JSX.Element {
     const raw = empiricalDroughtQuotaMode === "advised"
       ? empiricalDroughtQuotaAdvice.recommendedMinCount
       : empiricalDroughtQuotaManualMin;
-    return Math.max(0, Math.min(8, empiricalDroughtQuotaEligibleNumbers.length, Math.floor(raw)));
+    return Math.max(0, Math.min(8, Math.floor(raw)));
   }, [
     empiricalDroughtQuotaAdvice.recommendedMinCount,
     empiricalDroughtQuotaEligibleNumbers.length,
@@ -2897,7 +3034,7 @@ function AppInner(): JSX.Element {
       enabled: true,
       minCount: strictDroughtQuotaEffectiveMin,
       shortlist: strictDroughtQuotaShortlist.numbers,
-      rankMultipliers: strictDroughtQuotaShortlist.rankMultipliers,
+      rankMultipliers: droughtQuotaBoostEnabled ? strictDroughtQuotaShortlist.rankMultipliers : undefined,
       sourceLabel: strictDroughtQuotaMode === "advised"
         ? `SDSR-advised · ${strictDroughtQuotaAdvice.sourceLabel}`
         : "manual",
@@ -2908,6 +3045,7 @@ function AppInner(): JSX.Element {
     strictDroughtQuotaMode,
     strictDroughtQuotaShortlist.numbers,
     strictDroughtQuotaShortlist.rankMultipliers,
+    droughtQuotaBoostEnabled,
   ]);
   const empiricalDroughtQuotaGenerationOptions = useMemo<GenerateWorkerArgs["empiricalDroughtQuotaOptions"] | undefined>(() => {
     if (empiricalDroughtQuotaMode === "off") return undefined;
@@ -2915,7 +3053,7 @@ function AppInner(): JSX.Element {
       enabled: true,
       minCount: empiricalDroughtQuotaEffectiveMin,
       shortlist: empiricalDroughtQuotaShortlist.numbers,
-      rankMultipliers: empiricalDroughtQuotaShortlist.rankMultipliers,
+      rankMultipliers: droughtQuotaBoostEnabled ? empiricalDroughtQuotaShortlist.rankMultipliers : undefined,
       sourceLabel: empiricalDroughtQuotaMode === "advised"
         ? `hazard-advised · ${empiricalDroughtQuotaAdvice.sourceLabel}`
         : "manual",
@@ -2926,6 +3064,7 @@ function AppInner(): JSX.Element {
     empiricalDroughtQuotaMode,
     empiricalDroughtQuotaShortlist.numbers,
     empiricalDroughtQuotaShortlist.rankMultipliers,
+    droughtQuotaBoostEnabled,
   ]);
   const strictDroughtQuotaTraceLine = useCallback((label: string): string | null => {
     if (strictDroughtQuotaMode === "off") return null;
@@ -2959,20 +3098,6 @@ function AppInner(): JSX.Element {
     empiricalDroughtQuotaEligibleNumbers,
     empiricalDroughtQuotaMode,
   ]);
-  useEffect(() => {
-    setStrictDroughtQuotaManualMin((previous) => {
-      const safePrevious = Number.isFinite(previous) ? Math.max(0, Math.trunc(previous)) : 0;
-      const next = Math.min(safePrevious, Math.min(8, strictDroughtQuotaEligibleNumbers.length));
-      return next === previous ? previous : next;
-    });
-  }, [strictDroughtQuotaEligibleNumbers.length]);
-  useEffect(() => {
-    setEmpiricalDroughtQuotaManualMin((previous) => {
-      const safePrevious = Number.isFinite(previous) ? Math.max(0, Math.trunc(previous)) : 0;
-      const next = Math.min(safePrevious, Math.min(8, empiricalDroughtQuotaEligibleNumbers.length));
-      return next === previous ? previous : next;
-    });
-  }, [empiricalDroughtQuotaEligibleNumbers.length]);
   const hotColdExcludedSet = useMemo(
     () => new Set(hotColdExcludedNumbers),
     [hotColdExcludedNumbers],
@@ -3145,6 +3270,13 @@ function AppInner(): JSX.Element {
     );
   }, [dgaStripSelectedNumbers, previousNeighbourConstraintTargetNumbers]);
 
+  const dgaStripInvalidPreviousNeighbourTargets = useMemo(() => {
+    const targetSet = new Set(previousNeighbourConstraintTargetNumbers);
+    return normalizePreviousNeighbourConstraintNumbers(
+      dgaStripSelectedNumbers.filter((number) => !targetSet.has(number))
+    );
+  }, [dgaStripSelectedNumbers, previousNeighbourConstraintTargetNumbers]);
+
   const applyDgaStripMirrorToPreviousNeighbour = useCallback((numbers: readonly number[]) => {
     const targetSet = new Set(previousNeighbourConstraintTargetNumbers);
     setPreviousNeighbourConstraintNumbers(
@@ -3223,6 +3355,57 @@ function AppInner(): JSX.Element {
     });
   }, []);
 
+  const navigateToMonthlyTransitionEvidence = useCallback(() => {
+    setShapeBucketQuotasExpanded(true);
+    if (typeof window === "undefined") return;
+
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        const element = document.getElementById(MONTHLY_TRANSITION_GOVERNOR_TARGET_ID);
+        if (!(element instanceof HTMLElement)) return;
+        element.scrollIntoView({ behavior: "smooth", block: "center" });
+        element.focus({ preventScroll: true });
+        element.classList.add("windfall-provenance-target-pulse");
+        window.setTimeout(() => element.classList.remove("windfall-provenance-target-pulse"), 1200);
+      });
+    });
+  }, []);
+
+  const navigateToGenerationSetupSummaryTarget = useCallback((target: GenerationSetupSummaryTarget) => {
+    if (target === "forcedExcluded") setActiveSetupSummaryExpanded(true);
+    if (target === "ratios" || target === "droughtGovernor" || target === "latestNeighbour") {
+      setRecencyLatestDrawExpanded(true);
+    }
+    if (target === "numbersDiagnostic" || target === "d1Sgi") setEngineRankingExpanded(true);
+    if (target === "monthlyTransition" || target === "carryOver" || target === "bucketPlan") {
+      setShapeBucketQuotasExpanded(true);
+    }
+    if (target === "readinessFilters") setHardFiltersExpanded(true);
+    if (typeof window === "undefined") return;
+
+    const targetId = GENERATION_SETUP_SUMMARY_TARGET_IDS[target];
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        const element = document.getElementById(targetId);
+        if (!(element instanceof HTMLElement)) return;
+
+        const details = element.closest("details");
+        if (details instanceof HTMLDetailsElement && !details.open) {
+          const summary = details.querySelector("summary");
+          if (summary instanceof HTMLElement) summary.click();
+          else details.open = true;
+        }
+
+        window.requestAnimationFrame(() => {
+          element.scrollIntoView({ behavior: "smooth", block: "center" });
+          element.focus({ preventScroll: true });
+          element.classList.add("windfall-provenance-target-pulse");
+          window.setTimeout(() => element.classList.remove("windfall-provenance-target-pulse"), 1200);
+        });
+      });
+    });
+  }, []);
+
   const handleDgaStripChange = useCallback((nums: number[]) => {
     const sorted = removeUserExcludedNumbers(normalizeDgaSelectedNumbers(nums), selectionUnavailableNumbers);
     const simulationNumbers = sorted.slice(0, 8);
@@ -3287,7 +3470,7 @@ function AppInner(): JSX.Element {
 
   const manualPrizeCheckSaveDisabledReason = useMemo(() => {
     if (!manualPrizeCheckNextDraw.targetDate) {
-      return "Load real draw history before saving a manual prize-check result.";
+      return "Load real draw history before saving an official draw result.";
     }
     if (manualPrizeCheckNextDraw.isFuture) {
       return `The next history draw date is ${manualPrizeCheckNextDraw.targetDate}, which is still in the future. Save after the draw has happened, or use Draw History Manager for a deliberate manual correction.`;
@@ -3300,44 +3483,31 @@ function AppInner(): JSX.Element {
 
     const normalized = normalizeManualPrizeCheckNumbers(numbers, [], NUM_MAINS + NUM_SUPPS);
     if (normalized.length !== NUM_MAINS + NUM_SUPPS) {
-      showToast("Manual Prize Check needs 8 unique numbers before it can be saved as a draw.");
+      showToast("Manual Prize Check needs 8 unique numbers before it can be saved as an official draw result.");
       setTraceMaybe((traceLines) => [
         ...traceLines,
-        `[TRACE] Save as Next Draw blocked: Manual Prize Check had ${normalized.length}/8 usable numbers.`,
+        `[TRACE] Save Official Draw Result blocked: Manual Prize Check had ${normalized.length}/8 usable numbers.`,
       ]);
       return;
     }
 
     const targetInfo = findNextHistoryDrawDate(realHistory, planningDrawContext.today);
     if (!targetInfo.targetDate) {
-      showToast("Load real draw history before saving a manual prize-check result.");
-      setTraceMaybe((traceLines) => [...traceLines, "[TRACE] Save as Next Draw blocked: no next history draw date could be resolved."]);
+      showToast("Load real draw history before saving an official draw result.");
+      setTraceMaybe((traceLines) => [...traceLines, "[TRACE] Save Official Draw Result blocked: no next history draw date could be resolved."]);
       return;
     }
     if (targetInfo.isFuture) {
       showToast(`Next history draw date ${targetInfo.targetDate} is still in the future.`);
       setTraceMaybe((traceLines) => [
         ...traceLines,
-        `[TRACE] Save as Next Draw blocked: target ${targetInfo.targetDate} is still in the future.`,
+        `[TRACE] Save Official Draw Result blocked: target ${targetInfo.targetDate} is still in the future.`,
       ]);
       return;
     }
 
     const mainNumbers = normalized.slice(0, NUM_MAINS);
     const suppNumbers = normalized.slice(NUM_MAINS, NUM_MAINS + NUM_SUPPS);
-    const confirmed = typeof window === "undefined" || window.confirm([
-      `Save Manual Prize Check as draw ${targetInfo.targetDate}?`,
-      "",
-      `Main: ${mainNumbers.join(", ")}`,
-      `Supp: ${suppNumbers.join(", ")}`,
-      "",
-      "This will update Windfall's loaded real history and ask for CSV write/download handling so the history file can be updated.",
-    ].join("\n"));
-    if (!confirmed) {
-      setTraceMaybe((traceLines) => [...traceLines, `[TRACE] Save as Next Draw cancelled for ${targetInfo.targetDate}.`]);
-      return;
-    }
-
     const outputDateFormat = dateFormatForDrawHistory(realHistory);
     const validated = validateDrawEntry({
       date: targetInfo.targetDate,
@@ -3353,7 +3523,7 @@ function AppInner(): JSX.Element {
 
     if (!validated.ok) {
       showToast(validated.message);
-      setTraceMaybe((traceLines) => [...traceLines, `[TRACE] Save as Next Draw blocked: ${validated.message}`]);
+      setTraceMaybe((traceLines) => [...traceLines, `[TRACE] Save Official Draw Result blocked: ${validated.message}`]);
       return;
     }
 
@@ -3362,7 +3532,7 @@ function AppInner(): JSX.Element {
     if (localRows.some((row) => buildHistoryExactKey(row) === exactKey)) {
       const message = `That exact draw already exists in history (${validated.row.date}). Nothing was saved.`;
       showToast(message);
-      setTraceMaybe((traceLines) => [...traceLines, `[TRACE] Save as Next Draw blocked: ${message}`]);
+      setTraceMaybe((traceLines) => [...traceLines, `[TRACE] Save Official Draw Result blocked: ${message}`]);
       return;
     }
 
@@ -3370,7 +3540,7 @@ function AppInner(): JSX.Element {
     if (localRows.some((row) => normalizeHistoryDate(row.date) === normalizedDate)) {
       const message = `A different draw is already stored for ${validated.row.date}. Resolve the date conflict in Draw History Manager before saving another version.`;
       showToast(message);
-      setTraceMaybe((traceLines) => [...traceLines, `[TRACE] Save as Next Draw blocked: ${message}`]);
+      setTraceMaybe((traceLines) => [...traceLines, `[TRACE] Save Official Draw Result blocked: ${message}`]);
       return;
     }
 
@@ -3390,7 +3560,16 @@ function AppInner(): JSX.Element {
           csv = toCsv(nextRows, header);
           await writeCsvToHandle(handle, csv);
           persistenceLabel = `saved to ${file.name}`;
-        } catch {
+        } catch (caught) {
+          if (isFilePickerCancelError(caught)) {
+            const message = "Save Official Draw Result cancelled. History was not changed and no CSV fallback was created.";
+            showToast(message);
+            setTraceMaybe((traceLines) => [
+              ...traceLines,
+              `[TRACE] Save Official Draw Result cancelled by user before file selection; history unchanged.`,
+            ]);
+            return;
+          }
           downloadCsvFallback("windfall_history_lottolyzer.csv", csv);
           persistenceLabel = "CSV download created after direct write was not completed";
         }
@@ -3403,12 +3582,12 @@ function AppInner(): JSX.Element {
       showToast(`Saved draw ${validated.row.date}.`);
       setTraceMaybe((traceLines) => [
         ...traceLines,
-        `[TRACE] Save as Next Draw: saved ${validated.row.date} from Manual Prize Check (${persistenceLabel}). Main ${mainNumbers.join(", ")} · Supp ${suppNumbers.join(", ")}.`,
+        `[TRACE] Save Official Draw Result: saved ${validated.row.date} from Manual Prize Check (${persistenceLabel}). Main ${mainNumbers.join(", ")} · Supp ${suppNumbers.join(", ")}.`,
       ]);
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : String(caught);
-      showToast(`Save as Next Draw failed: ${message}`);
-      setTraceMaybe((traceLines) => [...traceLines, `[TRACE] Save as Next Draw failed: ${message}`]);
+      showToast(`Save Official Draw Result failed: ${message}`);
+      setTraceMaybe((traceLines) => [...traceLines, `[TRACE] Save Official Draw Result failed: ${message}`]);
     } finally {
       setIsSavingManualPrizeCheckAsDraw(false);
     }
@@ -3765,7 +3944,7 @@ function AppInner(): JSX.Element {
   }, [realFilteredHistory]);
 
   const numberTrends = useMemo(() => computeNumberTrends(realFilteredHistory), [realFilteredHistory]);
-  const shortTrends = useMemo(() => numberTrends.map((t) => ({ number: t.number, fortnight: t.fortnight, month: t.month })), [numberTrends]);
+  const shortTrends = useMemo(() => numberTrends.map((t) => ({ number: t.number, fortnight: t.fortnight, month: t.month, recentDrawCount: Math.min(6, realFilteredHistory.length), comparisonDrawCount: Math.min(NUMBER_TREND_MONTH_DRAW_WINDOW, realFilteredHistory.length) })), [numberTrends, realFilteredHistory.length]);
   const trendWeights = useMemo(() => buildTrendWeights(shortTrends, { method: "exp", beta: 3.0 }), [shortTrends]);
 
   const conditionalProb = useMemo(
@@ -3838,41 +4017,33 @@ function AppInner(): JSX.Element {
     monthEndCarryOverIncludeBoundaryRepeats,
   ]);
 
-  useEffect(() => {
-    if (monthEndCarryOverBiasTouchedRef.current) return;
-    setMonthEndCarryOverBiasEnabled(monthEndCarryOverWeighting.defaultEnabled);
-  }, [monthEndCarryOverWeighting.defaultEnabled]);
+  const monthEndCarryOverBiasEnabled = monthEndCarryOverAutoEnabled
+    ? monthEndCarryOverWeighting.defaultEnabled : monthEndCarryOverManualEnabled;
 
   const setMonthEndCarryOverBiasEnabledManual = useCallback((enabled: boolean) => {
-    monthEndCarryOverBiasTouchedRef.current = true;
+    setMonthEndCarryOverAutoEnabled(false);
     setMonthEndCarryOverBiasEnabled(enabled);
   }, []);
 
   const setMonthEndCarryOverStrengthManual = useCallback((value: MonthEndCarryOverStrength) => {
-    monthEndCarryOverBiasTouchedRef.current = true;
     setMonthEndCarryOverStrength(value);
   }, []);
 
   const setMonthEndCarryOverIncludeMonthEndUndrawnManual = useCallback((enabled: boolean) => {
-    monthEndCarryOverBiasTouchedRef.current = true;
     setMonthEndCarryOverIncludeMonthEndUndrawn(enabled);
   }, []);
 
   const setMonthEndCarryOverIncludeBoundaryRepeatsManual = useCallback((enabled: boolean) => {
-    monthEndCarryOverBiasTouchedRef.current = true;
     setMonthEndCarryOverIncludeBoundaryRepeats(enabled);
   }, []);
 
   const setSelectedCarryOverBoostModeManual = useCallback((value: SelectedCarryOverBoostMode) => {
-    monthEndCarryOverBiasTouchedRef.current = true;
     setSelectedCarryOverBoostMode(value);
   }, []);
 
   const toggleSelectedCarryOverBoostNumber = useCallback((number: number) => {
     if (!Number.isInteger(number) || number < 1 || number > 45) return;
     if (selectionUnavailableSet.has(number)) return;
-    monthEndCarryOverBiasTouchedRef.current = true;
-    setMonthEndCarryOverBiasEnabled(true);
     setSelectedCarryOverBoostNumbers((previous) => (
       previous.includes(number)
         ? previous.filter((item) => item !== number)
@@ -3944,13 +4115,85 @@ function AppInner(): JSX.Element {
   const monthEndCarryOverDefaultLabel = useMemo(() => {
     const nextDrawOrdinal = monthEndCarryOverWeighting.drawsSoFarThisMonth + 1;
     if (monthEndCarryOverWeighting.defaultEnabled) {
-      return `Default ON • next draw is D${nextDrawOrdinal} of ${monthEndCarryOverWeighting.targetMonthLabel}`;
+      return `Auto eligible • next draw is D${nextDrawOrdinal} of ${monthEndCarryOverWeighting.targetMonthLabel}`;
     }
     if (monthEndCarryOverWeighting.drawsSoFarThisMonth < monthEndCarryOverWeighting.earlyDrawLimit) {
-      return `Default OFF • no positive active signal for D${nextDrawOrdinal} of ${monthEndCarryOverWeighting.targetMonthLabel}`;
+      return `Auto inactive • no positive active signal for D${nextDrawOrdinal} of ${monthEndCarryOverWeighting.targetMonthLabel}`;
     }
-    return `Default OFF • first ${monthEndCarryOverWeighting.earlyDrawLimit} draws of ${monthEndCarryOverWeighting.targetMonthLabel} are already recorded`;
+    return `Auto inactive • first ${monthEndCarryOverWeighting.earlyDrawLimit} draws of ${monthEndCarryOverWeighting.targetMonthLabel} are already recorded`;
   }, [monthEndCarryOverWeighting.defaultEnabled, monthEndCarryOverWeighting.drawsSoFarThisMonth, monthEndCarryOverWeighting.earlyDrawLimit, monthEndCarryOverWeighting.targetMonthLabel]);
+
+  const droughtEvidenceGovernorProfile = useMemo(() => buildDroughtEvidenceGovernorProfile({
+    mode: droughtEvidenceGovernorMode,
+    settings: droughtEvidenceGovernorSettings,
+    strictAdvice: strictDroughtQuotaAdvice,
+    strictShortlist: strictDroughtQuotaShortlist,
+    strictEligibleNumbers: strictDroughtQuotaEligibleNumbers,
+    empiricalAdvice: empiricalDroughtQuotaAdvice,
+    empiricalShortlist: empiricalDroughtQuotaShortlist,
+    empiricalEligibleNumbers: empiricalDroughtQuotaEligibleNumbers,
+    monthlyBuckets: dgaLiveMonthlyBuckets,
+    carryOverNumbers: monthEndCarryOverWeighting.monthEndUndrawnNumbers,
+    targetMonthLabel: planningDrawContext.targetMonthLabel,
+    targetDrawOrdinal: planningDrawContext.targetDrawOrdinal,
+    targetMonthExpectedDrawCount: planningDrawContext.targetMonthExpectedDrawCount,
+  }), [
+    droughtEvidenceGovernorMode,
+    droughtEvidenceGovernorSettings,
+    dgaLiveMonthlyBuckets,
+    empiricalDroughtQuotaAdvice,
+    empiricalDroughtQuotaEligibleNumbers,
+    empiricalDroughtQuotaShortlist,
+    monthEndCarryOverWeighting.monthEndUndrawnNumbers,
+    planningDrawContext.targetDrawOrdinal,
+    planningDrawContext.targetMonthExpectedDrawCount,
+    planningDrawContext.targetMonthLabel,
+    strictDroughtQuotaAdvice,
+    strictDroughtQuotaEligibleNumbers,
+    strictDroughtQuotaShortlist,
+  ]);
+  const monthlyBucketTransitionWatchProfile = useMemo(() => buildMonthlyBucketTransitionGovernorProfile({
+    mode: "auto",
+    history: realHistory,
+    monthlyBuckets: dgaLiveMonthlyBuckets,
+    targetMonthLabel: planningDrawContext.targetMonthLabel,
+    targetDrawOrdinal: planningDrawContext.targetDrawOrdinal,
+    targetMonthExpectedDrawCount: planningDrawContext.targetMonthExpectedDrawCount,
+    includeSupp: true,
+  }), [
+    dgaLiveMonthlyBuckets,
+    planningDrawContext.targetDrawOrdinal,
+    planningDrawContext.targetMonthExpectedDrawCount,
+    planningDrawContext.targetMonthLabel,
+    realHistory,
+  ]);
+  const monthlyBucketTransitionGovernorProfile = useMemo(() => (
+    monthlyBucketTransitionGovernorMode === "auto"
+      ? monthlyBucketTransitionWatchProfile
+      : buildMonthlyBucketTransitionGovernorProfile({
+        mode: monthlyBucketTransitionGovernorMode,
+        history: realHistory,
+        monthlyBuckets: dgaLiveMonthlyBuckets,
+        targetMonthLabel: planningDrawContext.targetMonthLabel,
+        targetDrawOrdinal: planningDrawContext.targetDrawOrdinal,
+        targetMonthExpectedDrawCount: planningDrawContext.targetMonthExpectedDrawCount,
+        includeSupp: true,
+      })
+  ), [
+    dgaLiveMonthlyBuckets,
+    monthlyBucketTransitionGovernorMode,
+    monthlyBucketTransitionWatchProfile,
+    planningDrawContext.targetDrawOrdinal,
+    planningDrawContext.targetMonthExpectedDrawCount,
+    planningDrawContext.targetMonthLabel,
+    realHistory,
+  ]);
+  const activeDroughtEvidenceGovernorProfile = droughtEvidenceGovernorMode !== "off"
+    ? droughtEvidenceGovernorProfile
+    : undefined;
+  const activeMonthlyBucketTransitionGovernorProfile = monthlyBucketTransitionGovernorMode !== "off"
+    ? monthlyBucketTransitionGovernorProfile
+    : undefined;
 
   // Reference mode for OGA percentiles and histogram
   const [ogaRefMode, setOgaRefMode] = useState<"window" | "all">("window");
@@ -4033,7 +4276,7 @@ function AppInner(): JSX.Element {
     if (survivorState.recent) activeSignals.push(`RecentHits weight ${rankingWeights.recent}`);
     if (survivorState.carryOver) activeSignals.push(`carry-over weight ${survivorState.carryOverWeight}`);
     if (survivorState.scoring && activeScoringGenerationProfile) {
-      activeSignals.push(`Scoring Diagnostics ${activeScoringGenerationProfile.influence}`);
+      activeSignals.push(`Numbers diagnostic ${activeScoringGenerationProfile.influence}`);
     }
     if (selectedRatios.length > 0) activeSignals.push(`odd/even quota ${selectedRatios.join(", ")}`);
 
@@ -4123,6 +4366,7 @@ function AppInner(): JSX.Element {
     return applyReadinessHardFiltersToCandidates(pool, readinessHardFilters, {
       monthlyBuckets: monthlyBucketSetsAlways ?? monthlyConstraintPayload?.buckets ?? null,
       monthlyIdealDrawState,
+      idmTargetComposition: activeReadinessIdmTarget?.composition ?? null,
       monthlyAvgBuckets,
       historyForOga: realFilteredHistory.length ? realFilteredHistory : realHistory,
       ogaRefScores: pastOGAScoresRef,
@@ -4134,9 +4378,12 @@ function AppInner(): JSX.Element {
   function emitReadinessHardFilterTrace(label: string, result: ApplyReadinessHardFiltersResult): void {
     const rejectTotal = totalReadinessHardFilterRejects(result.rejects);
     if (readinessHardFiltersActive || rejectTotal > 0 || result.skipped.length > 0) {
+      const idmTargetTrace = activeReadinessIdmTarget
+        ? `; IDM target ${activeReadinessIdmTarget.traceLabel}`
+        : "; IDM target unavailable";
       setTraceMaybe((traceLines) => [
         ...traceLines,
-        `[TRACE] ${label}: Rdy component hard filters ${readinessHardFilterSummary}; rejected IDM:${result.rejects.idm} Conv:${result.rejects.conv} OGA:${result.rejects.oga}`,
+        `[TRACE] ${label}: Rdy component hard filters ${readinessHardFilterSummary}${idmTargetTrace}; rejected IDM:${result.rejects.idm} Conv:${result.rejects.conv} OGA:${result.rejects.oga}`,
         ...result.skipped.map((message) => `[TRACE] ${label}: ${message}`),
       ]);
     }
@@ -4319,9 +4566,11 @@ function AppInner(): JSX.Element {
     }
     if (strictDroughtQuotaEffectiveMin > 0) {
       activeHardGates.push(`strict drought minimum ${strictDroughtQuotaEffectiveMin}`);
+      if (strictDroughtQuotaEffectiveMin > strictDroughtQuotaEligibleNumbers.length) blockers.push(`strict minimum ${strictDroughtQuotaEffectiveMin} exceeds ${strictDroughtQuotaEligibleNumbers.length} eligible numbers`);
     }
     if (empiricalDroughtQuotaEffectiveMin > 0) {
       activeHardGates.push(`empirical drought minimum ${empiricalDroughtQuotaEffectiveMin}`);
+      if (empiricalDroughtQuotaEffectiveMin > empiricalDroughtQuotaEligibleNumbers.length) blockers.push(`empirical minimum ${empiricalDroughtQuotaEffectiveMin} exceeds ${empiricalDroughtQuotaEligibleNumbers.length} eligible numbers`);
     }
 
     const strictSet = new Set(strictDroughtQuotaEligibleNumbers);
@@ -4383,6 +4632,7 @@ function AppInner(): JSX.Element {
     if (readinessHardFiltersActive) activeHardGates.push(`Rdy component floors ${readinessHardFilterSummary}`);
     if (sumFilter.enabled) activeHardGates.push(`sum ${sumFilter.min}-${sumFilter.max}${sumFilter.includeSupp ? "+supp" : ""}`);
     if (digitWidthConstraintTargets.enabled) activeHardGates.push(`digit width ${digitWidthConstraintTargets.singleDigitCount}/${digitWidthConstraintTargets.twoDigitCount}`);
+    if (repeatedTerminalFamiliesRule) activeHardGates.push(`repeated terminal families ${repeatedTerminalFamiliesSummary}`);
 
     const hardGateText = activeHardGates.length ? activeHardGates.join(" · ") : "none beyond uniqueness";
     const blockerText = blockers.length ? blockers.join(" · ") : "none detected";
@@ -4435,12 +4685,15 @@ function AppInner(): JSX.Element {
       lastDrawOverlapRuleMode !== "off" ? `last-draw ${lastDrawOverlapRuleSummary}` : null,
       repeatUnionEnabled ? `repeat pool ${repeatUnionSummary}` : null,
       activeMainDigitRuleSummary ? `ending rules ${activeMainDigitRuleSummary}` : null,
+      repeatedTerminalFamiliesRule ? `repeated terminal families ${repeatedTerminalFamiliesSummary}` : null,
     ].filter(Boolean).join(", ") || "none";
     const weightingSummaryForTrace = [
       lambdaEnabled ? `lambda ${lambda.toFixed(2)}` : "lambda off",
       gpwfEnabled ? "GPWF on" : "GPWF off",
       selectedBoostEnabled ? `selected boost x${selectedBoostFactor}` : "selected boost off",
       recentMatchBias > 0 ? `last-draw bias ${recentMatchBias}` : "last-draw bias off",
+      activeDroughtEvidenceGovernorProfile ? `drought governor ${activeDroughtEvidenceGovernorProfile.summaryLabel}` : "drought governor off",
+      activeMonthlyBucketTransitionGovernorProfile ? `monthly transition ${activeMonthlyBucketTransitionGovernorProfile.summaryLabel}` : "monthly transition off",
       d1TerminalMomentumSgiEnabled ? `D1 SGI ${formatD1TerminalMomentumStrength(d1TerminalMomentumGenerationProfile.internalStrength)}` : "D1 SGI off",
       drawBucketPatternInfluenceEnabled ? "Draw Bucket Patterns boost on" : "Draw Bucket Patterns boost off",
       activeMainDigitBoostSummary ? `ending boosts ${activeMainDigitBoostSummary}` : null,
@@ -4478,6 +4731,8 @@ function AppInner(): JSX.Element {
 	      lines.push(`[TRACE] ${repeatUnionMonthlyCompatibilityTrace}`);
 	    }
       lines.push(...buildGenerationCompatibilityAuditTraceLines(options.label));
+      lines.push(...effectiveSettingsTrace(effectiveSettingsLedger));
+      if (options.mode === "rwr45") lines.push("[TRACE] Effective Settings above describe configured standard generation. RwR45 bypasses evidence weights and quotas as reported separately.");
 
 	    return lines;
 	  }
@@ -4603,11 +4858,20 @@ function AppInner(): JSX.Element {
       if (strictDroughtQuotaMode !== "off" || empiricalDroughtQuotaMode !== "off") {
         setTraceMaybe((t) => [...t, "[TRACE] Drought quota is ON but RwR45/PNUaRW45 bypasses evidence quotas; strict/empirical drought quotas were not applied to this random-coverage run."]);
       }
+      if (activeDroughtEvidenceGovernorProfile) {
+        setTraceMaybe((t) => [...t, `[TRACE] Drought Evidence Governor is ${droughtEvidenceGovernorMode} but RwR45/PNUaRW45 bypasses evidence weighting; drought governor weights were not applied to this random-coverage run.`]);
+      }
+      if (activeMonthlyBucketTransitionGovernorProfile) {
+        setTraceMaybe((t) => [...t, `[TRACE] Monthly Bucket Transition Governor is ${monthlyBucketTransitionGovernorMode} but RwR45/PNUaRW45 bypasses evidence weighting; monthly transition weights were not applied to this random-coverage run.`]);
+      }
       if (d1TerminalMomentumSgiEnabled) {
         setTraceMaybe((t) => [...t, "[TRACE] D1 Terminal Momentum SGI is ON but RwR45/PNUaRW45 bypasses evidence weighting; D1 SGI was not applied to this random-coverage run."]);
       }
       if (drawBucketPatternInfluenceEnabled) {
         setTraceMaybe((t) => [...t, "[TRACE] Draw Bucket Patterns influence is ON but RwR45/PNUaRW45 bypasses evidence weighting; leaderboard boost was not applied to this random-coverage run."]);
+      }
+      if (repeatedTerminalFamiliesRule) {
+        setTraceMaybe((t) => [...t, "[TRACE] Repeated Terminal Digit Families is ON but RwR45/PNUaRW45 uses its own random-coverage partition; repeated-family rule was not applied to this random-coverage run."]);
       }
       if (bucketCoveragePlannerEnabled) {
         setTraceMaybe((t) => [...t, "[TRACE] Bucket Coverage Planner is ON but RwR45/PNUaRW45 uses its own random-coverage partition; bucket coverage planning was not applied."]);
@@ -4838,11 +5102,22 @@ function AppInner(): JSX.Element {
       d1TerminalMomentumProfile: d1TerminalMomentumGenerationProfile,
       latestNeighbourSupportOptions: {
         enabled: latestNeighbourSupportEnabled,
+        supportBoostFactor: latestNeighbourBoostEnabled ? 3 : 1,
         planningLastDrawOverride: planningDrawContext.isPlanningLastDraw,
         mode: latestNeighbourSupportMode,
       },
       strictDroughtQuotaOptions: strictDroughtQuotaGenerationOptions,
       empiricalDroughtQuotaOptions: empiricalDroughtQuotaGenerationOptions,
+      droughtEvidenceGovernorProfile: activeDroughtEvidenceGovernorProfile,
+      monthlyBucketTransitionGovernorProfile: activeMonthlyBucketTransitionGovernorProfile,
+      repeatedTerminalDigitFamiliesOptions: repeatedTerminalFamiliesRule
+        ? {
+          enabled: true,
+          mode: repeatedTerminalFamiliesRule.mode,
+          count: repeatedTerminalFamiliesRule.count,
+          scope: repeatedTerminalFamiliesRule.scope,
+        }
+        : undefined,
     };
 
     // Trace callback: appends messages as they arrive from the worker
@@ -5200,11 +5475,22 @@ function AppInner(): JSX.Element {
       undefined,
       {
         enabled: latestNeighbourSupportEnabled,
+        supportBoostFactor: latestNeighbourBoostEnabled ? 3 : 1,
         planningLastDrawOverride: planningDrawContext.isPlanningLastDraw,
         mode: latestNeighbourSupportMode,
       },
       strictDroughtQuotaGenerationOptions,
-      empiricalDroughtQuotaGenerationOptions
+      empiricalDroughtQuotaGenerationOptions,
+      activeDroughtEvidenceGovernorProfile,
+      activeMonthlyBucketTransitionGovernorProfile,
+      repeatedTerminalFamiliesRule
+        ? {
+          enabled: true,
+          mode: repeatedTerminalFamiliesRule.mode,
+          count: repeatedTerminalFamiliesRule.count,
+          scope: repeatedTerminalFamiliesRule.scope,
+        }
+        : undefined,
     );
 
     const monthlyTrace = buildMonthlyTrace();
@@ -5392,6 +5678,9 @@ function AppInner(): JSX.Element {
         if (review.sameNumbersDifferentDateIssues.length > 0) {
           setTrace((t) => [...t, `[TRACE] Smart review flagged ${review.sameNumbersDifferentDateIssues.length} repeated number set${review.sameNumbersDifferentDateIssues.length === 1 ? "" : "s"} across different dates.`]);
         }
+        if (review.scheduleIssues.length > 0) {
+          setTrace((t) => [...t, ...review.scheduleIssues.map((issue) => `[TRACE] History schedule review: ${issue.description}`)]);
+        }
         if (correctedDraws.length >= MIN_VALID_DRAWS) {
           const isNewestFirst = new Date(correctedDraws[0].date) > new Date(correctedDraws[correctedDraws.length - 1].date);
           const ordered = isNewestFirst ? correctedDraws.slice().reverse() : correctedDraws.slice();
@@ -5524,6 +5813,27 @@ function AppInner(): JSX.Element {
   const dgaHeatmapLegendTotal = isMonthlyBucketHeatmapView
     ? dgaMonthlyBucketDrawSeries.totalCells
     : legendTotal;
+  const normalizedHiddenDgaTemperatureBuckets = useMemo(
+    () => normalizeHeatmapLegendHiddenIndexes(hiddenDgaTemperatureBuckets, bucketLabels.length),
+    [hiddenDgaTemperatureBuckets, bucketLabels.length],
+  );
+  const activeDgaHeatmapHiddenBucketIndexes = isMonthlyBucketHeatmapView
+    ? [] as number[]
+    : normalizedHiddenDgaTemperatureBuckets;
+  const handleDgaTemperatureLegendToggle = useCallback((bucketIndexToToggle: number) => {
+    setHiddenDgaTemperatureBuckets((prev) => toggleHeatmapLegendHiddenIndex(
+      prev,
+      bucketIndexToToggle,
+      bucketLabels.length,
+    ));
+  }, [bucketLabels.length]);
+  useEffect(() => {
+    setHiddenDgaTemperatureBuckets((prev) => {
+      const normalized = normalizeHeatmapLegendHiddenIndexes(prev, bucketLabels.length);
+      if (normalized.length === prev.length && normalized.every((value, index) => value === prev[index])) return prev;
+      return normalized;
+    });
+  }, [bucketLabels.length]);
   const dgaHeatmapBucketIndexSeries = isMonthlyBucketHeatmapView
     ? dgaMonthlyBucketDrawSeriesFull.bucketIndexSeries
     : undefined;
@@ -5543,8 +5853,8 @@ function AppInner(): JSX.Element {
       ? `${simulatedDraw ? "Appends the simulated next draw on the right and " : ""}shows each number’s running calendar-month bucket after every draw across all history. Columns outside the active WFMQYH window are dimmed; legend and drought summaries stay scoped to the active window.${monthlyBucketTemperatureOverlaySummary}`
       : `${simulatedDraw ? "Appends the simulated next draw on the right. " : ""}Shows each number’s running calendar-month bucket after every draw (Undrawn → 8x+).${monthlyBucketTemperatureOverlaySummary}`
     : dgaHeatmapActiveWindow
-      ? "Shows each number’s temperature bucket across all history using the selected metric. Columns outside the active WFMQYH window are dimmed; legend and drought summaries stay scoped to the active window."
-      : "Shows the temperature bucket of each number through time using the selected metric.";
+      ? "Shows each number’s temperature bucket across all history using the selected metric, with a blank Next column for DGA strip mockups. Columns outside the active WFMQYH window are dimmed; legend and drought summaries stay scoped to the active window."
+      : "Shows the temperature bucket of each number through time using the selected metric, with a blank Next column for DGA strip mockups.";
   useEffect(() => {
     const values: number[] = [];
     for (let n = 0; n < trendValueSeries.length; n++) {
@@ -5579,7 +5889,7 @@ function AppInner(): JSX.Element {
     title: string;
     target: ActiveSetupProvenanceTarget;
     targetLabel: string;
-    items: Array<{ label: string; value: React.ReactNode }>;
+    items: Array<{ label: string; value: string | number }>;
   }> = [
     {
       title: "History & Source",
@@ -5611,6 +5921,7 @@ function AppInner(): JSX.Element {
         { label: "Last draw", value: lastDrawOverlapRuleSummary },
         { label: "RecBias", value: recentMatchBias },
         { label: latestNeighbourSupportTraceLabel(latestNeighbourSupportMode), value: latestNeighbourSupportEnabled ? "on" : "off" },
+        { label: "Drought governor", value: droughtEvidenceGovernorProfile.summaryLabel },
         { label: "Drought quotas", value: droughtQuotaSummary },
         { label: "Prev ±1/±2", value: previousNeighbourConstraintNumbers.length ? previousNeighbourConstraintNumbers.join(", ") : "off" },
         { label: "Drought-break", value: droughtBreakSelectedNumbers.length ? droughtBreakSelectedNumbers.join(", ") : "off" },
@@ -5635,6 +5946,7 @@ function AppInner(): JSX.Element {
       targetLabel: "Go to Shape & Bucket Quotas",
       items: [
         { label: "End limits", value: endDigitSetSummary },
+        { label: "Repeated families", value: repeatedTerminalFamiliesSummary },
         { label: "Digit width", value: digitWidthConstraintTargets.enabled ? `${digitWidthConstraintTargets.singleDigitPercent}/${digitWidthConstraintTargets.twoDigitPercent} ${formatDigitWidthScopeLabel(digitWidthConstraintTargets.scope)} => ${digitWidthConstraintTargets.singleDigitCount}/${digitWidthConstraintTargets.twoDigitCount}` : "off" },
         { label: "End boosts", value: activeMainDigitBoostSummary || "none" },
         { label: "Decade bias", value: activeMainDecadeBiasSummary || "none" },
@@ -5650,11 +5962,56 @@ function AppInner(): JSX.Element {
           label: "Carry-over",
           value: monthEndCarryOverBiasEnabled
             ? `${monthEndCarryOverStrengthSettings.label} · ${monthEndCarryOverWeighting.targetMonthLabel} · active ${monthEndCarryOverWeighting.activeNumbers.length}${monthEndCarryOverPoolBreakdown ? ` (${monthEndCarryOverPoolBreakdown})` : ""} · undrawn ${monthEndCarryOverIncludeMonthEndUndrawn ? "on" : "off"} · boundary ${monthEndCarryOverIncludeBoundaryRepeats ? "on" : "off"}${selectedCarryOverBoostSummary ? ` · selected ${selectedCarryOverBoostSummary} x${selectedCarryOverBoostFactor}` : ""}`
-            : `off · default ${monthEndCarryOverWeighting.defaultEnabled ? "on" : "off"}`,
+            : `off · early-month Auto ${monthEndCarryOverAutoEnabled ? "enabled, no signal" : "off"}`,
         },
+        { label: "Monthly transition", value: monthlyBucketTransitionGovernorProfile.summaryLabel },
       ],
     },
   ];
+
+  const generationSetupSummaryItems: Array<{
+    key: string;
+    text: string;
+    target: GenerationSetupSummaryTarget;
+    targetLabel: string;
+  }> = [
+    { key: "forced", text: `Forced ${generationForcedNumbers.length}`, target: "forcedExcluded", targetLabel: "Show forced-number provenance" },
+    { key: "excluded", text: `Excluded ${allExclusions.length}`, target: "forcedExcluded", targetLabel: "Show exclusion provenance" },
+    { key: "ratios", text: `Ratios ${selectedRatios.length ? selectedRatios.join(" ") : "off"}`, target: "ratios", targetLabel: "Go to odd/even ratio controls" },
+    { key: "numbers", text: `Numbers diagnostic ${formatScoringInfluenceLabel(scoringGenerationInfluence)}`, target: "numbersDiagnostic", targetLabel: "Go to Numbers diagnostic influence" },
+    { key: "drought", text: `Drought governor ${droughtEvidenceGovernorProfile.summaryLabel}`, target: "droughtGovernor", targetLabel: "Go to Drought Evidence Governor" },
+    { key: "monthly-transition", text: `Monthly transition ${monthlyBucketTransitionGovernorProfile.summaryLabel}`, target: "monthlyTransition", targetLabel: "Go to Monthly Bucket Transition Governor" },
+    { key: "d1-sgi", text: `D1 SGI ${d1TerminalMomentumSgiEnabled ? formatD1TerminalMomentumStrength(d1TerminalMomentumGenerationProfile.internalStrength) : "off"}`, target: "d1Sgi", targetLabel: "Go to D1 terminal momentum SGI" },
+    { key: "latest-neighbour", text: `${latestNeighbourSupportTraceLabel(latestNeighbourSupportMode)} ${latestNeighbourSupportEnabled ? "on" : "off"}`, target: "latestNeighbour", targetLabel: "Go to Latest Draw neighbour support" },
+    { key: "readiness", text: `Rdy filters ${readinessHardFilterSummary}`, target: "readinessFilters", targetLabel: "Go to Readiness hard filters" },
+    { key: "carry-over", text: `Carry-over ${monthEndCarryOverBiasEnabled ? monthEndCarryOverStrengthSettings.label : "off"}`, target: "carryOver", targetLabel: "Go to month-end carry-over controls" },
+    { key: "stage-idm", text: `Stage IDM ${stageIdealDrawState ? `${stageIdealDrawState.comparableMonthCount} comps` : "unavailable"}`, target: "stageIdm", targetLabel: "Go to Stage IDM in Monthly Draws Summary" },
+    { key: "bucket-plan", text: `Bucket plan ${bucketCoveragePlannerEnabled ? `${bucketCoveragePlannerPreview.label}${bucketCoveragePlannerIgnoreUndrawn ? " · 0x random" : ""}` : "off"}`, target: "bucketPlan", targetLabel: "Go to Bucket Coverage Planner" },
+  ];
+
+  const effectiveSettingsLedger: EffectiveSettingsLedger = withRestoredSettingSources({
+    version: SETTINGS_MODEL_VERSION,
+    rows: [
+      { id: "generation-mode", label: "Generation mode", requested: rwr45Enabled ? "RwR45" : "Standard", applied: rwr45Enabled ? "Random coverage; evidence weights and quotas bypassed" : `Count ${numCandidates}; overgen ${overgenFactor}x; attempts ${attemptMultiplier} per pool row`, source: "Control", effect: "Generation path", scope: "Main generator", reason: "The rows below describe standard-mode configuration; RwR45 bypasses evidence settings. Trace reports each run's actual path." },
+      { id: "numbers", label: "Numbers diagnostic influence", requested: scoringGenerationInfluence, applied: activeScoringGenerationProfile ? activeScoringGenerationProfile.traceLabel : "Off", source: "Control", effect: "Sampling and survivor ranking", scope: historyWindowName, reason: "Number ranks use Light 0.9-1.2x, Normal 0.75-1.55x, Strong 0.55-2.2x; tied scores are neutral. Diagnostic support, not win probability." },
+      { id: "selected", label: "Selected-number boost", requested: selectedBoostEnabled ? `${selectedBoostFactor}x` : "Off", applied: selectedBoostEnabled ? `${selectedBoostFactor}x for [${userSelectedNumbers.join(", ") || "none"}]` : "Off", source: "Control", effect: "Sampling", scope: "User selection", reason: "Selection alone does not enable this boost. Forced inclusion is a separate constraint." },
+      { id: "forced", label: "Forced / excluded numbers", requested: `Forced [${generationForcedNumbers.join(", ") || "none"}]; exclusions [${allExclusions.join(", ") || "none"}]`, applied: `MiAN exclusions [${getMianHardExclusions().join(", ") || "none"}]; SDE1 ${knobs.enableSDE1 ? "On" : "Off"}; HC3 ${knobs.enableHC3 ? "On" : "Off"}; exclude-unselected ${autoExcludeUnselected ? "On" : "Off"}`, source: "Control", effect: "Hard inclusion / exclusion", scope: "Main generator", reason: "Current derived lists reflect the enabled rules. Compatibility checks flag conflicts; runtime Trace also records row-specific pool changes." },
+      { id: "monthly-counts", label: "Monthly construction", requested: `Constructive ${monthlyConstructiveEnabled ? "On" : "Off"}; MiAN ${acceptanceNeedsEnabled ? "On" : "Off"}`, applied: `Construction: ${monthlyConstructiveEnabled && monthlyConstraintPayload ? formatMonthlyConstraintCountsForTrace(monthlyConstraintPayload.constraints) : "Off"}; MiAN: ${acceptanceNeedsEnabled ? formatMonthlyConstraintCountsForTrace(effectiveMianCounts) : "Off"}`, source: "Control", effect: "Construction and hard minimums", scope: planningDrawContext.targetMonthLabel, reason: `Coverage ${bucketCoveragePlannerEnabled ? bucketCoveragePlannerPreview.label : "Off"}; ignored undrawn coverage ${bucketCoveragePlannerIgnoreUndrawn ? "On" : "Off"}.` },
+      { id: "survivors", label: "Survivor ranking", requested: `OGA ${knobs.enableOGA ? rankingWeights.oga : 0}; SelHits ${rankingWeights.selHitsEnabled ? rankingWeights.sel : 0}; RecentHits ${rankingWeights.recentHitsEnabled ? rankingWeights.recent : 0}`, applied: `Numbers ${activeScoringGenerationProfile ? scoringGenerationInfluence : "Off"}; carry-over ${monthEndCarryOverBiasEnabled ? monthEndCarryOverStrength : "Off"}`, source: "Control", effect: "Final pool selection", scope: "Main generator", reason: "These signals operate after hard filters. Odd/even quotas remain enforced; a construction boost does not guarantee survival into the displayed rows." },
+      { id: "window", label: "WFMQYH", requested: windowMode === "Custom" ? `Custom ${customDrawCount}` : historyWindowName, applied: `${realFilteredHistory.length} real draws`, source: "Control", effect: "Evidence scope", scope: historyWindowName, reason: "Manual counts are retained when history changes; only available draws are used." },
+      { id: "repeat", label: "Newest-draw pool", requested: `${repeatWindowSizeW} draws, minimum ${minFromRecentUnionM}`, applied: `${effectiveRepeatWindowSizeW} draws, ${repeatUnionUniqueCount} unique; ${minFromRecentUnionM > repeatUnionCandidateMax ? "BLOCKED" : `minimum ${minFromRecentUnionM}`}`, source: repeatWindowAuto ? "Automatic" : "Control", effect: "Hard minimum", scope: historyWindowName, reason: repeatWindowAuto ? "Current-month default is enabled." : "Manual window preserved; impossible minimums block generation." },
+      { id: "recency", label: "Last-draw bias", requested: String(recentMatchBias), applied: `${lastDrawBiasMultiplier(recentMatchBias, minRecentMatches).toFixed(3)}x latest-draw numbers`, source: "Control", effect: "Sampling only", scope: "Latest active real draw", reason: "Positive minimum: boost 1+bias. Otherwise penalty 1/(1+bias). Never rejects by itself." },
+      { id: "neighbour", label: "Neighbour support", requested: latestNeighbourSupportEnabled ? `${latestNeighbourSupportMode}; boost ${latestNeighbourBoostEnabled ? "On" : "Off"}` : "Off", applied: latestNeighbourSupportEnabled ? `minimum 1; ${latestNeighbourBoostEnabled ? 3 : 1}x weight` : "Off", source: "Control", effect: "Quota; optional sampling", scope: "Latest active draw; current month", reason: "Fixed eligibility screens: streak >7/10 and drought >6 with undrawn terminal clustering." },
+      ...([ ["Strict", strictDroughtQuotaMode, strictDroughtQuotaManualMin, strictDroughtQuotaEffectiveMin, strictDroughtQuotaEligibleNumbers], ["Empirical", empiricalDroughtQuotaMode, empiricalDroughtQuotaManualMin, empiricalDroughtQuotaEffectiveMin, empiricalDroughtQuotaEligibleNumbers] ] as const).map(([name, mode, requested, minimum, numbers]) => ({ id: name, label: `${name} drought quota`, requested: mode === "manual" ? `Manual minimum ${requested}` : mode, applied: minimum > numbers.length ? `BLOCKED: ${numbers.length} eligible` : `minimum ${minimum}; ${numbers.length} eligible`, source: mode === "advised" ? "Automatic" as const : "Control" as const, effect: "Hard minimum", scope: "Current shortlist", reason: `Numbers: ${numbers.join(", ") || "none"}. Rank weighting ${droughtQuotaBoostEnabled && minimum > 0 ? "On: 2x first down to 1+1/list-size last" : "Off: neutral 1x"}.` })),
+      { id: "carry", label: "Month-end carry-over", requested: monthEndCarryOverAutoEnabled ? "Early-month Auto" : monthEndCarryOverManualEnabled ? "Manual On" : "Off", applied: monthEndCarryOverBiasEnabled ? monthEndCarryOverStrength : "Off", source: monthEndCarryOverAutoEnabled ? "Automatic" : "Control", effect: "Sampling and survivor ranking", scope: monthEndCarryOverWeighting.targetMonthLabel, reason: monthEndCarryOverDefaultLabel },
+      { id: "drought-governor", label: "Drought Evidence Governor", requested: droughtEvidenceGovernorMode, applied: droughtEvidenceGovernorProfile.summaryLabel, source: droughtEvidenceGovernorMode === "auto" ? "Automatic" : "Control", effect: "Sampling", scope: droughtEvidenceGovernorProfile.contextLabel, reason: droughtEvidenceGovernorProfile.traceLabel },
+      { id: "month-governor", label: "Monthly Transition Governor", requested: monthlyBucketTransitionGovernorMode, applied: monthlyBucketTransitionGovernorProfile.summaryLabel, source: monthlyBucketTransitionGovernorMode === "auto" ? "Automatic" : "Control", effect: "Sampling", scope: planningDrawContext.targetMonthLabel, reason: "Fixed stage rules; manual mode bypasses the evidence gate, not hard filters." },
+      { id: "d1", label: "D1 terminal momentum", requested: d1TerminalMomentumSgiEnabled ? "Auto On" : "Off", applied: d1TerminalMomentumGenerationProfile.internalStrength, source: "Automatic", effect: "Sampling", scope: planningDrawContext.targetMonthLabel, reason: d1TerminalMomentumGenerationProfile.traceLabel },
+      ...activeSetupProvenanceGroups.flatMap(group => group.items.map(item => ({ id: `${group.title}:${item.label}`, label: `${group.title}: ${item.label}`, requested: String(item.value), applied: String(item.value), source: "Control" as const, effect: "Configured rule / weight", scope: historyWindowName, reason: "Current setup, including restored choices. Off values are inactive. Runtime conflicts and combined weights appear in Trace." }))),
+      { id: "temperature", label: "Temperature recipe", requested: tempMetric, applied: "alpha 0.25; hybrid 0.6; 10 buckets", source: "Fixed model", effect: "Diagnostic classification", scope: "Panel-labelled history", reason: "Classification, not a calibrated prediction; no automatic forced selections." },
+      { id: "baseline-policy", label: "Opening-month baseline policy", requested: "opening-month-schedule-v2", applied: baselineHistoryScopeLabel, source: "Fixed model", effect: "Baseline scope only", scope: "Loaded real history", reason: "Exclude the earliest month only when its first recorded draw is later than its first scheduled Mon/Wed/Fri draw. Internal gaps and completed-month requirements are separate checks. Literal all real history is retained." },
+    ],
+  }, restoredSettingsLedgerRef.current);
 
   const handleNewPredictionDraft = () => {
     predictionJournalDraftIdRef.current += 1;
@@ -5749,9 +6106,12 @@ function AppInner(): JSX.Element {
     if (readinessHardFiltersActive) fragments.push(`Rdy hard ${readinessHardFilterSummary}`);
     if (sumFilter.enabled) fragments.push(`sum ${sumFilter.min}-${sumFilter.max}`);
     if (digitWidthConstraintTargets.enabled) fragments.push("single/double digit quota");
+    if (repeatedTerminalFamiliesRule) fragments.push(`repeated terminal families ${repeatedTerminalFamiliesSummary}`);
     if (activeMainDigitBoostSummary) fragments.push("ending boosts");
     if (activeMainDecadeBiasSummary) fragments.push("decade bias");
     if (activeScoringGenerationProfile) fragments.push(`Numbers diagnostic ${formatScoringInfluenceLabel(scoringGenerationInfluence)}`);
+    if (activeDroughtEvidenceGovernorProfile) fragments.push(`Drought governor ${activeDroughtEvidenceGovernorProfile.summaryLabel}`);
+    if (activeMonthlyBucketTransitionGovernorProfile) fragments.push(`Monthly transition ${activeMonthlyBucketTransitionGovernorProfile.summaryLabel}`);
     if (d1TerminalMomentumSgiEnabled) fragments.push(`D1 SGI ${formatD1TerminalMomentumStrength(d1TerminalMomentumGenerationProfile.internalStrength)}`);
     if (monthEndCarryOverBiasEnabled) fragments.push(`carry-over ${monthEndCarryOverStrengthSettings.label}`);
     if (lambdaEnabled) fragments.push(`lambda ${lambda.toFixed(2)}`);
@@ -5763,6 +6123,8 @@ function AppInner(): JSX.Element {
     acceptanceNeedsHardExclude,
     activeMainDecadeBiasSummary,
     activeMainDigitBoostSummary,
+    activeDroughtEvidenceGovernorProfile,
+    activeMonthlyBucketTransitionGovernorProfile,
     activeScoringGenerationProfile,
     bucketCoveragePlannerEnabled,
     bucketCoveragePlannerIgnoreUndrawn,
@@ -5791,6 +6153,8 @@ function AppInner(): JSX.Element {
     previousNeighbourConstraintNumbers.length,
     readinessHardFilterSummary,
     readinessHardFiltersActive,
+    repeatedTerminalFamiliesRule,
+    repeatedTerminalFamiliesSummary,
     repeatUnionEnabled,
     repeatUnionSummary,
     scoringGenerationInfluence,
@@ -6208,8 +6572,9 @@ function AppInner(): JSX.Element {
                     <span style={{ display: "inline-flex", flexDirection: "column", gap: 3, verticalAlign: "top" }}>
                       <input
                         type="number"
+                        aria-label="Custom WFMQYH draw count"
                         min={1}
-                        max={history.length}
+                        max={Math.max(1, history.length, customDrawCount)}
                         value={customDrawCount}
                         disabled={!windowEnabled}
                         onChange={(e) => setCustomDrawCount(Number(e.target.value))}
@@ -6657,6 +7022,9 @@ function AppInner(): JSX.Element {
         <TemperatureTransitionPanel
           history={baselineHistory}
           historyScopeLabel={baselineHistoryScopeLabel}
+          activeWindowHistory={realFilteredHistory}
+          activeWindowScopeLabel={`Current WFMQYH window (${realFilteredHistory.length} real draws)`}
+          selectedNumbers={userSelectedNumbers}
           alpha={0.25}
           metric={tempMetric}
           buckets={10}
@@ -6681,7 +7049,6 @@ function AppInner(): JSX.Element {
           defaultWindow={activeWindowSize}
           showSimulation={true}
           forcedNumbers={generationForcedNumbers}
-          selectedCheckNumbers={selectedNumbers}
           externalFocusNumber={focusNumber}
           onFocusChange={setFocusNumber}
         />
@@ -7001,6 +7368,7 @@ function AppInner(): JSX.Element {
           onAvgBucketsChange={handleMonthlyAvgBucketsChange}
           onIdealDrawStateChange={handleMonthlyIdealDrawStateChange}
           onStageIdealDrawStateChange={handleStageIdealDrawStateChange}
+          onAppliedBucketMixTargetChange={handleAppliedBucketMixTargetChange}
           onSimulateNumbers={handleSimulateAcceptanceNeeds}
         />
       </CollapsibleSection>
@@ -7234,16 +7602,20 @@ function AppInner(): JSX.Element {
             defaultOpen={true}
           >
             <div className="windfall-generation-setup-summary-strip" aria-label="Active generation setup summary">
-              <span className="windfall-generation-setup-summary-chip">Forced {generationForcedNumbers.length}</span>
-              <span className="windfall-generation-setup-summary-chip">Excluded {allExclusions.length}</span>
-              <span className="windfall-generation-setup-summary-chip">Ratios {selectedRatios.length ? selectedRatios.join(" ") : "off"}</span>
-              <span className="windfall-generation-setup-summary-chip">Scoring {formatScoringInfluenceLabel(scoringGenerationInfluence)}</span>
-              <span className="windfall-generation-setup-summary-chip">D1 SGI {d1TerminalMomentumSgiEnabled ? formatD1TerminalMomentumStrength(d1TerminalMomentumGenerationProfile.internalStrength) : "off"}</span>
-              <span className="windfall-generation-setup-summary-chip">{latestNeighbourSupportTraceLabel(latestNeighbourSupportMode)} {latestNeighbourSupportEnabled ? "on" : "off"}</span>
-              <span className="windfall-generation-setup-summary-chip">Rdy filters {readinessHardFilterSummary}</span>
-              <span className="windfall-generation-setup-summary-chip">Carry-over {monthEndCarryOverBiasEnabled ? monthEndCarryOverStrengthSettings.label : "off"}</span>
-              <span className="windfall-generation-setup-summary-chip">Stage IDM {stageIdealDrawState ? `${stageIdealDrawState.comparableMonthCount} comps` : "unavailable"}</span>
-              <span className="windfall-generation-setup-summary-chip">Bucket plan {bucketCoveragePlannerEnabled ? `${bucketCoveragePlannerPreview.label}${bucketCoveragePlannerIgnoreUndrawn ? " · 0x random" : ""}` : "off"}</span>
+              {generationSetupSummaryItems.map((item) => (
+                <HigButton
+                  key={item.key}
+                  size="compact"
+                  variant="quiet"
+                  className="windfall-generation-setup-summary-chip"
+                  onClick={() => navigateToGenerationSetupSummaryTarget(item.target)}
+                  aria-label={`${item.targetLabel}. Current summary: ${item.text}`}
+                  title={item.targetLabel}
+                >
+                  <span>{item.text}</span>
+                  <span className="windfall-generation-setup-summary-chip__arrow" aria-hidden="true">›</span>
+                </HigButton>
+              ))}
             </div>
 
             <div className="windfall-generation-setup-stack">
@@ -7251,7 +7623,7 @@ function AppInner(): JSX.Element {
                 id={ACTIVE_SETUP_PROVENANCE_TARGET_IDS.geometryPattern}
                 title="Engine & Ranking"
                 subtitle="Ranking references, OGA forecast bias, diagnostic influence, recency weighting, and GPWF controls."
-                collapsedSummary={`Scoring ${formatScoringInfluenceLabel(scoringGenerationInfluence)} · D1 SGI ${d1TerminalMomentumSgiEnabled ? formatD1TerminalMomentumStrength(d1TerminalMomentumGenerationProfile.internalStrength) : "off"} · OGA ${ogaRefMode} · KDE ${enableOGAForecastBias ? "on" : "off"} · λ ${lambdaEnabled ? lambda.toFixed(2) : "off"} · GPWF ${gpwfEnabled ? "on" : "off"}`}
+                collapsedSummary={`Numbers ${formatScoringInfluenceLabel(scoringGenerationInfluence)} · D1 SGI ${d1TerminalMomentumSgiEnabled ? formatD1TerminalMomentumStrength(d1TerminalMomentumGenerationProfile.internalStrength) : "off"} · Drought ${droughtEvidenceGovernorProfile.summaryLabel} · Monthly transition ${monthlyBucketTransitionGovernorProfile.summaryLabel} · OGA ${ogaRefMode} · KDE ${enableOGAForecastBias ? "on" : "off"} · λ ${lambdaEnabled ? lambda.toFixed(2) : "off"} · GPWF ${gpwfEnabled ? "on" : "off"}`}
                 defaultExpanded={true}
                 expanded={engineRankingExpanded}
                 onExpandedChange={setEngineRankingExpanded}
@@ -7392,8 +7764,9 @@ function AppInner(): JSX.Element {
                 </p>
                 <div className="windfall-influence-row-list">
                   <HigField
-                    label="Scoring diagnostics influence"
-                    help="Uses Scoring System Diagnostics as diagnostic evidence weighting during candidate construction. This is not a probability and does not override legal exclusions or selected quotas."
+                    id={GENERATION_SETUP_SUMMARY_TARGET_IDS.numbersDiagnostic}
+                    label="Numbers diagnostic influence"
+                    help="Uses the Numbers ranking from Scoring System Diagnostics as evidence weighting during candidate construction. This is not a probability and does not override legal exclusions or selected quotas."
                   >
                     <select
                       name="scoringGenerationInfluence"
@@ -7411,7 +7784,11 @@ function AppInner(): JSX.Element {
                     Applies the Numbers diagnostic evidence weighting before candidate filters run; selected constraints still decide which candidates survive.
                   </p>
                   <div className="windfall-engine-ranking-rule" aria-hidden="true" />
-                  <label className="windfall-engine-ranking-toggle">
+                  <label
+                    id={GENERATION_SETUP_SUMMARY_TARGET_IDS.d1Sgi}
+                    className="windfall-engine-ranking-toggle"
+                    tabIndex={-1}
+                  >
                     <input
                       type="checkbox"
                       checked={d1TerminalMomentumSgiEnabled}
@@ -7538,6 +7915,29 @@ function AppInner(): JSX.Element {
                   Ranking weights for the Generated Candidates Rdy column. These sliders change score emphasis only; hard rejection thresholds live in Hard Filters.
                 </p>
 
+                <div style={{
+                  border: "1px solid #c7d2fe",
+                  borderRadius: 8,
+                  background: "#eef2ff",
+                  color: "#1e3a8a",
+                  padding: "8px 10px",
+                  marginBottom: 10,
+                  display: "grid",
+                  gap: 4,
+                  fontSize: 12,
+                  lineHeight: 1.35,
+                }}>
+                  <div>
+                    <b>Active IDM target:</b>{" "}
+                    {activeReadinessIdmTarget
+                      ? `${activeReadinessIdmTarget.sourceLabel} · ${activeReadinessIdmTarget.detail}`
+                      : "Unavailable until Monthly Draws Summary publishes an ideal draw."}
+                  </div>
+                  <div style={{ color: "#475569" }}>
+                    IDM target means the bucket recipe the app compares candidates against. If IDM is the only Rdy signal On, any positive IDM slider value displays as 100% because it is the only active component.
+                  </div>
+                </div>
+
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10, marginBottom: 10 }}>
                   {RDY_WEIGHT_KEYS.map((key) => {
                     const copy = RDY_WEIGHT_COPY[key];
@@ -7658,7 +8058,7 @@ function AppInner(): JSX.Element {
                 id={ACTIVE_SETUP_SHAPE_BUCKET_CARD_ID}
                 title="Shape & Bucket Quotas"
                 subtitle="Ending-digit, decade, monthly bucket, and carry-over composition controls."
-                collapsedSummary={`Digit width ${digitWidthConstraintTargets.enabled ? `${digitWidthConstraintTargets.singleDigitCount}/${digitWidthConstraintTargets.twoDigitCount}` : "off"} · MiAN ${acceptanceNeedsEnabled ? "on" : "off"} · bucket plan ${bucketCoveragePlannerEnabled ? `${bucketCoveragePlannerPreview.label}${bucketCoveragePlannerIgnoreUndrawn ? " / 0x random" : ""}` : "off"} · ending rules ${activeMainDigitRuleSummary || "off"} · ending boosts ${activeMainDigitBoostSummary || "off"} · decade ${activeMainDecadeBiasSummary || "off"} · MRB ${mrbEnabled ? "on" : "off"}`}
+                collapsedSummary={`Digit width ${digitWidthConstraintTargets.enabled ? `${digitWidthConstraintTargets.singleDigitCount}/${digitWidthConstraintTargets.twoDigitCount}` : "off"} · repeated families ${repeatedTerminalFamiliesSummary} · MiAN ${acceptanceNeedsEnabled ? "on" : "off"} · bucket plan ${bucketCoveragePlannerEnabled ? `${bucketCoveragePlannerPreview.label}${bucketCoveragePlannerIgnoreUndrawn ? " / 0x random" : ""}` : "off"} · ending rules ${activeMainDigitRuleSummary || "off"} · ending boosts ${activeMainDigitBoostSummary || "off"} · decade ${activeMainDecadeBiasSummary || "off"} · MRB ${mrbEnabled ? "on" : "off"}`}
                 defaultExpanded={false}
                 expanded={shapeBucketQuotasExpanded}
                 onExpandedChange={setShapeBucketQuotasExpanded}
@@ -7863,6 +8263,107 @@ function AppInner(): JSX.Element {
                       </div>
                     );
                   })}
+                    </div>
+                    <div
+                      style={{
+                        display: "grid",
+                        gap: 10,
+                        marginTop: 12,
+                        padding: "10px 12px",
+                        borderRadius: 8,
+                        border: `1px solid ${repeatedTerminalFamiliesRule ? "#86efac" : "#e5e7eb"}`,
+                        background: repeatedTerminalFamiliesRule ? "#f6fff7" : "#fcfcfc",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>
+                            Repeated Terminal Digit Families
+                          </div>
+                          <div style={{ marginTop: 2, fontSize: 11, color: "#64748b", lineHeight: 1.45 }}>
+                            Counts how many terminal digit families appear at least twice inside the candidate.
+                          </div>
+                        </div>
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            minHeight: 22,
+                            padding: "2px 8px",
+                            borderRadius: 999,
+                            border: `1px solid ${repeatedTerminalFamiliesRule ? "#86efac" : "#e5e7eb"}`,
+                            background: repeatedTerminalFamiliesRule ? "#dcfce7" : "#f8fafc",
+                            color: repeatedTerminalFamiliesRule ? "#166534" : "#64748b",
+                            fontSize: 11,
+                            fontWeight: 700,
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {repeatedTerminalFamiliesRule ? "Hard rule active" : "Off"}
+                        </span>
+                      </div>
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "repeat(auto-fit, minmax(150px, max-content))",
+                          gap: 10,
+                          alignItems: "end",
+                        }}
+                      >
+                        <label style={{ display: "grid", gap: 3, fontSize: 11, color: "#555", fontWeight: 600 }}>
+                          <span>Mode</span>
+                          <select
+                            value={repeatedTerminalFamiliesEnabled ? repeatedTerminalFamiliesMode : "off"}
+                            onChange={(e) => {
+                              const rawMode = e.target.value;
+                              if (rawMode === "off") {
+                                setRepeatedTerminalFamiliesEnabled(false);
+                                return;
+                              }
+                              setRepeatedTerminalFamiliesMode(normalizeRepeatedTerminalDigitFamilyMode(rawMode));
+                              setRepeatedTerminalFamiliesEnabled(true);
+                            }}
+                            style={{ minWidth: 130, fontWeight: 400 }}
+                          >
+                            {repeatedTerminalFamilyModeOptions.map((option) => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <label style={{ display: "grid", gap: 3, fontSize: 11, color: "#555", fontWeight: 600 }}>
+                          <span>Families</span>
+                          <select
+                            value={Math.min(repeatedTerminalFamiliesCount, repeatedTerminalFamiliesMax)}
+                            disabled={!repeatedTerminalFamiliesEnabled}
+                            onChange={(e) => setRepeatedTerminalFamiliesCount(Math.max(0, Math.min(repeatedTerminalFamiliesMax, Number(e.target.value) || 0)))}
+                            style={{ minWidth: 90, opacity: repeatedTerminalFamiliesEnabled ? 1 : 0.55, fontWeight: 400 }}
+                          >
+                            {Array.from({ length: repeatedTerminalFamiliesMax + 1 }, (_, idx) => (
+                              <option key={idx} value={idx}>{idx}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <label style={{ display: "grid", gap: 3, fontSize: 11, color: "#555", fontWeight: 600 }}>
+                          <span>Count against</span>
+                          <select
+                            value={repeatedTerminalFamiliesScope}
+                            disabled={!repeatedTerminalFamiliesEnabled}
+                            onChange={(e) => setRepeatedTerminalFamiliesScope(normalizeRepeatedTerminalDigitFamilyScope(e.target.value))}
+                            style={{ minWidth: 140, opacity: repeatedTerminalFamiliesEnabled ? 1 : 0.55, fontWeight: 400 }}
+                          >
+                            <option value="mainAndSupp">{repeatedTerminalFamilyScopeLabels.mainAndSupp}</option>
+                            <option value="main">{repeatedTerminalFamilyScopeLabels.main}</option>
+                          </select>
+                        </label>
+                      </div>
+                      <div style={{ fontSize: 11, color: repeatedTerminalFamiliesRule ? "#166534" : "#64748b", lineHeight: 1.5 }}>
+                        <div>
+                          Current rule: <b>{repeatedTerminalFamiliesSummary}</b>.
+                        </div>
+                        <div>
+                          Example: 33, 27, 21, 31, 26, 43 + 30, 20 has repeated families 0, 1, 3 in mains + supps; mains only has 1 and 3.
+                        </div>
+                      </div>
                     </div>
                   </section>
 
@@ -8140,6 +8641,8 @@ function AppInner(): JSX.Element {
                     </div>
                   )}
                   <div
+                    id={GENERATION_SETUP_SUMMARY_TARGET_IDS.bucketPlan}
+                    tabIndex={-1}
                     style={{
                       marginTop: 10,
                       padding: "9px 10px",
@@ -8410,7 +8913,11 @@ function AppInner(): JSX.Element {
                   })()}
                 </div>
 
-                    <div className="windfall-constraint-subgroup">
+                    <div
+                      id={GENERATION_SETUP_SUMMARY_TARGET_IDS.carryOver}
+                      className="windfall-constraint-subgroup"
+                      tabIndex={-1}
+                    >
                   <div style={{ fontWeight: 600, marginBottom: 4 }}>
                     Month-end carry-over bias
                     <span
@@ -8423,7 +8930,7 @@ function AppInner(): JSX.Element {
                         borderRadius: 4,
                         padding: "1px 6px",
                       }}
-                      title="Automatic default based on whether the planning month is still inside its first three draws."
+                      title="Eligibility only. Auto must be explicitly enabled."
                     >
                       {monthEndCarryOverDefaultLabel}
                     </span>
@@ -8437,6 +8944,8 @@ function AppInner(): JSX.Element {
                     />
                     Use month-end carry-over weighting in ranking and generation
                   </label>
+                  <label style={{ display: "block", marginBottom: 8 }}><input type="checkbox" checked={monthEndCarryOverAutoEnabled} onChange={(e) => { setMonthEndCarryOverAutoEnabled(e.target.checked); setMonthEndCarryOverBiasEnabled(false); }} /> Auto-enable for positive early-month evidence</label>
+                  <div role="status">Applied: {monthEndCarryOverBiasEnabled ? "On" : "Off"}. Selecting carry-over numbers does not enable weighting.</div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", marginBottom: 6, fontSize: 12 }}>
                     <label title="Controls how far learned carry-over factors move away from neutral and how much ranking weight carry-over receives.">
                       Influence{" "}
@@ -8522,6 +9031,17 @@ function AppInner(): JSX.Element {
                     )}
                   </div>
                     </div>
+
+                    <div
+                      id={MONTHLY_TRANSITION_GOVERNOR_TARGET_ID}
+                      className="windfall-constraint-subgroup windfall-transition-governor-container"
+                      tabIndex={-1}
+                    >
+                      <MonthlyBucketTransitionGovernorControls
+                        profile={monthlyBucketTransitionGovernorProfile}
+                        onModeChange={setMonthlyBucketTransitionGovernorMode}
+                      />
+                    </div>
                   </section>
                 </div>
               </div>
@@ -8549,7 +9069,11 @@ function AppInner(): JSX.Element {
                   <input type="checkbox" checked={useTrickyRule} onChange={(e) => setUseTrickyRule(e.target.checked)} style={{ marginRight: 6 }} />
                   Tricky Rule (reject 0:8 and 8:0)
                 </label>
-                <div style={{ marginTop: 6 }}>
+                <div
+                  id={GENERATION_SETUP_SUMMARY_TARGET_IDS.ratios}
+                  tabIndex={-1}
+                  style={{ marginTop: 6 }}
+                >
                   <b>Odd/Even ratios</b> (disable Tricky to use):
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginTop: 6 }}>
                     <button
@@ -8599,9 +9123,17 @@ function AppInner(): JSX.Element {
                       Default-off generation quotas. Strict drought 6+ uses the current strict drought-break shortlist; empirical hazard uses the current smoothed empirical hazard shortlist. Manual modes use your chosen minimum count. Advised modes use no-lookahead replay evidence, stay capped at a low-count minimum of 1, and only apply when the replay beats an equal-size random baseline enough to justify it. These are hard quotas, not win probabilities.
                     </InfoHelp>
                   </div>
-                  <div style={{ color: "#475569", fontSize: 11, lineHeight: 1.45 }}>
-                    Overlap: {droughtQuotaOverlapNumbers.length ? droughtQuotaOverlapNumbers.join(", ") : "none"}. A number in both lists can satisfy both quota families, but still occupies one candidate slot.
+                  <div id={GENERATION_SETUP_SUMMARY_TARGET_IDS.droughtGovernor} tabIndex={-1}>
+                    <DroughtEvidenceGovernorControls
+                      profile={droughtEvidenceGovernorProfile}
+                      onModeChange={setDroughtEvidenceGovernorMode}
+                      onSettingsChange={setDroughtEvidenceGovernorSettings}
+                    />
                   </div>
+                  <div style={{ color: "#475569", fontSize: 12, lineHeight: 1.45 }}>
+                    Quota overlap: {droughtQuotaOverlapNumbers.length ? droughtQuotaOverlapNumbers.join(", ") : "none"}. A number in both lists can satisfy both quota families, but still occupies one candidate slot.
+                  </div>
+                  <label><input type="checkbox" checked={droughtQuotaBoostEnabled} onChange={(e) => setDroughtQuotaBoostEnabled(e.target.checked)} /> Add rank weighting to active drought quotas (2x first to 1.125x eighth)</label>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 10 }}>
                     <div style={{ display: "grid", gap: 7, padding: 8, border: "1px solid #ddd6fe", borderRadius: 8, background: "#fff" }}>
                       <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 800, flexWrap: "wrap" }}>
@@ -8622,17 +9154,17 @@ function AppInner(): JSX.Element {
                           <input
                             type="number"
                             min={0}
-                            max={Math.min(8, strictDroughtQuotaEligibleNumbers.length)}
+                            max={8}
                             value={strictDroughtQuotaManualMin}
                             onChange={(event) => {
                               const value = Number(event.target.value);
                               const safe = Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
-                              setStrictDroughtQuotaManualMin(Math.min(safe, Math.min(8, strictDroughtQuotaEligibleNumbers.length)));
+                              setStrictDroughtQuotaManualMin(Math.min(safe, 8));
                             }}
                             style={{ width: 60 }}
                           />
                           <span style={{ color: "#6b21a8", fontSize: 11, fontWeight: 800 }}>
-                            max {Math.min(8, strictDroughtQuotaEligibleNumbers.length)}
+                            {strictDroughtQuotaEligibleNumbers.length} eligible now
                           </span>
                         </label>
                       )}
@@ -8643,6 +9175,7 @@ function AppInner(): JSX.Element {
                             ? <>{strictDroughtQuotaAdvice.traceLabel}. Effective minimum {strictDroughtQuotaEffectiveMin}. {strictDroughtQuotaAdvice.reason}</>
                             : <>Manual minimum {strictDroughtQuotaEffectiveMin}. Current eligible strict shortlist: {strictDroughtQuotaEligibleNumbers.length ? strictDroughtQuotaEligibleNumbers.join(", ") : "none after active exclusions"}.</>}
                       </div>
+                      {strictDroughtQuotaEffectiveMin > strictDroughtQuotaEligibleNumbers.length && <p role="alert">Generation blocked: requested {strictDroughtQuotaEffectiveMin}, only {strictDroughtQuotaEligibleNumbers.length} eligible. Change the request or exclusions.</p>}
                       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, color: "#334155", fontSize: 11 }}>
                         <span style={{ fontWeight: 800 }}>Replay</span>
                         <span>{strictDroughtQuotaAdvice.sourceLabel}</span>
@@ -8671,17 +9204,17 @@ function AppInner(): JSX.Element {
                           <input
                             type="number"
                             min={0}
-                            max={Math.min(8, empiricalDroughtQuotaEligibleNumbers.length)}
+                            max={8}
                             value={empiricalDroughtQuotaManualMin}
                             onChange={(event) => {
                               const value = Number(event.target.value);
                               const safe = Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
-                              setEmpiricalDroughtQuotaManualMin(Math.min(safe, Math.min(8, empiricalDroughtQuotaEligibleNumbers.length)));
+                              setEmpiricalDroughtQuotaManualMin(Math.min(safe, 8));
                             }}
                             style={{ width: 60 }}
                           />
                           <span style={{ color: "#0369a1", fontSize: 11, fontWeight: 800 }}>
-                            max {Math.min(8, empiricalDroughtQuotaEligibleNumbers.length)}
+                            {empiricalDroughtQuotaEligibleNumbers.length} eligible now
                           </span>
                         </label>
                       )}
@@ -8692,6 +9225,7 @@ function AppInner(): JSX.Element {
                             ? <>{empiricalDroughtQuotaAdvice.traceLabel}. Effective minimum {empiricalDroughtQuotaEffectiveMin}. {empiricalDroughtQuotaAdvice.reason}</>
                             : <>Manual minimum {empiricalDroughtQuotaEffectiveMin}. Current eligible empirical shortlist: {empiricalDroughtQuotaEligibleNumbers.length ? empiricalDroughtQuotaEligibleNumbers.join(", ") : "none after active exclusions"}.</>}
                       </div>
+                      {empiricalDroughtQuotaEffectiveMin > empiricalDroughtQuotaEligibleNumbers.length && <p role="alert">Generation blocked: requested {empiricalDroughtQuotaEffectiveMin}, only {empiricalDroughtQuotaEligibleNumbers.length} eligible. Change the request or exclusions.</p>}
                       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, color: "#334155", fontSize: 11 }}>
                         <span style={{ fontWeight: 800 }}>Replay</span>
                         <span>{empiricalDroughtQuotaAdvice.sourceLabel}</span>
@@ -8722,6 +9256,8 @@ function AppInner(): JSX.Element {
                     Default off until one or more target numbers are selected. Selected targets are combined with Number Trends forced numbers before candidate generation.
                   </div>
                   <div
+                    id={GENERATION_SETUP_SUMMARY_TARGET_IDS.latestNeighbour}
+                    tabIndex={-1}
                     style={{
                       marginTop: 8,
                       padding: "8px 10px",
@@ -8765,9 +9301,8 @@ function AppInner(): JSX.Element {
                         </select>
                       </label>
                     </div>
-                    <div style={{ color: "#64748b", fontSize: 11, lineHeight: 1.45 }}>
-                      Uses {latestNeighbourSupportModeLabel(latestNeighbourSupportMode)} targets from the latest WFMQYH draw, recent 10-draw streak cap &gt;7, current monthly buckets when available, and existing 0/5 ending-digit rules as coordination checks. It is evidence-based filtering, not a probability claim.
-                    </div>
+                    <label><input type="checkbox" checked={latestNeighbourBoostEnabled} disabled={!latestNeighbourSupportEnabled} onChange={(e) => setLatestNeighbourBoostEnabled(e.target.checked)} /> Add 3x sampling boost to eligible neighbour targets</label>
+                    <InfoHelp label="Neighbour eligibility and weighting">Uses {latestNeighbourSupportModeLabel(latestNeighbourSupportMode)} from the latest active draw. Fixed screens: streak above 7 in the latest 10 draws; drought above 6 with clustered undrawn terminal companions, except at month end. Quota alone is neutral weighting (1x). The optional 3x boost compounds with other weights; it is not a probability.</InfoHelp>
                   </div>
                   {userExclusionReminder && (
                     <div role="status" style={{ marginTop: 6, color: "#475569", fontSize: 11, lineHeight: 1.45 }}>
@@ -9053,25 +9588,27 @@ function AppInner(): JSX.Element {
                   <div style={{ marginTop: 8 }}>
                     <label title="Within the active WFMQYH history, build a pool from every number seen in the newest W real draws.">
                       Look back over <span style={{ fontWeight: 900, textDecoration: "underline", textUnderlineOffset: "2px" }}>newest draws</span>:
-                      <input type="number" min={0} max={realHistory.length} value={repeatWindowSizeW} onChange={(e) => setRepeatWindowSizeW(Number(e.target.value))} style={{ width: 70, marginLeft: 6 }} />
+                      <input type="number" min={0} max={Math.max(realHistory.length, repeatWindowSizeW)} value={repeatWindowSizeW} onChange={(e) => { setRepeatWindowAuto(false); setRepeatWindowSizeW(Math.max(0, Math.trunc(Number(e.target.value)) || 0)); }} style={{ width: 70, marginLeft: 6 }} />
                     </label>
+                    <label style={{ marginLeft: 10 }}><input type="checkbox" checked={repeatWindowAuto} onChange={(e) => setRepeatWindowAuto(e.target.checked)} /> Use current-month default</label>
                     <label style={{ marginLeft: 10 }}>
                       Minimum candidate numbers from that pool:
                       <input
                         type="number"
+                        aria-label="Minimum candidate numbers from newest-draw pool"
                         min={0}
-                        max={repeatUnionCandidateMax}
+                        max={8}
                         value={minFromRecentUnionM}
                         onChange={(e) => {
                           const value = Number(e.target.value);
                           const safeValue = Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
-                          setMinFromRecentUnionM(Math.min(safeValue, repeatUnionCandidateMax));
+                          setMinFromRecentUnionM(Math.min(safeValue, 8));
                         }}
                         style={{ width: 60, marginLeft: 6 }}
                       />
                     </label>
 	                    <span style={{ color: "#991b1b", fontSize: 11, fontWeight: 800 }}>
-	                      max {repeatUnionCandidateMax}
+	                      {repeatUnionInputMax} available slots
 	                    </span>
 	                    <div style={{ marginTop: 4, color: "#475569", fontSize: 11, lineHeight: 1.45 }}>
                       Default follows the latest observed month: {latestObservedMonthDrawCount
@@ -9079,7 +9616,7 @@ function AppInner(): JSX.Element {
                         : <>no dated real month is available, so the active WFMQYH size is used.</>}
 	                    </div>
 	                    <div style={{ marginTop: 4, color: "#475569", fontSize: 11, lineHeight: 1.45 }}>
-	                      Unique numbers in this newest-draw pool: <strong>{repeatUnionUniqueCount}</strong>. Raw usable range is <strong>0-{repeatUnionRawCandidateMax}</strong>; current monthly bucket requirements make the safe range <strong>0-{repeatUnionCandidateMax}</strong>.
+	                      Unique numbers in this newest-draw pool: <strong>{repeatUnionUniqueCount}</strong>. Requests can be 0-8; the current compatible maximum is <strong>{repeatUnionCandidateMax}</strong>. Larger requests are retained but block generation.
 	                    </div>
 	                    {repeatUnionMonthlyFeasibility && repeatUnionMonthlyFeasibility.maxFeasibleHits < repeatUnionRawCandidateMax && (
 	                      <div style={{ marginTop: 4, color: "#991b1b", fontSize: 11, fontWeight: 800, lineHeight: 1.45 }}>
@@ -9152,7 +9689,11 @@ function AppInner(): JSX.Element {
                     </label>
                   </div>
 
-                  <div style={{ borderTop: "1px dashed #ddd", marginTop: 12, paddingTop: 10 }}>
+                  <div
+                    id={GENERATION_SETUP_SUMMARY_TARGET_IDS.readinessFilters}
+                    tabIndex={-1}
+                    style={{ borderTop: "1px dashed #ddd", marginTop: 12, paddingTop: 10 }}
+                  >
                     <h4 style={{ margin: "0 0 4px", color: "#0f172a", fontSize: 13 }}>Readiness component hard filters</h4>
                     <p className="windfall-influence-card__subtitle" style={{ margin: "0 0 10px" }}>
                       Optional lower-bound filters for the same IDM, Conv, and OGA components used by Rdy. Defaults are OFF and 0%; turning a rule off resets its threshold to 0%.
@@ -9211,8 +9752,11 @@ function AppInner(): JSX.Element {
                 subtitle="A plain-language audit trail of active forced numbers, exclusions, and generation inputs."
                 collapsedSummary={`Forced ${generationForcedNumbers.length} · exclusions ${allExclusions.length} · SDE1 ${knobs.enableSDE1 ? "on" : "off"} · HC3 ${knobs.enableHC3 ? "on" : "off"}`}
                 defaultExpanded={false}
+                expanded={activeSetupSummaryExpanded}
+                onExpandedChange={setActiveSetupSummaryExpanded}
               >
             <div className="windfall-influence-provenance" aria-label="Generation provenance summary">
+              <EffectiveSettings ledger={effectiveSettingsLedger} status={settingsPersistence.status} error={settingsPersistence.error} />
               <div className="windfall-influence-provenance__header">Provenance</div>
               <div className="windfall-influence-provenance__grid">
                 {activeSetupProvenanceGroups.map((group) => (
@@ -9240,7 +9784,11 @@ function AppInner(): JSX.Element {
               </div>
             </div>
             {/* Forced and Excluded reporting */}
-            <div className="windfall-influence-report">
+            <div
+              id={GENERATION_SETUP_SUMMARY_TARGET_IDS.forcedExcluded}
+              className="windfall-influence-report"
+              tabIndex={-1}
+            >
               <div style={{ marginBottom: 6 }}>
                 <b>Forced numbers</b> ({generationForcedNumbers.length}): {generationForcedNumbers.length ? sortedGenerationForcedNumbers.join(", ") : "— none —"}
                 <span style={{ color: "#64748b" }}> Trend {trendSelectedNumbers.length}; latest ±1/±2 {previousNeighbourConstraintNumbers.length}; drought-break {droughtBreakSelectedNumbers.length}; paste-weighted {pasteWeightedForcedNumbers.length}; Signal Confluence {signalConfluenceForcedNumbers.length}.</span>
@@ -9355,6 +9903,10 @@ function AppInner(): JSX.Element {
             setNumCandidates={setNumCandidates}
             rwr45Enabled={rwr45Enabled}
             setRwr45Enabled={setRwr45Enabled}
+            monthlyTransitionWatchProfile={monthlyBucketTransitionWatchProfile}
+            monthlyTransitionInfluenceProfile={monthlyBucketTransitionGovernorProfile}
+            monthlyTransitionTargetDrawOrdinal={planningDrawContext.targetDrawOrdinal}
+            onReviewMonthlyTransitionEvidence={navigateToMonthlyTransitionEvidence}
             generationSessionActive={generationSessionActive}
             generationSessionCount={generationSessionRows.length}
             onStartGenerationSession={handleStartGenerationSession}
@@ -9396,6 +9948,9 @@ function AppInner(): JSX.Element {
             monthlyAvgBuckets={monthlyAvgBuckets}
             monthlyBuckets={monthlyBucketSetsAlways ?? monthlyConstraintPayload?.buckets}
             monthlyIdealDrawState={monthlyIdealDrawState}
+            idmTargetComposition={activeReadinessIdmTarget?.composition ?? null}
+            idmTargetSourceLabel={activeReadinessIdmTarget?.sourceLabel}
+            idmTargetDetail={activeReadinessIdmTarget?.detail}
             stageIdealDrawState={stageIdealDrawState}
             historyForOGA={realFilteredHistory}
             fullHistory={realHistory}
@@ -9616,6 +10171,16 @@ function AppInner(): JSX.Element {
                   {isMonthlyBucketHeatmapView ? "Bucket letters:" : "Letters:"}
                   <input type="checkbox" checked={showHeatmapLetters} onChange={e => setShowHeatmapLetters(e.target.checked)} style={{ marginLeft: 6 }} title="Overlay letter codes" />
                 </label>
+                <label style={{ fontSize: 13 }}>
+                  Hover labels:
+                  <input
+                    type="checkbox"
+                    checked={showHeatmapHoverLabels}
+                    onChange={(e) => setShowHeatmapHoverLabels(e.target.checked)}
+                    style={{ marginLeft: 6 }}
+                    title="Show or hide the text labels in the heatmap hover card. The heatmap spark-line setting is separate."
+                  />
+                </label>
                 {isMonthlyBucketHeatmapView ? (
                   <label style={{ fontSize: 13 }}>
                     Heatmap hover spark-line:
@@ -9632,7 +10197,16 @@ function AppInner(): JSX.Element {
               </div>
 
               <div style={{ width: "100%", marginTop: 8, marginBottom: 6 }}>
-                <HeatmapLegendBar labels={dgaHeatmapBucketLabels} counts={dgaHeatmapLegendCounts} total={dgaHeatmapLegendTotal} colors={dgaHeatmapBucketColors} />
+                <HeatmapLegendBar
+                  labels={dgaHeatmapBucketLabels}
+                  counts={dgaHeatmapLegendCounts}
+                  total={dgaHeatmapLegendTotal}
+                  colors={dgaHeatmapBucketColors}
+                  hiddenIndexes={activeDgaHeatmapHiddenBucketIndexes}
+                  onToggleIndex={isMonthlyBucketHeatmapView ? undefined : handleDgaTemperatureLegendToggle}
+                  onShowAll={() => setHiddenDgaTemperatureBuckets([])}
+                  filterHint="Temperature filter: click bands to hide/show cells."
+                />
               </div>
 
               <div style={{ width: "100%", overflowX: "auto" }}>
@@ -9660,11 +10234,15 @@ function AppInner(): JSX.Element {
                       activeWindowStart={dgaHeatmapActiveWindow?.start}
                       activeWindowEnd={dgaHeatmapActiveWindow?.end}
                       highlightedColumns={dgaHeatmapHighlightedColumns}
+                      hiddenBucketIndexes={activeDgaHeatmapHiddenBucketIndexes}
                       showBucketLetters={showHeatmapLetters}
                       bucketLetters={dgaHeatmapBucketLetters}
                       temperatureOverlayMode={isMonthlyBucketHeatmapView ? monthlyBucketTemperatureOverlayMode : "off"}
                       temperatureOverlayMetricLabel={isMonthlyBucketHeatmapView ? formatTemperatureMetricLabel(monthlyBucketTemperatureMetric) : undefined}
+                      showHoverLabel={showHeatmapHoverLabels}
                       showDrawSlotAxis={isMonthlyBucketHeatmapView}
+                      showNextDrawColumn={!isMonthlyBucketHeatmapView}
+                      nextDrawNumbers={!isMonthlyBucketHeatmapView ? dgaStripSelectedNumbers : []}
                       showHoverSparkline={!isMonthlyBucketHeatmapView || showMbsHoverSparkline}
                     />
                   </div>
@@ -9721,11 +10299,9 @@ function AppInner(): JSX.Element {
                     <b>{mirrorDgaStripToPreviousNeighbour ? "On" : "Off"}</b>
                     {" · "}
                     {mirrorDgaStripToPreviousNeighbour
-                      ? dgaStripPreviousNeighbourMatches.length
-                        ? `Mirroring ${dgaStripPreviousNeighbourMatches.length} valid target${dgaStripPreviousNeighbourMatches.length === 1 ? "" : "s"}: ${dgaStripPreviousNeighbourMatches.join(", ")}.`
-                        : dgaStripSelectedNumbers.length
-                          ? "No current strip selections are valid latest-draw ±1/±2 targets."
-                          : "Select numbers in the DGA simulation strip to mirror matching ±1/±2 targets."
+                      ? dgaStripSelectedNumbers.length
+                        ? `Mirroring ${dgaStripPreviousNeighbourMatches.length} valid target${dgaStripPreviousNeighbourMatches.length === 1 ? "" : "s"}: ${dgaStripPreviousNeighbourMatches.length ? dgaStripPreviousNeighbourMatches.join(", ") : "none"}. Invalid for this builder: ${dgaStripInvalidPreviousNeighbourTargets.length ? dgaStripInvalidPreviousNeighbourTargets.join(", ") : "none"}.`
+                        : "Select numbers in the DGA simulation strip to mirror matching ±1/±2 targets."
                       : "DGA strip simulates only. Turn on to copy only valid latest-draw ±1/±2 targets into the constraint builder."}
                   </div>
                 </div>
@@ -9839,6 +10415,8 @@ function AppInner(): JSX.Element {
     const zpaNorm = getSavedNormalizeMode() ?? "all";
     const zpaGroups = getSavedGroups() ?? custom;
     const snapshot: AppPresetSnapshot = {
+      effectiveSettingsLedger,
+      lastWorkerGenerationSeed: getGenerationSeed(),
       drawWindowMode,
       rangeFrom,
       rangeTo,
@@ -9916,9 +10494,16 @@ function AppInner(): JSX.Element {
       digitWidthConstraintEnabled,
       digitWidthSingleDigitPercent,
       digitWidthScope: digitWidthConstraintScope,
+      repeatedTerminalFamiliesEnabled,
+      repeatedTerminalFamiliesMode,
+      repeatedTerminalFamiliesCount,
+      repeatedTerminalFamiliesScope,
       attemptMultiplier,
       overgenFactor,
       scoringGenerationInfluence,
+      droughtEvidenceGovernorMode,
+      droughtEvidenceGovernorSettings: normalizeDroughtEvidenceGovernorSettings(droughtEvidenceGovernorSettings),
+      monthlyBucketTransitionGovernorMode,
       drawBucketPatternInfluenceEnabled,
       d1TerminalMomentumSgiEnabled,
       d1TerminalMomentumInternalStrength: d1TerminalMomentumGenerationProfile.internalStrength,
@@ -9952,6 +10537,7 @@ function AppInner(): JSX.Element {
       empiricalDroughtQuotaMode,
       empiricalDroughtQuotaManualMin,
       repeatWindowSizeW,
+      repeatWindowAuto,
       minFromRecentUnionM,
       sumFilter: { ...sumFilter },
       patternConstraintMode,
@@ -9964,6 +10550,7 @@ function AppInner(): JSX.Element {
       monthlyBucketTemperatureOverlayMode,
       monthlyBucketTemperatureMetric,
       showHeatmapLetters,
+      showHeatmapHoverLabels,
       showMbsHoverSparkline,
       dgaMonthlyBucketStateOpacity,
       ogaRefMode,
@@ -9972,7 +10559,10 @@ function AppInner(): JSX.Element {
       ogaPreferredBand,
       ogaPreferredDeciles: [...ogaPreferredDeciles],
       traceVerbose,
-      monthEndCarryOverBiasEnabled: monthEndCarryOverBiasTouchedRef.current ? monthEndCarryOverBiasEnabled : undefined,
+      monthEndCarryOverBiasEnabled: monthEndCarryOverManualEnabled,
+      monthEndCarryOverAutoEnabled,
+      latestNeighbourBoostEnabled,
+      droughtQuotaBoostEnabled,
       monthEndCarryOverStrength,
       monthEndCarryOverIncludeMonthEndUndrawn,
       monthEndCarryOverIncludeBoundaryRepeats,
@@ -10057,6 +10647,18 @@ function AppInner(): JSX.Element {
       snapshot.empiricalDroughtQuotaAdviceOneToThreeLift = empiricalDroughtQuotaAdvice.oneToThreeLift;
       snapshot.empiricalDroughtQuotaAdviceZeroHitRate = empiricalDroughtQuotaAdvice.zeroHitRate;
       snapshot.empiricalDroughtQuotaAdviceExpectedRandomZeroHitRate = empiricalDroughtQuotaAdvice.expectedRandomZeroHitRate;
+      snapshot.droughtEvidenceGovernorActive = droughtEvidenceGovernorProfile.active;
+      snapshot.droughtEvidenceGovernorSummaryLabel = droughtEvidenceGovernorProfile.summaryLabel;
+      snapshot.droughtEvidenceGovernorActiveFamilies = [...droughtEvidenceGovernorProfile.activeFamilies];
+      snapshot.droughtEvidenceGovernorBoostedNumbers = sortedSnapshotNumbers(droughtEvidenceGovernorProfile.boostedNumbers);
+      snapshot.droughtEvidenceGovernorTraceLabel = droughtEvidenceGovernorProfile.traceLabel;
+      snapshot.droughtEvidenceGovernorNumberMultipliers = { ...droughtEvidenceGovernorProfile.numberMultipliers };
+      snapshot.monthlyBucketTransitionGovernorActive = monthlyBucketTransitionGovernorProfile.active;
+      snapshot.monthlyBucketTransitionGovernorSummaryLabel = monthlyBucketTransitionGovernorProfile.summaryLabel;
+      snapshot.monthlyBucketTransitionGovernorInternalStrength = monthlyBucketTransitionGovernorProfile.internalStrength;
+      snapshot.monthlyBucketTransitionGovernorBoostedNumbers = sortedSnapshotNumbers(monthlyBucketTransitionGovernorProfile.boostedNumbers);
+      snapshot.monthlyBucketTransitionGovernorTraceLabel = monthlyBucketTransitionGovernorProfile.traceLabel;
+      snapshot.monthlyBucketTransitionGovernorNumberMultipliers = { ...monthlyBucketTransitionGovernorProfile.numberMultipliers };
       snapshot.selectionInsightsSnapshot = buildSelectionInsightsSnapshot({
         enabled: insightsEnabled,
         selected: selectionInsightsAnchorNumbers,
@@ -10071,6 +10673,8 @@ function AppInner(): JSX.Element {
   }
 
   function applySnapshot(s: AppPresetSnapshot) {
+    restoredSettingsLedgerRef.current = s.effectiveSettingsLedger ?? null;
+    settingsPersistence.setStatus("Restored setup; subsequent edits use current controls");
     setDrawWindowMode(s.drawWindowMode);
     setRangeFrom(s.rangeFrom);
     setRangeTo(s.rangeTo);
@@ -10202,6 +10806,17 @@ function AppInner(): JSX.Element {
     setDigitWidthConstraintEnabled(!!s.digitWidthConstraintEnabled);
     setDigitWidthSingleDigitPercent(Math.max(0, Math.min(100, Math.round((s.digitWidthSingleDigitPercent ?? 0) / 5) * 5)));
     setDigitWidthConstraintScope(s.digitWidthScope === "mainAndSupp" ? "mainAndSupp" : "main");
+    const savedRepeatedTerminalScope = normalizeRepeatedTerminalDigitFamilyScope(s.repeatedTerminalFamiliesScope);
+    setRepeatedTerminalFamiliesScope(savedRepeatedTerminalScope);
+    setRepeatedTerminalFamiliesMode(normalizeRepeatedTerminalDigitFamilyMode(s.repeatedTerminalFamiliesMode));
+    setRepeatedTerminalFamiliesCount(Math.max(
+      0,
+      Math.min(
+        repeatedTerminalDigitFamilyMaxForScope(savedRepeatedTerminalScope),
+        Math.round(Number.isFinite(s.repeatedTerminalFamiliesCount) ? s.repeatedTerminalFamiliesCount ?? 1 : 1),
+      ),
+    ));
+    setRepeatedTerminalFamiliesEnabled(!!s.repeatedTerminalFamiliesEnabled);
     setAttemptMultiplier(s.attemptMultiplier ?? DEFAULT_ATTEMPT_MULTIPLIER);
     setOvergenFactor((s as any).overgenFactor ?? 50);
     setScoringGenerationInfluence(
@@ -10209,6 +10824,9 @@ function AppInner(): JSX.Element {
         ? s.scoringGenerationInfluence
         : "off",
     );
+    setDroughtEvidenceGovernorMode(normalizeDroughtEvidenceGovernorMode(s.droughtEvidenceGovernorMode));
+    setDroughtEvidenceGovernorSettings(normalizeDroughtEvidenceGovernorSettings(s.droughtEvidenceGovernorSettings));
+    setMonthlyBucketTransitionGovernorMode(normalizeMonthlyBucketTransitionGovernorMode(s.monthlyBucketTransitionGovernorMode));
     setDrawBucketPatternInfluenceEnabled(!!s.drawBucketPatternInfluenceEnabled);
     setD1TerminalMomentumSgiEnabled(!!s.d1TerminalMomentumSgiEnabled);
     setAcceptanceNeedsHardExclude(!!(s as any).acceptanceNeedsHardExclude);
@@ -10246,6 +10864,7 @@ function AppInner(): JSX.Element {
     );
     setEmpiricalDroughtQuotaManualMin(Math.max(0, Math.min(8, Math.round(s.empiricalDroughtQuotaManualMin ?? 1))));
     setRepeatWindowSizeW(s.repeatWindowSizeW ?? 12);
+    setRepeatWindowAuto(s.repeatWindowAuto ?? false);
     setMinFromRecentUnionM(s.minFromRecentUnionM ?? 0);
     setSumFilter(s.sumFilter ?? { enabled: false, min: 0, max: 0, includeSupp: true });
     setPatternConstraintModeode(s.patternConstraintMode ?? 'boost');
@@ -10258,6 +10877,7 @@ function AppInner(): JSX.Element {
     setMonthlyBucketTemperatureOverlayMode(normalizeTemperatureOverlayMode(s.monthlyBucketTemperatureOverlayMode));
     setMonthlyBucketTemperatureMetric(normalizeTemperatureMetricMode(s.monthlyBucketTemperatureMetric, "recency"));
     setShowHeatmapLetters(s.showHeatmapLetters ?? false);
+    setShowHeatmapHoverLabels(s.showHeatmapHoverLabels ?? true);
     setShowMbsHoverSparkline(s.showMbsHoverSparkline ?? true);
     setDgaMonthlyBucketStateOpacity(clampDgaMonthlyBucketStateOpacity(s.dgaMonthlyBucketStateOpacity ?? 1));
     setOgaRefMode(s.ogaRefMode ?? 'window');
@@ -10269,13 +10889,10 @@ function AppInner(): JSX.Element {
     setMonthEndCarryOverStrength(normalizeMonthEndCarryOverStrength(s.monthEndCarryOverStrength));
     setMonthEndCarryOverIncludeMonthEndUndrawn(s.monthEndCarryOverIncludeMonthEndUndrawn ?? true);
     setMonthEndCarryOverIncludeBoundaryRepeats(s.monthEndCarryOverIncludeBoundaryRepeats ?? true);
-    if (typeof s.monthEndCarryOverBiasEnabled === "boolean") {
-      monthEndCarryOverBiasTouchedRef.current = true;
-      setMonthEndCarryOverBiasEnabled(s.monthEndCarryOverBiasEnabled);
-    } else {
-      monthEndCarryOverBiasTouchedRef.current = false;
-      setMonthEndCarryOverBiasEnabled(monthEndCarryOverWeighting.defaultEnabled);
-    }
+    setMonthEndCarryOverBiasEnabled(s.monthEndCarryOverBiasEnabled === true);
+    setMonthEndCarryOverAutoEnabled(s.monthEndCarryOverAutoEnabled === true);
+    setLatestNeighbourBoostEnabled(s.latestNeighbourBoostEnabled === true);
+    setDroughtQuotaBoostEnabled(s.droughtQuotaBoostEnabled === true);
     setSelectedCarryOverBoostNumbers(
       Array.from(new Set((s.selectedCarryOverBoostNumbers ?? []).filter((number) => Number.isInteger(number) && number >= 1 && number <= 45)))
         .sort((left, right) => left - right)

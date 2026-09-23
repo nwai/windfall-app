@@ -1,0 +1,147 @@
+.windfall-transition-watch {
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(10, 132, 255, 0.32);
+  border-left: 4px solid #0a84ff;
+  border-radius: 8px;
+  background: rgba(239, 247, 255, 0.88);
+  color: #172033;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.windfall-transition-watch__heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.windfall-transition-watch__eyebrow {
+  display: block;
+  color: #0066cc;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.windfall-transition-watch h3 {
+  margin: 2px 0 0;
+  color: #111827;
+  font-size: 15px;
+  line-height: 1.25;
+}
+
+.windfall-transition-watch__evidence {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border: 1px solid rgba(10, 132, 255, 0.38);
+  border-radius: 999px;
+  background: #fff;
+  color: #0055a6;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.windfall-transition-watch__condition,
+.windfall-transition-watch__summary {
+  margin: 8px 0 0;
+}
+
+.windfall-transition-watch__condition {
+  color: #334155;
+  font-weight: 700;
+}
+
+.windfall-transition-watch__numbers {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 9px;
+}
+
+.windfall-transition-watch__number-list {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.windfall-transition-watch__number-list span {
+  display: inline-grid;
+  place-items: center;
+  min-width: 30px;
+  min-height: 30px;
+  padding: 2px 6px;
+  border: 1px solid rgba(10, 132, 255, 0.42);
+  border-radius: 999px;
+  background: #fff;
+  color: #064f91;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.windfall-transition-watch__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(10, 132, 255, 0.2);
+}
+
+.windfall-transition-watch details {
+  margin-top: 6px;
+}
+
+.windfall-transition-watch summary {
+  min-height: 32px;
+  padding: 6px 0;
+  color: #0055a6;
+  cursor: pointer;
+  font-weight: 750;
+}
+
+.windfall-transition-watch dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  gap: 8px 14px;
+  margin: 4px 0 8px;
+}
+
+.windfall-transition-watch dl div {
+  min-width: 0;
+}
+
+.windfall-transition-watch dt {
+  color: #5b6473;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.windfall-transition-watch dd {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+  font-weight: 650;
+}
+
+.windfall-transition-watch details p {
+  margin: 6px 0 2px;
+  color: #475569;
+}
+
+@media (max-width: 620px) {
+  .windfall-transition-watch__heading,
+  .windfall-transition-watch__footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .windfall-transition-watch__evidence {
+    align-self: flex-start;
+  }
+}

@@ -9,10 +9,19 @@ import {
 import { drawsFromRows, rowsFromDraws } from "./drawHistoryReview";
 
 describe("drawHistoryValidation", () => {
+  it("blocks off-schedule dates in manual entry and reference imports", () => {
+    const options = { mainCount: 6, suppCount: 2, minNumber: 1, maxNumber: 45, outputDateFormat: "iso" as const };
+    const result = validateDrawEntry({ date: "2026-04-28", mains: ["1", "2", "3", "4", "5", "6"], supps: ["7", "8"] }, options);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.message).toContain("Tuesday");
+    const parsed = parseReferenceDrawRows("date,main1,main2,main3,main4,main5,main6,supp1,supp2\n2/1/26,1,2,3,4,5,6,7,8", options);
+    expect(parsed.rows).toEqual([]);
+    expect(parsed.rejectedRowCount).toBe(1);
+  });
   it("rejects blank number slots before treating them as zero", () => {
     const result = validateDrawEntry(
       {
-        date: "2026-05-26",
+        date: "2026-05-25",
         mains: ["1", "2", "", "4", "5", "6"],
         supps: ["7", "8"],
       },
@@ -28,7 +37,7 @@ describe("drawHistoryValidation", () => {
   it("validates a complete row and preserves the requested date format", () => {
     const result = validateDrawEntry(
       {
-        date: "2026-05-26",
+        date: "2026-05-25",
         mains: ["1", "2", "3", "4", "5", "6"],
         supps: ["7", "8"],
       },
@@ -37,14 +46,14 @@ describe("drawHistoryValidation", () => {
 
     expect(result).toEqual({
       ok: true,
-      row: { date: "5/26/26", mains: [1, 2, 3, 4, 5, 6], supps: [7, 8] },
+      row: { date: "5/25/26", mains: [1, 2, 3, 4, 5, 6], supps: [7, 8] },
     });
   });
 
   it("parses reference rows and reports rejected malformed rows", () => {
     const source = [
       "date,main1,main2,main3,main4,main5,main6,supp1,supp2",
-      "2026-05-26,1,2,3,4,5,6,7,8",
+      "2026-05-25,1,2,3,4,5,6,7,8",
       "2026-05-27,1,2,3,4,5,6,7,99",
     ].join("\n");
 
@@ -56,7 +65,7 @@ describe("drawHistoryValidation", () => {
       outputDateFormat: "iso",
     });
 
-    expect(result.rows).toEqual([{ date: "2026-05-26", mains: [1, 2, 3, 4, 5, 6], supps: [7, 8] }]);
+    expect(result.rows).toEqual([{ date: "2026-05-25", mains: [1, 2, 3, 4, 5, 6], supps: [7, 8] }]);
     expect(result.rejectedRowCount).toBe(1);
   });
 

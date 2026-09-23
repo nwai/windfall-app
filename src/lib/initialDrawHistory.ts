@@ -1,5 +1,6 @@
 import type { Draw } from "../types";
 import { parseDrawDateToEpoch } from "./recentDraws";
+import { auditHistorySchedule, drawScheduleDateError } from "./historyScheduleAudit";
 
 export type InitialDrawHistorySource = "cache" | "bundled-csv" | "none";
 
@@ -47,6 +48,31 @@ export function chooseInitialDrawHistory(
 
   const cachedLatest = latestEpoch(cached);
   const bundledLatest = latestEpoch(bundled);
+
+  if (cachedLatest === bundledLatest && cached.length === bundled.length) {
+    const errors = (rows: Draw[]) => {
+      const audit = auditHistorySchedule(rows);
+      return audit.invalidDateRows.length + audit.offScheduleRows.length;
+    };
+    const numberKey = (draw: Draw) => (
+      `${[...draw.main].sort((a, b) => a - b).join(",")}|${[...draw.supp].sort((a, b) => a - b).join(",")}`
+    );
+    const numberKeys = (rows: Draw[]) => rows.map(numberKey).sort();
+    const exactKey = (draw: Draw) => `${parseDrawDateToEpoch(draw.date)}|${numberKey(draw)}`;
+    const bundledKeys = new Set(bundled.map(exactKey));
+    const validCachedRowsUnchanged = cached.filter((draw) => !drawScheduleDateError(draw.date)).every((draw) => (
+      bundledKeys.has(exactKey(draw))
+    ));
+    if (errors(cached) > errors(bundled)
+      && validCachedRowsUnchanged
+      && JSON.stringify(numberKeys(cached)) === JSON.stringify(numberKeys(bundled))) {
+      return {
+        history: bundled,
+        source: "bundled-csv",
+        reason: "Bundled CSV corrects invalid or off-schedule dates in the browser cache, with the same draw count, latest date and main/supp number sets.",
+      };
+    }
+  }
 
   if (bundledLatest > cachedLatest) {
     return {

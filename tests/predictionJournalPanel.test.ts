@@ -818,7 +818,7 @@ describe("PredictionJournalPanel", () => {
     expect(html).toContain("Saved setup");
     expect(html).not.toContain("WFMQYH Custom 13");
     expect(html).not.toContain("Odd/even ratios: 5:3, 4:4");
-    expect(html).not.toContain("Scoring influence: normal");
+    expect(html).not.toContain("Numbers diagnostic influence: normal");
     expect(html).not.toContain("Month-end carry-over: strong");
     expect(html).not.toContain("User selected: 3");
   });

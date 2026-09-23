@@ -463,6 +463,7 @@ export const analyzeMonthlyBucketMixReplay = (
       ? allMonthGroups.filter((group) => group.monthLabel !== targetMonthLabel)
       : allMonthGroups,
     (group) => group.monthLabel,
+    group => group.draws[0]?.date,
   ).filter((group) => (
     effectiveScope === "all-month-lengths" ||
     group.draws.length === targetMonthDrawCount

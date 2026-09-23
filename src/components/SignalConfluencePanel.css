@@ -98,6 +98,43 @@
   font-weight: 700;
 }
 
+.signal-confluence-panel__visibility-control {
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: center;
+  gap: 6px 8px;
+}
+
+.signal-confluence-panel__control-label {
+  color: #334155;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.signal-confluence-panel__segments {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.05);
+}
+
+.signal-confluence-panel__segment {
+  min-width: 108px;
+  min-height: 32px;
+  border-radius: 7px;
+}
+
+.signal-confluence-panel__control-help {
+  grid-column: 1 / -1;
+  max-width: 410px;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .signal-confluence-panel__select {
   min-height: 32px;
   border: 1px solid rgba(15, 23, 42, 0.18);
@@ -341,5 +378,23 @@
 @media (max-width: 560px) {
   .signal-confluence-panel__summary {
     grid-template-columns: 1fr;
+  }
+
+  .signal-confluence-panel__visibility-control {
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .signal-confluence-panel__segments {
+    width: 100%;
+  }
+
+  .signal-confluence-panel__segment {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .signal-confluence-panel__control-help {
+    grid-column: 1;
   }
 }

@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 
 const appSource = (): string => readFileSync(resolve(process.cwd(), "src/App.tsx"), "utf8");
 const registrySource = (): string => readFileSync(resolve(process.cwd(), "src/lib/panelFavorites.ts"), "utf8");
+const monthlySummarySource = (): string => readFileSync(resolve(process.cwd(), "src/components/MonthlyDrawsSummaryPanel.tsx"), "utf8");
+const stylesSource = (): string => readFileSync(resolve(process.cwd(), "src/index.css"), "utf8");
 
 const blockBetween = (source: string, start: string, end: string): string => {
   const startIndex = source.indexOf(start);
@@ -102,5 +104,43 @@ describe("Candidate Generation Influences control relocation", () => {
     expect(app).toContain("Rejects · digit buckets");
     expect(app).toContain("Rejects · shape/recency");
     expect(app).not.toContain("rejects — excl:${st.exclusions} sum:${st.sumRange} div5:${st.div5} main0:${st.mainZeroSet}");
+  });
+
+  it("makes every top setup-summary value a navigable HIG button with a precise destination", () => {
+    const app = appSource();
+    const influencesBlock = blockBetween(
+      app,
+      'panelId="candidate-generation-influences"',
+      '{/* [ORDER-ANCHOR] 23.5 Paste-Weighted Candidate Generator */}',
+    );
+
+    expect(influencesBlock).toContain("generationSetupSummaryItems.map");
+    expect(influencesBlock).toContain('className="windfall-generation-setup-summary-chip"');
+    expect(influencesBlock).toContain("navigateToGenerationSetupSummaryTarget(item.target)");
+    expect(influencesBlock).toContain('aria-label={`${item.targetLabel}. Current summary: ${item.text}`}');
+
+    for (const target of [
+      "forcedExcluded",
+      "ratios",
+      "numbersDiagnostic",
+      "droughtGovernor",
+      "monthlyTransition",
+      "d1Sgi",
+      "latestNeighbour",
+      "readinessFilters",
+      "carryOver",
+      "stageIdm",
+      "bucketPlan",
+    ]) {
+      expect(app).toContain(`target: "${target}"`);
+    }
+
+    expect(app).toContain("setActiveSetupSummaryExpanded(true)");
+    expect(app).toContain("setEngineRankingExpanded(true)");
+    expect(app).toContain("setShapeBucketQuotasExpanded(true)");
+    expect(app).toContain("setRecencyLatestDrawExpanded(true)");
+    expect(app).toContain("setHardFiltersExpanded(true)");
+    expect(monthlySummarySource()).toContain('MONTHLY_DRAWS_STAGE_IDM_TARGET_ID = "monthly-draws-summary-stage-idm"');
+    expect(stylesSource()).toContain(".windfall-generation-setup-summary-chip:hover");
   });
 });

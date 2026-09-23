@@ -1,7 +1,9 @@
 // Add focus controls (type-in focus + optional Pin)
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { Draw } from '../../types';
-import { getSDE1FilteredPool } from '../../sde1';
+import { monteCarloWeights, simulateMonteCarlo, MONTE_CARLO_MODEL_VERSION } from '../../lib/monteCarloModel';
+import { seededRandom } from '../../lib/settingsTransparency';
+import { InfoHelp } from '../shared/HigControls';
 
 type LayoutMode = 'grid' | 'table';
 type SortMode = 'multi' | 'biased' | 'base' | 'sim' | 'number';
@@ -23,7 +25,6 @@ export interface MonteCarloPanelProps {
   drawSize?: number;
   showSimulation?: boolean;
   forcedNumbers?: number[];
-  selectedCheckNumbers?: number[];
 
   externalFocusNumber?: number | null;
   onFocusChange?: (n: number | null) => void;
@@ -31,7 +32,6 @@ export interface MonteCarloPanelProps {
 
 export const MonteCarloPanel: React.FC<MonteCarloPanelProps> = ({
   history,
-  enableSDE1,
   excludedNumbers,
   trendWeights,
   defaultWindow = 30,
@@ -39,75 +39,49 @@ export const MonteCarloPanel: React.FC<MonteCarloPanelProps> = ({
   drawSize = 8,
   showSimulation = true,
   forcedNumbers = [],
-  selectedCheckNumbers = [],
   externalFocusNumber = null,
   onFocusChange,
 }) => {
   const [layout, setLayout] = useState<LayoutMode>('grid');
   const [columns, setColumns] = useState<number>(4);
   const [simulationRuns, setSimulationRuns] = useState<number>(20000);
-  const [simResults, setSimResults] = useState<Map<number, number> | null>(null);
+  const [simulation, setSimulation] = useState<{ counts: Map<number, number>; runs: number; key: string; seed: number } | null>(null);
+  const [simulationError, setSimulationError] = useState<string | null>(null);
+  const runId = useRef(0);
   const [isRunning, setIsRunning] = useState<boolean>(false);
-  const [useTrendBias, setUseTrendBias] = useState<boolean>(true);
+  const [useTrendBias, setUseTrendBias] = useState<boolean>(false);
   const [sortMode, setSortMode] = useState<SortMode>('multi');
   const [focusNumber, setFocusNumber] = useState<number | null>(null);
   const [pinFocus, setPinFocus] = useState<boolean>(false);
 
 
   const recent = useMemo(
-    () => history.slice(-Math.min(defaultWindow, history.length)),
+    () => {
+      const real = history.filter(draw => !draw.isSimulated);
+      const count = Number.isFinite(defaultWindow) ? Math.max(0, Math.floor(defaultWindow)) : 0;
+      return count > 0 ? real.slice(-count) : [];
+    },
     [history, defaultWindow]
   );
-
-  const sde1Data = useMemo(() => {
-    if (!enableSDE1) {
-      return { pool: Array.from({ length: 45 }, (_, i) => i + 1), excludedNumbers: [] as number[] };
-    }
-    return getSDE1FilteredPool(history);
-  }, [enableSDE1, history]);
 
   const combinedExcluded = useMemo(() => {
     const merged = new Set<number>([...excludedNumbers]);
     return Array.from(merged).sort((a, b) => a - b);
   }, [excludedNumbers]);
 
-  const rawFreq = useMemo(() => {
-    const freq = Array(45).fill(0);
-    recent.forEach(draw => {
-      [...draw.main, ...draw.supp].forEach(n => {
-        if (n >= 1 && n <= 45) freq[n - 1] += 1;
-      });
-    });
-    return freq;
-  }, [recent]);
-
-  const baseProbs = useMemo(() => {
-    const total = rawFreq.reduce((a, b) => a + b, 0);
-    if (total === 0) return Array(45).fill(1 / 45);
-    return rawFreq.map(f => f / total);
-  }, [rawFreq]);
-
-  const adjustedProbs = useMemo(() => {
-    const arr = baseProbs.slice();
-    combinedExcluded.forEach(n => { arr[n - 1] = 0; });
-    let sum = arr.reduce((a, b) => a + b, 0);
-    if (sum === 0) {
-      const allowed = Array.from({ length: 45 }, (_, i) => i + 1).filter(n => !combinedExcluded.includes(n));
-      if (!allowed.length) return arr;
-      const p = 1 / allowed.length;
-      allowed.forEach(n => (arr[n - 1] = p));
-      return arr;
-    }
-    return arr.map(p => p / sum);
-  }, [baseProbs, combinedExcluded]);
+  const adjustedProbs = useMemo(() => monteCarloWeights(recent, combinedExcluded), [recent, combinedExcluded]);
 
   const biasedProbs = useMemo(() => {
     if (!useTrendBias || !trendWeights) return adjustedProbs;
-    let arr = adjustedProbs.map((p, idx) => p * (trendWeights[idx + 1] ?? 1));
-    const sum = arr.reduce((a, b) => a + b, 0);
-    if (sum === 0) return adjustedProbs;
-    return arr.map(p => p / sum);
-  }, [adjustedProbs, trendWeights, useTrendBias]);
+    return monteCarloWeights(recent, combinedExcluded, trendWeights);
+  }, [adjustedProbs, recent, combinedExcluded, trendWeights, useTrendBias]);
+
+  const simulationKey = JSON.stringify({ history: recent, probabilities: biasedProbs, drawSize });
+  const simResults = simulation?.key === simulationKey ? simulation.counts : null;
+  const eligibleCount = biasedProbs.filter(p => p > 0).length;
+  const validRuns = Number.isInteger(simulationRuns) && simulationRuns >= 1000 && simulationRuns <= 2000000;
+  useEffect(() => { runId.current++; setIsRunning(false); }, [simulationKey]);
+  useEffect(() => () => { runId.current++; }, []);
 
   const probabilityRows: NumberProb[] = useMemo(
     () =>
@@ -117,10 +91,10 @@ export const MonteCarloPanel: React.FC<MonteCarloPanelProps> = ({
           number,
           baseProb: adjustedProbs[i],
           biasedProb: biasedProbs[i],
-          simulatedProb: simResults ? (simResults.get(number) || 0) / (simulationRuns || 1) : undefined,
+          simulatedProb: simResults && simulation ? (simResults.get(number) || 0) / simulation.runs : undefined,
         };
       }),
-    [adjustedProbs, biasedProbs, simResults, simulationRuns]
+    [adjustedProbs, biasedProbs, simResults, simulation]
   );
 
   const sortedRows = useMemo(() => {
@@ -139,30 +113,29 @@ export const MonteCarloPanel: React.FC<MonteCarloPanelProps> = ({
     return arr;
   }, [probabilityRows, sortMode]);
 
-  const runSimulation = useCallback(() => {
+  const runSimulation = useCallback(async () => {
+    if (!validRuns || eligibleCount < drawSize) return;
+    const id = ++runId.current;
+    const seed = crypto.getRandomValues(new Uint32Array(1))[0];
+    const rng = seededRandom(seed);
+    const requestedRuns = simulationRuns;
     setIsRunning(true);
-    setTimeout(() => {
+    setSimulationError(null);
+    try {
       const cumulative = new Map<number, number>();
-      const cdf: { n: number; c: number }[] = [];
-      let acc = 0;
-      biasedProbs.forEach((p, idx) => {
-        acc += p;
-        cdf.push({ n: idx + 1, c: acc });
-      });
-      for (let i = 0; i < simulationRuns; i++) {
-        const pickSet = new Set<number>();
-        while (pickSet.size < drawSize) {
-          const r = Math.random();
-          const hit = cdf.find(x => x.c >= r);
-          if (!hit) continue;
-          pickSet.add(hit.n);
-        }
-        for (const n of pickSet) cumulative.set(n, (cumulative.get(n) || 0) + 1);
+      for (let completed = 0; completed < requestedRuns; completed += 1000) {
+        await new Promise(resolve => setTimeout(resolve, 0));
+        if (runId.current !== id) return;
+        const counts = simulateMonteCarlo(biasedProbs, Math.min(1000, requestedRuns - completed), drawSize, rng);
+        for (const [n, count] of counts) cumulative.set(n, (cumulative.get(n) ?? 0) + count);
       }
-      setSimResults(cumulative);
-      setIsRunning(false);
-    }, 0);
-  }, [biasedProbs, simulationRuns, drawSize]);
+      if (runId.current === id) setSimulation({ counts: cumulative, runs: requestedRuns, key: simulationKey, seed });
+    } catch (error) {
+      if (runId.current === id) setSimulationError(error instanceof Error ? error.message : 'Simulation failed.');
+    } finally {
+      if (runId.current === id) setIsRunning(false);
+    }
+  }, [biasedProbs, simulationRuns, drawSize, validRuns, eligibleCount, simulationKey]);
 
   const gridColumns = useMemo(() => {
     const perCol = Math.ceil(45 / columns);
@@ -212,7 +185,7 @@ export const MonteCarloPanel: React.FC<MonteCarloPanelProps> = ({
         {layout === 'grid' && (
           <label style={{ fontSize: 13 }}>
             Columns:
-            <input type="number" min={2} max={9} value={columns} onChange={e => setColumns(Number(e.target.value))} style={{ width: 55, marginLeft: 6 }} />
+            <input type="number" min={2} max={9} value={columns} onChange={e => setColumns(Math.max(2, Math.min(9, Math.floor(Number(e.target.value) || 2))))} style={{ width: 55, marginLeft: 6 }} />
           </label>
         )}
 
@@ -226,6 +199,7 @@ export const MonteCarloPanel: React.FC<MonteCarloPanelProps> = ({
           />
           Trend Bias
         </label>
+        <InfoHelp label="Monte Carlo model settings">Model {MONTE_CARLO_MODEL_VERSION}. Each eligible number receives count + 0.5 smoothing. Trend bias is optional: exp(3 times the difference between latest 6-draw and 13-draw rates), using actual available draws. Base and Biased are normalized sampling weights, not draw probabilities. Sim is inclusion frequency in simulated eight-number sets. Forced numbers shown here are generator context only; they are not forced in this independent simulation.</InfoHelp>
 
         {/* Focus controls */}
         <label style={{ fontSize: 13 }}>
@@ -275,7 +249,7 @@ export const MonteCarloPanel: React.FC<MonteCarloPanelProps> = ({
             </label>
             <button
               onClick={runSimulation}
-              disabled={!history.length || isRunning}
+              disabled={!recent.length || isRunning || !validRuns || eligibleCount < drawSize}
               style={{ background: '#3367d6', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: 4, cursor: isRunning ? 'default' : 'pointer', fontWeight: 600 }}
             >
               {isRunning ? 'Simulating…' : 'Run'}
@@ -289,10 +263,10 @@ export const MonteCarloPanel: React.FC<MonteCarloPanelProps> = ({
             <b>Excluded:</b> {combinedExcluded.length ? combinedExcluded.join(', ') : <span style={{ color: '#888' }}>none</span>}
           </span>
           <span style={{ fontSize: 12 }}>
-            <b>Forced:</b> {forcedNumbers.length ? forcedNumbers.join(', ') : <span style={{ color: '#888' }}>none</span>}
+            <b>Generator forced (context only):</b> {forcedNumbers.length ? forcedNumbers.join(', ') : <span style={{ color: '#888' }}>none</span>}
           </span>
           <span style={{ fontSize: 12 }}>
-            <b>Selected:</b> {selectedCheckNumbers.length ? selectedCheckNumbers.join(', ') : <span style={{ color: '#888' }}>none</span>}
+            <b>Scope:</b> independent Monte Carlo weighting
           </span>
           <span style={{ fontSize: 12 }}>
             <b>Focus:</b> {focusNumber ?? <span style={{ color: '#888' }}>none</span>}
@@ -301,8 +275,12 @@ export const MonteCarloPanel: React.FC<MonteCarloPanelProps> = ({
       </header>
 
       <div style={{ fontSize: 12, marginBottom: 6, color: '#555' }}>
-        Current-window weights from last {recent.length} draws. Scope: {historyScopeLabel ?? 'provided history'}. Exclusions zeroed then renormalized.
+        Sampling weights from {recent.length} draws; count + 0.5 smoothing. Scope: {historyScopeLabel ?? 'provided history'}. Trend {useTrendBias ? 'On' : 'Off'}.
       </div>
+      {simulationError && <p role="alert">{simulationError}</p>}
+      {eligibleCount < drawSize && <p role="alert">Need {drawSize} eligible numbers; only {eligibleCount} available. Review exclusions.</p>}
+      {!validRuns && <p role="alert">Runs must be a whole number from 1,000 to 2,000,000.</p>}
+      {simulation && <p role="status">{simResults ? `Completed ${simulation.runs.toLocaleString()} simulations; seed ${simulation.seed}.` : 'Previous simulation is out of date. Run again for this setup.'}</p>}
 
       {layout === 'table' ? (
         <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 14 }}>

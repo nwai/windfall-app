@@ -19,6 +19,7 @@ import {
   type EndingDigitMonthStageDigitRow,
 } from "../lib/endingDigitSequences";
 import { monthlyBucketDisplayForTimes } from "../lib/monthlyDrawSummary";
+import { TerminalDigitStageSplitCard } from "./TerminalDigitStageSplitCard";
 
 interface EndingDigitSequencePanelProps {
   draws: Draw[];
@@ -284,6 +285,12 @@ export const EndingDigitSequencePanel: React.FC<EndingDigitSequencePanelProps> =
           setMonthStageDrawCount(1);
         }}
         onDrawCountChange={setMonthStageDrawCount}
+      />
+
+      <TerminalDigitStageSplitCard
+        draws={draws}
+        allDraws={allDraws}
+        includeSupp={includeSupp}
       />
 
       <D1TerminalMomentumCard analysis={terminalMomentumAnalysis} />
