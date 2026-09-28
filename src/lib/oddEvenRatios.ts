@@ -24,6 +24,45 @@ const normalizeRatioList = (ratios: string[]): string[] => {
   return normalized;
 };
 
+const buildWeightedRatios = (
+  selectedRatios: string[],
+  ratioOptions?: OddEvenRatioOption[],
+): { ratio: string; index: number; weight: number }[] => {
+  const ratios = normalizeRatioList(selectedRatios);
+  const optionByRatio = new Map<string, OddEvenRatioOption>();
+  for (const option of ratioOptions ?? []) {
+    const ratio = String(option?.ratio ?? "").trim();
+    if (ratio) optionByRatio.set(ratio, option);
+  }
+
+  return ratios.map((ratio, index) => {
+    const option = optionByRatio.get(ratio);
+    const countWeight = Number(option?.count);
+    const percentWeight = Number(option?.percent);
+    const weight = Number.isFinite(countWeight) && countWeight > 0
+      ? countWeight
+      : Number.isFinite(percentWeight) && percentWeight > 0
+        ? percentWeight
+        : 1;
+    return { ratio, index, weight };
+  });
+};
+
+export function buildOddEvenRatioActiveShares(
+  selectedRatios: string[],
+  ratioOptions?: OddEvenRatioOption[],
+): Record<string, number> {
+  const weightedRatios = buildWeightedRatios(selectedRatios, ratioOptions);
+  const weightTotal = weightedRatios.reduce((sum, item) => sum + item.weight, 0);
+  if (weightTotal <= 0) {
+    return Object.fromEntries(weightedRatios.map((item) => [item.ratio, 0]));
+  }
+
+  return Object.fromEntries(
+    weightedRatios.map((item) => [item.ratio, (item.weight / weightTotal) * 100]),
+  );
+}
+
 export const oddEvenRatioForNumbers = (numbers: number[]): string => {
   const odds = numbers.filter((number) => number % 2 !== 0).length;
   return `${odds}:${numbers.length - odds}`;
@@ -50,29 +89,13 @@ export function buildOddEvenRatioQuotas(
   ratioOptions?: OddEvenRatioOption[],
 ): Record<string, number> {
   const totalRequested = Math.max(0, Math.floor(Number.isFinite(requested) ? requested : 0));
-  const ratios = normalizeRatioList(selectedRatios);
-  if (totalRequested <= 0 || ratios.length === 0) return {};
-
-  const optionByRatio = new Map<string, OddEvenRatioOption>();
-  for (const option of ratioOptions ?? []) {
-    const ratio = String(option?.ratio ?? "").trim();
-    if (ratio) optionByRatio.set(ratio, option);
-  }
-
-  const weightedRatios = ratios.map((ratio, index) => {
-    const option = optionByRatio.get(ratio);
-    const countWeight = Number(option?.count);
-    const percentWeight = Number(option?.percent);
-    const weight = Number.isFinite(countWeight) && countWeight > 0
-      ? countWeight
-      : Number.isFinite(percentWeight) && percentWeight > 0
-        ? percentWeight
-        : 1;
-    return { ratio, index, weight };
-  });
+  const weightedRatios = buildWeightedRatios(selectedRatios, ratioOptions);
+  if (totalRequested <= 0 || weightedRatios.length === 0) return {};
 
   const weightTotal = weightedRatios.reduce((sum, item) => sum + item.weight, 0);
-  if (weightTotal <= 0) return Object.fromEntries(ratios.map((ratio) => [ratio, 0]));
+  if (weightTotal <= 0) {
+    return Object.fromEntries(weightedRatios.map((item) => [item.ratio, 0]));
+  }
 
   const allocations = weightedRatios.map((item) => {
     const exact = (totalRequested * item.weight) / weightTotal;

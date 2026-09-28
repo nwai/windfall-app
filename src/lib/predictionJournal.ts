@@ -6,8 +6,15 @@ import {
   normalizeRepeatedTerminalDigitFamilyRule,
 } from "./repeatedTerminalDigitFamilies";
 import type { SelectionInsightsSnapshot } from "./selectionInsights";
+import {
+  clonePredictionCaptureBatch,
+  type PredictionCaptureBatch,
+} from "./predictionCapture";
 
 export const PREDICTION_JOURNAL_STORAGE_KEY = "windfall:prediction-journal:v1";
+export const PREDICTION_JOURNAL_UPDATED_EVENT = "windfall:prediction-journal-updated";
+export const PREDICTION_JOURNAL_BACKUP_FORMAT = "windfall-prediction-journal";
+export const PREDICTION_JOURNAL_BACKUP_VERSION = 1;
 
 export type PredictionTargetKind = "nextDraw" | "next2Draws" | "next3Draws" | "restOfMonth";
 
@@ -217,6 +224,30 @@ export interface PredictionJournalEntry {
   setupSnapshot?: AppPresetSnapshot;
   setupSummary?: PredictionJournalSetupSummary;
   provenance?: PredictionJournalProvenance;
+  captureBatch?: PredictionCaptureBatch;
+}
+
+export interface PredictionJournalBackup {
+  format: typeof PREDICTION_JOURNAL_BACKUP_FORMAT;
+  version: typeof PREDICTION_JOURNAL_BACKUP_VERSION;
+  exportedAt: string;
+  sourceOrigin?: string;
+  entries: PredictionJournalEntry[];
+}
+
+export interface ParsedPredictionJournalBackup {
+  entries: PredictionJournalEntry[];
+  rejectedCount: number;
+  sourceOrigin?: string;
+  exportedAt?: string;
+  legacyArray: boolean;
+}
+
+export interface PredictionJournalMergeResult {
+  entries: PredictionJournalEntry[];
+  addedCount: number;
+  updatedCount: number;
+  unchangedCount: number;
 }
 
 export interface BuildPredictionJournalEntryOptions {
@@ -228,6 +259,7 @@ export interface BuildPredictionJournalEntryOptions {
   setupSnapshot?: AppPresetSnapshot | null;
   reviewStatus?: PredictionJournalReviewStatus;
   previousEntry?: PredictionJournalEntry;
+  captureBatch?: PredictionCaptureBatch | null;
 }
 
 export interface PredictionJournalComputedStatus {
@@ -1148,6 +1180,9 @@ export function buildPredictionJournalEntry(options: BuildPredictionJournalEntry
   const reviewedAt = reviewStatus === "reviewedByUser"
     ? previous?.reviewStatus === "reviewedByUser" && previous.reviewedAt ? previous.reviewedAt : now
     : undefined;
+  const captureBatch = options.captureBatch === undefined
+    ? clonePredictionCaptureBatch(previous?.captureBatch)
+    : clonePredictionCaptureBatch(options.captureBatch);
 
   return {
     id: previous?.id ?? options.id ?? `prediction-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
@@ -1164,6 +1199,7 @@ export function buildPredictionJournalEntry(options: BuildPredictionJournalEntry
     setupSnapshot,
     setupSummary: setupSnapshot ? summarizePredictionJournalSetup(setupSnapshot) : previous?.setupSummary,
     provenance: buildPredictionJournalProvenance(inputs, setupSnapshot),
+    captureBatch,
   };
 }
 
@@ -1486,24 +1522,140 @@ const isPredictionJournalEntry = (value: unknown): value is PredictionJournalEnt
     && typeof entry.inputs === "object";
 };
 
+const normalizeStoredPredictionJournalEntry = (entry: PredictionJournalEntry): PredictionJournalEntry => {
+  const inputs = normalizePredictionJournalInputs(entry.inputs);
+  const reviewStatus = normalizeReviewStatus(entry.reviewStatus);
+  return {
+    ...entry,
+    inputs,
+    reviewStatus,
+    reviewedAt: reviewStatus === "reviewedByUser" && typeof entry.reviewedAt === "string" ? entry.reviewedAt : undefined,
+    archivedAt: typeof entry.archivedAt === "string" ? entry.archivedAt : undefined,
+    provenance: buildPredictionJournalProvenance(inputs, entry.setupSnapshot),
+    captureBatch: clonePredictionCaptureBatch(entry.captureBatch),
+  };
+};
+
+const entryTimestamp = (entry: PredictionJournalEntry): number => {
+  const parsed = Date.parse(entry.updatedAt);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const importedEntryIsNewer = (
+  imported: PredictionJournalEntry,
+  existing: PredictionJournalEntry,
+): boolean => {
+  if (imported.revision !== existing.revision) return imported.revision > existing.revision;
+  return entryTimestamp(imported) > entryTimestamp(existing);
+};
+
+export function createPredictionJournalBackup(
+  entries: PredictionJournalEntry[],
+  options: { exportedAt?: string; sourceOrigin?: string } = {},
+): PredictionJournalBackup {
+  const sourceOrigin = options.sourceOrigin?.trim();
+  return {
+    format: PREDICTION_JOURNAL_BACKUP_FORMAT,
+    version: PREDICTION_JOURNAL_BACKUP_VERSION,
+    exportedAt: options.exportedAt ?? new Date().toISOString(),
+    ...(sourceOrigin ? { sourceOrigin } : {}),
+    entries: entries.filter(isPredictionJournalEntry),
+  };
+}
+
+export function serializePredictionJournalBackup(
+  entries: PredictionJournalEntry[],
+  options: { exportedAt?: string; sourceOrigin?: string } = {},
+): string {
+  return JSON.stringify(createPredictionJournalBackup(entries, options), null, 2);
+}
+
+export function parsePredictionJournalBackup(raw: string): ParsedPredictionJournalBackup {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("The selected file is not valid JSON.");
+  }
+
+  const legacyArray = Array.isArray(parsed);
+  let rawEntries: unknown[];
+  let sourceOrigin: string | undefined;
+  let exportedAt: string | undefined;
+
+  if (Array.isArray(parsed)) {
+    rawEntries = parsed;
+  } else if (parsed && typeof parsed === "object") {
+    const backup = parsed as Partial<PredictionJournalBackup> & { entries?: unknown };
+    if (backup.format !== PREDICTION_JOURNAL_BACKUP_FORMAT) {
+      throw new Error("This JSON file is not a Windfall Prediction Journal backup.");
+    }
+    if (backup.version !== PREDICTION_JOURNAL_BACKUP_VERSION) {
+      throw new Error(`Prediction Journal backup version ${String(backup.version)} is not supported.`);
+    }
+    if (!Array.isArray(backup.entries)) {
+      throw new Error("This Prediction Journal backup does not contain an entries list.");
+    }
+    rawEntries = backup.entries;
+    sourceOrigin = typeof backup.sourceOrigin === "string" ? backup.sourceOrigin : undefined;
+    exportedAt = typeof backup.exportedAt === "string" ? backup.exportedAt : undefined;
+  } else {
+    throw new Error("This JSON file does not contain Prediction Journal entries.");
+  }
+
+  const entries = rawEntries
+    .filter(isPredictionJournalEntry)
+    .map(normalizeStoredPredictionJournalEntry);
+
+  return {
+    entries,
+    rejectedCount: rawEntries.length - entries.length,
+    sourceOrigin,
+    exportedAt,
+    legacyArray,
+  };
+}
+
+export function mergePredictionJournalEntries(
+  existingEntries: PredictionJournalEntry[],
+  importedEntries: PredictionJournalEntry[],
+): PredictionJournalMergeResult {
+  const merged = new Map<string, PredictionJournalEntry>();
+  existingEntries.filter(isPredictionJournalEntry).forEach((entry) => merged.set(entry.id, entry));
+
+  let addedCount = 0;
+  let updatedCount = 0;
+  let unchangedCount = 0;
+
+  for (const imported of importedEntries.filter(isPredictionJournalEntry)) {
+    const existing = merged.get(imported.id);
+    if (!existing) {
+      merged.set(imported.id, imported);
+      addedCount += 1;
+    } else if (importedEntryIsNewer(imported, existing)) {
+      merged.set(imported.id, imported);
+      updatedCount += 1;
+    } else {
+      unchangedCount += 1;
+    }
+  }
+
+  const entries = [...merged.values()].sort((left, right) => (
+    entryTimestamp(right) - entryTimestamp(left)
+      || right.revision - left.revision
+      || left.id.localeCompare(right.id)
+  ));
+
+  return { entries, addedCount, updatedCount, unchangedCount };
+}
+
 export function loadPredictionJournalEntries(storage: Storage = window.localStorage): PredictionJournalEntry[] {
   try {
     const raw = storage.getItem(PREDICTION_JOURNAL_STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(isPredictionJournalEntry).map((entry) => {
-      const inputs = normalizePredictionJournalInputs(entry.inputs);
-      const reviewStatus = normalizeReviewStatus(entry.reviewStatus);
-      return {
-        ...entry,
-        inputs,
-        reviewStatus,
-        reviewedAt: reviewStatus === "reviewedByUser" && typeof entry.reviewedAt === "string" ? entry.reviewedAt : undefined,
-        archivedAt: typeof entry.archivedAt === "string" ? entry.archivedAt : undefined,
-        provenance: buildPredictionJournalProvenance(inputs, entry.setupSnapshot),
-      };
-    });
+    return parsed.filter(isPredictionJournalEntry).map(normalizeStoredPredictionJournalEntry);
   } catch {
     return [];
   }
@@ -1511,8 +1663,14 @@ export function loadPredictionJournalEntries(storage: Storage = window.localStor
 
 export function savePredictionJournalEntries(entries: PredictionJournalEntry[], storage: Storage = window.localStorage): void {
   storage.setItem(PREDICTION_JOURNAL_STORAGE_KEY, JSON.stringify(entries.filter(isPredictionJournalEntry)));
+  if (typeof window !== "undefined" && storage === window.localStorage) {
+    window.dispatchEvent(new Event(PREDICTION_JOURNAL_UPDATED_EVENT));
+  }
 }
 
 export function clearPredictionJournalEntries(storage: Storage = window.localStorage): void {
   storage.removeItem(PREDICTION_JOURNAL_STORAGE_KEY);
+  if (typeof window !== "undefined" && storage === window.localStorage) {
+    window.dispatchEvent(new Event(PREDICTION_JOURNAL_UPDATED_EVENT));
+  }
 }

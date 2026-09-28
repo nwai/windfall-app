@@ -12,6 +12,7 @@ import {
   type MonthlyTransitionLengthFilter,
   type MonthlyUndrawnSurvivalRow,
 } from "../lib/monthlyBucketTransitions";
+import MonthlyStageEvidenceAuditCard from "./MonthlyStageEvidenceAuditCard";
 import { HigField, InfoHelp } from "./shared/HigControls";
 
 interface MonthlyBucketTransitionLabPanelProps {
@@ -138,7 +139,7 @@ const fmtNum = (value: number | null | undefined, digits = 1): string => (
 
 export const formatWholeAwareNumber = (value: number | null | undefined, digits = 1): string => {
   if (value === null || value === undefined || !Number.isFinite(value)) return "n/a";
-  return Number.isInteger(value) ? String(value) : value.toFixed(digits);
+  return String(Number(value.toFixed(digits)));
 };
 
 const formatLength = (length: MonthlyTransitionLengthFilter): string => (
@@ -263,7 +264,7 @@ const MarkovProjectionTable: React.FC<{ rows: MonthlyBucketMarkovProjectionRow[]
           <th style={{ ...thStyle, textAlign: "right" }}>Expected advances</th>
           <th style={thStyle}>Strongest source</th>
           <th style={thStyle}>State before</th>
-          <th style={thStyle}>Projected after</th>
+          <th style={thStyle}>Projected after (expected)</th>
         </tr>
       </thead>
       <tbody>
@@ -562,6 +563,8 @@ export const MonthlyBucketTransitionLabPanel: React.FC<MonthlyBucketTransitionLa
           </ul>
         </div>
       )}
+
+      <MonthlyStageEvidenceAuditCard history={history} />
 
       <div style={sectionStyle}>
         <SectionHeader title="Current-Stage Transition Expectation" helpLabel="Current-stage transition expectation help">

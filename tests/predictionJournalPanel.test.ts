@@ -5,7 +5,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { PredictionJournalPanel } from "../src/components/PredictionJournalPanel";
-import { PREDICTION_JOURNAL_STORAGE_KEY, buildPredictionJournalEntry } from "../src/lib/predictionJournal";
+import {
+  PREDICTION_JOURNAL_STORAGE_KEY,
+  buildPredictionJournalEntry,
+  serializePredictionJournalBackup,
+} from "../src/lib/predictionJournal";
 import type { Draw } from "../src/types";
 
 const draw = (date: string, main: number[], supp: number[] = []): Draw => ({ date, main, supp });
@@ -55,6 +59,10 @@ describe("PredictionJournalPanel", () => {
 
     expect(html).toContain("Prediction Journal &amp; Scorecard");
     expect(html).toContain("Prediction Journal Findings Report");
+    expect(html).toContain("Stored locally for this browser address");
+    expect(html).toContain("Changing the hostname, port, or browser profile opens a separate local journal");
+    expect(html).toContain("Backup JSON");
+    expect(html).toContain("Import JSON");
     expect(html).toContain("Observe-only V1");
     expect(html).toContain("Journal entries");
     expect(html).toContain("Record your own draw hypotheses");
@@ -63,6 +71,62 @@ describe("PredictionJournalPanel", () => {
     expect(html).not.toContain("Save prediction");
     expect(html).not.toContain("<h3");
     expect(html).not.toContain("1,2,3,4,5,6");
+  });
+
+  it("imports a JSON backup by merging valid entries into the local journal", async () => {
+    const history = [
+      draw("6/22/26", [2, 4, 6, 8, 10, 12], [14, 16]),
+      draw("6/24/26", [1, 3, 5, 7, 9, 11], [13, 15]),
+    ];
+    const importedEntry = buildPredictionJournalEntry({
+      id: "prediction-panel-imported",
+      now: "2026-06-24T10:30:00.000Z",
+      latestDraw: history[1],
+      targetKind: "nextDraw",
+      reviewStatus: "reviewedByUser",
+      inputs: { notes: "Imported safely." },
+    });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(React.createElement(PredictionJournalPanel, { history }));
+    });
+
+    const importInput = container.querySelector(
+      "input[aria-label='Import Prediction Journal JSON backup']",
+    ) as HTMLInputElement;
+    const backup = serializePredictionJournalBackup([importedEntry], {
+      exportedAt: "2026-06-24T11:00:00.000Z",
+      sourceOrigin: "http://localhost:5173",
+    });
+    Object.defineProperty(importInput, "files", {
+      configurable: true,
+      value: [{ text: async () => backup }],
+    });
+
+    await act(async () => {
+      importInput.dispatchEvent(new Event("change", { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain("Import from http://localhost:5173: 1 added, 0 updated, 0 already current.");
+    const importedRowButton = container.querySelector(
+      "button[aria-controls='prediction-journal-entry-prediction-panel-imported']",
+    ) as HTMLButtonElement;
+    await act(async () => {
+      importedRowButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(container.textContent).toContain("Imported safely.");
+    const saved = JSON.parse(window.localStorage.getItem(PREDICTION_JOURNAL_STORAGE_KEY) ?? "[]");
+    expect(saved).toHaveLength(1);
+    expect(saved[0].id).toBe("prediction-panel-imported");
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
   });
 
   it("renders a date-aware journal draft after a new prediction request", () => {

@@ -20,10 +20,16 @@ import {
   type PreviousNeighbourDirectionalSelectionHelper,
 } from "../lib/previousNeighbourDirectionalPatterns";
 import type { Draw } from "../types";
+import type { LatestNeighbourSupportMode } from "../lib/latestNeighbourSupport";
 import { HigField, InfoHelp } from "./shared/HigControls";
+import LatestNeighbourLearningAuditCard from "./LatestNeighbourLearningAuditCard";
 
 interface PreviousNeighbourBacktestPanelProps {
   draws: Draw[];
+  auditDraws?: Draw[];
+  auditHistoryScopeLabel?: string;
+  liveNeighbourMode?: LatestNeighbourSupportMode;
+  liveNeighbourEnabled?: boolean;
   userSelectedNumbers?: readonly number[];
   excludedNumbers?: readonly number[];
   onToggleUserSelectedNumber?: (number: number) => void;
@@ -890,6 +896,10 @@ const TransitionHistoryTable: React.FC<{ transitions: PreviousNeighbourTransitio
 
 export const PreviousNeighbourBacktestPanel: React.FC<PreviousNeighbourBacktestPanelProps> = ({
   draws,
+  auditDraws = draws,
+  auditHistoryScopeLabel = "Current history slice",
+  liveNeighbourMode = "pm1",
+  liveNeighbourEnabled = false,
   userSelectedNumbers = [],
   excludedNumbers = [],
   onToggleUserSelectedNumber,
@@ -1000,6 +1010,13 @@ export const PreviousNeighbourBacktestPanel: React.FC<PreviousNeighbourBacktestP
           </select>
         </HigField>
       </div>
+
+      <LatestNeighbourLearningAuditCard
+        history={auditDraws}
+        historyScopeLabel={auditHistoryScopeLabel}
+        liveMode={liveNeighbourMode}
+        liveEnabled={liveNeighbourEnabled}
+      />
 
       <LiveHandoffPlanningCard
         handoff={handoffAnalysis}

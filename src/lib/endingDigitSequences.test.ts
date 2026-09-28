@@ -240,6 +240,67 @@ describe("analyzeTerminalDigitStageSplit", () => {
     expect(analysis.currentMonth?.selectedDigits).toEqual([0, 9]);
     expect(analysis.confidenceInterval).not.toBeNull();
     expect(analysis.randomComparisonPValue).not.toBeNull();
+    expect(analysis.nextDraw.targetDrawNumber).toBe(7);
+    expect(analysis.nextDraw.actual).toBe(8);
+    expect(analysis.nextDraw.ratio).toBeGreaterThan(2);
+    expect(analysis.nextDraw.digitRows.find((row) => row.digit === 9)).toMatchObject({
+      trials: 2,
+      actual: 8,
+      presenceHits: 2,
+    });
+    expect(analysis.candidateTranslation).toMatchObject({
+      eligibleTransitions: 2,
+      observedHits: 8,
+      currentState: "awaiting-target",
+      currentSelectedDigits: [0, 9],
+      currentPoolNumbers: [9, 10, 19, 20, 29, 30, 39, 40],
+    });
+    expect(analysis.candidateTranslation.auditRows).toHaveLength(2);
+    expect(analysis.candidateTranslation.distribution.reduce(
+      (sum, row) => sum + row.observedTransitions,
+      0,
+    )).toBe(2);
+    expect(analysis.candidateTranslation.distribution.reduce(
+      (sum, row) => sum + row.randomExpectedTransitions,
+      0,
+    )).toBeCloseTo(2, 8);
+  });
+
+  it("adds a real partial-month target draw to the immediate replay without treating the month as complete", () => {
+    const january = scheduledDraws(2026, 1, quietThenNine);
+    const february = scheduledDraws(2026, 2, quietThenNine);
+    const marchThroughD7 = scheduledDraws(2026, 3, quietThenNine).slice(0, 7);
+    const analysis = analyzeTerminalDigitStageSplit(
+      [...january, ...february, ...marchThroughD7],
+      { includeSupp: true, earlyDrawCount: 6, resampleCount: 0 },
+    );
+
+    expect(analysis.eligibleMonthCount).toBe(2);
+    expect(analysis.nextDraw.eligibleMonths).toBe(3);
+    expect(analysis.candidateTranslation.eligibleTransitions).toBe(3);
+    expect(analysis.candidateTranslation.currentState).toBe("target-recorded");
+    expect(analysis.candidateTranslation.auditRows[0]).toMatchObject({
+      monthKey: "2026-03",
+      targetDrawNumber: 7,
+      selectedDigits: [0, 9],
+      hitNumbers: [9, 19, 29, 39],
+      hitCount: 4,
+    });
+  });
+
+  it("never records a simulated target draw as candidate-translation evidence", () => {
+    const january = scheduledDraws(2026, 1, quietThenNine);
+    const march = scheduledDraws(2026, 3, quietThenNine);
+    const simulatedD7: Draw = { ...march[6], isSimulated: true };
+    const analysis = analyzeTerminalDigitStageSplit(
+      [...january, ...march.slice(0, 6), simulatedD7],
+      { includeSupp: true, earlyDrawCount: 6, resampleCount: 0 },
+    );
+
+    expect(analysis.nextDraw.eligibleMonths).toBe(1);
+    expect(analysis.candidateTranslation.eligibleTransitions).toBe(1);
+    expect(analysis.candidateTranslation.currentState).toBe("awaiting-target");
+    expect(analysis.candidateTranslation.auditRows.some((row) => row.monthKey === "2026-03")).toBe(false);
   });
 
   it("distinguishes repeated occurrences from draw presence", () => {
@@ -284,7 +345,36 @@ describe("analyzeTerminalDigitStageSplit", () => {
 
     expect(analysis.cutoffRows.map((row) => row.earlyDrawCount)).toEqual([3, 4, 5, 6, 7, 8, 9, 10]);
     expect(analysis.cutoffRows.find((row) => row.earlyDrawCount === 6)?.eligibleMonths).toBe(2);
+    expect(analysis.cutoffRows.find((row) => row.earlyDrawCount === 6)?.nextDrawRatio).toBeGreaterThan(2);
     expect(analysis.warnings.join(" ")).toContain("not corrected for trying several split points");
+  });
+
+  it("keeps the immediate next-draw replay separate from the rest of the month", () => {
+    const buildMonth = (year: number, month: number, laterDigit: number): Draw[] => scheduledDraws(
+      year,
+      month,
+      (ordinal) => {
+        if (ordinal <= 6) return { main: [1, 2, 3, 4, 5, 6], supp: [7, 8] };
+        if (ordinal === 7) return { main: [9, 19, 29, 39, 1, 2], supp: [3, 4] };
+        const base = laterDigit === 0
+          ? [10, 20, 30, 40, 1, 2, 3, 4]
+          : [5, 15, 25, 35, 45, 1, 2, 3];
+        return { main: base.slice(0, 6), supp: base.slice(6, 8) };
+      },
+    );
+    const historyA = [...buildMonth(2026, 1, 0), ...buildMonth(2026, 2, 0)];
+    const historyB = [...buildMonth(2026, 1, 5), ...buildMonth(2026, 2, 5)];
+    const analysisA = analyzeTerminalDigitStageSplit(historyA, { earlyDrawCount: 6, resampleCount: 0 });
+    const analysisB = analyzeTerminalDigitStageSplit(historyB, { earlyDrawCount: 6, resampleCount: 0 });
+
+    expect(analysisA.nextDraw.actual).toBe(analysisB.nextDraw.actual);
+    expect(analysisA.nextDraw.expected).toBe(analysisB.nextDraw.expected);
+    expect(analysisA.candidateTranslation.observedHits).toBe(analysisB.candidateTranslation.observedHits);
+    expect(analysisA.candidateTranslation.expectedHits).toBe(analysisB.candidateTranslation.expectedHits);
+    expect(analysisA.candidateTranslation.auditRows.map((row) => row.hitNumbers)).toEqual(
+      analysisB.candidateTranslation.auditRows.map((row) => row.hitNumbers),
+    );
+    expect(analysisA.actual).not.toBe(analysisB.actual);
   });
 });
 

@@ -18,16 +18,23 @@ import {
   type EndingDigitMonthStageAnalysis,
   type EndingDigitMonthStageDigitRow,
 } from "../lib/endingDigitSequences";
-import { monthlyBucketDisplayForTimes } from "../lib/monthlyDrawSummary";
+import {
+  monthlyBucketDisplayForTimes,
+  type StageIdealDrawState,
+} from "../lib/monthlyDrawSummary";
 import { TerminalDigitStageSplitCard } from "./TerminalDigitStageSplitCard";
+import { TerminalStructureTransitionLab } from "./TerminalStructureTransitionLab";
+import { InfoHelp } from "./shared/HigControls";
 
 interface EndingDigitSequencePanelProps {
   draws: Draw[];
   allDraws?: Draw[];
+  stageIdealDrawState?: StageIdealDrawState | null;
 }
 
 type SortMode = "dateDesc" | "coveredDesc" | "runDesc";
-type HorizonChoice = "6" | "10" | "20" | "36" | "WFMQYH";
+type RecentWindowChoice = "6" | "10" | "20" | "36" | "WFMQYH";
+type HalfLifeChoice = "3" | "6" | "9" | "12" | "24" | "36" | "WFMQYH";
 
 const StatChip: React.FC<{
   label: string;
@@ -100,11 +107,15 @@ const formatSequence = (digits: readonly number[]): string => digits.join("-");
 
 const formatComponent = (value: number): string => `${Math.round(value * 100)}%`;
 
-export const EndingDigitSequencePanel: React.FC<EndingDigitSequencePanelProps> = ({ draws, allDraws }) => {
+export const EndingDigitSequencePanel: React.FC<EndingDigitSequencePanelProps> = ({
+  draws,
+  allDraws,
+  stageIdealDrawState = null,
+}) => {
   const [includeSupp, setIncludeSupp] = useState<boolean>(true);
   const [sortMode, setSortMode] = useState<SortMode>("dateDesc");
-  const [recentWindowChoice, setRecentWindowChoice] = useState<HorizonChoice>("20");
-  const [halfLifeChoice, setHalfLifeChoice] = useState<HorizonChoice>("10");
+  const [recentWindowChoice, setRecentWindowChoice] = useState<RecentWindowChoice>("20");
+  const [halfLifeChoice, setHalfLifeChoice] = useState<HalfLifeChoice>("12");
   const [prediction, setPrediction] = useState<EndingDigitSequencePrediction | null>(null);
   const [monthStageMonthKey, setMonthStageMonthKey] = useState<string>("");
   const [monthStageDrawCount, setMonthStageDrawCount] = useState<number>(1);
@@ -200,7 +211,7 @@ export const EndingDigitSequencePanel: React.FC<EndingDigitSequencePanelProps> =
       includeSupp,
       sequenceLength: "auto",
       recentWindow: resolveHorizon(recentWindowChoice, draws.length, 20),
-      halfLife: resolveHorizon(halfLifeChoice, draws.length, 10),
+      halfLife: resolveHorizon(halfLifeChoice, draws.length, 12),
     }));
   };
 
@@ -208,9 +219,9 @@ export const EndingDigitSequencePanel: React.FC<EndingDigitSequencePanelProps> =
     <section style={{ border: "1px solid #e5e7eb", borderRadius: 8, background: "#fff", padding: 12 }}>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", marginBottom: 10 }}>
         <div>
-          <div style={{ fontWeight: 700, fontSize: 16, color: "#223" }}>Ending Digit Sequence Analyzer</div>
+          <div style={{ fontWeight: 700, fontSize: 16, color: "#223" }}>Within-Draw Ending Digit Sequence Analyzer</div>
           <div style={{ fontSize: 12, color: "#667", marginTop: 2 }}>
-            Checks whether draws cluster into consecutive ending-digit runs such as 2-3-4-5 or 8-9-0.
+            Checks whether one draw contains consecutive circular sequence motifs such as 2-3-4-5 or 8-9-0. Cross-draw family runs and motif movement are measured separately below.
           </div>
         </div>
         <div style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
@@ -233,7 +244,7 @@ export const EndingDigitSequencePanel: React.FC<EndingDigitSequencePanelProps> =
           </label>
           <label style={{ fontSize: 12, color: "#444" }}>
             Recent:
-            <select value={recentWindowChoice} onChange={(e) => setRecentWindowChoice(e.target.value as HorizonChoice)} style={{ marginLeft: 6, fontSize: 12 }}>
+            <select value={recentWindowChoice} onChange={(e) => setRecentWindowChoice(e.target.value as RecentWindowChoice)} style={{ marginLeft: 6, fontSize: 12 }}>
               <option value="6">6</option>
               <option value="10">10</option>
               <option value="20">20</option>
@@ -241,16 +252,21 @@ export const EndingDigitSequencePanel: React.FC<EndingDigitSequencePanelProps> =
               <option value="WFMQYH">WFMQYH</option>
             </select>
           </label>
-          <label style={{ fontSize: 12, color: "#444" }}>
-            Half-life:
-            <select value={halfLifeChoice} onChange={(e) => setHalfLifeChoice(e.target.value as HorizonChoice)} style={{ marginLeft: 6, fontSize: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "#444" }}>
+            <label htmlFor="ending-sequence-half-life">Half-life:</label>
+            <InfoHelp label="About ending-sequence half-life">
+              Half-life controls how quickly older draws fade in the candidate ranking. At 12, a draw 12 places old keeps half weight, one 24 places old keeps quarter weight, and one 48 places old keeps one-sixteenth weight. WFMQYH uses the active window length as the half-life, so its oldest draw keeps about half weight. Exponential weighting has no hard zero: older draws become progressively smaller but are not deliberately deleted.
+            </InfoHelp>
+            <select id="ending-sequence-half-life" value={halfLifeChoice} onChange={(e) => setHalfLifeChoice(e.target.value as HalfLifeChoice)} style={{ fontSize: 12 }}>
+              <option value="3">3</option>
               <option value="6">6</option>
-              <option value="10">10</option>
-              <option value="20">20</option>
+              <option value="9">9</option>
+              <option value="12">12</option>
+              <option value="24">24</option>
               <option value="36">36</option>
               <option value="WFMQYH">WFMQYH</option>
             </select>
-          </label>
+          </div>
           <button
             type="button"
             onClick={handleSuggestNext}
@@ -272,8 +288,14 @@ export const EndingDigitSequencePanel: React.FC<EndingDigitSequencePanelProps> =
       </div>
 
       <div style={{ fontSize: 12, color: "#556", marginBottom: 12, lineHeight: 1.45 }}>
-        Ending digits are treated <b>circularly</b>, so <b>8-9-0</b> and <b>9-0-1-2</b> count as consecutive runs. “Covered numbers” means how many numbers in the draw fall inside the strongest consecutive ending-digit run.
+        Ending digits are treated <b>circularly</b>, so <b>8-9-0</b> and <b>9-0-1-2</b> count as within-draw sequence motifs. “Covered numbers” means how many numbers in the draw fall inside the strongest motif. A same-ending family run across several draws is a different diagnostic.
       </div>
+
+      <TerminalStructureTransitionLab
+        draws={draws}
+        allDraws={allDraws}
+        includeSupp={includeSupp}
+      />
 
       <TerminalDigitMonthStageCard
         analysis={monthStageAnalysis}
@@ -291,6 +313,7 @@ export const EndingDigitSequencePanel: React.FC<EndingDigitSequencePanelProps> =
         draws={draws}
         allDraws={allDraws}
         includeSupp={includeSupp}
+        stageIdealDrawState={stageIdealDrawState}
       />
 
       <D1TerminalMomentumCard analysis={terminalMomentumAnalysis} />
@@ -676,7 +699,7 @@ const formatLift = (value: number | null): string => (
   value === null ? "n/a" : `${value.toFixed(2)}x`
 );
 
-function resolveHorizon(choice: HorizonChoice, drawCount: number, fallback: number): number {
+function resolveHorizon(choice: RecentWindowChoice | HalfLifeChoice, drawCount: number, fallback: number): number {
   if (choice === "WFMQYH") return Math.max(1, drawCount);
   const numeric = Number(choice);
   return Number.isFinite(numeric) && numeric > 0 ? numeric : fallback;

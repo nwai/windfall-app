@@ -246,6 +246,31 @@ describe("MonthlyDrawsSummaryPanel planning month rollover", () => {
     expect((badge?.closest("td") as HTMLTableCellElement | null)?.style.textAlign).toBe("center");
   });
 
+  it("places Acceptance Needs between Monthly Buckets and Robust Baseline", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-05T12:00:00"));
+    const history = [
+      draw("2026-07-01", [1, 2, 3, 4, 5, 6], [7, 8]),
+    ];
+
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(React.createElement(MonthlyDrawsSummaryPanel, { history }));
+    });
+
+    const text = container.textContent ?? "";
+    const monthlyBucketsIndex = text.indexOf("Monthly Buckets");
+    const acceptanceNeedsIndex = text.indexOf("Acceptance Needs");
+    const robustBaselineIndex = text.indexOf("Robust Baseline And Ideal Draw");
+
+    expect(monthlyBucketsIndex).toBeGreaterThanOrEqual(0);
+    expect(acceptanceNeedsIndex).toBeGreaterThan(monthlyBucketsIndex);
+    expect(robustBaselineIndex).toBeGreaterThan(acceptanceNeedsIndex);
+  });
+
   it("colours Acceptance Needs number pills by monthly bucket", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-05T12:00:00"));

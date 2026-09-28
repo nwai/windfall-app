@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildOddEvenRatioActiveShares,
   buildOddEvenRatioQuotas,
   oddEvenRatioForNumbers,
 } from "./oddEvenRatios";
@@ -51,5 +52,35 @@ describe("odd/even ratio helpers", () => {
       "2:6": 44,
       "7:1": 22,
     });
+  });
+
+  it("rebalances active shares across only the ratios that remain selected", () => {
+    const options = [
+      { ratio: "4:4", count: 33, percent: 33 },
+      { ratio: "5:3", count: 25, percent: 25 },
+      { ratio: "3:5", count: 17, percent: 17 },
+    ];
+
+    const shares = buildOddEvenRatioActiveShares(["5:3", "3:5"], options);
+
+    expect(shares["4:4"]).toBeUndefined();
+    expect(shares["5:3"]).toBeCloseTo(59.5238, 4);
+    expect(shares["3:5"]).toBeCloseTo(40.4762, 4);
+    expect(Object.values(shares).reduce((sum, share) => sum + share, 0)).toBeCloseTo(100, 10);
+  });
+
+  it("keeps the requested candidate total after a ratio is deselected", () => {
+    const quotas = buildOddEvenRatioQuotas(
+      100,
+      ["5:3", "3:5"],
+      [
+        { ratio: "4:4", count: 33 },
+        { ratio: "5:3", count: 25 },
+        { ratio: "3:5", count: 17 },
+      ],
+    );
+
+    expect(quotas).toEqual({ "5:3": 60, "3:5": 40 });
+    expect(Object.values(quotas).reduce((sum, quota) => sum + quota, 0)).toBe(100);
   });
 });

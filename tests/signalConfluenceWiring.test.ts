@@ -41,6 +41,11 @@ describe("Signal Confluence / Number Consensus Ledger wiring", () => {
     expect(html).toContain('aria-label="Ledger row visibility"');
     expect(html).toContain("Supported only");
     expect(html).toContain("All 45");
+    expect(html).toContain("Signal Confluence Independence Audit");
+    expect(html).toContain("current-set redundancy check");
+    expect(html).toContain("Ledger effect");
+    expect(html).toContain("Review audit");
+    expect(html).toContain("not proof that any pair is independent");
     expect(html).not.toContain("Hide zero-support numbers");
   });
 

@@ -31,6 +31,7 @@ import {
 } from "./lib/dgaSuppSuggestion";
 import { DGAVisualizer } from "./components/DGAVisualizer";
 import { DGAConstellationDiagnosticPanel } from "./components/DGAConstellationDiagnosticPanel";
+import DgaAutoSuppLearningAuditPanel from "./components/DgaAutoSuppLearningAuditPanel";
 import {
   DGASimulateStrip,
   UserExclusionsStrip,
@@ -115,7 +116,14 @@ import {
   type AppPreset,
 } from "./lib/presets";
 import type { WindowPattern } from "./components/WindowStatsPanel";
-import { applyOddEvenRatioQuotas, generateCandidates, summarizeOddEvenRatios, type GenerateCandidatesResult } from "./generateCandidates";
+import {
+  applyOddEvenRatioQuotas,
+  buildOddEvenRatioActiveShares,
+  buildOddEvenRatioQuotas,
+  generateCandidates,
+  summarizeOddEvenRatios,
+  type GenerateCandidatesResult,
+} from "./generateCandidates";
 import { useGenerateWorker, serializeMonthlyBuckets, serializeTrendMap } from "./hooks/useGenerateWorker";
 import { usePlanningDrawContext } from "./hooks/usePlanningDrawContext";
 import type { GenerateWorkerArgs } from "./workers/generateWorker";
@@ -309,7 +317,20 @@ import {
 } from "./lib/panelFavorites";
 import { dateFromMonthLabel } from "./lib/planningDrawContext";
 import { findNextHistoryDrawDate } from "./lib/drawHistoryNextDraw";
-import { PREDICTION_JOURNAL_SELECTION_REASON_LABELS } from "./lib/predictionJournal";
+import { PREDICTION_JOURNAL_SELECTION_REASON_LABELS, drawFingerprint } from "./lib/predictionJournal";
+import {
+  appendPredictionCaptureRun,
+  createPredictionCaptureSession,
+  setPredictionCaptureSessionStatus,
+  type PredictionCaptureAction,
+  type PredictionCaptureBatch,
+  type PredictionCaptureSession,
+} from "./lib/predictionCapture";
+import {
+  clearPredictionCaptureSession,
+  loadPredictionCaptureSession,
+  savePredictionCaptureSession,
+} from "./lib/predictionCaptureStorage";
 
 type DgaHeatmapViewMode = "temperature" | "monthlyBucketState";
 type TemperatureMetricMode = "ema" | "recency" | "hybrid";
@@ -1828,6 +1849,10 @@ function AppInner(): JSX.Element {
   const [keptGeneratedCandidateRows, setKeptGeneratedCandidateRows] = useState<KeptGeneratedCandidateRow[]>([]);
   const [generationSessionActive, setGenerationSessionActive] = useState<boolean>(false);
   const [generationSessionRows, setGenerationSessionRows] = useState<KeptGeneratedCandidateRow[]>([]);
+  const [predictionCaptureSession, setPredictionCaptureSession] = useState<PredictionCaptureSession | null>(null);
+  const [predictionCaptureStorageState, setPredictionCaptureStorageState] = useState<"loading" | "ready" | "error">("loading");
+  const [predictionCaptureStorageMessage, setPredictionCaptureStorageMessage] = useState<string>("");
+  const predictionCaptureStorageReadyRef = useRef(false);
   const keptGeneratedCandidateSequenceRef = useRef(0);
   const generationSessionSequenceRef = useRef(0);
   const [ratioSummary, setRatioSummary] = useState<any>(null);
@@ -1842,6 +1867,50 @@ function AppInner(): JSX.Element {
     // @ts-ignore
     setTrace(updater);
   }, [traceVerbose]);
+  useEffect(() => {
+    let cancelled = false;
+    void loadPredictionCaptureSession()
+      .then((stored) => {
+        if (cancelled) return;
+        const recovered = stored?.status === "active"
+          ? setPredictionCaptureSessionStatus(stored, "ended", new Date().toISOString())
+          : stored;
+        setPredictionCaptureSession(recovered);
+        predictionCaptureStorageReadyRef.current = true;
+        setPredictionCaptureStorageState("ready");
+        setPredictionCaptureStorageMessage(
+          stored?.status === "active"
+            ? "Recovered the previous capture and paused it. Resume explicitly before recording new output."
+            : "Prediction Capture is stored locally for this browser address.",
+        );
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        predictionCaptureStorageReadyRef.current = true;
+        setPredictionCaptureStorageState("error");
+        setPredictionCaptureStorageMessage(error instanceof Error ? error.message : "Prediction Capture persistence is unavailable.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!predictionCaptureStorageReadyRef.current || predictionCaptureStorageState === "loading") return;
+    const persist = predictionCaptureSession
+      ? savePredictionCaptureSession(predictionCaptureSession)
+      : clearPredictionCaptureSession();
+    void persist
+      .then(() => {
+        if (predictionCaptureStorageState === "error") return;
+        setPredictionCaptureStorageState("ready");
+        setPredictionCaptureStorageMessage("Prediction Capture is stored locally for this browser address.");
+      })
+      .catch((error) => {
+        setPredictionCaptureStorageState("error");
+        setPredictionCaptureStorageMessage(error instanceof Error ? error.message : "Prediction Capture could not be persisted.");
+      });
+  }, [predictionCaptureSession, predictionCaptureStorageState]);
   useEffect(() => {
     if (!scoringGenerationInfluenceTraceReadyRef.current) {
       scoringGenerationInfluenceTraceReadyRef.current = true;
@@ -3686,6 +3755,93 @@ function AppInner(): JSX.Element {
     scrollToDGA();
   };
 
+  function recordPredictionCaptureOutput(action: PredictionCaptureAction, outputCandidates: CandidateSet[]): void {
+    if (!predictionCaptureSession || predictionCaptureSession.status !== "active" || outputCandidates.length === 0) return;
+    const latestRealDraw = realFilteredHistory[realFilteredHistory.length - 1] ?? realHistory[realHistory.length - 1];
+    const result = appendPredictionCaptureRun(predictionCaptureSession, {
+      action,
+      candidates: outputCandidates,
+      setupSnapshot: buildSnapshot({ includePanelFavorites: true, includeDerivedPredictionEvidence: true }),
+      latestDrawDate: latestRealDraw?.date,
+      latestDrawFingerprint: latestRealDraw ? drawFingerprint(latestRealDraw) : undefined,
+      windowLabel: historyWindowName,
+      windowDrawCount: realFilteredHistory.length,
+    });
+    if (!result.runId) return;
+    setPredictionCaptureSession(result.session);
+    setTraceMaybe((traceLines) => [
+      ...traceLines,
+      `[TRACE] Prediction Capture ${action}: recorded ${result.capturedRows} displayed candidate${result.capturedRows === 1 ? "" : "s"} under immutable run ${result.runId}; rejected invalid rows ${result.rejectedRows}.`,
+    ]);
+  }
+
+  const handleStartPredictionCapture = () => {
+    const now = new Date().toISOString();
+    const next = predictionCaptureSession
+      ? setPredictionCaptureSessionStatus(predictionCaptureSession, "active", now)
+      : createPredictionCaptureSession(now);
+    setPredictionCaptureSession(next);
+    setPredictionCaptureStorageMessage("Capture is active. Only output created from this point forward will be recorded.");
+    setTraceMaybe((traceLines) => [
+      ...traceLines,
+      `[TRACE] Prediction Capture started explicitly: ${next.rows.length} prior row occurrence${next.rows.length === 1 ? "" : "s"} retained; future displayed candidate output will receive immutable setup provenance.`,
+    ]);
+  };
+
+  const handleEndPredictionCapture = () => {
+    if (!predictionCaptureSession || predictionCaptureSession.status !== "active") return;
+    const next = setPredictionCaptureSessionStatus(predictionCaptureSession, "ended");
+    setPredictionCaptureSession(next);
+    setPredictionCaptureStorageMessage("Capture is paused. Stored rows remain available for selection and backup.");
+    setTraceMaybe((traceLines) => [
+      ...traceLines,
+      `[TRACE] Prediction Capture ended: ${next.rows.length} captured row occurrence${next.rows.length === 1 ? "" : "s"} retained locally.`,
+    ]);
+  };
+
+  const handleClearPredictionCapture = () => {
+    const cleared = predictionCaptureSession?.rows.length ?? 0;
+    setPredictionCaptureSession(null);
+    setPredictionCaptureStorageMessage("Prediction Capture is empty.");
+    setTraceMaybe((traceLines) => [
+      ...traceLines,
+      `[TRACE] Prediction Capture cleared: removed ${cleared} captured row occurrence${cleared === 1 ? "" : "s"}.`,
+    ]);
+  };
+
+  const handleReplacePredictionCapture = (session: PredictionCaptureSession) => {
+    const imported = session.status === "active"
+      ? setPredictionCaptureSessionStatus(session, "ended")
+      : session;
+    setPredictionCaptureSession(imported);
+    setPredictionCaptureStorageMessage("Imported capture is paused. Resume explicitly before recording new output.");
+    setTraceMaybe((traceLines) => [
+      ...traceLines,
+      `[TRACE] Prediction Capture imported: ${imported.runs.length} run${imported.runs.length === 1 ? "" : "s"}; ${imported.rows.length} row occurrence${imported.rows.length === 1 ? "" : "s"}; capture paused on import.`,
+    ]);
+  };
+
+  const handleSavePredictionCapture = (batch: PredictionCaptureBatch) => {
+    const firstGameNumbers = batch.games.length === 1 ? batch.games[0].numbers : undefined;
+    predictionJournalDraftIdRef.current += 1;
+    setPredictionJournalDraftRequest({
+      id: predictionJournalDraftIdRef.current,
+      setupSnapshot: buildSnapshot({ includePanelFavorites: true, includeDerivedPredictionEvidence: true }),
+      inputOverrides: {
+        ...(firstGameNumbers ? { numbers: firstGameNumbers } : {}),
+        notes: `Prediction Capture batch: ${batch.sourceSummary.distinctGames} distinct played game${batch.sourceSummary.distinctGames === 1 ? "" : "s"}, ${batch.sourceSummary.purchasedLines} purchased line${batch.sourceSummary.purchasedLines === 1 ? "" : "s"}, ${batch.sourceSummary.capturedGames} exact captured-source match${batch.sourceSummary.capturedGames === 1 ? "" : "es"}, ${batch.sourceSummary.externalGames} external/source-unknown.`,
+      },
+      captureBatch: batch,
+      sourceLabel: "Prediction Capture draft",
+    });
+    setPredictionJournalOpen(true);
+    if (typeof window !== "undefined") {
+      window.requestAnimationFrame(() => {
+        document.getElementById("panel-prediction-journal")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    }
+  };
+
   const handleStartGenerationSession = useCallback(() => {
     setGenerationSessionActive(true);
     setTraceMaybe((traceLines) => [
@@ -3724,13 +3880,14 @@ function AppInner(): JSX.Element {
       ...row,
       id: `generation-session-export-${Date.now()}-${index + 1}`,
     }));
+    recordPredictionCaptureOutput("exported", exportedRows.map((row) => ({ main: row.main, supp: row.supp })));
     setKeptGeneratedCandidateRows((current) => [...current, ...exportedRows]);
     setGenerationSessionRows([]);
     setTraceMaybe((traceLines) => [
       ...traceLines,
       `[TRACE] Generation session exported: ${exportedRows.length} candidate${exportedRows.length === 1 ? "" : "s"} appended to Portfolio Compression as mains+supps and Paste-Weighted as mains-only rows; session storage cleared${generationSessionActive ? " and capture remains active" : ""}.`,
     ]);
-  }, [generationSessionActive, generationSessionRows, setTraceMaybe]);
+  }, [generationSessionActive, generationSessionRows, recordPredictionCaptureOutput, setTraceMaybe]);
 
   const handleKeepGeneratedCandidate = useCallback((idx: number) => {
     const candidate = candidates[idx];
@@ -3752,11 +3909,12 @@ function AppInner(): JSX.Element {
     }
 
     setKeptGeneratedCandidateRows((current) => [...current, keptRow]);
+    recordPredictionCaptureOutput("kept", [candidate]);
     setTraceMaybe((traceLines) => [
       ...traceLines,
       `[TRACE] Kept generated candidate #${idx + 1}: mains [${keptRow.main.join(", ")}]${keptRow.supp.length ? ` supps [${keptRow.supp.join(", ")}]` : ""} appended to Portfolio Compression and Paste-Weighted rows.`,
     ]);
-  }, [buildKeptGeneratedCandidateRow, candidates, setTraceMaybe]);
+  }, [buildKeptGeneratedCandidateRow, candidates, recordPredictionCaptureOutput, setTraceMaybe]);
 
   const handleSimulatePickSixManual = (nums: number[]) => {
     if (nums.length !== 8 || nums.some((n) => !Number.isFinite(n))) return;
@@ -3954,6 +4112,14 @@ function AppInner(): JSX.Element {
   const ratioOptionValues = useMemo(() => ratioOptions.map((option) => option.ratio), [ratioOptions]);
   const allVisibleRatiosSelected = ratioOptionValues.length > 0
     && ratioOptionValues.every((ratio) => selectedRatios.includes(ratio));
+  const activeOddEvenRatioShares = useMemo(
+    () => buildOddEvenRatioActiveShares(selectedRatios, ratioOptions),
+    [ratioOptions, selectedRatios],
+  );
+  const activeOddEvenRatioQuotas = useMemo(
+    () => buildOddEvenRatioQuotas(numCandidates, selectedRatios, ratioOptions),
+    [numCandidates, ratioOptions, selectedRatios],
+  );
 
   // Minimum number of prior draws required for a stable OGA baseline.
   // Draws computed against fewer than this many draws produce unreliable scores
@@ -4663,10 +4829,15 @@ function AppInner(): JSX.Element {
       options.overgen !== undefined ? `overgen ${options.overgen}x` : null,
       options.attemptBudget !== undefined ? `budget ${options.attemptBudget}` : null,
     ].filter(Boolean).join(" · ");
+    const ratioSharesForTrace = buildOddEvenRatioActiveShares(selectedRatios, ratioOptions);
+    const ratioQuotasForTrace = buildOddEvenRatioQuotas(options.requested, selectedRatios, ratioOptions);
     const ratioSummaryForTrace = selectedRatios.length
       ? selectedRatios.map((ratio) => {
         const option = ratioOptions.find((row) => row.ratio === ratio);
-        return option ? `${ratio} ${option.percent}%` : ratio;
+        const source = option ? `${option.count} draws/${option.percent}% source` : "no source row";
+        const active = ratioSharesForTrace[ratio] ?? 0;
+        const target = ratioQuotasForTrace[ratio] ?? 0;
+        return `${ratio} ${source} -> ${active.toFixed(1)}% active, target ${target}/${options.requested}`;
       }).join(", ")
       : "off";
     const survivorSignalsForTrace = [
@@ -4896,6 +5067,7 @@ function AppInner(): JSX.Element {
       processedCandidates = readinessFilterResult.candidates;
       const dt = Math.round(performance.now() - t0);
       processedCandidates = captureGenerationSessionCandidates(processedCandidates);
+      recordPredictionCaptureOutput("generated", processedCandidates);
 
       setCandidates(processedCandidates);
       setRatioSummary(summarizeOddEvenRatios(
@@ -5226,6 +5398,7 @@ function AppInner(): JSX.Element {
       // Now apply final ranking with prize labels for display
       processedCandidates = recomputeCompositeRanking(processedCandidates);
       processedCandidates = captureGenerationSessionCandidates(processedCandidates);
+      recordPredictionCaptureOutput("generated", processedCandidates);
       const finalRatioSummary = summarizeOddEvenRatios(
         processedCandidates,
         numCandidates,
@@ -6959,22 +7132,57 @@ function AppInner(): JSX.Element {
             {selectedRatios.length}/{ratioOptionValues.length} ratios selected
           </span>
         </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 18 }}>
-          {ratioOptions.map(({ ratio, count, percent }) => (
-            <label key={ratio} style={{ marginRight: 16, opacity: useTrickyRule ? 0.4 : 1 }}>
-              <input
-                type="checkbox"
-                checked={selectedRatios.includes(ratio)}
-                onChange={() => handleRatioToggle(ratio)}
-                disabled={useTrickyRule}
-                style={{ marginRight: 6 }}
-              />
-              {ratio} ({count} draws, {percent}%)
-            </label>
-          ))}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+          {ratioOptions.map(({ ratio, count, percent }) => {
+            const selected = selectedRatios.includes(ratio);
+            const activeShare = activeOddEvenRatioShares[ratio] ?? 0;
+            const target = activeOddEvenRatioQuotas[ratio] ?? 0;
+            return (
+              <label
+                key={ratio}
+                style={{
+                  minHeight: 44,
+                  padding: "7px 10px",
+                  border: `1px solid ${selected ? "#93c5fd" : "#dbe3ec"}`,
+                  borderRadius: 7,
+                  background: selected ? "#eff6ff" : "#fff",
+                  opacity: useTrickyRule ? 0.4 : 1,
+                  display: "grid",
+                  gridTemplateColumns: "auto 1fr",
+                  columnGap: 7,
+                  alignItems: "center",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={selected}
+                  onChange={() => handleRatioToggle(ratio)}
+                  disabled={useTrickyRule}
+                  aria-label={`${ratio} odd/even ratio`}
+                  style={{ margin: 0 }}
+                />
+                <span>
+                  <strong>{ratio}</strong>
+                  <span style={{ display: "block", fontSize: 11, color: "#64748b" }}>
+                    Source: {count} draw{count === 1 ? "" : "s"} · {percent}%
+                  </span>
+                  {selected && !useTrickyRule && (
+                    <span style={{ display: "block", fontSize: 11, color: "#174ea6", fontWeight: 800 }}>
+                      Active: {activeShare.toFixed(1)}% · quota target {target}/{numCandidates}
+                    </span>
+                  )}
+                </span>
+              </label>
+            );
+          })}
         </div>
-        <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>
-          Ratios apply to all 8 numbers. Only ratios observed in selected window are shown.
+        <div aria-live="polite" style={{ fontSize: 12, color: "#475569", marginTop: 10, lineHeight: 1.45 }}>
+          {rwr45Enabled
+            ? "RwR45 / PNUaRW45 bypasses odd/even quotas, so these targets are not applied in that mode."
+            : selectedRatios.length > 0
+              ? "Selected ratios are rebalanced to 100% from their relative WFMQYH draw counts. Deselecting a ratio redistributes its share; it does not reduce the requested candidate count. Integer quota targets use largest-remainder rounding. Later filters can still cause a reported shortfall."
+              : "No odd/even quota is active. Select one or more ratios to allocate 100% of the requested candidates across them."}
+          {" "}Ratios apply to all 8 numbers. Only ratios observed in the active real WFMQYH window are shown.
         </div>
       </CollapsibleSection>
 
@@ -7070,6 +7278,10 @@ function AppInner(): JSX.Element {
           top={8}
           title="Drought-break shortlist (mains + supps)"
           bucketLabels={monthlyBucketLabels}
+          targetDrawDate={planningDrawContext.targetDrawDate}
+          targetMonthLabel={planningDrawContext.targetMonthLabel}
+          targetDrawOrdinal={planningDrawContext.targetDrawOrdinal}
+          targetMonthExpectedDrawCount={planningDrawContext.targetMonthExpectedDrawCount}
           forcedNumbers={droughtBreakSelectedNumbers}
           excludedNumbers={selectionUnavailableNumbers}
           maxForcedSelections={MAX_DROUGHT_BREAK_FORCED_NUMBERS}
@@ -7133,6 +7345,10 @@ function AppInner(): JSX.Element {
       <CollapsibleSection panelId="previous-neighbour-backtest" title={<b>Previous ±1/±2 Neighbour Diagnostics</b>} summaryHint="observe-only adjacent-neighbour diagnostics" defaultOpen={false}>
         <PreviousNeighbourBacktestPanel
           draws={realFilteredHistory}
+          auditDraws={baselineHistory}
+          auditHistoryScopeLabel={baselineHistoryScopeLabel}
+          liveNeighbourMode={latestNeighbourSupportMode}
+          liveNeighbourEnabled={latestNeighbourSupportEnabled}
           userSelectedNumbers={userSelectedNumbers}
           excludedNumbers={selectionUnavailableNumbers}
           onToggleUserSelectedNumber={toggleSharedUserSelectedNumber}
@@ -7189,9 +7405,13 @@ function AppInner(): JSX.Element {
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 11.35 Ending Digit Sequences */}
-      <CollapsibleSection panelId="ending-digit-sequences" title={<b>Ending Digit Sequences</b>} summaryHint="consecutive ending-digit runs" defaultOpen={false}>
+      <CollapsibleSection panelId="ending-digit-sequences" title={<b>Ending Digit Sequences</b>} summaryHint="within-draw motifs and cross-draw terminal transitions" defaultOpen={false}>
         <div style={{ marginTop: 8 }}>
-          <EndingDigitSequencePanel draws={realFilteredHistory} allDraws={realHistory} />
+          <EndingDigitSequencePanel
+            draws={realFilteredHistory}
+            allDraws={realHistory}
+            stageIdealDrawState={stageIdealDrawState}
+          />
         </div>
       </CollapsibleSection>
 
@@ -9098,12 +9318,28 @@ function AppInner(): JSX.Element {
                     <span style={{ fontSize: 11, color: "#64748b" }}>{selectedRatios.length}/{ratioOptionValues.length} selected</span>
                   </div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 6 }}>
-                    {ratioOptions.map(({ ratio }) => (
-                      <label key={ratio} style={{ opacity: useTrickyRule ? 0.4 : 1 }}>
-                        <input type="checkbox" checked={selectedRatios.includes(ratio)} disabled={useTrickyRule} onChange={() => handleRatioToggle(ratio)} style={{ marginRight: 6 }} />
-                        {ratio}
-                      </label>
-                    ))}
+                    {ratioOptions.map(({ ratio, count, percent }) => {
+                      const selected = selectedRatios.includes(ratio);
+                      const activeShare = activeOddEvenRatioShares[ratio] ?? 0;
+                      const target = activeOddEvenRatioQuotas[ratio] ?? 0;
+                      return (
+                        <label
+                          key={ratio}
+                          title={`${ratio}: WFMQYH source ${count} draws (${percent}%); ${selected ? `active share ${activeShare.toFixed(1)}%, quota target ${target}/${numCandidates}` : "not selected"}`}
+                          style={{ opacity: useTrickyRule ? 0.4 : 1 }}
+                        >
+                          <input type="checkbox" checked={selected} disabled={useTrickyRule} onChange={() => handleRatioToggle(ratio)} style={{ marginRight: 6 }} />
+                          {ratio}{selected ? ` · ${activeShare.toFixed(1)}%` : ""}
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <div aria-live="polite" style={{ marginTop: 6, fontSize: 11, color: "#64748b", lineHeight: 1.4 }}>
+                    {rwr45Enabled
+                      ? "RwR45 bypasses these quotas."
+                      : selectedRatios.length
+                        ? `Selected shares rebalance to 100% of Count (${numCandidates}); final filters can still cause quota shortfalls.`
+                        : "No odd/even quota is active."}
                   </div>
                 </div>
                 <div
@@ -9913,6 +10149,15 @@ function AppInner(): JSX.Element {
             onEndGenerationSession={handleEndGenerationSession}
             onClearGenerationSession={handleClearGenerationSession}
             onExportGenerationSession={handleExportGenerationSession}
+            predictionCaptureSession={predictionCaptureSession}
+            predictionCaptureStorageState={predictionCaptureStorageState}
+            predictionCaptureStorageMessage={predictionCaptureStorageMessage}
+            onStartPredictionCapture={handleStartPredictionCapture}
+            onEndPredictionCapture={handleEndPredictionCapture}
+            onClearPredictionCapture={handleClearPredictionCapture}
+            onReplacePredictionCapture={handleReplacePredictionCapture}
+            onSavePredictionCapture={handleSavePredictionCapture}
+            onPredictionCaptureOutputAction={recordPredictionCaptureOutput}
             userSelectedNumbers={userSelectedNumbers}
             setUserSelectedNumbers={setUserSelectedNumbers}
             excludedNumbers={selectionUnavailableNumbers}
@@ -10356,6 +10601,14 @@ function AppInner(): JSX.Element {
                 )}
               </div>
             </InlineCollapsibleCard>
+          </div>
+
+          <div style={{ marginTop: 12 }}>
+            <DgaAutoSuppLearningAuditPanel
+              history={realHistory}
+              activeHistoryCount={realFilteredHistory.length}
+              selectedNumbers={dgaStripSelectedNumbers}
+            />
           </div>
 
           <div style={{ marginTop: 12 }}>

@@ -38,6 +38,12 @@ import { computeVirtualRowWindow, type VirtualRowWindow } from "../../lib/virtua
 import { HigButton, InfoHelp } from "../shared/HigControls";
 import type { MonthlyBucketTransitionGovernorProfile } from "../../lib/monthlyBucketTransitionGovernor";
 import { TransitionWatchCard } from "./TransitionWatchCard";
+import { PredictionCaptureCard } from "./PredictionCaptureCard";
+import type {
+  PredictionCaptureAction,
+  PredictionCaptureBatch,
+  PredictionCaptureSession,
+} from "../../lib/predictionCapture";
 
 const GENERATED_CANDIDATE_VISIBLE_COLUMN_COUNT = 23;
 export const GENERATED_CANDIDATE_PLAY_COST_CENTS = 67;
@@ -133,6 +139,15 @@ export interface GeneratedCandidatesPanelProps {
   onEndGenerationSession?: () => void;
   onClearGenerationSession?: () => void;
   onExportGenerationSession?: () => void;
+  predictionCaptureSession?: PredictionCaptureSession | null;
+  predictionCaptureStorageState?: "loading" | "ready" | "error";
+  predictionCaptureStorageMessage?: string;
+  onStartPredictionCapture?: () => void;
+  onEndPredictionCapture?: () => void;
+  onClearPredictionCapture?: () => void;
+  onReplacePredictionCapture?: (session: PredictionCaptureSession) => void;
+  onSavePredictionCapture?: (batch: PredictionCaptureBatch) => void;
+  onPredictionCaptureOutputAction?: (action: PredictionCaptureAction, candidates: CandidateSet[]) => void;
   forcedNumbers?: number[];
   excludedNumbers?: number[];
   userSelectedNumbers: number[];
@@ -253,6 +268,15 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
   onEndGenerationSession,
   onClearGenerationSession,
   onExportGenerationSession,
+  predictionCaptureSession = null,
+  predictionCaptureStorageState = "ready",
+  predictionCaptureStorageMessage,
+  onStartPredictionCapture,
+  onEndPredictionCapture,
+  onClearPredictionCapture,
+  onReplacePredictionCapture,
+  onSavePredictionCapture,
+  onPredictionCaptureOutputAction,
   userSelectedNumbers,
   setUserSelectedNumbers,
   onSelectCandidate,
@@ -2029,8 +2053,9 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
          : `candidates.csv`;
        a.click();
        URL.revokeObjectURL(url);
+       onPredictionCaptureOutputAction?.("exported", exportData.map(({ c }) => c));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-      }, [sortedCandidates, filteredCandidates, isFilteringActive, matchedCount, convergenceScores, idmScores, stageIdmScores, readinessScores, winScores, nrrScores, nsScores, exportSettings, enableOGA, numCandidates, overgenFactor, attemptMultiplier, ogaSpokeCount, forcedNumbers, userSelectedNumbers, monthlyBuckets, historyForOGA]);
+      }, [sortedCandidates, filteredCandidates, isFilteringActive, matchedCount, convergenceScores, idmScores, stageIdmScores, readinessScores, winScores, nrrScores, nsScores, exportSettings, enableOGA, numCandidates, overgenFactor, attemptMultiplier, ogaSpokeCount, forcedNumbers, userSelectedNumbers, monthlyBuckets, historyForOGA, onPredictionCaptureOutputAction]);
 
      const copyCandidatesForPasteWeightedGenerator = useCallback(async () => {
        const copyRows = selectRowsForCandidateExport(
@@ -2043,10 +2068,11 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
        try {
          await writeTextToClipboard(text);
          showCopyPasteStatus(`Copied ${copyRows.length} candidate row${copyRows.length === 1 ? "" : "s"} for Paste-Weighted input.`);
+         onPredictionCaptureOutputAction?.("copied", copyRows.map(({ c }) => c));
        } catch (error) {
          showCopyPasteStatus(`Copy failed: ${error instanceof Error ? error.message : "clipboard unavailable"}`);
        }
-     }, [filteredCandidates, isFilteringActive, showCopyPasteStatus, sortedCandidates]);
+     }, [filteredCandidates, isFilteringActive, onPredictionCaptureOutputAction, showCopyPasteStatus, sortedCandidates]);
 
      const handleKeepCandidate = useCallback((idx: number) => {
        if (!onKeepCandidate) return;
@@ -2057,6 +2083,22 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
 
      return (
      <section style={panel}>
+       {onStartPredictionCapture
+         && onEndPredictionCapture
+         && onClearPredictionCapture
+         && onReplacePredictionCapture
+         && onSavePredictionCapture ? (
+           <PredictionCaptureCard
+             session={predictionCaptureSession}
+             storageState={predictionCaptureStorageState}
+             storageMessage={predictionCaptureStorageMessage}
+             onStart={onStartPredictionCapture}
+             onEnd={onEndPredictionCapture}
+             onClear={onClearPredictionCapture}
+             onReplaceSession={onReplacePredictionCapture}
+             onSaveAsPrediction={onSavePredictionCapture}
+           />
+         ) : null}
        {monthlyTransitionWatchProfile
          && monthlyTransitionInfluenceProfile
          && Number.isInteger(monthlyTransitionTargetDrawOrdinal) ? (

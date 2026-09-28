@@ -11,10 +11,13 @@ import {
   buildPredictionJournalEntry,
   canEditPredictionJournalEntry,
   loadPredictionJournalEntries,
+  mergePredictionJournalEntries,
   normalizePredictionJournalInputs,
+  parsePredictionJournalBackup,
   parsePredictionJournalDate,
   savePredictionJournalEntries,
   scorePredictionJournalEntry,
+  serializePredictionJournalBackup,
   type PredictionBucketKey,
   type PredictionJournalEntry,
   type PredictionJournalInputs,
@@ -52,6 +55,10 @@ import {
   type PredictionJournalFindingSeverity,
   type PredictionJournalFindingsReport,
 } from "../lib/predictionJournalFindings";
+import {
+  scorePredictionCaptureBatch,
+  type PredictionCaptureBatch,
+} from "../lib/predictionCapture";
 
 export interface PredictionJournalPanelProps {
   history: Draw[];
@@ -67,6 +74,7 @@ export interface PredictionJournalDraftRequest {
   setupSnapshot?: AppPresetSnapshot;
   inputOverrides?: PredictionJournalInputs;
   sourceLabel?: string;
+  captureBatch?: PredictionCaptureBatch;
 }
 
 type PredictionJournalViewMode = "entries" | "draft";
@@ -650,6 +658,119 @@ const replayPrizeButtonStyle = (division: LatestDrawReplayPrize["division"]): Re
   cursor: "pointer",
   font: "inherit",
 });
+
+const renderPredictionCaptureDraftSummary = (batch: PredictionCaptureBatch) => (
+  <section
+    data-testid="prediction-capture-draft-summary"
+    aria-label="Prediction Capture draft summary"
+    style={{ marginTop: 12, border: "1px solid #b9d6ee", borderRadius: 8, padding: 10, background: "#f2f8fd" }}
+  >
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+      <div>
+        <div style={{ color: "#1f3b57", fontSize: 13, fontWeight: 900 }}>Prediction Capture attached</div>
+        <div style={{ marginTop: 2, color: "#526477", fontSize: 12 }}>
+          {batch.sourceSummary.distinctGames} distinct played game{batch.sourceSummary.distinctGames === 1 ? "" : "s"} · {batch.sourceSummary.purchasedLines} purchased line{batch.sourceSummary.purchasedLines === 1 ? "" : "s"} · ${(batch.sourceSummary.purchasedLines * batch.unitCostCents / 100).toFixed(2)} recorded cost
+        </div>
+      </div>
+      <span style={provenanceChipStyle(batch.sourceSummary.externalGames ? "warn" : "good")}>
+        {batch.sourceSummary.capturedGames} exact-source · {batch.sourceSummary.externalGames} external
+      </span>
+    </div>
+    <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 6 }}>
+      {batch.games.map((game) => (
+        <span key={game.id} style={provenanceChipStyle(game.provenance.status === "matched" ? "good" : "neutral")}>
+          {game.numbers.join(", ")}{game.quantity > 1 ? ` ×${game.quantity}` : ""} · {game.provenance.status === "matched" ? `${game.provenance.runIds.length} run link${game.provenance.runIds.length === 1 ? "" : "s"}` : "source unknown"}
+        </span>
+      ))}
+    </div>
+    <div style={{ marginTop: 7, color: "#64748b", fontSize: 12, lineHeight: 1.4 }}>
+      Played-game analytics count each distinct six-number line once. Ticket quantity is retained separately for cost. {batch.analyticalForecasts.length} explicit 6+2 analytical forecast{batch.analyticalForecasts.length === 1 ? " is" : "s are"} stored separately.
+    </div>
+  </section>
+);
+
+const renderPredictionCaptureScorecard = (
+  batch: PredictionCaptureBatch,
+  targetDraw: Draw | undefined,
+  reviewStatus: PredictionJournalReviewStatus,
+) => {
+  const score = targetDraw ? scorePredictionCaptureBatch(batch, targetDraw) : null;
+  return (
+    <section
+      data-testid="prediction-capture-entry-scorecard"
+      aria-label="Prediction Capture portfolio scorecard"
+      style={{ marginTop: 10, border: "1px solid #dbe3ec", borderRadius: 8, padding: 10, background: "#fff" }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "flex-start" }}>
+        <div>
+          <div style={{ color: "#26313d", fontSize: 13, fontWeight: 900 }}>Played games and portfolio scorecard</div>
+          <div style={{ marginTop: 2, color: "#64748b", fontSize: 12 }}>
+            {batch.sourceSummary.distinctGames} distinct games · {batch.sourceSummary.purchasedLines} purchased lines · ${(batch.sourceSummary.purchasedLines * batch.unitCostCents / 100).toFixed(2)} captured cost
+          </div>
+        </div>
+        <span style={provenanceChipStyle(reviewStatus === "reviewedByUser" ? "good" : "warn")}>
+          {reviewStatus === "reviewedByUser" ? "Reviewed pre-draw evidence" : "Not reviewed · excluded from formal audit"}
+        </span>
+      </div>
+
+      {score ? (
+        <>
+          <div style={{ marginTop: 9, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(135px, 1fr))", gap: 7 }}>
+            {[
+              ["Target", score.targetDate],
+              ["Best game", score.bestDivision === "—" ? "No prize" : score.bestDivision],
+              ["Portfolio coverage", `${score.coveredDrawNumbers.length}/8`],
+              ["Mains covered", `${score.coveredMainNumbers.length}/6`],
+              ["Supps covered", `${score.coveredSuppNumbers.length}/2`],
+              ["All-eight spread", score.allEightSpreadCovered ? "Yes" : "No"],
+            ].map(([label, value]) => (
+              <div key={label} style={{ border: "1px solid #e2e8f0", borderRadius: 7, padding: "7px 8px", background: "#f8fafc" }}>
+                <div style={{ color: "#64748b", fontSize: 11, fontWeight: 800 }}>{label}</div>
+                <div style={{ marginTop: 2, color: "#26313d", fontSize: 15, fontWeight: 900 }}>{value}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{ marginTop: 9, overflowX: "auto", maxHeight: 300, overflowY: "auto", border: "1px solid #e2e8f0", borderRadius: 7 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 650, fontSize: 12 }}>
+              <thead style={{ position: "sticky", top: 0, zIndex: 1, background: "#f1f5f9" }}>
+                <tr>
+                  {['Game', 'Qty', 'Main hits', 'Supp hits', 'Prize', 'Source'].map((heading) => (
+                    <th key={heading} style={{ padding: "7px 8px", textAlign: heading === "Game" ? "left" : "center", borderBottom: "1px solid #cbd5e1", whiteSpace: "nowrap" }}>{heading}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {score.gameScores.map((gameScore) => {
+                  const game = batch.games.find((item) => item.id === gameScore.gameId);
+                  return (
+                    <tr key={gameScore.gameId}>
+                      <td style={{ padding: "7px 8px", borderBottom: "1px solid #edf2f7", fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>{gameScore.numbers.join(", ")}</td>
+                      <td style={{ padding: "7px 8px", borderBottom: "1px solid #edf2f7", textAlign: "center" }}>{gameScore.quantity}</td>
+                      <td style={{ padding: "7px 8px", borderBottom: "1px solid #edf2f7", textAlign: "center" }}>{gameScore.mainHits}</td>
+                      <td style={{ padding: "7px 8px", borderBottom: "1px solid #edf2f7", textAlign: "center" }}>{gameScore.suppHits}</td>
+                      <td style={{ padding: "7px 8px", borderBottom: "1px solid #edf2f7", textAlign: "center", fontWeight: 900, color: gameScore.division === "—" ? "#64748b" : "#166534" }}>{gameScore.division === "—" ? "None" : gameScore.division}</td>
+                      <td style={{ padding: "7px 8px", borderBottom: "1px solid #edf2f7", textAlign: "center" }}>{game?.provenance.status === "matched" ? `Captured · ${game.provenance.runIds.length} run${game.provenance.runIds.length === 1 ? "" : "s"}` : "External / unknown"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {score.forecastScores.length ? (
+            <div style={{ marginTop: 8, color: "#526477", fontSize: 12, lineHeight: 1.45 }}>
+              <strong>6+2 analytical forecasts:</strong>{" "}
+              {score.forecastScores.map((forecast) => `${forecast.main.join(", ")} + supps ${forecast.supp.join(", ")} = ${forecast.selectedMainHits}/6 main-role hits, ${forecast.selectedSuppHits}/2 supp-role hits, prize check ${forecast.division === "—" ? "none" : forecast.division}`).join(" · ")}
+            </div>
+          ) : null}
+        </>
+      ) : (
+        <div style={{ marginTop: 8, color: "#64748b", fontSize: 12 }}>
+          Pending. Per-game prize results and portfolio coverage appear only after the real target draw is present in history.
+        </div>
+      )}
+    </section>
+  );
+};
 
 const formatFindingPercent = (value: number): string => `${Math.round(value * 100)}%`;
 
@@ -1712,13 +1833,19 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
   const [selectionReasonIncludesOther, setSelectionReasonIncludesOther] = useState(false);
   const [selectionReasonOtherText, setSelectionReasonOtherText] = useState("");
   const [notes, setNotes] = useState("");
+  const [draftCaptureBatch, setDraftCaptureBatch] = useState<PredictionCaptureBatch | null>(null);
   const [message, setMessage] = useState("");
   const [showUnreviewedSaveAlert, setShowUnreviewedSaveAlert] = useState(false);
   const [showHistoricalPrizeCollisionSaveAlert, setShowHistoricalPrizeCollisionSaveAlert] = useState(false);
   const [showValidationErrors, setShowValidationErrors] = useState(false);
   const [expandedEntryId, setExpandedEntryId] = useState<string | null>(null);
   const [showArchivedEntries, setShowArchivedEntries] = useState(false);
+  const [journalStorageMessage, setJournalStorageMessage] = useState<{
+    kind: "status" | "error";
+    text: string;
+  } | null>(null);
   const draftRegionRef = useRef<HTMLDivElement | null>(null);
+  const journalImportInputRef = useRef<HTMLInputElement | null>(null);
   const revealDraftRegionRef = useRef(false);
   const lastNumbersAutoFillRef = useRef<PredictionJournalAutoFillSnapshot>(emptyAutoFillSnapshot());
 
@@ -1949,7 +2076,7 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
     trendRatio,
   ]);
 
-  const hasPredictionContent = Object.keys(formInputs).length > 0;
+  const hasPredictionContent = Object.keys(formInputs).length > 0 || Boolean(draftCaptureBatch?.games.length);
 
   const validationErrors = useMemo(() => {
     const errors: string[] = [];
@@ -2100,6 +2227,7 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
     setTargetKind("nextDraw");
     fillFormFromInputs({});
     setReviewStatus("notReviewed");
+    setDraftCaptureBatch(null);
     setShowUnreviewedSaveAlert(false);
     setShowHistoricalPrizeCollisionSaveAlert(false);
     setShowValidationErrors(false);
@@ -2113,6 +2241,7 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
     setExpandedEntryId(null);
     setTargetKind(entry.targetKind);
     setReviewStatus(normalizeReviewStatus(entry.reviewStatus));
+    setDraftCaptureBatch(entry.captureBatch ?? null);
     setShowUnreviewedSaveAlert(false);
     setShowHistoricalPrizeCollisionSaveAlert(false);
     fillFormFromInputs(inputs);
@@ -2146,6 +2275,7 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
     setReviewStatus("notReviewed");
     setShowUnreviewedSaveAlert(false);
     setShowHistoricalPrizeCollisionSaveAlert(false);
+    setDraftCaptureBatch(newPredictionDraft.captureBatch ?? null);
     fillFormFromInputs(mergedInputs);
     if (mergedInputs.numbers?.length) {
       applyNumbersAutoFill(numberText(mergedInputs.numbers), draft.targetKind);
@@ -2194,6 +2324,7 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
       inputs: formInputs,
       setupSnapshot: getSetupSnapshot?.() ?? editingEntry?.setupSnapshot,
       reviewStatus,
+      captureBatch: draftCaptureBatch ?? editingEntry?.captureBatch,
       now: now(),
     });
 
@@ -2238,20 +2369,78 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
     setMessage(archive ? "Prediction archived. It is hidden from the active list but still kept for audit/export." : "Prediction restored to the active journal.");
   };
 
-  const downloadJournalJson = () => {
+  const journalStorageOrigin = typeof window === "undefined" ? "this browser address" : window.location.origin;
+
+  const buildJournalBackupJson = () => serializePredictionJournalBackup(entries, {
+    exportedAt: now(),
+    sourceOrigin: typeof window === "undefined" ? undefined : window.location.origin,
+  });
+
+  const downloadJournalJson = (announce = true) => {
     if (typeof document === "undefined" || typeof URL === "undefined") return;
-    const blob = new Blob([JSON.stringify(entries, null, 2)], { type: "application/json" });
+    const exportedAt = now();
+    const blob = new Blob([serializePredictionJournalBackup(entries, {
+      exportedAt,
+      sourceOrigin: typeof window === "undefined" ? undefined : window.location.origin,
+    })], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = "windfall-prediction-journal.json";
+    const datePart = /^\d{4}-\d{2}-\d{2}/.exec(exportedAt)?.[0] ?? "backup";
+    anchor.download = `windfall-prediction-journal-${datePart}.json`;
     anchor.click();
     URL.revokeObjectURL(url);
+    if (announce) {
+      setJournalStorageMessage({
+        kind: "status",
+        text: `Backed up ${entries.length} journal ${entries.length === 1 ? "entry" : "entries"} from ${journalStorageOrigin}.`,
+      });
+    }
+  };
+
+  const handleJournalImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    if (!file) return;
+
+    try {
+      const parsed = parsePredictionJournalBackup(await file.text());
+      if (parsed.entries.length === 0) {
+        setJournalStorageMessage({
+          kind: "error",
+          text: parsed.rejectedCount > 0
+            ? `No valid journal entries were found; ${parsed.rejectedCount} malformed ${parsed.rejectedCount === 1 ? "row was" : "rows were"} rejected. The local journal was not changed.`
+            : "This backup contains no journal entries. The local journal was not changed.",
+        });
+        return;
+      }
+
+      const result = mergePredictionJournalEntries(entries, parsed.entries);
+      if (result.addedCount > 0 || result.updatedCount > 0) {
+        setEntries(result.entries);
+      }
+
+      const source = parsed.sourceOrigin ? ` from ${parsed.sourceOrigin}` : "";
+      const rejected = parsed.rejectedCount > 0
+        ? ` ${parsed.rejectedCount} malformed ${parsed.rejectedCount === 1 ? "row was" : "rows were"} rejected.`
+        : "";
+      setJournalStorageMessage({
+        kind: "status",
+        text: `Import${source}: ${result.addedCount} added, ${result.updatedCount} updated, ${result.unchangedCount} already current.${rejected}`,
+      });
+    } catch (error) {
+      setJournalStorageMessage({
+        kind: "error",
+        text: error instanceof Error ? error.message : "The selected journal backup could not be imported.",
+      });
+    } finally {
+      input.value = "";
+    }
   };
 
   const handleEmailToAuthor = async () => {
     if (typeof window === "undefined") return;
-    const json = JSON.stringify(entries, null, 2);
+    const json = buildJournalBackupJson();
     const subject = "Windfall Prediction Journal export";
     const header = [
       "Windfall Prediction Journal export",
@@ -2266,14 +2455,14 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
       body = [
         header,
         "The journal JSON was too large for a reliable mailto body.",
-        "Windfall tried to copy the JSON to the clipboard; if that failed, it downloaded windfall-prediction-journal.json.",
+        "Windfall tried to copy the JSON to the clipboard; if that failed, it downloaded a dated Prediction Journal JSON backup.",
       ].join("\n");
       try {
         if (!navigator.clipboard?.writeText) throw new Error("Clipboard API unavailable");
         await navigator.clipboard.writeText(json);
         fallbackMessage = " JSON copied to clipboard because it was too large for the email body.";
       } catch {
-        downloadJournalJson();
+        downloadJournalJson(false);
         fallbackMessage = " JSON downloaded because it was too large for the email body and clipboard was unavailable.";
       }
     }
@@ -2285,6 +2474,69 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
 
   return (
     <section className="windfall-ledger-panel" aria-label="Prediction Journal & Scorecard">
+      <JournalLegendBox
+        title="Stored locally for this browser address"
+        tone="soft"
+        style={{ marginBottom: 14 }}
+      >
+        <div
+          data-testid="prediction-journal-local-storage-notice"
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 12,
+            alignItems: "center",
+          }}
+        >
+          <div style={{ flex: "1 1 340px", minWidth: 0, fontSize: 12, lineHeight: 1.45, color: "#475569" }}>
+            <div style={{ fontWeight: 850, color: "#1f3b57", overflowWrap: "anywhere" }}>
+              {journalStorageOrigin}
+            </div>
+            <div>
+              Changing the hostname, port, or browser profile opens a separate local journal. This is not cloud sync.
+              Back up before switching addresses; importing merges valid entries and never clears this journal.
+            </div>
+          </div>
+          <div style={{ display: "flex", flex: "0 1 auto", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+            <HigButton
+              size="compact"
+              variant="secondary"
+              onClick={() => downloadJournalJson()}
+              disabled={entries.length === 0}
+            >
+              Backup JSON
+            </HigButton>
+            <HigButton
+              size="compact"
+              variant="secondary"
+              onClick={() => journalImportInputRef.current?.click()}
+            >
+              Import JSON
+            </HigButton>
+            <input
+              ref={journalImportInputRef}
+              type="file"
+              accept=".json,application/json"
+              aria-label="Import Prediction Journal JSON backup"
+              hidden
+              onChange={(event) => void handleJournalImport(event)}
+            />
+          </div>
+        </div>
+        {journalStorageMessage ? (
+          <div
+            role={journalStorageMessage.kind === "error" ? "alert" : "status"}
+            style={{
+              marginTop: 8,
+              fontSize: 12,
+              fontWeight: 750,
+              color: journalStorageMessage.kind === "error" ? "#991b1b" : "#31506b",
+            }}
+          >
+            {journalStorageMessage.text}
+          </div>
+        ) : null}
+      </JournalLegendBox>
       {journalViewMode === "draft" ? (
         <div
           ref={draftRegionRef}
@@ -2303,6 +2555,8 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
           The journal is observe-only. New Prediction drafts from current app state, entries are anchored to the latest real draw when saved, can be edited before the first target draw arrives, and lock once scoring has begun.
         </InfoHelp>
       </div>
+
+      {draftCaptureBatch ? renderPredictionCaptureDraftSummary(draftCaptureBatch) : null}
 
       <JournalLegendBox title="New user guide" tone="soft" style={{ marginTop: 12 }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10, fontSize: 12, lineHeight: 1.45 }}>
@@ -2773,6 +3027,11 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
                           {entry.canEdit ? " · Editable until first target draw appears" : " · Locked after target draw arrived"}
                         </span>
                         {renderCollapsedPickedNumbers(entry.inputs.numbers)}
+                        {entry.captureBatch ? (
+                          <span style={{ display: "block", marginTop: 4, color: "#31506b", fontSize: 12, fontWeight: 850 }}>
+                            Played portfolio: {entry.captureBatch.sourceSummary.distinctGames} distinct game{entry.captureBatch.sourceSummary.distinctGames === 1 ? "" : "s"} · {entry.captureBatch.sourceSummary.purchasedLines} line{entry.captureBatch.sourceSummary.purchasedLines === 1 ? "" : "s"}
+                          </span>
+                        ) : null}
                       </span>
                       <span style={{ color: "#64748b", fontSize: 12, fontWeight: 800 }}>{isExpanded ? "Hide" : "Open"}</span>
                     </button>
@@ -2836,6 +3095,7 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
                           </div>
                         ) : null}
                         {entry.provenance ? renderStructuredProvenance(entry.provenance) : null}
+                        {entry.captureBatch ? renderPredictionCaptureScorecard(entry.captureBatch, entry.targetDraws[0], normalizedReviewStatus) : null}
                         {entry.setupSnapshot?.effectiveSettingsLedger && <EffectiveSettings ledger={entry.setupSnapshot.effectiveSettingsLedger} status="Captured setup for this entry; not the current setup." />}
                         {terminalDigitHistory ? renderTerminalDigitHistory(terminalDigitHistory) : null}
                         {historicalPrizeCollision ? renderHistoricalPrizeCollision(historicalPrizeCollision, "entry") : null}

@@ -57,6 +57,7 @@ import {
 } from "./lib/repeatedTerminalDigitFamilies";
 export {
   applyOddEvenRatioQuotas,
+  buildOddEvenRatioActiveShares,
   buildOddEvenRatioQuotas,
   candidateOddEvenRatio,
   summarizeOddEvenRatios,

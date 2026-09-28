@@ -1191,6 +1191,106 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
           </div>
 
           <div style={sectionStyle}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+              <div>
+                <strong style={{ color: "#0f172a" }}>Acceptance Needs</strong>
+                <div style={{ color: "#64748b", fontSize: 12 }}>
+                  Select numbers from the active monthly buckets; stale selections are removed automatically.
+                  {summary.effectiveMonthIsSynthetic ? " The planning month starts with all numbers in Undrawn." : ""}
+                </div>
+                {userExclusionReminder && (
+                  <div role="status" style={{ color: "#475569", fontSize: 12, marginTop: 4 }}>
+                    {userExclusionReminder}. Clear the manual exclusion or turn off the rule that excludes them before selecting them here.
+                  </div>
+                )}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 6, color: "#334155", fontSize: 12, fontWeight: 700 }}>
+                  <input
+                    type="checkbox"
+                    checked={constructiveFillEnabled}
+                    onChange={(event) => onConstructiveFillChange?.(event.target.checked)}
+                  />
+                  Use counts when constructing candidates
+                </label>
+                <label
+                  style={{ display: "flex", alignItems: "center", gap: 6, color: "#475569", fontSize: 11, fontWeight: 700 }}
+                  title="Favour the clicked numbers inside each selected bucket during constructive fill, while still allowing unclicked numbers to appear."
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedNumberBiasEnabled}
+                    onChange={(event) => setSelectedNumberBiasEnabled(event.target.checked)}
+                  />
+                  Bias clicked bucket numbers (not forced)
+                </label>
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(108px, 1fr))", gap: 6, marginBottom: 10 }}>
+              {bucketMeta.map(({ key, times, label }) => (
+                <div key={key} style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: 8, background: "#f8fafc" }}>
+                  <div style={{ color: colorForTimes(times), fontSize: 12, fontWeight: 800 }}>{label}</div>
+                  <div style={{ color: "#0f172a", fontSize: 18, fontWeight: 900 }}>{constraints[key]}</div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 8 }}>
+              {bucketMeta.map(({ key, times, label }) => (
+                <div key={key} style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: 8 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "flex-start", marginBottom: 6 }}>
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}>
+                      <strong style={{ color: colorForTimes(times), fontSize: 13 }}>{label}</strong>
+                      <span style={{ color: "#0f172a", fontSize: 16, fontWeight: 900, fontVariantNumeric: "tabular-nums" }}>
+                        {projectedBucketCounts[key].projectedCount}
+                      </span>
+                    </div>
+                    <span
+                      style={{ color: "#64748b", fontSize: 11, fontWeight: 800, fontVariantNumeric: "tabular-nums" }}
+                      title={`Base ${projectedBucketCounts[key].baseCount}${projectedBucketCounts[key].delta === 0 ? "" : `, delta ${formatSigned(projectedBucketCounts[key].delta)}`}`}
+                    >
+                      {projectedBucketCounts[key].delta === 0 ? `base ${projectedBucketCounts[key].baseCount}` : formatSigned(projectedBucketCounts[key].delta)}
+                    </span>
+                  </div>
+                  <div style={{ color: "#64748b", fontSize: 11, marginBottom: 6 }}>
+                    Clicked {projectedBucketCounts[key].selectedCount} · base {projectedBucketCounts[key].baseCount}
+                  </div>
+                  <NumberPills
+                    numbers={bucketOptions[key]}
+                    selected={selectedByBucket[key]}
+                    excludedNumbers={userExcludedNumbers}
+                    bucketTimes={times}
+                    bucketLabel={label}
+                    onToggle={(n) => toggleBucketNumber(key, n)}
+                  />
+                </div>
+              ))}
+            </div>
+
+            <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+              <button type="button" onClick={handleUseSelected} disabled={!onUseSelectedNumbers || allSelected.length === 0}>
+                Use selected
+              </button>
+              <button type="button" onClick={clearSelections} disabled={allSelected.length === 0}>
+                Clear
+              </button>
+              <button type="button" onClick={handleSimulate} disabled={allSelected.length === 0}>
+                Simulate 8
+              </button>
+              <span style={{ color: "#64748b", fontSize: 12 }}>
+                {allSelected.length} selected
+              </span>
+              {simulateResult && (
+                <span style={{ display: "inline-flex", gap: 5, alignItems: "center", color: "#166534", fontSize: 12, fontWeight: 800 }}>
+                  Result
+                  <NumberPills numbers={simulateResult} />
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div style={sectionStyle}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
               <strong style={{ color: "#0f172a" }}>Robust Baseline And Ideal Draw</strong>
               <span style={{ color: "#64748b", fontSize: 12, maxWidth: 620, textAlign: "right" }}>
@@ -1698,105 +1798,6 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
             </div>
           </div>
 
-          <div style={sectionStyle}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
-              <div>
-                <strong style={{ color: "#0f172a" }}>Acceptance Needs</strong>
-                <div style={{ color: "#64748b", fontSize: 12 }}>
-                  Select numbers from the active monthly buckets; stale selections are removed automatically.
-                  {summary.effectiveMonthIsSynthetic ? " The planning month starts with all numbers in Undrawn." : ""}
-                </div>
-                {userExclusionReminder && (
-                  <div role="status" style={{ color: "#475569", fontSize: 12, marginTop: 4 }}>
-                    {userExclusionReminder}. Clear the manual exclusion or turn off the rule that excludes them before selecting them here.
-                  </div>
-                )}
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
-                <label style={{ display: "flex", alignItems: "center", gap: 6, color: "#334155", fontSize: 12, fontWeight: 700 }}>
-                  <input
-                    type="checkbox"
-                    checked={constructiveFillEnabled}
-                    onChange={(event) => onConstructiveFillChange?.(event.target.checked)}
-                  />
-                  Use counts when constructing candidates
-                </label>
-                <label
-                  style={{ display: "flex", alignItems: "center", gap: 6, color: "#475569", fontSize: 11, fontWeight: 700 }}
-                  title="Favour the clicked numbers inside each selected bucket during constructive fill, while still allowing unclicked numbers to appear."
-                >
-                  <input
-                    type="checkbox"
-                    checked={selectedNumberBiasEnabled}
-                    onChange={(event) => setSelectedNumberBiasEnabled(event.target.checked)}
-                  />
-                  Bias clicked bucket numbers (not forced)
-                </label>
-              </div>
-            </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(108px, 1fr))", gap: 6, marginBottom: 10 }}>
-              {bucketMeta.map(({ key, times, label }) => (
-                <div key={key} style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: 8, background: "#f8fafc" }}>
-                  <div style={{ color: colorForTimes(times), fontSize: 12, fontWeight: 800 }}>{label}</div>
-                  <div style={{ color: "#0f172a", fontSize: 18, fontWeight: 900 }}>{constraints[key]}</div>
-                </div>
-              ))}
-            </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 8 }}>
-              {bucketMeta.map(({ key, times, label }) => (
-                <div key={key} style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: 8 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "flex-start", marginBottom: 6 }}>
-                    <div style={{ display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}>
-                      <strong style={{ color: colorForTimes(times), fontSize: 13 }}>{label}</strong>
-                      <span style={{ color: "#0f172a", fontSize: 16, fontWeight: 900, fontVariantNumeric: "tabular-nums" }}>
-                        {projectedBucketCounts[key].projectedCount}
-                      </span>
-                    </div>
-                    <span
-                      style={{ color: "#64748b", fontSize: 11, fontWeight: 800, fontVariantNumeric: "tabular-nums" }}
-                      title={`Base ${projectedBucketCounts[key].baseCount}${projectedBucketCounts[key].delta === 0 ? "" : `, delta ${formatSigned(projectedBucketCounts[key].delta)}`}`}
-                    >
-                      {projectedBucketCounts[key].delta === 0 ? `base ${projectedBucketCounts[key].baseCount}` : formatSigned(projectedBucketCounts[key].delta)}
-                    </span>
-                  </div>
-                  <div style={{ color: "#64748b", fontSize: 11, marginBottom: 6 }}>
-                    Clicked {projectedBucketCounts[key].selectedCount} · base {projectedBucketCounts[key].baseCount}
-                  </div>
-                  <NumberPills
-                    numbers={bucketOptions[key]}
-                    selected={selectedByBucket[key]}
-                    excludedNumbers={userExcludedNumbers}
-                    bucketTimes={times}
-                    bucketLabel={label}
-                    onToggle={(n) => toggleBucketNumber(key, n)}
-                  />
-                </div>
-              ))}
-            </div>
-
-            <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-              <button type="button" onClick={handleUseSelected} disabled={!onUseSelectedNumbers || allSelected.length === 0}>
-                Use selected
-              </button>
-              <button type="button" onClick={clearSelections} disabled={allSelected.length === 0}>
-                Clear
-              </button>
-              <button type="button" onClick={handleSimulate} disabled={allSelected.length === 0}>
-                Simulate 8
-              </button>
-              <span style={{ color: "#64748b", fontSize: 12 }}>
-                {allSelected.length} selected
-              </span>
-              {simulateResult && (
-                <span style={{ display: "inline-flex", gap: 5, alignItems: "center", color: "#166534", fontSize: 12, fontWeight: 800 }}>
-                  Result
-                  <NumberPills numbers={simulateResult} />
-                </span>
-              )}
-            </div>
-          </div>
         </>
       )}
     </div>

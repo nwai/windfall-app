@@ -7,10 +7,12 @@ describe("Monthly Bucket Transition Lab formatting", () => {
     expect(formatWholeAwareNumber(4)).toBe("4");
     expect(`D${formatWholeAwareNumber(4)}`).toBe("D4");
     expect(formatWholeAwareNumber(12)).toBe("12");
+    expect(formatWholeAwareNumber(13.999999999)).toBe("14");
   });
 
   it("keeps a decimal place when a median genuinely lands between whole values", () => {
     expect(formatWholeAwareNumber(4.5)).toBe("4.5");
     expect(`D${formatWholeAwareNumber(4.5)}`).toBe("D4.5");
+    expect(formatWholeAwareNumber(2.74)).toBe("2.7");
   });
 });

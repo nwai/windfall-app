@@ -25,8 +25,7 @@ export interface TerminalDigitStageMonthEvidence {
   direction: "above" | "equal" | "below" | "unavailable";
 }
 
-export interface TerminalDigitStageCutoffRow {
-  earlyDrawCount: number;
+interface TerminalDigitStageAggregate {
   eligibleMonths: number;
   averageSelectedDigits: number;
   actual: number;
@@ -35,6 +34,80 @@ export interface TerminalDigitStageCutoffRow {
   aboveMonths: number;
   equalMonths: number;
   belowMonths: number;
+}
+
+export interface TerminalDigitStageCutoffRow extends TerminalDigitStageAggregate {
+  earlyDrawCount: number;
+  nextDrawTransitions: number;
+  nextDrawActual: number;
+  nextDrawExpected: number;
+  nextDrawRatio: number | null;
+}
+
+export interface TerminalDigitStageNextDrawDigitEvidence {
+  digit: number;
+  familyNumbers: number[];
+  trials: number;
+  actual: number;
+  expected: number;
+  ratio: number | null;
+  presenceHits: number;
+  expectedPresenceHits: number;
+}
+
+export interface TerminalDigitStageNextDrawEvidence extends TerminalDigitStageAggregate {
+  targetDrawNumber: number;
+  liftPercent: number | null;
+  confidenceInterval: { low: number; high: number } | null;
+  randomComparisonPValue: number | null;
+  monthsWithAnyHit: number;
+  expectedMonthsWithAnyHit: number;
+  olderPeriod: { months: number; ratio: number | null };
+  newerPeriod: { months: number; ratio: number | null };
+  digitRows: TerminalDigitStageNextDrawDigitEvidence[];
+}
+
+export interface TerminalDigitStageTranslationDistributionRow {
+  hitCount: number;
+  observedTransitions: number;
+  observedPercent: number;
+  randomExpectedTransitions: number;
+  randomExpectedPercent: number;
+}
+
+export interface TerminalDigitStageTranslationAuditRow {
+  monthKey: string;
+  targetDrawNumber: number;
+  targetDate: string;
+  selectedDigits: number[];
+  poolNumbers: number[];
+  targetNumbers: number[];
+  hitNumbers: number[];
+  hitCount: number;
+  expectedHits: number;
+}
+
+export type TerminalDigitStageTranslationCurrentState =
+  | "awaiting-target"
+  | "target-recorded"
+  | "insufficient-early-block"
+  | "unavailable";
+
+export interface TerminalDigitStageCandidateTranslation {
+  targetDrawNumber: number;
+  eligibleTransitions: number;
+  observedHits: number;
+  expectedHits: number;
+  observedAverageHits: number;
+  expectedAverageHits: number;
+  ratio: number | null;
+  olderPeriod: { transitions: number; ratio: number | null };
+  newerPeriod: { transitions: number; ratio: number | null };
+  currentState: TerminalDigitStageTranslationCurrentState;
+  currentSelectedDigits: number[];
+  currentPoolNumbers: number[];
+  distribution: TerminalDigitStageTranslationDistributionRow[];
+  auditRows: TerminalDigitStageTranslationAuditRow[];
 }
 
 export interface TerminalDigitStageCurrentRow {
@@ -83,6 +156,8 @@ export interface TerminalDigitStageSplitAnalysis {
   belowMonths: number;
   olderPeriod: { months: number; ratio: number | null };
   newerPeriod: { months: number; ratio: number | null };
+  nextDraw: TerminalDigitStageNextDrawEvidence;
+  candidateTranslation: TerminalDigitStageCandidateTranslation;
   monthRows: TerminalDigitStageMonthEvidence[];
   cutoffRows: TerminalDigitStageCutoffRow[];
   currentMonth: TerminalDigitStageCurrentMonth | null;
@@ -368,11 +443,156 @@ const buildMonthEvidence = (
   };
 };
 
-const aggregateEvidence = (rows: InternalMonthEvidence[]): TerminalDigitStageCutoffRow => {
+const buildNextDrawEvidence = (
+  month: PreparedStageMonth,
+  earlyDrawCount: number,
+  drawSize: number,
+  maxNumber: number,
+  metric: TerminalDigitStageMetric,
+  lowFamilyMode: TerminalDigitLowFamilyMode,
+): InternalMonthEvidence => {
+  const remainder = buildMonthEvidence(
+    month,
+    earlyDrawCount,
+    drawSize,
+    maxNumber,
+    metric,
+    lowFamilyMode,
+  );
+  const nextDraws = remainder.laterDraws.slice(0, 1);
+  const totals = lateMetricForDigits(nextDraws, remainder.selectedDigits, drawSize, maxNumber, metric);
+  return {
+    ...remainder,
+    actual: totals.actual,
+    expected: totals.expected,
+    ratio: totals.expected > 0 ? totals.actual / totals.expected : null,
+    direction: directionFor(totals.actual, totals.expected),
+    laterDraws: nextDraws,
+  };
+};
+
+const poolNumbersForDigits = (digits: number[], maxNumber: number): number[] => (
+  [...new Set(digits.flatMap((digit) => familyNumbersForDigit(digit, maxNumber)))]
+    .sort((left, right) => left - right)
+);
+
+const buildTranslationAuditRow = (
+  month: PreparedStageMonth,
+  earlyDrawCount: number,
+  drawSize: number,
+  maxNumber: number,
+  metric: TerminalDigitStageMetric,
+  lowFamilyMode: TerminalDigitLowFamilyMode,
+): TerminalDigitStageTranslationAuditRow | null => {
+  const targetDraw = month.draws[earlyDrawCount];
+  if (!targetDraw) return null;
+  const observations = observeEarlyDigits(month.draws, earlyDrawCount, drawSize, maxNumber, metric);
+  const selectedDigits = selectLowDigits(observations, lowFamilyMode);
+  const poolNumbers = poolNumbersForDigits(selectedDigits, maxNumber);
+  const pool = new Set(poolNumbers);
+  const targetNumbers = targetDraw.numbers.slice();
+  const hitNumbers = targetNumbers.filter((number) => pool.has(number));
+  return {
+    monthKey: month.monthKey,
+    targetDrawNumber: earlyDrawCount + 1,
+    targetDate: targetDraw.date,
+    selectedDigits,
+    poolNumbers,
+    targetNumbers,
+    hitNumbers,
+    hitCount: hitNumbers.length,
+    expectedHits: targetNumbers.length * (poolNumbers.length / maxNumber),
+  };
+};
+
+const hypergeometricProbability = (
+  populationSize: number,
+  successCount: number,
+  drawCount: number,
+  hitCount: number,
+): number => {
+  if (
+    populationSize <= 0
+    || successCount < 0
+    || successCount > populationSize
+    || drawCount < 0
+    || drawCount > populationSize
+    || hitCount < 0
+    || hitCount > successCount
+    || drawCount - hitCount > populationSize - successCount
+  ) return 0;
+  const denominator = combinationRatio(populationSize, drawCount);
+  if (denominator <= 0) return 0;
+  return (
+    combinationRatio(successCount, hitCount)
+    * combinationRatio(populationSize - successCount, drawCount - hitCount)
+  ) / denominator;
+};
+
+const translationRatioForRows = (rows: TerminalDigitStageTranslationAuditRow[]): number | null => {
+  const actual = rows.reduce((sum, row) => sum + row.hitCount, 0);
+  const expected = rows.reduce((sum, row) => sum + row.expectedHits, 0);
+  return expected > 0 ? actual / expected : null;
+};
+
+const buildCandidateTranslation = (
+  rows: TerminalDigitStageTranslationAuditRow[],
+  currentMonth: TerminalDigitStageCurrentMonth | null,
+  earlyDrawCount: number,
+  drawSize: number,
+  maxNumber: number,
+): TerminalDigitStageCandidateTranslation => {
+  const observedHits = rows.reduce((sum, row) => sum + row.hitCount, 0);
+  const expectedHits = rows.reduce((sum, row) => sum + row.expectedHits, 0);
+  const midpoint = Math.floor(rows.length / 2);
+  const olderRows = rows.slice(0, midpoint);
+  const newerRows = rows.slice(midpoint);
+  const currentSelectedDigits = currentMonth?.hasCompleteEarlyBlock
+    ? currentMonth.selectedDigits.slice()
+    : [];
+  const currentPoolNumbers = poolNumbersForDigits(currentSelectedDigits, maxNumber);
+  let currentState: TerminalDigitStageTranslationCurrentState = "unavailable";
+  if (currentMonth && !currentMonth.hasCompleteEarlyBlock) currentState = "insufficient-early-block";
+  else if (currentMonth?.hasCompleteEarlyBlock) {
+    currentState = currentMonth.recordedDraws > earlyDrawCount ? "target-recorded" : "awaiting-target";
+  }
+
+  const distribution = Array.from({ length: drawSize + 1 }, (_, hitCount) => {
+    const observedTransitions = rows.filter((row) => row.hitCount === hitCount).length;
+    const randomExpectedTransitions = rows.reduce((sum, row) => (
+      sum + hypergeometricProbability(maxNumber, row.poolNumbers.length, row.targetNumbers.length, hitCount)
+    ), 0);
+    return {
+      hitCount,
+      observedTransitions,
+      observedPercent: rows.length > 0 ? (observedTransitions / rows.length) * 100 : 0,
+      randomExpectedTransitions,
+      randomExpectedPercent: rows.length > 0 ? (randomExpectedTransitions / rows.length) * 100 : 0,
+    };
+  });
+
+  return {
+    targetDrawNumber: earlyDrawCount + 1,
+    eligibleTransitions: rows.length,
+    observedHits,
+    expectedHits,
+    observedAverageHits: rows.length > 0 ? observedHits / rows.length : 0,
+    expectedAverageHits: rows.length > 0 ? expectedHits / rows.length : 0,
+    ratio: expectedHits > 0 ? observedHits / expectedHits : null,
+    olderPeriod: { transitions: olderRows.length, ratio: translationRatioForRows(olderRows) },
+    newerPeriod: { transitions: newerRows.length, ratio: translationRatioForRows(newerRows) },
+    currentState,
+    currentSelectedDigits,
+    currentPoolNumbers,
+    distribution,
+    auditRows: rows.slice().reverse(),
+  };
+};
+
+const aggregateEvidence = (rows: InternalMonthEvidence[]): TerminalDigitStageAggregate => {
   const actual = rows.reduce((sum, row) => sum + row.actual, 0);
   const expected = rows.reduce((sum, row) => sum + row.expected, 0);
   return {
-    earlyDrawCount: 0,
     eligibleMonths: rows.length,
     averageSelectedDigits: rows.length
       ? rows.reduce((sum, row) => sum + row.selectedDigits.length, 0) / rows.length
@@ -471,6 +691,53 @@ const ratioForRows = (rows: InternalMonthEvidence[]): number | null => {
   return expected > 0 ? actual / expected : null;
 };
 
+const expectedAnySelectedDigitHit = (
+  selectedDigits: number[],
+  drawSize: number,
+  maxNumber: number,
+): number => {
+  const selectedNumberCount = selectedDigits.reduce(
+    (sum, digit) => sum + familyNumbersForDigit(digit, maxNumber).length,
+    0,
+  );
+  if (selectedNumberCount <= 0 || drawSize <= 0) return 0;
+  return 1 - (combinationRatio(maxNumber - selectedNumberCount, drawSize) / combinationRatio(maxNumber, drawSize));
+};
+
+const buildNextDrawDigitRows = (
+  rows: InternalMonthEvidence[],
+  drawSize: number,
+  maxNumber: number,
+  metric: TerminalDigitStageMetric,
+): TerminalDigitStageNextDrawDigitEvidence[] => (
+  Array.from({ length: 10 }, (_, digit) => {
+    const qualifyingRows = rows.filter((row) => row.selectedDigits.includes(digit));
+    const familyNumbers = familyNumbersForDigit(digit, maxNumber);
+    const actual = qualifyingRows.reduce(
+      (sum, row) => sum + countDigitMetric(row.laterDraws, digit, metric),
+      0,
+    );
+    const expected = qualifyingRows.length > 0
+      ? expectedDigitMetric(qualifyingRows.length, familyNumbers.length, drawSize, maxNumber, metric)
+      : 0;
+    const presenceHits = qualifyingRows.filter((row) => (
+      row.laterDraws.some((draw) => draw.numbers.some((number) => terminalDigit(number) === digit))
+    )).length;
+    const expectedPresenceHits = qualifyingRows.length
+      * expectedPresencePerDraw(familyNumbers.length, drawSize, maxNumber);
+    return {
+      digit,
+      familyNumbers,
+      trials: qualifyingRows.length,
+      actual,
+      expected,
+      ratio: expected > 0 ? actual / expected : null,
+      presenceHits,
+      expectedPresenceHits,
+    };
+  })
+);
+
 const buildCurrentMonth = (
   month: PreparedStageMonth | undefined,
   earlyDrawCount: number,
@@ -558,14 +825,30 @@ export const analyzeTerminalDigitStageSplit = (
   const resampleCount = clampInteger(options.resampleCount ?? DEFAULT_RESAMPLE_COUNT, 0, 20_000);
   const months = prepareMonths(draws, includeSupp, maxNumber);
   const completeMonths = months.filter((month) => month.isComplete);
-  const availableMonthLengths = [...new Set(completeMonths.map((month) => month.draws.length))]
+  const availableMonthLengths = [...new Set(completeMonths.map((month) => month.expectedDateKeys.length))]
     .sort((left, right) => left - right);
-  const eligibleMonths = completeMonths.filter((month) => (
-    (monthLength === "all" || month.draws.length === monthLength)
+  const matchesMonthLength = (month: PreparedStageMonth): boolean => (
+    monthLength === "all" || month.expectedDateKeys.length === monthLength
+  );
+  const eligibleCompleteMonths = completeMonths.filter((month) => (
+    matchesMonthLength(month)
+    && month.draws.length > earlyDrawCount
+  ));
+  const eligibleNextDrawMonths = months.filter((month) => (
+    month.isPrefixComplete
+    && matchesMonthLength(month)
     && month.draws.length > earlyDrawCount
   ));
 
-  const monthRows = eligibleMonths.map((month) => buildMonthEvidence(
+  const monthRows = eligibleCompleteMonths.map((month) => buildMonthEvidence(
+    month,
+    earlyDrawCount,
+    drawSize,
+    maxNumber,
+    metric,
+    lowFamilyMode,
+  ));
+  const nextDrawRows = eligibleNextDrawMonths.map((month) => buildNextDrawEvidence(
     month,
     earlyDrawCount,
     drawSize,
@@ -574,7 +857,8 @@ export const analyzeTerminalDigitStageSplit = (
     lowFamilyMode,
   ));
   const aggregate = aggregateEvidence(monthRows);
-  const random = createRandom(options.randomSeed ?? 0x51a6e5);
+  const randomSeed = options.randomSeed ?? 0x51a6e5;
+  const random = createRandom(randomSeed);
   const confidenceInterval = bootstrapRatioInterval(monthRows, resampleCount, random);
   const randomComparisonPValue = randomSubsetPValue(
     monthRows,
@@ -588,21 +872,81 @@ export const analyzeTerminalDigitStageSplit = (
   const midpoint = Math.floor(monthRows.length / 2);
   const olderRows = monthRows.slice(0, midpoint);
   const newerRows = monthRows.slice(midpoint);
+  const nextDrawAggregate = aggregateEvidence(nextDrawRows);
+  const nextDrawRandom = createRandom(randomSeed ^ 0x9e3779b9);
+  const nextDrawConfidenceInterval = bootstrapRatioInterval(nextDrawRows, resampleCount, nextDrawRandom);
+  const nextDrawRandomComparisonPValue = randomSubsetPValue(
+    nextDrawRows,
+    nextDrawAggregate.ratio,
+    drawSize,
+    maxNumber,
+    metric,
+    resampleCount,
+    nextDrawRandom,
+  );
+  const nextDrawMidpoint = Math.floor(nextDrawRows.length / 2);
+  const nextDrawOlderRows = nextDrawRows.slice(0, nextDrawMidpoint);
+  const nextDrawNewerRows = nextDrawRows.slice(nextDrawMidpoint);
+  const latestMonth = months[months.length - 1];
+  const currentMonth = buildCurrentMonth(
+    latestMonth,
+    earlyDrawCount,
+    drawSize,
+    maxNumber,
+    metric,
+    lowFamilyMode,
+  );
+  const translationRows = eligibleNextDrawMonths
+    .map((month) => buildTranslationAuditRow(
+      month,
+      earlyDrawCount,
+      drawSize,
+      maxNumber,
+      metric,
+      lowFamilyMode,
+    ))
+    .filter((row): row is TerminalDigitStageTranslationAuditRow => row !== null);
+  const candidateTranslation = buildCandidateTranslation(
+    translationRows,
+    currentMonth,
+    earlyDrawCount,
+    drawSize,
+    maxNumber,
+  );
 
   const cutoffRows = Array.from({ length: 8 }, (_, index) => index + 3).map((cutoff) => {
-    const rows = completeMonths
-      .filter((month) => (
-        (monthLength === "all" || month.draws.length === monthLength)
-        && month.draws.length > cutoff
-      ))
-      .map((month) => buildMonthEvidence(month, cutoff, drawSize, maxNumber, metric, lowFamilyMode));
-    return { ...aggregateEvidence(rows), earlyDrawCount: cutoff };
+    const cutoffMonths = completeMonths.filter((month) => (
+      matchesMonthLength(month)
+      && month.draws.length > cutoff
+    ));
+    const cutoffTransitionMonths = months.filter((month) => (
+      month.isPrefixComplete
+      && matchesMonthLength(month)
+      && month.draws.length > cutoff
+    ));
+    const rows = cutoffMonths.map((month) => (
+      buildMonthEvidence(month, cutoff, drawSize, maxNumber, metric, lowFamilyMode)
+    ));
+    const nextRows = cutoffTransitionMonths.map((month) => (
+      buildNextDrawEvidence(month, cutoff, drawSize, maxNumber, metric, lowFamilyMode)
+    ));
+    const nextAggregate = aggregateEvidence(nextRows);
+    return {
+      ...aggregateEvidence(rows),
+      earlyDrawCount: cutoff,
+      nextDrawTransitions: nextRows.length,
+      nextDrawActual: nextAggregate.actual,
+      nextDrawExpected: nextAggregate.expected,
+      nextDrawRatio: nextAggregate.ratio,
+    };
   });
 
-  const latestMonth = months[months.length - 1];
   const warnings: string[] = [];
-  if (eligibleMonths.length < 8) {
-    warnings.push(`Only ${eligibleMonths.length} complete comparable month${eligibleMonths.length === 1 ? "" : "s"} are available; treat the result as thin evidence.`);
+  if (eligibleCompleteMonths.length < 8) {
+    warnings.push(`Only ${eligibleCompleteMonths.length} complete comparable month${eligibleCompleteMonths.length === 1 ? "" : "s"} are available for the remainder-of-month test; treat the result as thin evidence.`);
+  }
+  if (eligibleNextDrawMonths.length < 8) {
+    warnings.push(`Only ${eligibleNextDrawMonths.length} valid D1-to-D${earlyDrawCount + 1} transition${eligibleNextDrawMonths.length === 1 ? "" : "s"} are available for the immediate replay; treat the result as thin evidence.`);
   }
   if (monthLength !== "all" && !availableMonthLengths.includes(monthLength)) {
     warnings.push(`No complete ${monthLength}-draw months are available in this history source.`);
@@ -630,16 +974,25 @@ export const analyzeTerminalDigitStageSplit = (
     belowMonths: aggregate.belowMonths,
     olderPeriod: { months: olderRows.length, ratio: ratioForRows(olderRows) },
     newerPeriod: { months: newerRows.length, ratio: ratioForRows(newerRows) },
+    nextDraw: {
+      ...nextDrawAggregate,
+      targetDrawNumber: earlyDrawCount + 1,
+      liftPercent: nextDrawAggregate.ratio === null ? null : (nextDrawAggregate.ratio - 1) * 100,
+      confidenceInterval: nextDrawConfidenceInterval,
+      randomComparisonPValue: nextDrawRandomComparisonPValue,
+      monthsWithAnyHit: nextDrawRows.filter((row) => row.actual > 0).length,
+      expectedMonthsWithAnyHit: nextDrawRows.reduce(
+        (sum, row) => sum + expectedAnySelectedDigitHit(row.selectedDigits, drawSize, maxNumber),
+        0,
+      ),
+      olderPeriod: { months: nextDrawOlderRows.length, ratio: ratioForRows(nextDrawOlderRows) },
+      newerPeriod: { months: nextDrawNewerRows.length, ratio: ratioForRows(nextDrawNewerRows) },
+      digitRows: buildNextDrawDigitRows(nextDrawRows, drawSize, maxNumber, metric),
+    },
+    candidateTranslation,
     monthRows: monthRows.map(({ laterDraws: _laterDraws, ...row }) => row),
     cutoffRows,
-    currentMonth: buildCurrentMonth(
-      latestMonth,
-      earlyDrawCount,
-      drawSize,
-      maxNumber,
-      metric,
-      lowFamilyMode,
-    ),
+    currentMonth,
     warnings,
   };
 };

@@ -27,6 +27,7 @@ import {
   type SignalConfluenceSortKey,
   type SignalConfluenceVisibilityMode,
 } from "../lib/signalConfluence";
+import { auditSignalConfluenceIndependence } from "../lib/signalConfluenceIndependence";
 import { HigButton } from "./shared/HigControls";
 import "./SignalConfluencePanel.css";
 
@@ -55,6 +56,12 @@ interface SignalConfluencePanelProps {
 }
 
 const formatScore = (value: number): string => value.toFixed(2);
+
+const formatAuditProbability = (value: number): string => {
+  if (!Number.isFinite(value)) return "n/a";
+  if (value < 0.001) return "<0.001";
+  return value.toFixed(3);
+};
 
 const allNumbers = (): number[] => Array.from({ length: 45 }, (_, index) => index + 1);
 
@@ -437,6 +444,7 @@ export const SignalConfluencePanel: React.FC<SignalConfluencePanelProps> = ({
   const [visibilityMode, setVisibilityMode] = useState<SignalConfluenceVisibilityMode>("supported-only");
   const [sortKey, setSortKey] = useState<SignalConfluenceSortKey>("rank");
   const [supportSortDirection, setSupportSortDirection] = useState<SignalConfluenceSortDirection>("descending");
+  const [showIndependenceAudit, setShowIndependenceAudit] = useState(false);
 
   const rows = useMemo(() => {
     const mentions: SignalConfluenceMention[] = [
@@ -485,6 +493,11 @@ export const SignalConfluencePanel: React.FC<SignalConfluencePanelProps> = ({
     return visibilityMode === "all-45" ? sorted : sorted.slice(0, showTop);
   }, [rows, showTop, sortKey, supportSortDirection, visibilityMode]);
 
+  const independenceAudit = useMemo(
+    () => auditSignalConfluenceIndependence(rows),
+    [rows],
+  );
+
   const supportFamilyCount = useMemo(() => (
     new Set(rows.flatMap((row) => row.supportMentions.map((mention) => mention.family))).size
   ), [rows]);
@@ -523,7 +536,7 @@ export const SignalConfluencePanel: React.FC<SignalConfluencePanelProps> = ({
         <div>
           <span className="signal-confluence-panel__kicker">Observe-only ledger</span>
           <p>
-            This panel counts where independent-looking app signals mention the same numbers. Related signals are capped by family, so a cluster of similar evidence cannot pretend to be many separate proofs. It changes candidate generation only when you deliberately force a supported number from this table.
+            This panel counts where different app signal families mention the same numbers. Repeated mentions are capped within each family, and the independence audit below checks cross-family overlap separately. It changes candidate generation only when you deliberately force a supported number from this table.
           </p>
         </div>
       </div>
@@ -549,6 +562,103 @@ export const SignalConfluencePanel: React.FC<SignalConfluencePanelProps> = ({
           <div className="signal-confluence-panel__metric-value">{ndeeStatus}</div>
           <div className="signal-confluence-panel__metric-detail">only after fixed replay runs</div>
         </div>
+      </div>
+
+      <div className="signal-confluence-panel__audit">
+        <div className="signal-confluence-panel__audit-header">
+          <div>
+            <span className="signal-confluence-panel__kicker">Truthfulness audit</span>
+            <strong>Signal Confluence Independence Audit</strong>
+            <p>
+              Tests whether different support families currently point to more of the same numbers than fixed-size random sets would. This is a current-set redundancy check, not proof that any pair is independent.
+            </p>
+          </div>
+          <HigButton
+            variant="quiet"
+            size="compact"
+            aria-expanded={showIndependenceAudit}
+            aria-controls="signal-confluence-independence-audit-details"
+            onClick={() => setShowIndependenceAudit((current) => !current)}
+          >
+            {showIndependenceAudit ? "Hide audit" : "Review audit"}
+          </HigButton>
+        </div>
+
+        <div className="signal-confluence-panel__audit-summary">
+          <div>
+            <span>Active families</span>
+            <strong>{independenceAudit.activeFamilyCount}</strong>
+          </div>
+          <div>
+            <span>Pairs tested</span>
+            <strong>{independenceAudit.pairCount}</strong>
+          </div>
+          <div>
+            <span>Overlap flags</span>
+            <strong>{independenceAudit.flaggedPairCount}</strong>
+          </div>
+          <div>
+            <span>Ledger effect</span>
+            <strong>None</strong>
+          </div>
+        </div>
+
+        <div className={`signal-confluence-panel__audit-verdict ${independenceAudit.flaggedPairCount ? "signal-confluence-panel__audit-verdict--watch" : ""}`}>
+          {independenceAudit.activeFamilyCount < 2
+            ? "At least two active support families are required before pair overlap can be checked."
+            : independenceAudit.flaggedPairCount > 0
+              ? `${independenceAudit.flaggedPairCount} family pair${independenceAudit.flaggedPairCount === 1 ? "" : "s"} currently overlap above the 5% false-discovery-rate threshold. Treat their agreement as potentially redundant.`
+              : "No family pair currently clears the overlap audit threshold. This is not evidence that the families are independent."}
+        </div>
+
+        {showIndependenceAudit ? (
+          <div id="signal-confluence-independence-audit-details" className="signal-confluence-panel__audit-details">
+            <div className="signal-confluence-panel__audit-family-scope">
+              {independenceAudit.familyRows.length
+                ? independenceAudit.familyRows.map((row) => `${row.label} ${row.numbers.length}`).join(" · ")
+                : "No active support families."}
+            </div>
+            {independenceAudit.pairRows.length ? (
+              <div className="signal-confluence-panel__audit-table-scroll">
+                <table className="signal-confluence-panel__audit-table">
+                  <thead>
+                    <tr>
+                      <th>Family pair</th>
+                      <th>Set sizes</th>
+                      <th>Shared numbers</th>
+                      <th>Observed / expected</th>
+                      <th>Lift</th>
+                      <th>Jaccard</th>
+                      <th>FDR q</th>
+                      <th>Read</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {independenceAudit.pairRows.map((row) => (
+                      <tr key={`${row.leftFamily}-${row.rightFamily}`}>
+                        <td>{row.leftLabel} + {row.rightLabel}</td>
+                        <td>{row.leftSize} / {row.rightSize}</td>
+                        <td>{row.sharedNumbers.length ? row.sharedNumbers.join(", ") : "none"}</td>
+                        <td>{row.observedOverlap} / {row.expectedOverlap.toFixed(2)}</td>
+                        <td>{row.overlapLift.toFixed(2)}x</td>
+                        <td>{(row.jaccard * 100).toFixed(1)}%</td>
+                        <td>{formatAuditProbability(row.adjustedPValue)}</td>
+                        <td>
+                          <span className={`signal-confluence-panel__audit-read ${row.flagged ? "signal-confluence-panel__audit-read--watch" : ""}`}>
+                            {row.flagged ? "Redundancy watch" : "Not flagged"}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+            <p className="signal-confluence-panel__audit-method">
+              Each family is reduced to its unique supported-number set. Expected overlap is |A| x |B| / 45. The audit uses an exact one-sided hypergeometric overlap test and Benjamini-Hochberg correction across every active family pair at a 5% false discovery rate. A non-flag is inconclusive; it does not certify independence. Results never alter ledger rank or generation.
+            </p>
+          </div>
+        ) : null}
       </div>
 
       <div className="signal-confluence-panel__controls">

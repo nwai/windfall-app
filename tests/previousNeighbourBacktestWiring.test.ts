@@ -11,6 +11,8 @@ describe("Previous ±1 neighbour backtest app wiring", () => {
     expect(appSource.indexOf('id="workflow-validation"')).toBeLessThan(
       appSource.indexOf('panelId="previous-neighbour-backtest"'),
     );
+    expect(appSource).toContain("auditDraws={baselineHistory}");
+    expect(appSource).toContain("auditHistoryScopeLabel={baselineHistoryScopeLabel}");
     expect(appSource).toContain("onToggleUserSelectedNumber={toggleSharedUserSelectedNumber}");
   });
 
@@ -21,5 +23,7 @@ describe("Previous ±1 neighbour backtest app wiring", () => {
     expect(manual).toContain("does not alter candidate generation");
     expect(manual).toContain("Anti-lookahead rule");
     expect(manual).toContain("duplicated neighbour");
+    expect(manual).toContain("LDN-SA-1");
+    expect(manual).toContain("Latest Draw ±1/±2 Learning &amp; Self-Audit");
   });
 });

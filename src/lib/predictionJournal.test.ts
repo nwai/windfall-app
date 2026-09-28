@@ -9,15 +9,44 @@ import {
   clearPredictionJournalEntries,
   computePredictionJournalStatus,
   loadPredictionJournalEntries,
+  mergePredictionJournalEntries,
+  parsePredictionJournalBackup,
   scorePredictionJournalEntry,
   savePredictionJournalEntries,
+  serializePredictionJournalBackup,
 } from "./predictionJournal";
+import { buildPredictionCaptureBatch, parsePredictionCaptureRows } from "./predictionCapture";
 
 const draw = (date: string, main: number[], supp: number[] = []): Draw => ({ date, main, supp });
 
 describe("predictionJournal", () => {
   beforeEach(() => {
     clearPredictionJournalEntries();
+  });
+
+  it("preserves a multi-game Prediction Capture batch through journal backup and restore", () => {
+    const captureBatch = buildPredictionCaptureBatch({
+      externalRows: parsePredictionCaptureRows("1,2,3,4,5,6\n7,8,9,10,11,12"),
+      externalInputSource: "manual",
+      now: "2026-06-24T10:25:00.000Z",
+    });
+    const entry = buildPredictionJournalEntry({
+      id: "prediction-capture-entry",
+      now: "2026-06-24T10:30:00.000Z",
+      latestDraw: draw("6/24/26", [1, 3, 5, 7, 9, 11], [13, 15]),
+      targetKind: "nextDraw",
+      reviewStatus: "reviewedByUser",
+      inputs: { notes: "Two played games." },
+      captureBatch,
+    });
+
+    const restored = parsePredictionJournalBackup(serializePredictionJournalBackup([entry], {
+      exportedAt: "2026-06-24T11:00:00.000Z",
+    })).entries[0];
+
+    expect(restored.captureBatch?.games).toHaveLength(2);
+    expect(restored.captureBatch?.sourceSummary.purchasedLines).toBe(2);
+    expect(restored.captureBatch?.games.every((game) => game.provenance.status === "external")).toBe(true);
   });
 
   it("creates partial date-anchored predictions without requiring every field", () => {
@@ -606,6 +635,68 @@ describe("predictionJournal", () => {
 
     window.localStorage.setItem("windfall:prediction-journal:v1", "not-json");
     expect(loadPredictionJournalEntries()).toEqual([]);
+  });
+
+  it("backs up origin metadata and safely merges imported journal entries", () => {
+    const existing = buildPredictionJournalEntry({
+      id: "prediction-backup-existing",
+      now: "2026-06-24T10:30:00.000Z",
+      latestDraw: draw("6/24/26", [1, 3, 5, 7, 9, 11], [13, 15]),
+      targetKind: "nextDraw",
+      inputs: { notes: "Original entry." },
+    });
+    const updated = buildPredictionJournalEntry({
+      previousEntry: existing,
+      now: "2026-06-24T11:00:00.000Z",
+      latestDraw: draw("6/24/26", [1, 3, 5, 7, 9, 11], [13, 15]),
+      targetKind: "nextDraw",
+      inputs: { notes: "Updated entry." },
+    });
+    const added = buildPredictionJournalEntry({
+      id: "prediction-backup-added",
+      now: "2026-06-24T11:05:00.000Z",
+      latestDraw: draw("6/24/26", [1, 3, 5, 7, 9, 11], [13, 15]),
+      targetKind: "nextDraw",
+      inputs: { notes: "Imported entry." },
+    });
+
+    const backup = serializePredictionJournalBackup([updated, added], {
+      exportedAt: "2026-06-24T12:00:00.000Z",
+      sourceOrigin: "http://localhost:5173",
+    });
+    const parsed = parsePredictionJournalBackup(backup);
+
+    expect(parsed).toMatchObject({
+      sourceOrigin: "http://localhost:5173",
+      exportedAt: "2026-06-24T12:00:00.000Z",
+      rejectedCount: 0,
+      legacyArray: false,
+    });
+    expect(parsed.entries.map((entry) => entry.id)).toEqual([
+      "prediction-backup-existing",
+      "prediction-backup-added",
+    ]);
+
+    const merged = mergePredictionJournalEntries([existing], parsed.entries);
+    expect(merged).toMatchObject({ addedCount: 1, updatedCount: 1, unchangedCount: 0 });
+    expect(merged.entries.find((entry) => entry.id === existing.id)?.inputs.notes).toBe("Updated entry.");
+  });
+
+  it("accepts legacy raw-array exports and reports malformed imported rows", () => {
+    const entry = buildPredictionJournalEntry({
+      id: "prediction-backup-legacy",
+      now: "2026-06-24T10:30:00.000Z",
+      latestDraw: draw("6/24/26", [1, 3, 5, 7, 9, 11], [13, 15]),
+      targetKind: "nextDraw",
+      inputs: { notes: "Legacy export." },
+    });
+
+    const parsed = parsePredictionJournalBackup(JSON.stringify([entry, { id: "broken" }]));
+
+    expect(parsed.legacyArray).toBe(true);
+    expect(parsed.entries).toHaveLength(1);
+    expect(parsed.rejectedCount).toBe(1);
+    expect(() => parsePredictionJournalBackup("not-json")).toThrow("not valid JSON");
   });
 
   it("normalizes older saved entries as not reviewed when loading", () => {

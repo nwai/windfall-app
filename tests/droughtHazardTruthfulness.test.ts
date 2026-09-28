@@ -22,8 +22,24 @@ describe("DGA drought hazard truthfulness wording", () => {
     expect(panelSource).toContain("Replay-only");
     expect(panelSource).toContain("does not recalculate the Strict drought or Empirical hazard shortlist above");
     expect(panelSource).toContain("Drought source split replay scope");
+    expect(panelSource).toContain("Bucket maturity");
+    expect(panelSource).toContain("separate observe-only, stage-conditioned comparison");
+    expect(panelSource).toContain("does not change rank, empirical rate, forced selections, or generation");
     expect(heatmapSource).toContain("Smoothed drought-break appearance rate");
     expect(heatmapSource).not.toContain("Break-drought chance next draw");
+  });
+
+  it("keeps drought learning versioned, walk-forward, and observe-only", () => {
+    const panelSource = source("src/components/DroughtLearningAuditPanel.tsx");
+    const modelSource = source("src/lib/droughtLearningAudit.ts");
+
+    expect(panelSource).toContain("Drought Learning & Self-Audit");
+    expect(panelSource).toContain("does not modify application code");
+    expect(panelSource).toContain("does not affect candidate generation");
+    expect(panelSource).toContain("Episodes 6+ is deliberately excluded");
+    expect(modelSource).toContain('DROUGHT_LEARNING_MODEL_VERSION = "DLA-1"');
+    expect(modelSource).toContain("gateBeforeDraw = evaluateGate(records)");
+    expect(modelSource).toContain("updateLearningCounters");
   });
 
   it("renders drought-break shortlist numbers as capped forced-inclusion controls", () => {

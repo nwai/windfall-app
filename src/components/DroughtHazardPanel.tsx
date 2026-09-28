@@ -8,6 +8,11 @@ import {
   computeStrictDroughtShortlist,
 } from "../lib/droughtHazard";
 import {
+  analyzeDroughtBucketMaturity,
+  type DroughtBucketMaturityRow,
+  type DroughtBucketMaturityStatus,
+} from "../lib/droughtBucketMaturity";
+import {
   formatUserExclusionReminder,
   normalizeUserExclusionLocks,
   removeUserExcludedNumbers,
@@ -17,6 +22,7 @@ import {
   type DroughtShortlistHitDetail,
   type DroughtShortlistSourceReplayResult,
 } from "../lib/droughtShortlistSourceReplay";
+import DroughtLearningAuditPanel from "./DroughtLearningAuditPanel";
 
 type DroughtDisplayMode = "strict" | "empirical";
 type DroughtReplayScope = "all-baseline" | "wfmqyh";
@@ -36,6 +42,10 @@ export const DroughtHazardPanel: React.FC<{
   excludedNumbers?: number[];
   maxForcedSelections?: number;
   bucketLabels?: Record<number, string>;
+  targetDrawDate?: string;
+  targetMonthLabel?: string;
+  targetDrawOrdinal?: number;
+  targetMonthExpectedDrawCount?: number;
 }> = ({
   history,
   fullHistory,
@@ -51,6 +61,10 @@ export const DroughtHazardPanel: React.FC<{
   excludedNumbers = [],
   maxForcedSelections,
   bucketLabels,
+  targetDrawDate,
+  targetMonthLabel,
+  targetDrawOrdinal,
+  targetMonthExpectedDrawCount,
 }) => {
   const [mode, setMode] = React.useState<DroughtDisplayMode>(defaultMode);
   const [replayScope, setReplayScope] = React.useState<DroughtReplayScope>("all-baseline");
@@ -103,6 +117,33 @@ export const DroughtHazardPanel: React.FC<{
     [byNumber, top]
   );
   const strictRows = React.useMemo(() => strict.rows.slice(0, top), [strict.rows, top]);
+  const maturity = React.useMemo(() => {
+    if (!targetMonthLabel || !targetDrawOrdinal || !targetMonthExpectedDrawCount) return null;
+    return analyzeDroughtBucketMaturity({
+      baselineHistory: baselineHistory?.length
+        ? baselineHistory
+        : fullHistory?.length
+          ? fullHistory
+          : history,
+      currentHistory: fullHistory?.length ? fullHistory : history,
+      targetDrawDate,
+      targetMonthLabel,
+      targetDrawOrdinal,
+      targetMonthExpectedDrawCount,
+    });
+  }, [
+    baselineHistory,
+    fullHistory,
+    history,
+    targetDrawDate,
+    targetDrawOrdinal,
+    targetMonthExpectedDrawCount,
+    targetMonthLabel,
+  ]);
+  const maturityByNumber = React.useMemo(
+    () => new Map((maturity?.byNumber ?? []).map((row) => [row.number, row])),
+    [maturity],
+  );
 
   const renderNumberButton = (number: number) => {
     const isUserExcluded = userExcludedSet.has(number);
@@ -196,6 +237,7 @@ export const DroughtHazardPanel: React.FC<{
             threshold={strict.threshold}
             bucketLabels={bucketLabels}
             fallbackLabels={fallbackLabels}
+            maturityByNumber={maturityByNumber}
             renderNumberButton={renderNumberButton}
             rowBackground={rowBackground}
           />
@@ -204,6 +246,7 @@ export const DroughtHazardPanel: React.FC<{
             rows={empiricalRows}
             bucketLabels={bucketLabels}
             fallbackLabels={fallbackLabels}
+            maturityByNumber={maturityByNumber}
             renderNumberButton={renderNumberButton}
             rowBackground={rowBackground}
           />
@@ -216,8 +259,24 @@ export const DroughtHazardPanel: React.FC<{
         onScopeChange={setReplayScope}
       />
       <div style={{ fontSize: 12, color: "#666", marginTop: 6 }}>
-        Strict rank uses full-history current drought first. Break maturity is the share of that number's completed {strict.threshold}+ drought episodes that were broken at or before its current drought length. Max observed empirical drought length k = {maxK}. Sparse empirical lengths are stabilized with {priorTrials} baseline prior trials. Month bucket is context only; it does not drive the rate.
+        Strict rank uses full-history current drought first. Break maturity is the share of that number's completed {strict.threshold}+ drought episodes that were broken at or before its current drought length. Max observed empirical drought length k = {maxK}. Sparse empirical lengths are stabilized with {priorTrials} baseline prior trials. Bucket maturity is a separate observe-only, stage-conditioned comparison; it does not change rank, empirical rate, forced selections, or generation.
+        {maturity && (
+          <> It uses {maturity.analyzedTargetDraws} baseline target draws after a {maturity.warmupDraws}-draw warm-up and compares the current {maturity.targetMonthExpectedDrawCount}D D{maturity.targetDrawOrdinal} state with matching historical month-bucket states.</>
+        )}
       </div>
+      {targetMonthLabel && targetDrawOrdinal && targetMonthExpectedDrawCount ? (
+        <div style={{ marginTop: 12 }}>
+          <DroughtLearningAuditPanel
+            history={baselineHistory?.length ? baselineHistory : fullHistory?.length ? fullHistory : history}
+            historyScopeLabel={baselineHistoryScopeLabel}
+            threshold={strict.threshold}
+            topK={top}
+            targetMonthLabel={targetMonthLabel}
+            targetDrawOrdinal={targetDrawOrdinal}
+            targetMonthExpectedDrawCount={targetMonthExpectedDrawCount}
+          />
+        </div>
+      ) : null}
     </section>
   );
 };
@@ -444,9 +503,10 @@ const StrictDroughtTable: React.FC<{
   threshold: number;
   bucketLabels?: Record<number, string>;
   fallbackLabels: string[];
+  maturityByNumber: ReadonlyMap<number, DroughtBucketMaturityRow>;
   renderNumberButton: (number: number) => React.ReactNode;
   rowBackground: (number: number) => string | undefined;
-}> = ({ rows, threshold, bucketLabels, fallbackLabels, renderNumberButton, rowBackground }) => (
+}> = ({ rows, threshold, bucketLabels, fallbackLabels, maturityByNumber, renderNumberButton, rowBackground }) => (
   <table style={tableStyle}>
     <thead>
       <tr style={{ background: "#f7f7f7" }}>
@@ -455,6 +515,7 @@ const StrictDroughtTable: React.FC<{
         <th style={{ ...th, textAlign: "left" }}>Month bucket</th>
         <th style={th}>Full drought</th>
         <th style={th}>WFMQYH drought</th>
+        <th style={{ ...th, textAlign: "left" }}>Bucket maturity</th>
         <th style={th}>Episodes {threshold}+</th>
         <th style={th}>Typical break</th>
         <th style={th}>Break maturity</th>
@@ -471,6 +532,9 @@ const StrictDroughtTable: React.FC<{
           <td style={{ ...td, textAlign: "left" }}>{bucketLabels?.[r.number] ?? fallbackLabels[r.number] ?? "—"}</td>
           <td style={td}>{r.currentDrought}</td>
           <td style={td}>{r.activeWindowDrought}</td>
+          <td style={{ ...td, textAlign: "left" }}>
+            <BucketMaturityCell row={maturityByNumber.get(r.number)} />
+          </td>
           <td style={td}>{r.historicalDroughtEpisodes}</td>
           <td style={td}>{formatTypicalBreak(r)}</td>
           <td style={td}>{r.breakTimingScore.toFixed(0)}%</td>
@@ -482,7 +546,7 @@ const StrictDroughtTable: React.FC<{
         </tr>
       )) : (
         <tr>
-          <td style={{ ...td, textAlign: "left" }} colSpan={11}>
+          <td style={{ ...td, textAlign: "left" }} colSpan={12}>
             No numbers currently meet the strict {threshold}+ full-history drought threshold.
           </td>
         </tr>
@@ -495,15 +559,17 @@ const EmpiricalHazardTable: React.FC<{
   rows: DroughtHazardNumberRow[];
   bucketLabels?: Record<number, string>;
   fallbackLabels: string[];
+  maturityByNumber: ReadonlyMap<number, DroughtBucketMaturityRow>;
   renderNumberButton: (number: number) => React.ReactNode;
   rowBackground: (number: number) => string | undefined;
-}> = ({ rows, bucketLabels, fallbackLabels, renderNumberButton, rowBackground }) => (
+}> = ({ rows, bucketLabels, fallbackLabels, maturityByNumber, renderNumberButton, rowBackground }) => (
   <table style={tableStyle}>
     <thead>
       <tr style={{ background: "#f7f7f7" }}>
         <th style={th}>#</th>
         <th style={{ ...th, textAlign: "left" }}>Month bucket</th>
         <th style={th}>Current drought (k)</th>
+        <th style={{ ...th, textAlign: "left" }}>Bucket maturity</th>
         <th style={th}>Smoothed appearance rate</th>
         <th style={th}>Observed hits / trials</th>
         <th style={th}>Vs baseline</th>
@@ -515,6 +581,9 @@ const EmpiricalHazardTable: React.FC<{
           <td style={td}>{renderNumberButton(r.number)}</td>
           <td style={{ ...td, textAlign: "left" }}>{bucketLabels?.[r.number] ?? fallbackLabels[r.number] ?? "—"}</td>
           <td style={td}>{r.k}</td>
+          <td style={{ ...td, textAlign: "left" }}>
+            <BucketMaturityCell row={maturityByNumber.get(r.number)} />
+          </td>
           <td style={td}>{(r.p * 100).toFixed(1)}%</td>
           <td style={td}>{r.hitsNext}/{r.trials}</td>
           <td style={baselineCell(r.liftVsBaseline)}>
@@ -526,6 +595,44 @@ const EmpiricalHazardTable: React.FC<{
   </table>
 );
 
+const MATURITY_STATUS_LABELS: Record<DroughtBucketMaturityStatus, string> = {
+  "at-boundary": "At stage bound",
+  "near-boundary": "Near stage bound",
+  "long-tail": "Long historical tail",
+  "within-range": "Within range",
+  "stage-start": "Stage start",
+  unavailable: "Unavailable",
+};
+
+const BucketMaturityCell: React.FC<{ row?: DroughtBucketMaturityRow }> = ({ row }) => {
+  if (!row || row.currentDrought === null) {
+    return <span style={{ color: "#64748b" }}>No comparable state</span>;
+  }
+
+  const stagePosition = row.structuralMaxDrought === null
+    ? `k${row.currentDrought}`
+    : `k${row.currentDrought}/${row.structuralMaxDrought}`;
+  const percentile = row.historicalPercentile === null
+    ? "P—"
+    : `P${Math.round(row.historicalPercentile * 100)}`;
+  const evidence = row.tailTrials > 0
+    ? `${row.tailHitsNext}/${row.tailTrials} historical next-draw hits · ${row.sample}`
+    : "No at-least-this-mature historical matches";
+  const title = row.structuralMaxDrought === null
+    ? `0x has no within-month structural drought ceiling. ${stagePosition} is at ${percentile} among comparable month-stage states. ${evidence}.`
+    : `${stagePosition} shows the current drought and the maximum mathematically possible drought at this draw stage for a ${row.bucketCount}x number. ${percentile} among comparable month-stage states. ${evidence}.`;
+
+  return (
+    <div title={title} aria-label={`${MATURITY_STATUS_LABELS[row.status]}. ${title}`} style={maturityCellStyle}>
+      <div style={maturityCellTopLineStyle}>
+        <span style={maturityBadgeStyle(row.status)}>{MATURITY_STATUS_LABELS[row.status]}</span>
+        <span style={maturityPositionStyle}>{stagePosition} · {percentile}</span>
+      </div>
+      <div style={maturityEvidenceStyle}>{evidence}</div>
+    </div>
+  );
+};
+
 const formatTypicalBreak = (row: StrictDroughtNumberRow): string => {
   if (row.medianBreakLength == null || row.p75BreakLength == null) return "No completed episodes";
   return `med ${formatLength(row.medianBreakLength)} / p75 ${formatLength(row.p75BreakLength)}`;
@@ -535,7 +642,7 @@ const formatLength = (value: number): string => (
   Number.isInteger(value) ? String(value) : value.toFixed(1)
 );
 
-const tableStyle: React.CSSProperties = { width: "100%", minWidth: 920, borderCollapse: "collapse", fontSize: 14 };
+const tableStyle: React.CSSProperties = { width: "100%", minWidth: 1160, borderCollapse: "collapse", fontSize: 14 };
 const th: React.CSSProperties = { textAlign: "right", padding: "6px 8px", borderBottom: "1px solid #ddd", fontWeight: 700, whiteSpace: "nowrap" };
 const td: React.CSSProperties = { textAlign: "right", padding: "6px 8px", borderBottom: "1px solid #eee", whiteSpace: "nowrap" };
 
@@ -544,6 +651,46 @@ const baselineCell = (liftVsBaseline: number): React.CSSProperties => ({
   color: liftVsBaseline >= 0 ? "#b91c1c" : "#1d4ed8",
   fontWeight: 700,
 });
+
+const maturityCellStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 3,
+  minWidth: 190,
+};
+
+const maturityCellTopLineStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 6,
+};
+
+const maturityPositionStyle: React.CSSProperties = {
+  color: "#334155",
+  fontSize: 12,
+  fontVariantNumeric: "tabular-nums",
+  fontWeight: 800,
+};
+
+const maturityEvidenceStyle: React.CSSProperties = {
+  color: "#64748b",
+  fontSize: 11,
+  fontVariantNumeric: "tabular-nums",
+};
+
+const maturityBadgeStyle = (status: DroughtBucketMaturityStatus): React.CSSProperties => {
+  const emphasized = status === "at-boundary" || status === "long-tail";
+  return {
+    border: `1px solid ${emphasized ? "#93c5fd" : "#cbd5e1"}`,
+    borderRadius: 999,
+    background: emphasized ? "#eff6ff" : "#f8fafc",
+    color: emphasized ? "#1d4ed8" : "#475569",
+    fontSize: 10,
+    fontWeight: 900,
+    lineHeight: 1.2,
+    padding: "3px 6px",
+    whiteSpace: "nowrap",
+  };
+};
 
 const segmentedControl: React.CSSProperties = {
   display: "flex",
