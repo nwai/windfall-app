@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -14,6 +14,28 @@ import {
 const draw = (date: string, main: number[], supp: number[] = []): Draw => ({ date, main, supp });
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+const mountedPanels: Array<{ container: HTMLDivElement; root: ReturnType<typeof createRoot> }> = [];
+afterEach(async () => {
+  for (const { container, root } of mountedPanels.splice(0)) {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+const renderOpenBreakdown = async (props: React.ComponentProps<typeof HotColdRankingPanel>): Promise<HTMLDivElement> => {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  mountedPanels.push({ container, root });
+  await act(async () => root.render(React.createElement(HotColdRankingPanel, props)));
+  expect(container.querySelector("table")).toBeNull();
+  const toggle = [...container.querySelectorAll("button")].find(button => button.textContent?.startsWith("Hot vs Cold breakdown table"));
+  expect(toggle).toBeTruthy();
+  await act(async () => toggle!.click());
+  expect(container.querySelector("table")).not.toBeNull();
+  return container;
+};
 
 const firstBreakdownNumber = (container: HTMLElement): string | null => (
   container.querySelector("tbody tr td:nth-child(2)")?.textContent?.trim() ?? null
@@ -106,42 +128,36 @@ describe("analyzeHotColdRanking", () => {
     expect(html).toContain("0 · latest draw only");
   });
 
-  it("renders include/exclude generation selectors for hot/cold breakdown rows", () => {
-    const html = renderToStaticMarkup(React.createElement(HotColdRankingPanel as any, {
+  it("renders include/exclude generation selectors after opening the hot/cold breakdown", async () => {
+    const container = await renderOpenBreakdown({
       history,
       forcedNumbers: [4],
       excludedNumbers: [1],
       onToggleForcedNumber: () => undefined,
       onToggleExcludedNumber: () => undefined,
-    }));
+    });
 
-    expect(html).toContain("Include selected rows");
-    expect(html).toContain("Exclude selected rows");
-    expect(html).toContain("Forced in");
-    expect(html).toContain("Excluded");
+    expect(container.textContent).toContain("Include selected rows");
+    expect(container.textContent).toContain("Exclude selected rows");
+    expect(container.textContent).toContain("Forced in");
+    expect(container.textContent).toContain("Excluded");
   });
 
-  it("labels manual user exclusions as locked in hot/cold include mode", () => {
-    const html = renderToStaticMarkup(React.createElement(HotColdRankingPanel as any, {
+  it("labels manual user exclusions as locked in hot/cold include mode", async () => {
+    const container = await renderOpenBreakdown({
       history,
       lockedExcludedNumbers: [1],
       onToggleForcedNumber: () => undefined,
       onToggleExcludedNumber: () => undefined,
-    }));
+    });
 
-    expect(html).toContain("Active exclusions: 1");
-    expect(html).toContain("User Excluded");
-    expect(html).toContain("Clear the manual exclusion or turn off the rule");
+    expect(container.textContent).toContain("Active exclusions: 1");
+    expect(container.textContent).toContain("User Excluded");
+    expect(container.textContent).toContain("Clear the manual exclusion or turn off the rule");
   });
 
   it("lets every hot/cold breakdown column expose a sortable header and toggles number order", async () => {
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const root = createRoot(container);
-
-    await act(async () => {
-      root.render(React.createElement(HotColdRankingPanel, { history }));
-    });
+    const container = await renderOpenBreakdown({ history });
 
     const sortableHeaders = Array.from(container.querySelectorAll("thead button[aria-label^='Sort by ']"));
     expect(sortableHeaders).toHaveLength(14);
@@ -166,11 +182,6 @@ describe("analyzeHotColdRanking", () => {
       numberHeader?.click();
     });
     expect(firstBreakdownNumber(container)).toBe("45");
-
-    await act(async () => {
-      root.unmount();
-    });
-    container.remove();
   });
 
   it("resolves WFMQYH shortcut choices to draw counts", () => {

@@ -21,4 +21,14 @@ describe("startup history fallback wiring", () => {
     expect(source).toContain("handleUseSimulatedStartupHistory");
     expect(source).toContain("buildDemoDrawHistory");
   });
+
+  it("shares the remembered CSV target between startup, history manager and official-result saving", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/App.tsx"), "utf8");
+    expect(source).toContain("useCsvHistoryTarget({ onLoad: commitHistory");
+    expect(source).toContain("csvTarget={csvHistoryTarget.target}");
+    expect(source).toContain("onCsvTargetSelected={csvHistoryTarget.remember}");
+    expect(source).toContain("csvHistoryTarget.target?.handle ?? await pickCsvFile()");
+    expect(source).toContain('data-testid="csv-target-startup-status"');
+    expect(source).toContain('"Reconnect CSV"');
+  });
 });

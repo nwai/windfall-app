@@ -19,11 +19,14 @@ import {
 } from "../../lib/pasteWeightedCandidates";
 import { normalizeUserSelectedNumbers } from "../../lib/userSelectedNumbers";
 import { formatUserExclusionReminder, normalizeUserExclusionLocks } from "../../lib/userExclusionLocks";
+import type { MonthlyBucketTransitionGovernorProfile } from "../../lib/monthlyBucketTransitionGovernor";
+import { MonthlyTransitionInfluenceSummary } from "../MonthlyTransitionInfluenceSummary";
 
 interface PasteWeightedCandidatesPanelProps {
   onSimulateCandidate?: (numbers: number[]) => void;
   onGeneratedCandidatesChange?: (candidates: PasteWeightedGenerationResult["candidates"]) => void;
   forcedNumbers?: number[];
+  generationForcedNumbers?: number[];
   excludedNumbers?: number[];
   onToggleForcedNumber?: (number: number) => void;
   activeSimulatedKey?: string | null;
@@ -36,6 +39,9 @@ interface PasteWeightedCandidatesPanelProps {
   stageIdealDrawState?: StageIdealDrawState | null;
   monthlyBucketSets?: MonthlyBucketSets | null;
   monthlyAcceptanceNeeds?: MonthlyFrequencyConstraints | null;
+  monthlyTransitionInfluenceProfile?: MonthlyBucketTransitionGovernorProfile | null;
+  monthlyTransitionBypassed?: boolean;
+  onEditMonthlyTransitionInfluence?: () => void;
 }
 
 const candidateCountOptions = Array.from({ length: 27 }, (_, index) => index + 4);
@@ -224,6 +230,7 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
   onSimulateCandidate,
   onGeneratedCandidatesChange,
   forcedNumbers = [],
+  generationForcedNumbers,
   excludedNumbers = [],
   onToggleForcedNumber,
   activeSimulatedKey = null,
@@ -236,6 +243,9 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
   stageIdealDrawState = null,
   monthlyBucketSets = null,
   monthlyAcceptanceNeeds = null,
+  monthlyTransitionInfluenceProfile = null,
+  monthlyTransitionBypassed = false,
+  onEditMonthlyTransitionInfluence,
 }) => {
   const consumedKeptRowIdsRef = useRef<Set<string>>(new Set());
   const [pasteText, setPasteText] = useState(initialPasteText);
@@ -250,6 +260,15 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
   const [stageIdmTargetCounts, setStageIdmTargetCounts] = useState<number[] | null>(null);
   const [monthlyAcceptanceNeedsEnabled, setMonthlyAcceptanceNeedsEnabled] = useState(false);
   const [result, setResult] = useState<PasteWeightedGenerationResult | null>(null);
+  const sharedForcedNumbers = normalizeUserExclusionLocks(generationForcedNumbers ?? forcedNumbers);
+  const hardNumberSignature = JSON.stringify([sharedForcedNumbers, normalizeUserExclusionLocks(excludedNumbers)]);
+  const hardNumberSignatureRef = useRef(hardNumberSignature);
+  useEffect(() => {
+    if (hardNumberSignatureRef.current === hardNumberSignature) return;
+    hardNumberSignatureRef.current = hardNumberSignature;
+    setResult(null);
+    onGeneratedCandidatesChange?.([]);
+  }, [hardNumberSignature, onGeneratedCandidatesChange]);
 
   const parsed = useMemo(() => parsePastedCandidateNumbers(pasteText), [pasteText]);
   const countedNumberSet = useMemo(
@@ -338,6 +357,8 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
     const nextResult = generatePasteWeightedCandidates(pasteText, {
       candidateCount,
       constraints: {
+        forcedNumbers: sharedForcedNumbers,
+        excludedNumbers,
         ending5: ending5Mode,
         ending0: ending0Mode,
         oddEven: {
@@ -565,7 +586,7 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
               Missing from pasted rows ({missingNumbers.length})
             </div>
             <div style={mutedStyle}>
-              These are valid 1-45 numbers that do not appear in the pasted rows. Click one to add or remove it as a Paste-Weighted hard forced inclusion for candidate generation; this does not change the pasted count ranking.
+              These are valid 1-45 numbers that do not appear in the pasted rows. Click one to add or remove it as a shared hard forced inclusion. Paste-Weighted generation seeds forced numbers into its six-main output; absent numbers add no pasted count or score.
             </div>
             {userExclusionReminder && (
               <div style={{ ...mutedStyle, color: "#475569", marginTop: 4 }}>
@@ -867,6 +888,14 @@ export const PasteWeightedCandidatesPanel: React.FC<PasteWeightedCandidatesPanel
               <div style={mutedStyle}>Stage IDM appears here after Monthly Draws Summary has comparable month-stage evidence.</div>
             )}
           </div>
+          {monthlyTransitionInfluenceProfile?.userEnabled && <div style={{ gridColumn: "1 / -1" }}>
+            <MonthlyTransitionInfluenceSummary
+              profile={monthlyTransitionInfluenceProfile}
+              bypassedByRandomCoverage={monthlyTransitionBypassed}
+              referenceOnly
+              onEdit={onEditMonthlyTransitionInfluence}
+            />
+          </div>}
           <div style={{ ...constraintControlStyle, gridColumn: "1 / -1" }}>
             <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 800, color: "#334155" }}>
               <input

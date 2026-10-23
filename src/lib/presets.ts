@@ -2,6 +2,7 @@
 // v1 keeps data purely client-side and exportable/importable.
 
 import { normalizeBatesParameters, type BatesParameterSet } from "./batesWeightsCore";
+import { normalizeHotColdRankingSettings, type HotColdRankingSettings } from "./hotColdRanking";
 import { normalizeFavoritePanelIds } from "./panelFavorites";
 import {
   normalizeRepeatedTerminalDigitFamilyMode,
@@ -11,6 +12,7 @@ import {
   type RepeatedTerminalDigitFamilyScope,
 } from "./repeatedTerminalDigitFamilies";
 import type { SelectionInsightsSnapshot } from "./selectionInsights";
+import type { PreviousNeighbourAtlasEvidenceSnapshot } from "./previousNeighbourAtlasEvidence";
 import { normalizeDroughtEvidenceGovernorMode, normalizeDroughtEvidenceGovernorSettings, type DroughtEvidenceGovernorMode, type DroughtEvidenceGovernorSettings } from "./droughtEvidenceGovernor";
 import { normalizeWeightedTargetNumbers, normalizeWeightedTargets } from "./weightedTargets";
 import { normalizeMonthlyBucketTransitionGovernorMode, type MonthlyBucketTransitionGovernorMode } from "./monthlyBucketTransitionGovernor";
@@ -127,11 +129,37 @@ export interface AppPresetSnapshot {
 
   // Odd/Even ratios and tricky rule
   selectedRatios: string[];
+  terminalShapeQuotaEnabled?: boolean;
+  terminalShapeAllocationBasis?: "history" | "equal";
+  selectedTerminalShapes?: string[];
+  terminalRunShapeLinkEnabled?: boolean;
+  terminalShapeIndependentSettings?: { enabled: boolean; selectedShapes: string[]; allocationBasis?: "history" | "equal" };
+  terminalShapeLinkEvidence?: {
+    modelVersion: string;
+    sourceDraws: number;
+    matchingDraws: number;
+    mode: "allocation" | "requireAll";
+    selectedRuns: string[];
+    rows: { shape: string; count: number; percent: number }[];
+    error: string | null;
+  };
+  terminalRunRuleEnabled?: boolean;
+  terminalRunMode?: "allocation" | "requireAll";
+  terminalRunUseAllObserved?: boolean;
+  terminalRunAllocationBasis?: "history" | "equal";
+  terminalRunManualSettings?: { mode: "allocation" | "requireAll"; selectedRuns: string[]; allocationBasis: "history" | "equal" };
+  selectedTerminalRuns?: string[];
+  terminalRunEvidence?: {
+    modelVersion: string;
+    validDraws: number;
+    rows: { run: string; count: number; occurrencePercent: number; exactRandomPercent: number; candidateTarget: number | null }[];
+  };
   useTrickyRule: boolean;
 
   // User and system exclusions
   excludedNumbers: number[];
   hotColdForcedNumbers?: number[];
+  hotColdRankingSettings?: HotColdRankingSettings;
   hotColdExcludedNumbers?: number[];
   droughtBreakSelectedNumbers?: number[];
   pasteWeightedForcedNumbers?: number[];
@@ -163,6 +191,7 @@ export interface AppPresetSnapshot {
   droughtBreakShortlistTop?: number;
   droughtBreakStrictThreshold?: number;
   selectionInsightsSnapshot?: SelectionInsightsSnapshot;
+  neighbourAtlasEvidence?: PreviousNeighbourAtlasEvidenceSnapshot;
 
   // Trend settings
   trendLookback: number;
@@ -523,6 +552,31 @@ export function normalizeAppPresetSnapshot(snapshot: AppPresetSnapshot): AppPres
   const normalized: AppPresetSnapshot = {
     ...snapshot,
     userSelectedNumbers,
+    hotColdRankingSettings: snapshot.hotColdRankingSettings
+      ? normalizeHotColdRankingSettings(snapshot.hotColdRankingSettings) : undefined,
+    terminalShapeQuotaEnabled: !!snapshot.terminalShapeQuotaEnabled,
+    terminalShapeAllocationBasis: snapshot.terminalShapeAllocationBasis === "equal" ? "equal" : "history",
+    selectedTerminalShapes: Array.isArray(snapshot.selectedTerminalShapes)
+      ? [...new Set(snapshot.selectedTerminalShapes.filter((shape) => typeof shape === "string"))] : [],
+    terminalRunShapeLinkEnabled: !!snapshot.terminalRunShapeLinkEnabled,
+    terminalShapeIndependentSettings: snapshot.terminalShapeIndependentSettings ? {
+      enabled: !!snapshot.terminalShapeIndependentSettings.enabled,
+      allocationBasis: snapshot.terminalShapeIndependentSettings.allocationBasis === "equal" ? "equal" : "history",
+      selectedShapes: Array.isArray(snapshot.terminalShapeIndependentSettings.selectedShapes)
+        ? [...new Set(snapshot.terminalShapeIndependentSettings.selectedShapes.filter((shape) => typeof shape === "string"))] : [],
+    } : undefined,
+    terminalRunRuleEnabled: !!snapshot.terminalRunRuleEnabled,
+    terminalRunMode: snapshot.terminalRunMode === "requireAll" ? "requireAll" : "allocation",
+    terminalRunUseAllObserved: !!snapshot.terminalRunUseAllObserved,
+    terminalRunAllocationBasis: snapshot.terminalRunAllocationBasis === "equal" ? "equal" : "history",
+    terminalRunManualSettings: snapshot.terminalRunManualSettings ? {
+      mode: snapshot.terminalRunManualSettings.mode === "requireAll" ? "requireAll" : "allocation",
+      selectedRuns: Array.isArray(snapshot.terminalRunManualSettings.selectedRuns)
+        ? [...new Set(snapshot.terminalRunManualSettings.selectedRuns.filter((run) => typeof run === "string"))] : [],
+      allocationBasis: snapshot.terminalRunManualSettings.allocationBasis === "equal" ? "equal" : "history",
+    } : undefined,
+    selectedTerminalRuns: Array.isArray(snapshot.selectedTerminalRuns)
+      ? [...new Set(snapshot.selectedTerminalRuns.filter((run) => typeof run === "string"))] : [],
     weightedTargets: normalizeWeightedTargets(userSelectedNumbers, snapshot.weightedTargets),
     trendLookback: clampIntegerOrFallback(snapshot.trendLookback, 1, 52, DEFAULT_TREND_LOOKBACK),
     trendThreshold: Math.max(0, Math.min(1, finiteNumber(snapshot.trendThreshold, DEFAULT_TREND_THRESHOLD))),

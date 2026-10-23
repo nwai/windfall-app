@@ -1,6 +1,7 @@
 import React from "react";
 import { usePanelFavorites } from "../../context/PanelFavoritesContext";
 import { getFavoritePanelDomId } from "../../lib/panelFavorites";
+import { PanelHelp } from "../shared/PanelHelp";
 
 const WORKFLOW_LINKS = [
   { id: "workflow-history", label: "History" },
@@ -14,7 +15,7 @@ const WORKFLOW_LINKS = [
 export const AppWorkflowNav: React.FC = () => (
   <nav className="windfall-workflow-nav" aria-label="Workflow sections">
     {WORKFLOW_LINKS.map((link) => (
-      <a key={link.id} className="windfall-workflow-nav__link" href={`#${link.id}`}>
+      <a key={link.id} className="windfall-workflow-nav__link" data-workflow-home={link.id.slice("workflow-".length)} href={`#${link.id}`}>
         {link.label}
       </a>
     ))}
@@ -62,7 +63,7 @@ export const WorkflowAnchor: React.FC<WorkflowAnchorProps> = ({
   };
 
   return (
-    <div id={rootId} className="windfall-workflow-anchor" tabIndex={-1} data-panel-id={favoritePanelId}>
+    <div id={rootId} className="windfall-workflow-anchor" tabIndex={-1} data-panel-id={favoritePanelId} data-workflow-home={id.startsWith("workflow-") ? id.slice("workflow-".length) : undefined}>
       {favoritePanelId ? <span id={id} className="windfall-workflow-anchor__nav-target" aria-hidden="true" /> : null}
       <div className="windfall-workflow-anchor__topline">
         <div className="windfall-workflow-anchor__copy">
@@ -84,6 +85,8 @@ export const WorkflowAnchor: React.FC<WorkflowAnchorProps> = ({
               </button>
             ) : null}
             <h2 className="windfall-workflow-anchor__title">{title}</h2>
+            {favoritePanelId ? <PanelHelp panelId={favoritePanelId} title={title} summary={summary}
+              onReveal={collapsible ? () => onExpandedChange?.(true) : undefined} /> : null}
           </div>
         </div>
         <div className="windfall-workflow-anchor__actions">

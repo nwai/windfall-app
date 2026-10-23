@@ -1,0 +1,31 @@
+.ep-panel, .ep-record { color: #202124; min-width: 0; font-size: 13px; }
+.ep-panel p, .ep-record p { line-height: 1.5; margin: 10px 0; }
+.ep-meta { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; }
+.ep-badge { border: 1px solid #a4c4ea; border-radius: 5px; color: #15559a; padding: 4px 8px; background: #edf5ff; }
+.ep-scope { color: #51555c; }
+.ep-actions { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; margin: 14px 0; }
+.ep-actions input[type="number"] { width: 150px; min-height: 32px; box-sizing: border-box; }
+.ep-actions select { min-height: 32px; padding: 5px 7px; font: inherit; max-width: 100%; }
+.ep-panel .windfall-info-help__button { min-width: 32px; min-height: 32px; }
+.ep-review { display: flex; align-items: center; gap: 7px; min-height: 32px; }
+.ep-table-scroll { max-height: 390px; overflow: auto; margin: 10px 0; border: 1px solid #d8dce2; }
+.ep-table-scroll table { border-collapse: separate; border-spacing: 0; width: 100%; text-align: left; font-size: 12px; }
+.ep-table-scroll th, .ep-table-scroll td { padding: 9px 10px; border-bottom: 1px solid #e8eaee; vertical-align: top; }
+.ep-table-scroll thead th { position: sticky; top: 0; background: #f3f5f8; z-index: 1; white-space: nowrap; }
+.ep-table-scroll tbody th { min-width: 130px; font-weight: 600; }
+.ep-table-scroll small { display: block; margin-top: 4px; font-weight: 400; color: #5f636b; max-width: 190px; }
+.ep-numbers { white-space: nowrap; font-weight: 600; font-variant-numeric: tabular-nums; }
+.ep-numbers--main { color: #b72736; }
+.ep-numbers--supp { color: #197346; }
+.ep-table-scroll .ep-simulate { min-width: 150px; min-height: 32px; white-space: nowrap; }
+.ep-notice { border-left: 3px solid #3475bd; padding: 7px 10px; background: #f1f6fc; }
+.ep-panel details, .ep-record details { border-top: 1px solid #d8dce2; padding: 9px 0; }
+.ep-panel summary, .ep-record summary { cursor: pointer; min-height: 32px; display: list-item; align-content: center; font-weight: 600; }
+.ep-record { margin: 14px 0; }
+@media (max-width: 600px) {
+  .ep-actions .windfall-hig-button, .ep-table-scroll .ep-simulate, .ep-review, .ep-panel summary { min-height: 44px; }
+  .ep-actions select, .ep-actions input[type="number"], .ep-panel .windfall-info-help__button { min-height: 44px; }
+  .ep-panel .windfall-info-help__button { min-width: 44px; }
+  .ep-table-scroll { max-height: 330px; }
+  .ep-actions { align-items: stretch; }
+}

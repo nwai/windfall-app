@@ -72,11 +72,25 @@ describe("Signal Confluence independence audit", () => {
     ]);
 
     const audit = auditSignalConfluenceIndependence(rows);
-    const drought = audit.familyRows.find((row) => row.family === "drought");
+    const drought = audit.familyRows.find((row) => row.family === "drought-state");
 
     expect(drought?.numbers).toEqual([3, 7]);
     expect(audit.familyRows.some((row) => row.family === "user-state")).toBe(false);
     expect(audit.pairRows[0].sharedNumbers).toEqual([3, 7]);
+  });
+
+  it("audits latest and weekday neighbour views as one registered independence group", () => {
+    const rows = buildSignalConfluenceRows([
+      ...mentionsFor("latest-neighbour", [1, 2, 3, 4]),
+      ...mentionsFor("weekday-neighbour", [1, 2, 5, 6]),
+      ...mentionsFor("drought", [1, 2, 7, 8]),
+    ]);
+
+    const audit = auditSignalConfluenceIndependence(rows);
+
+    expect(audit.activeFamilyCount).toBe(2);
+    expect(audit.familyRows.find((row) => row.family === "previous-neighbour")?.numbers).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(audit.pairCount).toBe(1);
   });
 
   it("keeps exact upper-tail probabilities bounded at edge cases", () => {

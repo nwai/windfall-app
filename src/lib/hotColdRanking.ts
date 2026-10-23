@@ -6,6 +6,24 @@ export const HOT_COLD_HALF_LIFE_OPTIONS = [0, 6, 10, 14, 20] as const;
 export type HotColdWindowShortcut = "W" | "F" | "M" | "Q" | "Y" | "H" | "WFMQYH";
 export type HotColdWindowChoice = number | HotColdWindowShortcut;
 
+export interface HotColdRankingSettings {
+  includeSupp: boolean;
+  recentWindowChoice: string;
+  halfLifeChoice: string;
+}
+
+export const normalizeHotColdRankingSettings = (settings?: Partial<HotColdRankingSettings>): HotColdRankingSettings => {
+  const validChoice = (value: unknown, options: readonly number[], fallback: string) => (
+    typeof value === "string" && (options.some((option) => String(option) === value)
+      || HOT_COLD_WFMQYH_OPTIONS.some((option) => option.key === value)) ? value : fallback
+  );
+  return {
+    includeSupp: typeof settings?.includeSupp === "boolean" ? settings.includeSupp : true,
+    recentWindowChoice: validChoice(settings?.recentWindowChoice, HOT_COLD_RECENT_WINDOW_OPTIONS, "20"),
+    halfLifeChoice: validChoice(settings?.halfLifeChoice, HOT_COLD_HALF_LIFE_OPTIONS, "10"),
+  };
+};
+
 export interface HotColdShortcutOption {
   key: HotColdWindowShortcut;
   label: string;
@@ -302,3 +320,11 @@ export const analyzeHotColdRanking = (
     topCold: takeTop(rows, (row) => row.hotScore, false, 10),
   };
 };
+
+export const analyzeHotColdRankingProfile = (
+  history: Draw[], settings: HotColdRankingSettings, activeWindowSize?: number,
+) => analyzeHotColdRanking(history, {
+  includeSupp: settings.includeSupp,
+  recentWindow: resolveHotColdWindowChoice(parseHotColdWindowChoice(settings.recentWindowChoice, 20), history.length, 20, activeWindowSize),
+  halfLife: resolveHotColdWindowChoice(parseHotColdWindowChoice(settings.halfLifeChoice, 10), history.length, 10, activeWindowSize),
+});

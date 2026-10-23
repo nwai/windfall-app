@@ -2,7 +2,9 @@ import React, { useCallback, useMemo, useState } from "react";
 
 import type { Draw } from "../types";
 import {
-  analyzeHotColdRanking,
+  analyzeHotColdRankingProfile,
+  normalizeHotColdRankingSettings,
+  type HotColdRankingSettings,
   formatHotColdWindowChoiceLabel,
   HOT_COLD_HALF_LIFE_OPTIONS,
   HOT_COLD_RECENT_WINDOW_OPTIONS,
@@ -22,6 +24,8 @@ import {
 
 interface HotColdRankingPanelProps {
   history: Draw[];
+  settings?: HotColdRankingSettings;
+  onSettingsChange?: (settings: HotColdRankingSettings) => void;
   wfmqyhWindowSize?: number;
   forcedNumbers?: number[];
   excludedNumbers?: number[];
@@ -189,6 +193,8 @@ const TopListCard: React.FC<{ title: string; hint: string; rows: HotColdRankingR
 
 export const HotColdRankingPanel: React.FC<HotColdRankingPanelProps> = ({
   history,
+  settings,
+  onSettingsChange,
   wfmqyhWindowSize,
   forcedNumbers = [],
   excludedNumbers = [],
@@ -196,11 +202,19 @@ export const HotColdRankingPanel: React.FC<HotColdRankingPanelProps> = ({
   onToggleForcedNumber,
   onToggleExcludedNumber,
 }) => {
-  const [includeSupp, setIncludeSupp] = useState<boolean>(true);
-  const [recentWindowChoice, setRecentWindowChoice] = useState<string>("20");
-  const [halfLifeChoice, setHalfLifeChoice] = useState<string>("10");
+  const [localSettings, setLocalSettings] = useState(normalizeHotColdRankingSettings);
+  const profileSettings = settings ?? localSettings;
+  const { includeSupp, recentWindowChoice, halfLifeChoice } = profileSettings;
+  const updateSettings = (patch: Partial<HotColdRankingSettings>) => {
+    const next = normalizeHotColdRankingSettings({ ...profileSettings, ...patch });
+    if (onSettingsChange) onSettingsChange(next);
+    else setLocalSettings(next);
+  };
+  const setIncludeSupp = (value: boolean) => updateSettings({ includeSupp: value });
+  const setRecentWindowChoice = (value: string) => updateSettings({ recentWindowChoice: value });
+  const setHalfLifeChoice = (value: string) => updateSettings({ halfLifeChoice: value });
   const [digitFilter, setDigitFilter] = useState<HotColdDigitFilter>("all");
-  const [breakdownOpen, setBreakdownOpen] = useState<boolean>(true);
+  const [breakdownOpen, setBreakdownOpen] = useState<boolean>(false);
   const [breakdownSortKey, setBreakdownSortKey] = useState<BreakdownSortKey>("hotRank");
   const [breakdownSortDir, setBreakdownSortDir] = useState<BreakdownSortDir>("asc");
   const [breakdownSelectionMode, setBreakdownSelectionMode] = useState<BreakdownSelectionMode>("off");
@@ -224,8 +238,8 @@ export const HotColdRankingPanel: React.FC<HotColdRankingPanelProps> = ({
     : `Whole-history rank with a ${halfLifeLabel} half-life.`;
 
   const summary = useMemo(
-    () => analyzeHotColdRanking(history, { includeSupp, recentWindow: resolvedRecentWindow, halfLife: resolvedHalfLife }),
-    [history, includeSupp, resolvedRecentWindow, resolvedHalfLife],
+    () => analyzeHotColdRankingProfile(history, profileSettings, wfmqyhWindowSize),
+    [history, profileSettings, wfmqyhWindowSize],
   );
 
   const filteredRows = useMemo(() => {
@@ -323,19 +337,19 @@ export const HotColdRankingPanel: React.FC<HotColdRankingPanelProps> = ({
   return (
     <section style={{ border: "1px solid #e5e7eb", borderRadius: 8, background: "#fff", padding: 12, display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
-        <div>
+        <div style={{ flex: "1 1 280px", minWidth: 0 }}>
           <div style={{ fontSize: 12, color: "#667", marginTop: 2 }}>
             Compares <b>historical frequency</b>, <b>recent-window hotness</b>, and <b>recency-weighted hotness</b> so you can see when those rankings agree or diverge.
           </div>
         </div>
-        <div style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", fontSize: 12 }}>
-          <label style={{ display: "flex", alignItems: "center", gap: 6, color: "#334155" }}>
+        <div style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", fontSize: 12, flex: "1 1 440px", minWidth: 0 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, color: "#334155", flexBasis: "100%" }}>
             <input type="checkbox" checked={includeSupp} onChange={(event) => setIncludeSupp(event.target.checked)} />
             Include supplementary numbers
           </label>
-          <label style={{ display: "flex", alignItems: "center", gap: 6, color: "#334155" }}>
+          <label style={{ display: "grid", gap: 4, color: "#334155", flex: "1 1 180px", minWidth: 0 }}>
             Recent window
-            <select value={recentWindowChoice} onChange={(event) => setRecentWindowChoice(event.target.value)} style={{ fontSize: 12 }}>
+            <select value={recentWindowChoice} onChange={(event) => setRecentWindowChoice(event.target.value)} style={{ fontSize: 12, minHeight: 32, minWidth: 0, width: "100%", maxWidth: "100%" }}>
               <optgroup label="Draw-count choices">
                 {HOT_COLD_RECENT_WINDOW_OPTIONS.map((option) => (
                   <option key={option} value={String(option)}>{option} draws</option>
@@ -350,9 +364,9 @@ export const HotColdRankingPanel: React.FC<HotColdRankingPanelProps> = ({
               </optgroup>
             </select>
           </label>
-          <label style={{ display: "flex", alignItems: "center", gap: 6, color: "#334155" }}>
+          <label style={{ display: "grid", gap: 4, color: "#334155", flex: "1 1 180px", minWidth: 0 }}>
             Weighted half-life
-            <select value={halfLifeChoice} onChange={(event) => setHalfLifeChoice(event.target.value)} style={{ fontSize: 12 }}>
+            <select value={halfLifeChoice} onChange={(event) => setHalfLifeChoice(event.target.value)} style={{ fontSize: 12, minHeight: 32, minWidth: 0, width: "100%", maxWidth: "100%" }}>
               <optgroup label="Draw-count choices">
                 {HOT_COLD_HALF_LIFE_OPTIONS.map((option) => (
                   <option key={option} value={String(option)}>{formatHalfLifeOptionLabel(option)}</option>

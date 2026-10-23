@@ -38,8 +38,27 @@
 
 .signal-confluence-panel__summary {
   display: grid;
-  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 10px;
+}
+
+.signal-confluence-panel__portfolio-policy {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(37, 99, 235, 0.2);
+  border-radius: 10px;
+  background: rgba(239, 246, 255, 0.72);
+  color: #334155;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.signal-confluence-panel__portfolio-policy strong {
+  flex: 0 0 auto;
+  color: #1d4ed8;
+  white-space: nowrap;
 }
 
 .signal-confluence-panel__metric {
@@ -506,6 +525,12 @@
   color: #334155;
 }
 
+.signal-confluence-panel__chip--context {
+  border-color: rgba(100, 116, 139, 0.22);
+  background: rgba(100, 116, 139, 0.08);
+  color: #475569;
+}
+
 .signal-confluence-panel__empty {
   padding: 20px;
   text-align: center;
@@ -565,5 +590,9 @@
 
   .signal-confluence-panel__control-help {
     grid-column: 1;
+  }
+
+  .signal-confluence-panel__portfolio-policy {
+    display: grid;
   }
 }

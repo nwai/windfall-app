@@ -3,6 +3,7 @@ import React from "react";
 import type { Draw } from "../types";
 import {
   analyzeMonthlyStageEvidence,
+  MONTHLY_STAGE_EVIDENCE_MODEL_VERSION,
   type MonthlyStageEvidenceGateStatus,
 } from "../lib/monthlyStageEvidenceAudit";
 import InlineCollapsibleCard from "./shared/InlineCollapsibleCard";
@@ -52,7 +53,24 @@ const Metric: React.FC<{ label: string; value: string; detail: string }> = ({ la
 );
 
 export const MonthlyStageEvidenceAuditCard: React.FC<MonthlyStageEvidenceAuditCardProps> = ({ history }) => {
-  const result = React.useMemo(() => analyzeMonthlyStageEvidence(history), [history]);
+  const [expanded, setExpanded] = React.useState(false);
+  const result = React.useMemo(() => expanded ? analyzeMonthlyStageEvidence(history) : null, [expanded, history]);
+  if (!result) {
+    return (
+      <InlineCollapsibleCard
+        id="monthly-stage-evidence-learning-audit"
+        title="Monthly Stage Evidence Learning & Self-Audit"
+        subtitle="Shared, versioned month-stage evidence; observe-only"
+        collapsedSummary={`${MONTHLY_STAGE_EVIDENCE_MODEL_VERSION} · Open Review to run this history-only audit. Closed audits do not delay draw-history refreshes.`}
+        expanded={expanded}
+        onExpandedChange={setExpanded}
+        collapsedLabel="Review"
+        expandedLabel="Hide"
+      >
+        {null}
+      </InlineCollapsibleCard>
+    );
+  }
   const gateLabel = GATE_LABELS[result.gate.status];
   const latestRows = [...result.records].reverse().slice(0, 60);
   const current = result.currentState;
@@ -63,7 +81,8 @@ export const MonthlyStageEvidenceAuditCard: React.FC<MonthlyStageEvidenceAuditCa
       title="Monthly Stage Evidence Learning & Self-Audit"
       subtitle="Shared, versioned month-stage evidence; observe-only"
       collapsedSummary={`${result.modelVersion} · ${result.records.length} scored draws · ${gateLabel}`}
-      defaultExpanded={false}
+      expanded={expanded}
+      onExpandedChange={setExpanded}
       collapsedLabel="Review"
       expandedLabel="Hide"
     >

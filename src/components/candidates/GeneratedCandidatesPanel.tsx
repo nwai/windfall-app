@@ -1,8 +1,14 @@
 import React, { useMemo, useState, useEffect, useRef, useCallback } from "react";
+import { ForcedInclusionSummary, type ForcedInclusionSource } from "../shared/ForcedInclusionSummary";
+import GenerationConflictSummary from "../GenerationConflictSummary";
+import RwR45OutputSummary from "../RwR45OutputSummary";
+import type { GenerationPreflight, GenerationPreflightTarget, ForcedRemoval } from "../../lib/generationPreflight";
+import type { GeneratedCompositionSnapshot } from "../../lib/generatedComposition";
 import { generateExhaustiveCombos } from "../../lib/exhaustiveGenerator";
 import { isDisplayedValueInRange } from "../../lib/generatedCandidateFilterUtils";
 import {
   buildHistoricalPrizeBacktest,
+  candidateTerminalComposition,
   formatCandidateRowsForPasteWeightedGenerator,
   selectRowsForCandidateExport,
   type GeneratedCandidateViewRow,
@@ -21,7 +27,6 @@ import {
   toggleUserSelectedNumber,
 } from "../../lib/userSelectedNumbers";
 import {
-  formatUserExclusionReminder,
   normalizeUserExclusionLocks,
   removeUserExcludedNumbers,
 } from "../../lib/userExclusionLocks";
@@ -36,14 +41,21 @@ import {
 } from "../../lib/monthlyDrawSummary";
 import { computeVirtualRowWindow, type VirtualRowWindow } from "../../lib/virtualRows";
 import { HigButton, InfoHelp } from "../shared/HigControls";
+import { useOfficialDrawCheck } from "../../hooks/useOfficialDrawCheck";
+import OfficialDrawCheckCard from "../OfficialDrawCheckCard";
 import type { MonthlyBucketTransitionGovernorProfile } from "../../lib/monthlyBucketTransitionGovernor";
 import { TransitionWatchCard } from "./TransitionWatchCard";
+import { MonthlyTransitionInfluenceSummary } from "../MonthlyTransitionInfluenceSummary";
 import { PredictionCaptureCard } from "./PredictionCaptureCard";
 import type {
   PredictionCaptureAction,
   PredictionCaptureBatch,
   PredictionCaptureSession,
 } from "../../lib/predictionCapture";
+import {
+  matchNumbersToPreviousNeighbourAtlas,
+  type PreviousNeighbourAtlasEvidenceSnapshot,
+} from "../../lib/previousNeighbourAtlasEvidence";
 
 const GENERATED_CANDIDATE_VISIBLE_COLUMN_COUNT = 23;
 export const GENERATED_CANDIDATE_PLAY_COST_CENTS = 67;
@@ -118,6 +130,11 @@ const formatLastDrawOverlapExport = (settings: ExportSettings): string => {
 };
 
 export interface GeneratedCandidatesPanelProps {
+  generationPreflight?: GenerationPreflight;
+  forcedRemovalNotice?: ForcedRemoval[];
+  onDismissForcedRemovalNotice?: () => void;
+  onReviewGenerationConflict?: (target: GenerationPreflightTarget) => void;
+  rwR45Composition?: GeneratedCompositionSnapshot | null;
   onGenerate: () => void;
   onStopGenerate?: () => void;
   candidates: CandidateSet[];
@@ -133,6 +150,7 @@ export interface GeneratedCandidatesPanelProps {
   monthlyTransitionInfluenceProfile?: MonthlyBucketTransitionGovernorProfile;
   monthlyTransitionTargetDrawOrdinal?: number;
   onReviewMonthlyTransitionEvidence?: () => void;
+  neighbourAtlasEvidence?: PreviousNeighbourAtlasEvidenceSnapshot | null;
   generationSessionActive?: boolean;
   generationSessionCount?: number;
   onStartGenerationSession?: () => void;
@@ -149,6 +167,9 @@ export interface GeneratedCandidatesPanelProps {
   onSavePredictionCapture?: (batch: PredictionCaptureBatch) => void;
   onPredictionCaptureOutputAction?: (action: PredictionCaptureAction, candidates: CandidateSet[]) => void;
   forcedNumbers?: number[];
+  forcedInclusionSources?: readonly ForcedInclusionSource[];
+  onReviewForcedInclusions?: () => void;
+  numberConstraintSummary?: React.ReactNode;
   excludedNumbers?: number[];
   userSelectedNumbers: number[];
   setUserSelectedNumbers: (nums: number[]) => void;
@@ -257,11 +278,17 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
   numCandidates,
   setNumCandidates,
   rwr45Enabled = false,
+  generationPreflight,
+  forcedRemovalNotice,
+  onDismissForcedRemovalNotice,
+  onReviewGenerationConflict,
+  rwR45Composition,
   setRwr45Enabled,
   monthlyTransitionWatchProfile,
   monthlyTransitionInfluenceProfile,
   monthlyTransitionTargetDrawOrdinal,
   onReviewMonthlyTransitionEvidence,
+  neighbourAtlasEvidence = null,
   generationSessionActive = false,
   generationSessionCount = 0,
   onStartGenerationSession,
@@ -295,6 +322,9 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
   ogaScoresRef,
   forcedNumbers = [],
   excludedNumbers = [],
+  forcedInclusionSources,
+  onReviewForcedInclusions,
+  numberConstraintSummary,
   exportSettings,
   activeSimCandidateIdx,
   simSourceKind,
@@ -348,6 +378,14 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
       [excludedNumbers],
     );
     const userExcludedSet = useMemo(() => new Set(userExcludedNumbers), [userExcludedNumbers]);
+    const selectedAtlasCandidate = selectedCandidateIdx >= 0 ? candidates[selectedCandidateIdx] : null;
+    const selectedAtlasMatch = useMemo(
+      () => matchNumbersToPreviousNeighbourAtlas(
+        selectedAtlasCandidate ? [...selectedAtlasCandidate.main, ...selectedAtlasCandidate.supp] : [],
+        neighbourAtlasEvidence,
+      ),
+      [neighbourAtlasEvidence, selectedAtlasCandidate],
+    );
 
     // --- Running clock for generation time ---
     const [elapsedMs, setElapsedMs] = useState<number>(0);
@@ -393,7 +431,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
     }, []);
 
     // --- Column sorting ---
-    type SortKey = "nrr" | "ns" | "win" | "rdy" | "idm" | "stageIdm" | "conv" | "comp" | "ogaRaw" | "ogaPct" | "selHits" | "recentHits" | "previousNeighbourHits" | "previousNeighbourDuplicateHits" | "previousNeighbourDirectionalHits" | "oddEven" | "prize" | "b0x" | "b1x" | "b2x" | "b3x" | "b4x" | "b5x" | "b6x" | "b7x" | "b8x" | "recommended" | null;
+    type SortKey = "nrr" | "ns" | "win" | "rdy" | "idm" | "stageIdm" | "conv" | "comp" | "ogaRaw" | "ogaPct" | "selHits" | "recentHits" | "previousNeighbourHits" | "previousNeighbourDuplicateHits" | "previousNeighbourDirectionalHits" | "oddEven" | "terminalShape" | "terminalRuns" | "prize" | "b0x" | "b1x" | "b2x" | "b3x" | "b4x" | "b5x" | "b6x" | "b7x" | "b8x" | "recommended" | null;
     const [sortKey, setSortKey] = useState<SortKey>(null);
     const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
     const toggleSort = (key: SortKey) => {
@@ -409,17 +447,19 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
     const sortAria = (key: SortKey): "ascending" | "descending" | "none" => (
       sortKey === key ? (sortDir === "asc" ? "ascending" : "descending") : "none"
     );
-    const renderMetricHeader = (key: Exclude<SortKey, null>, label: string, help: React.ReactNode) => (
-      <th key={key} scope="col" aria-sort={sortAria(key)} style={th}>
+    const renderMetricHeader = (key: Exclude<SortKey, null>, label: string, help: React.ReactNode, accessibleLabel = label, wrap = false) => (
+      <th key={key} scope="col" aria-sort={sortAria(key)} style={candidateTh}>
         <span className="windfall-sortable-header">
           <button
             type="button"
             className="windfall-sortable-header__button"
+            aria-label={`Sort by ${accessibleLabel}`}
+            style={{ minHeight: 32, ...(wrap ? { whiteSpace: "normal", maxWidth: 60, lineHeight: 1.2 } : {}) }}
             onClick={() => toggleSort(key)}
           >
             {label}{sortIndicator(key)}
           </button>
-          <InfoHelp label={`${label} metric explanation`}>
+          <InfoHelp label={`${accessibleLabel} metric explanation`}>
             {help}
           </InfoHelp>
         </span>
@@ -641,8 +681,8 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
     );
     const [manualPrizeCheckFollowsUserSelected, setManualPrizeCheckFollowsUserSelected] = useState(false);
     const syncedManualPrizeCheckNumbers = useMemo(
-      () => normalizeManualPrizeCheckNumbers(userSelectedNumbers, userExcludedNumbers),
-      [userExcludedNumbers, userSelectedNumbers],
+      () => normalizeManualPrizeCheckNumbers(userSelectedNumbers),
+      [userSelectedNumbers],
     );
     useEffect(() => {
       if (!manualPrizeCheckFollowsUserSelected) return;
@@ -1139,6 +1179,8 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
   }, [nsScores]);
 
   /** Sorted candidates — preserves original index for callbacks */
+  const terminalCompositions = useMemo(() => candidates.map(candidateTerminalComposition), [candidates]);
+
   const sortedCandidates = useMemo((): GeneratedCandidateViewRow[] => {
     const indexed = candidates.map((c, i) => ({ c, origIdx: i }));
     if (!sortKey) return indexed;
@@ -1149,6 +1191,17 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
       const numsA: number[] = [...a.c.main, ...a.c.supp];
       const numsB: number[] = [...b.c.main, ...b.c.supp];
       switch (sortKey) {
+        case "terminalShape":
+        case "terminalRuns": {
+          const compositionA = terminalCompositions[a.origIdx];
+          const compositionB = terminalCompositions[b.origIdx];
+          if (!compositionA.shape || !compositionB.shape) {
+            return Number(!compositionA.shape) - Number(!compositionB.shape) || a.origIdx - b.origIdx;
+          }
+          const valueA = sortKey === "terminalShape" ? compositionA.shape : compositionA.runs.join(" · ");
+          const valueB = sortKey === "terminalShape" ? compositionB.shape : compositionB.runs.join(" · ");
+          return valueA.localeCompare(valueB, "en", { numeric: true }) * dir || a.origIdx - b.origIdx;
+        }
         case "nrr":
           va = nrrScores[a.origIdx] ?? -Infinity;
           vb = nrrScores[b.origIdx] ?? -Infinity;
@@ -1267,6 +1320,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
     manualSuppSet,
     hitSet,
     recentSet,
+    terminalCompositions,
   ]);
 
   // --- Multi-column range filter applied to sorted candidates ---
@@ -1360,7 +1414,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
       if (b6xV !== null && (bucketCounts?.times6 ?? null) !== b6xV) return false;
       if (b7xV !== null && (bucketCounts?.times7 ?? null) !== b7xV) return false;
       if (b8xV !== null && (bucketCounts?.times8 ?? null) !== b8xV) return false;
-      // Comp%: raw is finalCompositeAdj * 100
+      // Ranking points include additive bonuses and may exceed 100; they are not a percentage.
       if (!isDisplayedValueInRange(c.finalCompositeAdj === undefined ? undefined : c.finalCompositeAdj * 100, compMin, compMax, 2)) return false;
       // OGA Raw
       if (!isDisplayedValueInRange(c.ogaScore, ogaRawMin, ogaRawMax, 2)) return false;
@@ -1633,17 +1687,17 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
   const totalCombosEstimate = useMemo(() => exTotal || 0, [exTotal]);
  
    const renderDots = (count: number, color: string, emptyColor: string, ariaLabel: string) => (
-     <span aria-label={ariaLabel} style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
+     <span aria-label={`${ariaLabel}: ${count}`} style={{ display: "inline-flex", alignItems: "center", gap: 1 }}>
        {count > 0
          ? Array.from({ length: count }, (_, idx) => (
              <span
                key={`${ariaLabel}-${idx}`}
-               style={{ width: 10, height: 10, borderRadius: "50%", background: color, display: "inline-block" }}
+               style={{ width: 8, height: 8, borderRadius: "50%", background: color, display: "inline-block" }}
              />
            ))
          : (
              <span
-               style={{ width: 10, height: 10, borderRadius: "50%", border: `1px solid ${emptyColor}`, display: "inline-block" }}
+               style={{ width: 8, height: 8, borderRadius: "50%", border: `1px solid ${emptyColor}`, display: "inline-block" }}
              />
            )}
      </span>
@@ -1660,8 +1714,6 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
      return computeWeekdayWindfallPrizeScore(main, supp, manualMain, manualSupp);
    }
 
-   const selHeader = forcedNumbers.length ? "Sel/Forced Hits" : "SelHits";
-
      const numberFreq = useMemo(() => {
        const counts = new Map<number, number>();
        candidates.forEach((c) => {
@@ -1677,7 +1729,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
      }, [candidates]);
 
      const activeSortLabel = sortKey
-       ? `${sortKey}${sortDir === "asc" ? " ↑" : " ↓"}`
+       ? `${sortKey === "terminalShape" ? "Terminal shape" : sortKey === "terminalRuns" ? "Terminal runs" : sortKey}${sortDir === "asc" ? " ↑" : " ↓"}`
        : "generated order";
      const visibleRowsLabel = candidates.length === 0
        ? "0"
@@ -1725,7 +1777,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
      return `OGA raw ${ogaScore.toFixed(2)} • ${ogaPct.toFixed(1)}%\nRef: rank ${rank}/${sorted.length}, nearest ${nearestRaw.toFixed(2)}`;
    }
 
-   function renderNumber(n: number, _simRole?: "main" | "supp", isSearchMatched: boolean = false) {
+   function renderNumber(n: number, _simRole?: "main" | "supp", isSearchMatched: boolean = false, compact: boolean = false) {
       const isSel = selSet.has(n);
       const isRecent = recentSet.has(n);
       const searchAccent: React.CSSProperties | null = isSearchMatched
@@ -1735,8 +1787,8 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
           }
         : null;
       const base: React.CSSProperties = {
-        padding: "0 4px",
-        margin: "0 2px",
+        padding: compact ? "0 2px" : "0 4px",
+        margin: compact ? "0 1px" : "0 2px",
         borderRadius: 14,
         display: "inline-block",
         fontVariantNumeric: "tabular-nums",
@@ -1803,7 +1855,6 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
 
    function toggleManualPick(n: number) {
      if (manualPrizeCheckFollowsUserSelected) return;
-     if (userExcludedSet.has(n)) return;
      setManualSimSelected((prev) => {
        const next = prev.includes(n)
          ? prev.filter((x) => x !== n)
@@ -1877,7 +1928,8 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
        if (!exportData.length) return;
        const headers = [
          "#", "Main (6)", "Supp (2)", "Prize", "Odd/Even",
-         "Comp%", "OGA Raw", "OGA%", "SelHits", "RecentHits", "Prev±2", "Dup±2", "Dir±2",
+         "Terminal repetition shape", "Terminal runs", "Assigned terminal run quota",
+         "Ranking pts", "OGA Raw", "OGA%", "SelHits", "RecentHits", "Prev±2", "Dup±2", "Dir±2",
          "0x", "1x", "2x", "3x", "4x", "5x", "6x", "7x", "8x+",
           "Conv", "IDM", "StageIDM", "Rdy", "Win", "WinTier", "Nrr", "NS",
         ];
@@ -1887,6 +1939,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
          const odd = nums.filter((n: number) => n % 2 === 1).length;
          const even = nums.length - odd;
          const prizeLabel = computePrizeDivision(c.main, c.supp, manualMainSet, manualSuppSet);
+         const terminalComposition = terminalCompositions[i];
          const ogaRaw = c.ogaScore;
          const ogaPct = c.ogaPercentile;
          const selHits = c.selHits ?? nums.filter((n: number) => hitSet.has(n)).length;
@@ -1902,6 +1955,9 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
            c.supp.join(" "),
            prizeLabel,
            `${odd}:${even}`,
+           terminalComposition.shape ?? "",
+           terminalComposition.runs.join(" | "),
+           terminalComposition.assignedRun ?? "",
            c.finalCompositeAdj !== undefined ? (c.finalCompositeAdj * 100).toFixed(2) : "",
            ogaRaw !== undefined ? ogaRaw.toFixed(2) : "",
            ogaPct !== undefined ? ogaPct.toFixed(1) : "",
@@ -2055,7 +2111,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
        URL.revokeObjectURL(url);
        onPredictionCaptureOutputAction?.("exported", exportData.map(({ c }) => c));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-      }, [sortedCandidates, filteredCandidates, isFilteringActive, matchedCount, convergenceScores, idmScores, stageIdmScores, readinessScores, winScores, nrrScores, nsScores, exportSettings, enableOGA, numCandidates, overgenFactor, attemptMultiplier, ogaSpokeCount, forcedNumbers, userSelectedNumbers, monthlyBuckets, historyForOGA, onPredictionCaptureOutputAction]);
+      }, [sortedCandidates, filteredCandidates, isFilteringActive, matchedCount, convergenceScores, idmScores, stageIdmScores, readinessScores, winScores, nrrScores, nsScores, terminalCompositions, exportSettings, enableOGA, numCandidates, overgenFactor, attemptMultiplier, ogaSpokeCount, forcedNumbers, userSelectedNumbers, monthlyBuckets, historyForOGA, onPredictionCaptureOutputAction]);
 
      const copyCandidatesForPasteWeightedGenerator = useCallback(async () => {
        const copyRows = selectRowsForCandidateExport(
@@ -2099,6 +2155,11 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
              onSaveAsPrediction={onSavePredictionCapture}
            />
          ) : null}
+       <MonthlyTransitionInfluenceSummary
+         profile={monthlyTransitionInfluenceProfile}
+         bypassedByRandomCoverage={rwr45Enabled}
+         onEdit={onReviewMonthlyTransitionEvidence}
+       />
        {monthlyTransitionWatchProfile
          && monthlyTransitionInfluenceProfile
          && Number.isInteger(monthlyTransitionTargetDrawOrdinal) ? (
@@ -2110,6 +2171,45 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
              onReviewEvidence={onReviewMonthlyTransitionEvidence}
            />
          ) : null}
+       <div
+         data-testid="generated-candidates-neighbour-atlas"
+         style={{
+           marginBottom: 10,
+           border: "1px solid #bfdbfe",
+           borderRadius: 8,
+           background: "#f7fbff",
+           padding: "9px 10px",
+           display: "grid",
+           gap: 5,
+           color: "#334155",
+           fontSize: 12,
+           lineHeight: 1.4,
+         }}
+       >
+         <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+           <strong style={{ color: "#0f172a" }}>Neighbour Atlas candidate reference</strong>
+           <span style={{ color: "#1d4ed8", fontSize: 11, fontWeight: 850 }}>Observe-only · no rank or filter effect</span>
+         </div>
+         {neighbourAtlasEvidence ? (
+           <>
+             <div>
+               {neighbourAtlasEvidence.historySourceLabel} · {neighbourAtlasEvidence.scope === "mains" ? "mains only" : "mains + supps"} · lookback {neighbourAtlasEvidence.lookbackDraws} · D{neighbourAtlasEvidence.targetDrawOrdinal ?? "?"}{neighbourAtlasEvidence.targetMonthExpectedDrawCount ? ` of ${neighbourAtlasEvidence.targetMonthExpectedDrawCount}` : ""} · cloud {neighbourAtlasEvidence.currentCloud?.targetCount ?? 0}.
+             </div>
+             {selectedAtlasCandidate ? (
+               <div>
+                 Selected row #{selectedCandidateIdx + 1}: {selectedAtlasMatch.matchedNumbers.length} unique Atlas target{selectedAtlasMatch.matchedNumbers.length === 1 ? "" : "s"}{selectedAtlasMatch.matchedNumbers.length ? ` (${selectedAtlasMatch.matchedNumbers.join(", ")})` : ""} · direction paths {selectedAtlasMatch.directionalPattern} · ambiguous {selectedAtlasMatch.ambiguousNumbers.length ? selectedAtlasMatch.ambiguousNumbers.join(", ") : "none"}.
+               </div>
+             ) : (
+               <div style={{ color: "#64748b" }}>Select a candidate row to inspect its coverage of the current shared Atlas cloud.</div>
+             )}
+           </>
+         ) : (
+           <div style={{ color: "#64748b" }}>Atlas evidence is unavailable. Candidate generation continues unchanged.</div>
+         )}
+       </div>
+       {generationPreflight && onReviewGenerationConflict && <GenerationConflictSummary result={generationPreflight}
+         removals={forcedRemovalNotice} onDismissRemovals={onDismissForcedRemovalNotice} onReview={onReviewGenerationConflict} />}
+       <RwR45OutputSummary snapshot={rwR45Composition} />
        <header style={hdr}>
           <label style={{ fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6 }}>
            Count
@@ -2160,7 +2260,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
              Count ignored · 7 forced-aware random coverage rows
            </span>
          )}
-           <HigButton variant="primary" disabled={isGenerating} onClick={onGenerate}>
+           <HigButton variant="primary" disabled={isGenerating || !!generationPreflight?.blockers.length} onClick={onGenerate}>
              {isGenerating ? "Generating…" : "Generate"}
            </HigButton>
            {isGenerating && onStopGenerate && (
@@ -2364,12 +2464,13 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                  title={isUnavailable
                    ? `Clear the active exclusion or turn off the rule before selecting ${number}.${bucketTitle}`
                    : isForced
-                     ? `${number} is currently carry-over boosted.${bucketTitle} Click to toggle user selection.`
+                     ? `${number} is a forced inclusion from another control.${bucketTitle} Click to toggle a separate user selection.`
                      : isSelected
                        ? `Remove ${number} from user selected numbers.${bucketTitle}`
                        : `Add ${number} to user selected numbers.${bucketTitle}`}
                >
                  {number}
+                 {isForced && <sup aria-label="Forced inclusion" style={{ fontSize: 9, marginLeft: 2 }}>F</sup>}
                </button>
              );
            })}
@@ -2383,6 +2484,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
          >
            Clear
          </button>
+         {numberConstraintSummary ?? <ForcedInclusionSummary numbers={forcedNumbers} sources={forcedInclusionSources} onReview={onReviewForcedInclusions} />}
        </div>
 
        <div style={summaryStrip}>
@@ -2429,7 +2531,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                  color: filterEnabled ? "#1565c0" : "#555",
                  cursor: "pointer",
                }}
-               title="Toggle multi-column range filter to narrow candidates by Nrr, Rdy%, IDM%, Comp%, OGA Raw"
+               title="Toggle multi-column range filter to narrow candidates by Nrr, Rdy%, IDM%, Ranking pts, OGA Raw"
              >
                Filter {filterEnabled ? "ON" : "OFF"}
                 {hasActiveFilter && (
@@ -2552,7 +2654,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
 
                {/* ── Range (min / max) fields ── */}
                {([
-                 { label: "Comp%",   sk: "comp"       as SortKey, minK: "compMin"   as const, maxK: "compMax"   as const },
+                 { label: "Ranking pts", sk: "comp"    as SortKey, minK: "compMin"   as const, maxK: "compMax"   as const },
                  { label: "OGA Raw", sk: "ogaRaw"     as SortKey, minK: "ogaRawMin" as const, maxK: "ogaRawMax" as const },
                  { label: "OGA%",    sk: "ogaPct"     as SortKey, minK: "ogaPctMin" as const, maxK: "ogaPctMax" as const },
                  { label: "Conv",    sk: "conv"        as SortKey, minK: "convMin"   as const, maxK: "convMax"   as const },
@@ -2897,50 +2999,59 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
               position: "relative",
             }}
           >
-          <table style={tbl}>
+          <table className="generated-candidates-table" style={tbl}>
             <thead>
                <tr style={{ background: "#fafafa" }}>
-                 <th style={th} title="Original generated position; preserved when sorting or filtering.">#</th>
-                 <th style={mainTh}>Main (6)</th>
-                 <th style={th}>Supp (2)</th>
-                 <th style={th}>Manual (M/S)</th>
-                 <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("prize")}>Prize{sortIndicator("prize")}</th>
-                 <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("oddEven")}>Odd/Even{sortIndicator("oddEven")}</th>
-                 <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("selHits")}>{selHeader}{sortIndicator("selHits")}</th>
-                 <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("recentHits")}>RecentHits{sortIndicator("recentHits")}</th>
+                 <th style={{ ...candidateTh, width: 142 }}>Main (6)</th>
+                 <th style={candidateTh}>Supp (2)</th>
+                 <th style={candidateTh}>Manual (M/S)</th>
+                 <th style={{ ...candidateTh, ...sortableStyle }} onClick={() => toggleSort("prize")}>Prize{sortIndicator("prize")}</th>
+                 <th style={{ ...candidateTh, ...sortableStyle }} onClick={() => toggleSort("oddEven")}>Odd/Even{sortIndicator("oddEven")}</th>
+                 {renderMetricHeader("terminalShape", "Terminal shape", <>
+                   Terminal Repetition Shapes use all 6 mains + 2 supps. Each value is a terminal-family count, largest first.
+                   {" "}For example, 2+2+1+1+1+1 means two families occur twice and four occur once.
+                   {" "}This shows the actual candidate shape even when shape quotas are Off; it is not a score.
+                 </>, "Terminal Repetition Shapes", true)}
+                 {renderMetricHeader("terminalRuns", "Terminal runs", <>
+                   Terminal Run Quotas: all separate exact maximal runs across the 6 mains + 2 supps are shown, including wraparound such as 9-0-1.
+                   {" "}2-3-4-5 is one run, not overlapping 2-3-4 and 3-4-5 runs. None means no adjacent terminal digits.
+                   {" "}An asterisk (*) marks the run assigned for quota credit when this row was generated; unmarked runs are present but have no recorded allocation.
+                   {" "}Runs remain visible when rules are Off. Sorting groups the actual runs, not predictive strength.
+                 </>, "Terminal Run Quotas", true)}
+                 <th style={{ ...candidateTh, ...sortableStyle }} onClick={() => toggleSort("recentHits")}>RecentHits{sortIndicator("recentHits")}</th>
                  <th
-                   style={{ ...th, ...sortableStyle }}
+                   style={{ ...candidateTh, ...sortableStyle }}
                    onClick={() => toggleSort("previousNeighbourHits")}
                    title="Total unique candidate numbers that are ±1 or ±2 from the latest draw. Observe-only diagnostic; generation can separately require user-selected ±1/±2 targets."
                  >
                    Prev±2{sortIndicator("previousNeighbourHits")}
                  </th>
                  <th
-                   style={{ ...th, ...sortableStyle }}
+                   style={{ ...candidateTh, ...sortableStyle }}
                    onClick={() => toggleSort("previousNeighbourDuplicateHits")}
                    title="Candidate numbers that are duplicated or ambiguous ±1/±2 neighbour targets from more than one latest-draw source/offset."
                  >
                    Dup±2{sortIndicator("previousNeighbourDuplicateHits")}
                  </th>
                  <th
-                   style={{ ...th, ...sortableStyle }}
+                   style={{ ...candidateTh, ...sortableStyle }}
                    onClick={() => toggleSort("previousNeighbourDirectionalHits")}
                    title="Directional fingerprint as -2/-1/+1/+2 counts. Ambiguous numbers can count in more than one direction."
                  >
                    Dir±2{sortIndicator("previousNeighbourDirectionalHits")}
                  </th>
-                 <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("b0x")}>0x{sortIndicator("b0x")}</th>
-                 <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("b1x")}>1x{sortIndicator("b1x")}</th>
-                 <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("b2x")}>2x{sortIndicator("b2x")}</th>
-                 <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("b3x")}>3x{sortIndicator("b3x")}</th>
-                 <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("b4x")}>4x{sortIndicator("b4x")}</th>
-                 <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("b5x")}>5x{sortIndicator("b5x")}</th>
-                 <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("b6x")}>6x{sortIndicator("b6x")}</th>
-                 <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("b7x")}>7x{sortIndicator("b7x")}</th>
-                 <th style={{ ...th, ...sortableStyle }} onClick={() => toggleSort("b8x")}>8x+{sortIndicator("b8x")}</th>
+                 <th style={{ ...candidateTh, ...sortableStyle }} onClick={() => toggleSort("b0x")}>0x{sortIndicator("b0x")}</th>
+                 <th style={{ ...candidateTh, ...sortableStyle }} onClick={() => toggleSort("b1x")}>1x{sortIndicator("b1x")}</th>
+                 <th style={{ ...candidateTh, ...sortableStyle }} onClick={() => toggleSort("b2x")}>2x{sortIndicator("b2x")}</th>
+                 <th style={{ ...candidateTh, ...sortableStyle }} onClick={() => toggleSort("b3x")}>3x{sortIndicator("b3x")}</th>
+                 <th style={{ ...candidateTh, ...sortableStyle }} onClick={() => toggleSort("b4x")}>4x{sortIndicator("b4x")}</th>
+                 <th style={{ ...candidateTh, ...sortableStyle }} onClick={() => toggleSort("b5x")}>5x{sortIndicator("b5x")}</th>
+                 <th style={{ ...candidateTh, ...sortableStyle }} onClick={() => toggleSort("b6x")}>6x{sortIndicator("b6x")}</th>
+                 <th style={{ ...candidateTh, ...sortableStyle }} onClick={() => toggleSort("b7x")}>7x{sortIndicator("b7x")}</th>
+                 <th style={{ ...candidateTh, ...sortableStyle }} onClick={() => toggleSort("b8x")}>8x+{sortIndicator("b8x")}</th>
                  {renderMetricHeader("conv", "Conv", "Convergence measures how much this candidate moves the month's distribution toward (+) or away from (-) the Monthly Draws Summary target. Direction is informational only and is not a prize-winning prediction.")}
                  {renderMetricHeader("stageIdm", "Stage IDM", "Stage IDM measures how closely this candidate's bucket composition matches the next draw-stage target from comparable same-size months. It is descriptive alignment, not a probability.")}
-                 <th style={th}>Actions</th>
+                 <th style={candidateTh}>Actions</th>
               </tr>
            </thead>
             <tbody>
@@ -2960,6 +3071,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                 const previousNeighbourDirectionalPattern = c.previousNeighbourDirectionalPattern;
                 const odd = nums.filter((n: number) => n % 2 === 1).length;
                 const even = nums.length - odd;
+                const terminalComposition = terminalCompositions[i];
                 const manualMainHits = nums.filter((n: number) => manualMainSet.has(n)).length;
                 const manualSuppHits = nums.filter((n: number) => manualSuppSet.has(n)).length;
                 const prizeLabel = computePrizeDivision(c.main, c.supp, manualMainSet, manualSuppSet);
@@ -3010,6 +3122,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                      </tr>
                    )}
                    <tr
+                     data-generated-position={i + 1}
                      style={{
                        background: effectiveShade,
                        cursor: "pointer",
@@ -3021,8 +3134,7 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                      onClick={() => onSelectCandidate(i)}
                      title={`#${i + 1} SelHits=${selHits} RecentHits=${recentHits}${previousNeighbourHits !== undefined ? ` Prev±2=${previousNeighbourHits}` : ""}${previousNeighbourDuplicateHits !== undefined ? ` Dup±2=${previousNeighbourDuplicateHits}` : ""}${previousNeighbourDirectionalPattern ? ` Dir±2=${previousNeighbourDirectionalPattern}` : previousNeighbourDirectionalHits !== undefined ? ` Dir±2=${previousNeighbourDirectionalHits}` : ""}${convScore !== null ? ` Conv=${convScore.toFixed(1)}` : ""}${stageIdmScore !== null ? ` StageIDM=${(stageIdmScore * 100).toFixed(1)}%` : ""}`}
                   >
-                    <td style={tdCenter} title={`Original generated position ${i + 1}`}>{i + 1}</td>
-                    <td style={mainTd}>{c.main.map((n: number) => renderNumber(
+                    <td style={candidateMainTd}>{c.main.map((n: number) => renderNumber(
                       n,
                       isActiveSim ? "main" : undefined,
                       hasCommittedNumberSearch && (
@@ -3030,8 +3142,9 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                         || (n < 10 && committedSingleDigitSearchSet.has(n))
                         || (n >= 10 && committedTwoDigitSearchSet.has(n))
                       ),
+                      true,
                     ))}</td>
-                    <td style={suppTd}>{c.supp.map((n: number) => renderNumber(
+                    <td style={candidateSuppTd}>{c.supp.map((n: number) => renderNumber(
                       n,
                       isActiveSim ? "supp" : undefined,
                       hasCommittedNumberSearch && (
@@ -3039,44 +3152,58 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
                         || (n < 10 && committedSingleDigitSearchSet.has(n))
                         || (n >= 10 && committedTwoDigitSearchSet.has(n))
                       ),
+                      true,
                     ))}</td>
                    <td
                      style={manualTd}
                      title="Prize hits from this 8-number candidate row: red = winning main hits, green = winning supplementary hits."
                    >
                      {renderDots(manualMainHits, "#c62828", "#999", "Manual main hits from candidate row")}
-                     <span style={{ color: "#bbb", padding: "0 3px" }}>/</span>
+                     <span style={{ color: "#bbb", padding: "0 2px" }}>/</span>
                      {renderDots(manualSuppHits, "#2e7d32", "#999", "Manual supp hits from candidate row")}
                    </td>
-                    <td style={tdCenter}>{prizeLabel}</td>
-                    <td style={tdCenter}>{`${odd}:${even}`}</td>
-                   <td style={tdCenter}>{selHits}</td>
-                   <td style={tdCenter}>{recentHits}</td>
-                   <td style={tdCenter} title="Total unique candidate numbers that are ±1 or ±2 from the latest draw">{previousNeighbourHits ?? "—"}</td>
-                   <td style={tdCenter} title="Candidate numbers that are duplicated or ambiguous ±1/±2 neighbour targets">{previousNeighbourDuplicateHits ?? "—"}</td>
-                   <td style={tdCenter} title={previousNeighbourDirectionalPattern ? `Directional fingerprint: ${previousNeighbourDirectionalPattern}` : "Directional fingerprint as -2/-1/+1/+2 counts"}>
+                    <td style={candidateTdCenter}>{prizeLabel}</td>
+                    <td style={candidateTdCenter}>{`${odd}:${even}`}</td>
+                    <td style={candidateTerminalTd} data-terminal-shape={terminalComposition.shape ?? ""}>
+                      {terminalComposition.shape ?? "—"}
+                    </td>
+                    <td style={candidateTerminalTd} data-terminal-runs={terminalComposition.runs.join(" | ")}>
+                      {terminalComposition.shape ? (terminalComposition.runs.length ? terminalComposition.runs.map((run, index) => (
+                        <React.Fragment key={run}>
+                          {index > 0 && " · "}
+                          <span
+                            aria-label={run === terminalComposition.assignedRun ? `${run}, assigned quota` : run}
+                            style={{ fontWeight: run === terminalComposition.assignedRun ? 700 : undefined }}
+                          >{run}{run === terminalComposition.assignedRun ? "*" : ""}</span>
+                        </React.Fragment>
+                      )) : "None") : "—"}
+                    </td>
+                   <td style={candidateTdCenter}>{recentHits}</td>
+                   <td style={candidateTdCenter} title="Total unique candidate numbers that are ±1 or ±2 from the latest draw">{previousNeighbourHits ?? "—"}</td>
+                   <td style={candidateTdCenter} title="Candidate numbers that are duplicated or ambiguous ±1/±2 neighbour targets">{previousNeighbourDuplicateHits ?? "—"}</td>
+                   <td style={candidateTdCenter} title={previousNeighbourDirectionalPattern ? `Directional fingerprint: ${previousNeighbourDirectionalPattern}` : "Directional fingerprint as -2/-1/+1/+2 counts"}>
                      {previousNeighbourDirectionalPattern
                        ? previousNeighbourDirectionalPattern.replace(/-2:|-1:|\+1:|\+2:/g, "").replace(/\s+/g, "/")
                        : "—"}
                    </td>
-                   <td style={tdCenter}>{bucketCounts ? bucketCounts.undrawn : "—"}</td>
-                   <td style={tdCenter}>{bucketCounts ? bucketCounts.times1 : "—"}</td>
-                   <td style={tdCenter}>{bucketCounts ? bucketCounts.times2 : "—"}</td>
-                   <td style={tdCenter}>{bucketCounts ? bucketCounts.times3 : "—"}</td>
-                   <td style={tdCenter}>{bucketCounts ? bucketCounts.times4 : "—"}</td>
-                   <td style={tdCenter}>{bucketCounts ? bucketCounts.times5 : "—"}</td>
-                   <td style={tdCenter}>{bucketCounts ? bucketCounts.times6 : "—"}</td>
-                   <td style={tdCenter}>{bucketCounts ? bucketCounts.times7 : "—"}</td>
-                    <td style={tdCenter}>{bucketCounts ? bucketCounts.times8 : "—"}</td>
+                   <td style={candidateTdCenter}>{bucketCounts ? bucketCounts.undrawn : "—"}</td>
+                   <td style={candidateTdCenter}>{bucketCounts ? bucketCounts.times1 : "—"}</td>
+                   <td style={candidateTdCenter}>{bucketCounts ? bucketCounts.times2 : "—"}</td>
+                   <td style={candidateTdCenter}>{bucketCounts ? bucketCounts.times3 : "—"}</td>
+                   <td style={candidateTdCenter}>{bucketCounts ? bucketCounts.times4 : "—"}</td>
+                   <td style={candidateTdCenter}>{bucketCounts ? bucketCounts.times5 : "—"}</td>
+                   <td style={candidateTdCenter}>{bucketCounts ? bucketCounts.times6 : "—"}</td>
+                   <td style={candidateTdCenter}>{bucketCounts ? bucketCounts.times7 : "—"}</td>
+                    <td style={candidateTdCenter}>{bucketCounts ? bucketCounts.times8 : "—"}</td>
                     <td style={{
-                      ...tdCenter,
+                      ...candidateTdCenter,
                       fontWeight: isBestConv ? 700 : undefined,
                       color: convScore !== null ? (convScore > 0 ? "#2e7d32" : convScore < 0 ? "#c62828" : undefined) : undefined,
                     }}>
                       {convScore !== null ? (isBestConv ? `Top ${convScore.toFixed(1)}` : convScore.toFixed(1)) : "—"}
                     </td>
                     <td style={{
-                      ...tdCenter,
+                      ...candidateTdCenter,
                       fontWeight: isBestStageIdm ? 700 : undefined,
                       color: stageIdmScore !== null ? (stageIdmScore >= 0.875 ? "#0f5f8f" : stageIdmScore >= 0.5 ? "#2e7d32" : "#888") : undefined,
                       background: isBestStageIdm ? "rgba(14,165,233,0.12)" : undefined,
@@ -3382,7 +3509,6 @@ export const GeneratedCandidatesPanel: React.FC<GeneratedCandidatesPanelProps> =
           manualSaveDisabledReason={manualSaveDisabledReason}
           isSavingManualAsNextDraw={isSavingManualAsNextDraw}
           onSaveManualAsNextDraw={onSaveManualAsNextDraw}
-          excludedNumbers={userExcludedNumbers}
           numberToBucket={numberToBucket}
           currentDist={currentDist}
           targetDist={targetDist}
@@ -3797,6 +3923,8 @@ const officialDrawConfirmOverlayStyle: React.CSSProperties = {
 
 const officialDrawConfirmSheetStyle: React.CSSProperties = {
   width: "min(520px, 100%)",
+  maxHeight: "calc(100dvh - 32px)",
+  overflowY: "auto",
   display: "grid",
   gap: 14,
   padding: 18,
@@ -3855,7 +3983,6 @@ const ManualSim: React.FC<{
   manualSaveDisabledReason?: string;
   isSavingManualAsNextDraw?: boolean;
   onSaveManualAsNextDraw?: (numbers: number[]) => void;
-  excludedNumbers?: readonly number[];
   numberToBucket: Map<number, number> | null;
   currentDist: number[] | null;
   targetDist: number[] | null;
@@ -3869,7 +3996,6 @@ const ManualSim: React.FC<{
   manualSaveDisabledReason,
   isSavingManualAsNextDraw = false,
   onSaveManualAsNextDraw,
-  excludedNumbers = [],
   numberToBucket,
   currentDist,
   targetDist,
@@ -3877,11 +4003,6 @@ const ManualSim: React.FC<{
   // Compute before/after distribution when 8 numbers are selected
   const bucketLabels = ["0x", "1x", "2x", "3x", "4x", "5x", "6x", "7x", "8x+"];
   const showBeforeAfter = manualSimSelected.length === 8 && numberToBucket && currentDist && targetDist;
-  const userExcludedSet = React.useMemo(() => new Set(excludedNumbers), [excludedNumbers]);
-  const userExclusionReminder = React.useMemo(
-    () => formatUserExclusionReminder(excludedNumbers),
-    [excludedNumbers],
-  );
   const canSaveAsNextDraw = Boolean(onSaveManualAsNextDraw)
     && manualSimSelected.length === 8
     && !manualSaveDisabledReason
@@ -3897,6 +4018,7 @@ const ManualSim: React.FC<{
   const [officialResultConfirmed, setOfficialResultConfirmed] = React.useState(false);
   const manualMainNumbers = manualSimSelected.slice(0, 6);
   const manualSuppNumbers = manualSimSelected.slice(6, 8);
+  const officialCheck = useOfficialDrawCheck({ date: manualNextDrawDate ?? "", mains: manualMainNumbers, supps: manualSuppNumbers });
 
   React.useEffect(() => {
     if (canSaveAsNextDraw) return;
@@ -3917,7 +4039,7 @@ const ManualSim: React.FC<{
   };
 
   const confirmOfficialDrawSave = () => {
-    if (!canSaveAsNextDraw || !officialResultConfirmed) return;
+    if (!canSaveAsNextDraw || !officialResultConfirmed || !officialCheck.allowSave) return;
     setShowOfficialDrawConfirm(false);
     setOfficialResultConfirmed(false);
     onSaveManualAsNextDraw?.(manualSimSelected);
@@ -4020,6 +4142,7 @@ const ManualSim: React.FC<{
                 <strong>Loaded history CSV or download fallback</strong>
               </div>
             </div>
+            <OfficialDrawCheckCard check={officialCheck} />
             <label style={officialDrawConfirmCheckStyle}>
               <input
                 type="checkbox"
@@ -4037,7 +4160,7 @@ const ManualSim: React.FC<{
                 size="compact"
                 variant="primary"
                 onClick={confirmOfficialDrawSave}
-                disabled={!officialResultConfirmed || isSavingManualAsNextDraw}
+                disabled={!officialResultConfirmed || !officialCheck.allowSave || isSavingManualAsNextDraw}
                 aria-label="Confirm and save official draw result"
               >
                 Save to history
@@ -4049,11 +4172,6 @@ const ManualSim: React.FC<{
       {followUserSelected && (
         <div role="status" style={{ marginBottom: 8, color: "#475569", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "6px 8px", fontSize: 11 }}>
           Using User Selected order: {syncedUserSelectedNumbers.length}/8 copied. The first six synced values are treated as mains and the last two synced values are treated as supps; turn this off to choose Manual Prize Check slots directly.
-        </div>
-      )}
-      {userExclusionReminder && (
-        <div role="status" style={{ marginBottom: 8, color: "#475569", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "6px 8px", fontSize: 11 }}>
-          {userExclusionReminder}. Clear the manual exclusion or turn off the rule that excludes them before selecting them here.
         </div>
       )}
 
@@ -4125,11 +4243,10 @@ const ManualSim: React.FC<{
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
         {Array.from({ length: 45 }, (_, i) => i + 1).map((n) => {
           const idx = manualSimSelected.indexOf(n);
-          const isUserExcluded = userExcludedSet.has(n);
-          const picked = !isUserExcluded && idx !== -1;
+          const picked = idx !== -1;
           const atCapacity = manualSimSelected.length >= 8 && !picked;
           const slotColor = picked ? (idx < 6 ? "#4a6fe3" : "#8e44ad") : "#fff";
-          const disabled = followUserSelected || isUserExcluded || atCapacity;
+          const disabled = followUserSelected || atCapacity;
           return (
             <label
               key={n}
@@ -4141,17 +4258,15 @@ const ManualSim: React.FC<{
                 padding: 4,
                 border: "1px solid #bbb",
                 borderRadius: 6,
-                background: isUserExcluded ? "#f1f5f9" : slotColor,
-                color: picked ? "#fff" : isUserExcluded ? "#94a3b8" : "#333",
-                opacity: isUserExcluded || (atCapacity && !picked) ? 0.35 : 1,
+                background: slotColor,
+                color: picked ? "#fff" : "#333",
+                opacity: atCapacity && !picked ? 0.35 : 1,
                 cursor: followUserSelected ? "default" : disabled ? "not-allowed" : "pointer",
                 fontSize: 11,
               }}
               title={
                 followUserSelected
                   ? "Synced from User Selected numbers. Turn off Use User Selected to edit manually."
-                  : isUserExcluded
-                  ? `Clear the active exclusion or turn off the rule before selecting ${n}.`
                   : picked
                   ? `Slot ${idx + 1}`
                   : atCapacity
@@ -4163,7 +4278,6 @@ const ManualSim: React.FC<{
                 type="checkbox"
                 checked={picked}
                 disabled={disabled}
-                aria-label={isUserExcluded ? `Number ${n} is unavailable because it is excluded` : undefined}
                 onChange={() => toggleManualPick(n)}
                 style={{ marginBottom: 2 }}
               />
@@ -4173,7 +4287,7 @@ const ManualSim: React.FC<{
         })}
       </div>
       <div style={{ marginTop: 6, fontSize: 11, color: "#555" }}>
-        Manual selections are used only for candidate prize checks and the Historical Prize Backtest.
+        Manual selections are independent of generation exclusions and are used only for candidate prize checks and the Historical Prize Backtest.
         Use “Simulate” in the table to run a candidate through the DGA simulation flow.
       </div>
     </div>
@@ -4370,13 +4484,18 @@ const th: React.CSSProperties = {
 const mainTh: React.CSSProperties = { ...th, width: 170, whiteSpace: "nowrap" };
 const mainTd: React.CSSProperties = { ...td, width: 170, minWidth: 170, whiteSpace: "nowrap" };
 const suppTd: React.CSSProperties = { ...td, whiteSpace: "nowrap" };
-const manualTd: React.CSSProperties = { ...tdCenter, fontWeight: 600 };
-const actionTd: React.CSSProperties = { ...tdCenter, minWidth: 118 };
+const candidateTh: React.CSSProperties = { ...th, padding: "4px 3px", fontSize: 11 };
+const candidateTdCenter: React.CSSProperties = { ...tdCenter, padding: "4px 3px", whiteSpace: "nowrap" };
+const candidateMainTd: React.CSSProperties = { ...mainTd, padding: "4px 2px", width: 142, minWidth: 142 };
+const candidateSuppTd: React.CSSProperties = { ...suppTd, padding: "4px 2px" };
+const candidateTerminalTd: React.CSSProperties = { ...candidateTdCenter, fontSize: 11, fontVariantNumeric: "tabular-nums" };
+const manualTd: React.CSSProperties = { ...candidateTdCenter, fontWeight: 600 };
+const actionTd: React.CSSProperties = { ...candidateTdCenter, minWidth: 110 };
 const actionButtonGroup: React.CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
-  gap: 5,
+  gap: 3,
   flexWrap: "nowrap",
 };
 const simBtn: React.CSSProperties = {

@@ -1,9 +1,13 @@
 import React from "react";
+import { act } from "react";
+import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { CollapsibleSection } from "../src/components/shared/CollapsibleSection";
 import { InlineCollapsibleCard } from "../src/components/shared/InlineCollapsibleCard";
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 describe("hybrid visual system shell", () => {
   it("renders collapsible sections with Windfall section classes", () => {
@@ -54,6 +58,37 @@ describe("hybrid visual system shell", () => {
     expect(details?.hasAttribute("open")).toBe(false);
     expect(actions).not.toBeNull();
     expect(actions?.textContent).toContain("New Prediction");
+  });
+
+  it("defers and freezes expensive content while a section is collapsed", async () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    let childRenders = 0;
+    const Child = ({ value }: { value: string }) => {
+      childRenders += 1;
+      return React.createElement("span", null, value);
+    };
+    const renderSection = (open: boolean, value: string) => React.createElement(
+      CollapsibleSection,
+      { title: "Deferred diagnostics", open, deferContentWhileCollapsed: true },
+      React.createElement(Child, { value }),
+    );
+
+    await act(async () => root.render(renderSection(false, "first")));
+    expect(childRenders).toBe(0);
+
+    await act(async () => root.render(renderSection(true, "first")));
+    expect(childRenders).toBe(1);
+    expect(container.textContent).toContain("first");
+
+    await act(async () => root.render(renderSection(false, "hidden update")));
+    expect(childRenders).toBe(1);
+
+    await act(async () => root.render(renderSection(true, "refreshed")));
+    expect(childRenders).toBe(2);
+    expect(container.textContent).toContain("refreshed");
+
+    await act(async () => root.unmount());
   });
 
   it("renders inline collapsible cards with Windfall card classes", () => {

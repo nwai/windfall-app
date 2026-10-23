@@ -1,5 +1,6 @@
 import type { Draw } from "../types";
 import { analyzeHotColdRanking } from "./hotColdRanking";
+import { maximalTerminalDigitRuns } from "./terminalDigitRuns";
 
 export interface EndingDigitSequenceRun {
   digits: number[];
@@ -13,6 +14,7 @@ export interface EndingDigitSequenceDrawStats {
   maxRunLength: number;
   coveredNumbers: number;
   maxRuns: EndingDigitSequenceRun[];
+  allRuns: EndingDigitSequenceRun[];
 }
 
 export interface EndingDigitSequenceSummary {
@@ -849,6 +851,7 @@ export const analyzeEndingDigitSequences = (
       maxRunLength,
       coveredNumbers,
       maxRuns,
+      allRuns: maximalTerminalDigitRuns(numbers),
     };
   });
 
@@ -1152,6 +1155,7 @@ const buildStatsForPreparedDraw = (draw: PreparedDraw): EndingDigitSequenceDrawS
     maxRunLength,
     coveredNumbers,
     maxRuns,
+    allRuns: maximalTerminalDigitRuns(draw.numbers),
   };
 };
 

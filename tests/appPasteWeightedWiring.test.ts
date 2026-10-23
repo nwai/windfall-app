@@ -14,6 +14,7 @@ describe("App paste-weighted panel wiring", () => {
     const pastePanelCall = appSource.match(/<PasteWeightedCandidatesPanel[\s\S]*?\/>/)?.[0] ?? "";
     expect(pastePanelCall).toContain("stageIdealDrawState={stageIdealDrawState}");
     expect(pastePanelCall).toContain("forcedNumbers={pasteWeightedForcedNumbers}");
+    expect(pastePanelCall).toContain("generationForcedNumbers={generationForcedNumbers}");
     expect(pastePanelCall).toContain("excludedNumbers={allExclusions}");
     expect(pastePanelCall).toContain("onToggleForcedNumber={togglePasteWeightedForcedNumber}");
     expect(pastePanelCall).toContain("keptGeneratedRows={keptGeneratedCandidateRows}");

@@ -122,4 +122,43 @@ describe("DGAVisualizer row sizing", () => {
     expect(nextCell?.style.position).toBe("sticky");
     expect(nextCell?.style.right).toBe("0px");
   });
+
+  it("marks Atlas targets only in the synthetic Next column without replacing simulation symbols", async () => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(React.createElement(DGAVisualizer, {
+        grid: [
+          [1, 0, 0],
+          [0, 2, 2],
+        ],
+        diamonds: [],
+        predictions: [],
+        drawLabels: ["1", "2"],
+        numberLabels: ["1", "2"],
+        numberCounts: [1, 1],
+        minCount: 0,
+        maxCount: 2,
+        highlights: [],
+        setHighlights: vi.fn(),
+        controlsPosition: "below",
+        cellSize: 23,
+        showAtlasOverlay: true,
+        atlasOverlayNumbers: [2],
+        atlasOverlayLabels: { 2: "+1/+2" },
+      }));
+    });
+
+    const atlasMarker = container.querySelector('[aria-label="Neighbour Atlas target 2"]');
+    const nextCell = atlasMarker?.closest("td");
+    const historicalCells = container.querySelectorAll("tbody tr:nth-child(2) td");
+
+    expect(atlasMarker?.textContent).toBe("A");
+    expect(nextCell?.textContent).toContain("◯");
+    expect(nextCell?.getAttribute("title")).toContain("Neighbour Atlas: +1/+2; observe-only next-draw overlay");
+    expect(nextCell?.style.boxShadow).toContain("#2563eb");
+    expect(historicalCells[1]?.querySelector('[aria-label^="Neighbour Atlas target"]')).toBeNull();
+  });
 });

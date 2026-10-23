@@ -11,6 +11,10 @@ const draw = (date: string, main: number[], supp: number[] = [], isSimulated = f
 });
 
 describe("analyzeHistoricalPrizeCollision", () => {
+  it("recognises D2 for a complete six-number played line without invented supplementary choices", () => {
+    const result = analyzeHistoricalPrizeCollision([draw("2026-10-12", [1, 2, 3, 4, 5, 6], [7, 8])], [1, 2, 3, 4, 5, 7]);
+    expect(result.storedLineHits[0]).toMatchObject({ division: "Div2", mainHits: 5, suppHits: 1 });
+  });
   it("finds stored-line Division 1 and selected-set collisions from real valid history only", () => {
     const result = analyzeHistoricalPrizeCollision(
       [

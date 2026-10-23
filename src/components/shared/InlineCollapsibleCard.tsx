@@ -1,4 +1,6 @@
 import React, { useState } from "react";
+import { PanelHelp } from "./PanelHelp";
+import { panelTitleText } from "./panelTitleText";
 
 interface InlineCollapsibleCardProps {
   id?: string;
@@ -42,22 +44,26 @@ export const InlineCollapsibleCard: React.FC<InlineCollapsibleCardProps> = ({
 
   return (
     <div id={id} className="windfall-inline-card" tabIndex={id ? -1 : undefined}>
-      <button
-        type="button"
-        onClick={handleToggle}
-        className="windfall-inline-card__button"
-        aria-expanded={isExpanded}
-      >
-        <span className="windfall-inline-card__heading">
-          <span className="windfall-inline-card__title">{title}</span>
-          {subtitle ? (
-            <span className="windfall-inline-card__subtitle">{subtitle}</span>
-          ) : null}
-        </span>
-        <span className="windfall-inline-card__toggle">
-          {isExpanded ? expandedLabel : collapsedLabel}
-        </span>
-      </button>
+      <div className="windfall-inline-card__header">
+        <button
+          type="button"
+          onClick={handleToggle}
+          className="windfall-inline-card__button"
+          aria-expanded={isExpanded}
+        >
+          <span className="windfall-inline-card__heading">
+            <span className="windfall-inline-card__title">{title}</span>
+            {subtitle ? (
+              <span className="windfall-inline-card__subtitle">{subtitle}</span>
+            ) : null}
+          </span>
+          <span className="windfall-inline-card__toggle">
+            {isExpanded ? expandedLabel : collapsedLabel}
+          </span>
+        </button>
+        <PanelHelp panelId={id} title={panelTitleText(title)} summary={subtitle ? panelTitleText(subtitle) : undefined}
+          onReveal={() => { if (!isControlled) setInternalExpanded(true); onExpandedChange?.(true); }} />
+      </div>
 
       {!isExpanded && collapsedSummary ? (
         <div className="windfall-inline-card__summary">

@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useId } from "react";
 import {
   DROUGHT_GOVERNOR_BUCKET_LABELS,
   DROUGHT_GOVERNOR_MAX_MULTIPLIER,
@@ -32,6 +32,7 @@ function WeightSelect({ value, onChange, disabled, label }: {
 }
 
 export function DroughtEvidenceGovernorControls({ profile, onModeChange, onSettingsChange }: Props) {
+  const modeGroupName = useId();
   const { settings, mode } = profile;
   const manual = mode === "manual";
   const update = (patch: Partial<DroughtEvidenceGovernorSettings>) => onSettingsChange({ ...settings, ...patch });
@@ -41,13 +42,25 @@ export function DroughtEvidenceGovernorControls({ profile, onModeChange, onSetti
     <div className="windfall-drought-governor__heading">
       <strong>Drought Evidence Governor</strong>
       <InfoHelp label="About Auto evidence and Manual weights">
-        Auto uses the historical evidence gate. Manual uses your multipliers even if that gate fails. Only one mode can be on;
-        both off disables this governor. A 1.20x weight multiplies a number's construction weight by 1.20; it is not a 20% draw chance.
+        Auto uses the historical evidence gate. Manual uses your multipliers even if that gate fails. Choose one mode;
+        Off disables this governor. A 1.20x weight multiplies a number's construction weight by 1.20; it is not a 20% draw chance.
         Other weights and hard filters still apply. RwR45 bypasses this governor.
       </InfoHelp>
-      <label><input type="checkbox" role="switch" checked={mode === "auto"} onChange={(event) => onModeChange(event.target.checked ? "auto" : "off")} />Auto evidence</label>
-      <label><input type="checkbox" role="switch" checked={manual} onChange={(event) => onModeChange(event.target.checked ? "manual" : "off")} />Manual weights</label>
     </div>
+    <fieldset>
+      <legend>Mode</legend>
+      <div className="windfall-drought-governor__heading">
+        {([
+          { value: "off", label: "Off" },
+          { value: "auto", label: "Auto evidence" },
+          { value: "manual", label: "Manual weights" },
+        ] as const).map((choice) => <label key={choice.value}>
+          <input type="radio" name={modeGroupName} value={choice.value} checked={mode === choice.value}
+            onChange={(event) => { if (event.target.checked) onModeChange(choice.value); }} />
+          {choice.label}
+        </label>)}
+      </div>
+    </fieldset>
     <p className="windfall-drought-governor__context"><strong>Planning context: {profile.contextLabel}</strong><span>Month, expected draws, next draw ordinal. Mains + supps.</span></p>
     <p role="status"><strong>{profile.summaryLabel}</strong>{manual ? " · User-set experiment; Auto gate bypassed." : ""}</p>
 

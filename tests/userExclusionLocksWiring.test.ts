@@ -53,8 +53,8 @@ describe("app-wide user exclusion lock wiring", () => {
     pruneTargets.forEach((expectedSource) => {
       expect(APP_SOURCE).toContain(expectedSource);
     });
-    expect(APP_SOURCE).toContain("setManualSimSelected((current) => keepExistingNumberListWhenEqual(");
-    expect(APP_SOURCE).toContain("normalizeManualPrizeCheckNumbers(current, selectionUnavailableNumbers)");
+    expect(APP_SOURCE).not.toContain("normalizeManualPrizeCheckNumbers(current, selectionUnavailableNumbers)");
+    expect(APP_SOURCE).not.toContain("normalizeManualPrizeCheckNumbers(current, excludedNumbers)");
     expect(APP_SOURCE).toContain("() => removeUserExcludedNumbers(normalizeDgaSelectedNumbers(userSelectedNumbers), selectionUnavailableNumbers)");
   });
 

@@ -1,6 +1,7 @@
 import type { Draw } from "../types";
 import {
   rankWeekdayWindfallPrizeDivision,
+  computeWeekdayWindfallPrizeDivision,
   type WeekdayWindfallPrizeDivision,
 } from "./prizeDivisions";
 
@@ -78,6 +79,10 @@ const computeStoredLineCollision = (
 ): { division: HistoricalPrizeCollisionDivision; mainHits: number; suppHits: number } | null => {
   const mainHits = storedLineMain.filter((number) => drawnMain.has(number)).length;
   const suppHits = storedLineSupp.filter((number) => drawnSupp.has(number)).length;
+  if (storedLineSupp.length === 0 && storedLineMain.length === 6) {
+    const division = computeWeekdayWindfallPrizeDivision(storedLineMain, [], drawnMain, drawnSupp);
+    if (division === "Div1" || division === "Div2") return { division, mainHits, suppHits: storedLineMain.filter(number => drawnSupp.has(number)).length };
+  }
   if (mainHits === 6) return { division: "Div1", mainHits, suppHits };
   if (mainHits === 5 && suppHits >= 1) return { division: "Div2", mainHits, suppHits };
   return null;

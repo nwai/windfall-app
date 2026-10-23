@@ -1,17 +1,12 @@
 import React, { useMemo, useState, useEffect } from "react";
 import { Draw } from "../types";
+import { HigButton, HigField } from "./shared/HigControls";
+import { windowPatternForNumbers, type WindowPattern } from "../lib/windowPatternMatching";
+export type { WindowPattern } from "../lib/windowPatternMatching";
 
 /**
  * A pattern row: Low (<=22) count, High (>=23) count, Odd count, Even count, Sum (of mains+optional supp)
  */
-export interface WindowPattern {
-  low: number;
-  high: number;
-  odd: number;
-  even: number;
-  sum: number;
-}
-
 export interface WindowStatsPanelProps {
   draws: Draw[];
 
@@ -20,12 +15,17 @@ export interface WindowStatsPanelProps {
   sumMax?: number;
   includeSupp?: boolean;
   onSumFilterChange?: (range: { min: number; max: number; includeSupp: boolean }) => void;
+  sumFilterEnabled?: boolean;
+  onSumFilterEnabledChange?: (enabled: boolean) => void;
 
   // Pattern selection plumbing (NEW)
   patternsSelected?: WindowPattern[];                // patterns currently selected
   onTogglePattern?: (pattern: WindowPattern) => void; // add/remove pattern
-  constraintMode?: 'boost' | 'restrict';             // read-only label for display
-  patternBoostFactor?: number;                       // read-only label (only meaningful in boost mode)
+  constraintMode?: 'boost' | 'restrict';
+  patternBoostFactor?: number;
+  onConstraintModeChange?: (mode: 'boost' | 'restrict') => void;
+  onPatternBoostFactorChange?: (factor: number) => void;
+  onSumToleranceChange?: (tolerance: number) => void;
 
   // Optional: sum exact match tolerance when used in restrict mode (display only here)
   sumTolerance?: number;                             // e.g. 0 for exact, 2 means ±2 accepted (display)
@@ -38,12 +38,7 @@ function buildRow(draw: Draw, withSupp: boolean): WindowPattern & { date: string
   const mains = draw.main || [];
   const supp = draw.supp || [];
   const all = withSupp ? [...mains, ...supp] : mains;
-  const low = all.filter(n => n <= LOW_MAX).length;
-  const high = all.length - low;
-  const even = all.filter(n => n % 2 === 0).length;
-  const odd = all.length - even;
-  const sum = all.reduce((a, b) => a + b, 0);
-  return { date: draw.date || "(unknown)", low, high, odd, even, sum };
+  return { date: draw.date || "(unknown)", ...windowPatternForNumbers(all) };
 }
 
 function patternEquals(a: WindowPattern, b: WindowPattern) {
@@ -60,10 +55,15 @@ export const WindowStatsPanel: React.FC<WindowStatsPanelProps> = ({
   sumMax = 999,
   includeSupp = true,
   onSumFilterChange,
+  sumFilterEnabled = false,
+  onSumFilterEnabledChange,
   patternsSelected = [],
   onTogglePattern,
   constraintMode = 'boost',
   patternBoostFactor = 0.15,
+  onConstraintModeChange,
+  onPatternBoostFactorChange,
+  onSumToleranceChange,
   sumTolerance = 0,
 }) => {
 
@@ -90,7 +90,10 @@ export const WindowStatsPanel: React.FC<WindowStatsPanelProps> = ({
   }, [rows]);
 
   // Apply sum filter back to App
+  const validRange = Number.isInteger(minSum) && Number.isInteger(maxSum)
+    && minSum >= 0 && maxSum >= minSum;
   const applyToApp = () => {
+    if (!validRange) return;
     onSumFilterChange?.({ min: minSum, max: maxSum, includeSupp: withSupp });
   };
 
@@ -157,29 +160,59 @@ export const WindowStatsPanel: React.FC<WindowStatsPanelProps> = ({
           />
         </label>
 
-        <button
-          type="button"
+        <HigButton
           onClick={applyToApp}
-          style={{ padding: "4px 10px" }}
+          disabled={!validRange || !onSumFilterChange}
+          size="compact"
           title="Apply current sum range and supp toggle to candidate generation filters"
         >
           Apply to generation
-        </button>
-
-        {/* Read-only constraint mode and selected patterns count */}
-        <span style={{ fontSize: 12, color: "#555" }}>
-          Mode: <b>{constraintMode}</b>
-          {constraintMode === 'boost' && ` (factor ${patternBoostFactor})`}
+        </HigButton>
+        <label>
+          <input type="checkbox" checked={sumFilterEnabled}
+            disabled={!onSumFilterEnabledChange}
+            onChange={(event) => onSumFilterEnabledChange?.(event.target.checked)} />
+          Sum filter on
+        </label>
+        <span role="status" style={{ fontSize: 12 }}>
+          Applied sum filter: {sumFilterEnabled ? `${sumMin}-${sumMax} (${includeSupp ? "mains + supps" : "mains only"})` : "Off"}
         </span>
+
+        <HigField label="Pattern action">
+          <select value={constraintMode} disabled={!onConstraintModeChange}
+            onChange={(event) => onConstraintModeChange?.(event.target.value as 'boost' | 'restrict')}
+            style={{ minHeight: 32 }}>
+            <option value="boost">Boost survivors</option>
+            <option value="restrict">Restrict candidates</option>
+          </select>
+        </HigField>
+        <HigField label="Pattern bonus">
+          <input type="number" min={0} max={5} step={0.05} value={patternBoostFactor}
+            disabled={constraintMode !== 'boost' || !onPatternBoostFactorChange}
+            onChange={(event) => {
+              const value = Number(event.target.value);
+              if (Number.isFinite(value)) onPatternBoostFactorChange?.(Math.min(5, Math.max(0, value)));
+            }} style={{ width: 80, minHeight: 32 }} />
+        </HigField>
+        <HigField label="Pattern sum tolerance">
+          <input type="number" min={0} max={360} step={1} value={sumTolerance}
+            disabled={!onSumToleranceChange}
+            onChange={(event) => {
+              const value = Number(event.target.value);
+              if (Number.isFinite(value)) onSumToleranceChange?.(Math.min(360, Math.max(0, Math.floor(value))));
+            }} style={{ width: 80, minHeight: 32 }} />
+        </HigField>
         <span style={{ fontSize: 12, color: "#555" }}>
           Selected patterns: <b>{patternsSelected.length}</b>
         </span>
-        {constraintMode === 'restrict' && (
-          <span style={{ fontSize: 12, color: "#555" }}>
-            Sum tolerance ±{sumTolerance}
-          </span>
-        )}
+        <span role="status" style={{ fontSize: 12, color: "#555" }}>
+          Pattern effect: {patternsSelected.length === 0 ? "Off (no selected patterns)"
+            : constraintMode === 'restrict' ? `Require a match; sum tolerance +/-${sumTolerance}`
+            : patternBoostFactor > 0 ? `+${patternBoostFactor} per matching pattern after hard filters`
+            : "Off (zero bonus)"}
+        </span>
       </div>
+      {!validRange && <div role="alert">Enter non-negative whole numbers with sum minimum no greater than maximum.</div>}
 
       {/* Table */}
       <div style={{ overflowX: "auto" }}>
@@ -256,7 +289,10 @@ export const WindowStatsPanel: React.FC<WindowStatsPanelProps> = ({
       <div style={{ marginTop: 8, fontSize: 11, color: "#555", lineHeight: 1.6 }}>
         Patterns: (Low count ≤{LOW_MAX}) (High count ≥{LOW_MAX + 1}) (Odd, Even, Sum). Use "Add" to capture a row as a
         pattern constraint. In <b>restrict</b> mode candidates must match at least one selected pattern (optionally
-        allowing ±t sum tolerance). In <b>boost</b> mode each match multiplies candidate score by (1 + factor).
+        allowing ±t sum tolerance). In <b>boost</b> mode each distinct match adds the Pattern bonus to
+        the normalised survivor score after hard filters. It works even with zero other ranking weights;
+        it does not change number-sampling weights or bypass quotas. Each selected row retains its mains-only
+        or mains + supps scope. A zero bonus is neutral.
         Evolving odd/even dominance (e.g. shift 4:4 → 5:3) can be tracked by selecting recent rows with desired ratios.
       </div>
     </section>

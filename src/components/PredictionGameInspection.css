@@ -1,0 +1,11 @@
+.prediction-game-review, .prediction-game-history, .prediction-game-inspection { display: grid; gap: 8px; min-width: 0; font-size: 12px; line-height: 1.5; }
+.prediction-game-history { border-left: 3px solid #9bbddd; padding: 8px 10px; background: #f4f8fc; }
+.prediction-game-history__main { color: #b91c1c; font-weight: 800; }
+.prediction-game-history__supp { color: #166534; font-weight: 800; }
+.prediction-game-history__note { color: #526477; }
+.prediction-game-history__scroll { max-height: 250px; overflow: auto; min-width: 0; }
+.prediction-game-history__record { padding: 8px 2px; border-bottom: 1px solid #dbe3ec; overflow-wrap: anywhere; }
+.prediction-game-inspection { border-top: 1px solid #dbe3ec; padding-top: 10px; }
+.prediction-game-inspection__heading, .prediction-game-review__choices { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.prediction-game-review__choices button { max-width: 100%; white-space: normal; text-align: left; }
+.prediction-game-review__choices button[aria-pressed="true"] { outline: 2px solid #1675d1; outline-offset: 1px; }

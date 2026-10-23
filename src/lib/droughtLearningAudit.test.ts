@@ -5,6 +5,7 @@ import {
   DROUGHT_LEARNING_MIN_HISTORY,
   DROUGHT_LEARNING_MODEL_VERSION,
   DROUGHT_LEARNING_PROMOTION_TRIALS,
+  DROUGHT_STATE_IDENTITY_VERSION,
 } from "./droughtLearningAudit";
 
 const DAY_MS = 86_400_000;
@@ -51,11 +52,29 @@ describe("analyzeDroughtLearningAudit", () => {
     const result = analyzeDroughtLearningAudit(history, options);
 
     expect(result.modelVersion).toBe(DROUGHT_LEARNING_MODEL_VERSION);
+    expect(result.stateIdentityVersion).toBe(DROUGHT_STATE_IDENTITY_VERSION);
     expect(result.scope).toBe("mains+supps");
     expect(result.validHistoryDraws).toBe(history.length);
     expect(result.records.length).toBe(history.length - DROUGHT_LEARNING_MIN_HISTORY);
     expect(result.gate.trials).toBe(result.records.length);
     expect(result.calibrationRows.reduce((sum, row) => sum + row.trials, 0)).toBeGreaterThan(0);
+    expect(result.stateAuditRows.length).toBeGreaterThan(0);
+    expect(result.stateAuditRows.every((row) => row.targetDraws > 0 && row.numberStateTrials > 0)).toBe(true);
+    expect(result.currentRankedNumbers.every((row) => row.stateId.includes("|") && row.statePeers.includes(row.number))).toBe(true);
+  });
+
+  it("gives current peers in the same learned state the same rate and trial counts", () => {
+    const result = analyzeDroughtLearningAudit(buildHistory(120), options);
+    const groups = new Map<string, typeof result.currentRankedNumbers>();
+    result.currentRankedNumbers.forEach((row) => {
+      groups.set(row.stateId, [...(groups.get(row.stateId) ?? []), row]);
+    });
+    const shared = [...groups.values()].find((rows) => rows.length > 1);
+
+    expect(shared).toBeDefined();
+    expect(new Set(shared?.map((row) => row.learnedRate)).size).toBe(1);
+    expect(new Set(shared?.map((row) => row.exactTrials)).size).toBe(1);
+    expect(shared?.every((row) => row.statePeers.length === shared.length)).toBe(true);
   });
 
   it("never lets a target result change the ranking or learned rates formed before it", () => {

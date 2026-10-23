@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import RwR45OutputSummary from "./RwR45OutputSummary";
+import { HigButton, HigField, InfoHelp } from "./shared/HigControls";
 
 import type { Draw } from "../types";
 
@@ -38,8 +40,11 @@ import {
   formatBigInt,
   formatBucketMixCounts,
   getLatestDrawBucketOriginMix,
+  sortMonthlyBucketMixRows,
   type MonthlyBucketMixCombinatoricsRow,
   type MonthlyBucketMixCounts,
+  type MonthlyBucketMixSortDirection,
+  type MonthlyBucketMixSortKey,
 } from "../lib/monthlyBucketMixCombinatorics";
 import {
   analyzeMonthlyBucketMixReplay,
@@ -47,6 +52,9 @@ import {
   type BucketMixReplayScope,
 } from "../lib/monthlyBucketMixReplay";
 import type { Sde1Hc3ContextAdvice } from "../lib/sde1Hc3ContextAdvice";
+import type { PreviousNeighbourAtlasEvidenceSnapshot } from "../lib/previousNeighbourAtlasEvidence";
+import type { MonthlyBucketTransitionGovernorProfile } from "../lib/monthlyBucketTransitionGovernor";
+import { MonthlyTransitionInfluenceSummary } from "./MonthlyTransitionInfluenceSummary";
 
 export type {
   AvgBucketEntry,
@@ -60,6 +68,7 @@ export type {
 } from "../lib/monthlyDrawSummary";
 
 interface MonthlyDrawsSummaryPanelProps {
+  rwR45Composition?: import("../lib/generatedComposition").GeneratedCompositionSnapshot | null;
   history: Draw[];
   today?: Date;
   onConstraintsChange?: (payload: MonthlyConstraintPayload | null) => void;
@@ -75,11 +84,14 @@ interface MonthlyDrawsSummaryPanelProps {
   onSimulateNumbers?: (numbers: number[]) => void;
   excludedNumbers?: number[];
   sde1Hc3Advice?: Sde1Hc3ContextAdvice | null;
+  neighbourAtlasEvidence?: PreviousNeighbourAtlasEvidenceSnapshot | null;
+  monthlyTransitionInfluenceProfile?: MonthlyBucketTransitionGovernorProfile | null;
+  monthlyTransitionBypassed?: boolean;
+  onEditMonthlyTransitionInfluence?: () => void;
 }
 
 type DrawLimit = number | "all";
 type SelectedByBucket = MonthlyBucketSelections;
-type BucketMixSortDirection = "desc" | "asc";
 
 const emptySelections = (): SelectedByBucket => ({
   undrawn: [],
@@ -310,6 +322,21 @@ const selectStyle: React.CSSProperties = {
   fontSize: 13,
 };
 
+const bucketMixButtonStyle: React.CSSProperties = {
+  minWidth: 80,
+  height: 32,
+  boxSizing: "border-box",
+  whiteSpace: "nowrap",
+  letterSpacing: 0,
+};
+
+const appliedBucketMixButtonStyle: React.CSSProperties = {
+  ...bucketMixButtonStyle,
+  borderColor: "#166534",
+  background: "#15803d",
+  color: "#fff",
+};
+
 const thStyle: React.CSSProperties = {
   textAlign: "left",
   padding: "7px 8px",
@@ -375,6 +402,10 @@ const formatSignedPercentPoints = (value: number): string => {
   const points = value * 100;
   return `${points > 0 ? "+" : ""}${points.toFixed(1)}pp`;
 };
+
+const formatAtlasLift = (value: number | null): string => (
+  value === null || !Number.isFinite(value) ? "n/a" : `x${value.toFixed(2)}`
+);
 
 const formatReplayPValue = (value: number | null): string => {
   if (value === null || !Number.isFinite(value)) return "n/a";
@@ -630,6 +661,7 @@ const TargetGrid: React.FC<{ summary: MonthlyDrawSummary }> = ({ summary }) => (
 );
 
 export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> = ({
+  rwR45Composition,
   history,
   onConstraintsChange,
   onUseSelectedNumbers,
@@ -644,6 +676,10 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
   onSimulateNumbers,
   excludedNumbers = [],
   sde1Hc3Advice = null,
+  neighbourAtlasEvidence = null,
+  monthlyTransitionInfluenceProfile = null,
+  monthlyTransitionBypassed = false,
+  onEditMonthlyTransitionInfluence,
   today,
 }) => {
   const [drawLimit, setDrawLimit] = useState<DrawLimit>("all");
@@ -655,8 +691,12 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
   const [bucketMixApplyMessage, setBucketMixApplyMessage] = useState<string>("");
   const [bucketMixAppliedSignature, setBucketMixAppliedSignature] = useState<string>("");
   const [appliedBucketMixTarget, setAppliedBucketMixTarget] = useState<AppliedBucketMixTarget | null>(null);
-  const [bucketMixSortDirection, setBucketMixSortDirection] = useState<BucketMixSortDirection>("desc");
+  const [bucketMixSort, setBucketMixSort] = useState<{
+    key: MonthlyBucketMixSortKey;
+    direction: MonthlyBucketMixSortDirection;
+  }>({ key: "undrawn", direction: "desc" });
   const [bucketMixReplayScope, setBucketMixReplayScope] = useState<BucketMixReplayScope>("same-month-length");
+  const [bucketMixReplaySelectionKey, setBucketMixReplaySelectionKey] = useState("");
   const userExcludedKey = normalizeUserExclusionLocks(excludedNumbers).join(",");
   const userExcludedNumbers = useMemo(
     () => (userExcludedKey ? userExcludedKey.split(",").map(Number) : []),
@@ -721,6 +761,7 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
     setBucketMixApplyMessage("");
     setBucketMixAppliedSignature("");
     setAppliedBucketMixTarget(null);
+    setBucketMixReplaySelectionKey("");
   }, [stageMatchPlaybookSignatureValue]);
 
   const constraints = useMemo(
@@ -744,16 +785,15 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
     })
   ), [activeBucketSets, activeBucketSetsSignature, constraints, stageMatchPlaybook]);
   const latestDrawOriginMix = useMemo(() => getLatestDrawBucketOriginMix(history), [history]);
-  const sortedBucketMixRows = useMemo(() => {
-    const direction = bucketMixSortDirection === "desc" ? -1 : 1;
-    return [...bucketMixCombinatorics.rows].sort((left, right) => {
-      const combinationCompare = compareBigInt(left.actualCombinations, right.actualCombinations);
-      if (combinationCompare !== 0) return combinationCompare * direction;
-      return MONTHLY_BUCKET_KEYS.reduce((result, key) => (
-        result !== 0 ? result : right.counts[key] - left.counts[key]
-      ), 0);
-    });
-  }, [bucketMixCombinatorics.rows, bucketMixSortDirection]);
+  const sortedBucketMixRows = useMemo(() => (
+    sortMonthlyBucketMixRows(bucketMixCombinatorics.rows, bucketMixSort.key, bucketMixSort.direction)
+  ), [bucketMixCombinatorics.rows, bucketMixSort]);
+  const toggleBucketMixSort = (key: MonthlyBucketMixSortKey) => {
+    setBucketMixSort((current) => ({
+      key,
+      direction: current.key === key && current.direction === "desc" ? "asc" : "desc",
+    }));
+  };
   const largestBucketMix = useMemo(() => (
     [...bucketMixCombinatorics.rows].sort((left, right) => compareBigInt(right.actualCombinations, left.actualCombinations))[0] ?? null
   ), [bucketMixCombinatorics.rows]);
@@ -761,6 +801,14 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
     ?? stageMatchPlaybook?.expectedDrawCount
     ?? stageDrawContext?.expectedDrawCount
     ?? (typeof stageExpectedDrawCount === "number" ? stageExpectedDrawCount : null);
+  const bucketMixReplayTargetMonthLabel = stageIdealDrawState?.workingMonthLabel
+    ?? stageMatchPlaybook?.workingMonthLabel
+    ?? stageDrawContext?.workingMonthLabel
+    ?? summary.effectiveMonthLabel;
+  const bucketMixReplayLengthSource = stageIdealDrawState?.expectedDrawCountSource
+    ?? stageMatchPlaybook?.expectedDrawCountSource
+    ?? stageDrawContext?.expectedDrawCountSource
+    ?? (typeof stageExpectedDrawCount === "number" ? "override" : "auto");
   const bucketMixReplayRequestedScope: BucketMixReplayScope = bucketMixReplayScope === "same-month-length" && bucketMixReplayTargetDrawCount
     ? "same-month-length"
     : "all-month-lengths";
@@ -795,8 +843,34 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
     summary.effectiveMonthLabel,
   ]);
   const bucketMixReplay = bucketMixReplayFallback ?? bucketMixReplayPrimary;
+  const bucketMixReplayChoices = useMemo(() => {
+    const currentMixes = new Map(bucketMixCombinatorics.rows.map((row) => [bucketMixCountsSignature(row.counts), row]));
+    const availableCounts = MONTHLY_BUCKET_KEYS.reduce((counts, key) => {
+      counts[key] = Array.from(activeBucketSets[key]).filter((number) => !userExcludedSet.has(number)).length;
+      return counts;
+    }, {} as MonthlyBucketMixCounts);
+    return bucketMixReplay.rows.map((replay) => {
+      const mix = currentMixes.get(bucketMixCountsSignature(replay.mostCommonMix)) ?? null;
+      const shortBuckets = MONTHLY_BUCKET_KEYS
+        .filter((key) => replay.mostCommonMix[key] > availableCounts[key])
+        .map((key) => `${bucketLabelForTimes(MONTHLY_BUCKET_KEYS.indexOf(key))} needs ${replay.mostCommonMix[key]}, available ${availableCounts[key]}`);
+      return {
+        replay,
+        mix,
+        selectionKey: `${bucketMixReplay.scope}:${replay.key}`,
+        unavailableReason: shortBuckets.length
+          ? shortBuckets.join("; ")
+          : !mix ? "This exact mix is not available in the current month state." : "",
+      };
+    });
+  }, [activeBucketSets, bucketMixCombinatorics.rows, bucketMixReplay.rows, bucketMixReplay.scope, userExcludedSet]);
+  const appliedReplayChoice = bucketMixReplayChoices.find((choice) => (
+    choice.selectionKey === bucketMixReplaySelectionKey
+    && bucketMixAppliedSignature === bucketMixCountsSignature(choice.replay.mostCommonMix)
+    && !choice.unavailableReason
+  ));
   const bucketMixReplayNoBaselineMessage = bucketMixReplayNoBaselineFallback && bucketMixReplayTargetDrawCount
-    ? `No ${bucketMixReplayTargetDrawCount}D baseline months are available, so this view is temporarily using all month lengths.`
+    ? `No completed ${bucketMixReplayTargetDrawCount}D baseline months are available, so this view is temporarily using all month lengths.`
     : "";
   const bestReplayRow = useMemo(() => (
     bucketMixReplay.rows
@@ -864,6 +938,15 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
   const stageIdealDrawPublishedSignature = useRef<string | null>(null);
   const idealDrawPublishedSignature = useRef<string | null>(null);
   const appliedBucketMixTargetPublishedSignature = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!bucketMixReplaySelectionKey || !bucketMixAppliedSignature) return;
+    if (bucketMixAppliedSignature === bucketMixCountsSignature(constraints)) return;
+    setBucketMixReplaySelectionKey("");
+    setBucketMixAppliedSignature("");
+    setAppliedBucketMixTarget(null);
+    setBucketMixApplyMessage("Replay-applied mix cleared because the selected placeholders changed. Reapply the mix if it remains available.");
+  }, [bucketMixAppliedSignature, bucketMixReplaySelectionKey, constraints]);
 
   const projectedBucketCounts = useMemo(
     () => projectMonthlyBucketCounts(activeBucketSets, selectedByBucket),
@@ -960,6 +1043,7 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
     setSimulateResult(null);
     setBucketMixAppliedSignature("");
     setAppliedBucketMixTarget(null);
+    setBucketMixReplaySelectionKey("");
   };
 
   const handleUseSelected = () => {
@@ -978,9 +1062,16 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
     setBucketMixApplyMessage("");
     setBucketMixAppliedSignature("");
     setAppliedBucketMixTarget(null);
+    setBucketMixReplaySelectionKey("");
   };
 
-  const applyBucketMixRow = (row: MonthlyBucketMixCombinatoricsRow) => {
+  const applyBucketMixRow = (row: MonthlyBucketMixCombinatoricsRow, replayReference?: BucketMixReplayRow) => {
+    const replaySelectionKey = replayReference ? `${bucketMixReplay.scope}:${replayReference.key}` : "";
+    const sameAppliedMix = bucketMixAppliedSignature === bucketMixCountsSignature(row.counts);
+    if (sameAppliedMix) {
+      clearSelections();
+      return;
+    }
     const next = emptySelections();
     let requested = 0;
     let selected = 0;
@@ -1006,6 +1097,7 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
     setSelectedByBucket(next);
     setSimulateResult(null);
     setBucketMixAppliedSignature(bucketMixCountsSignature(row.counts));
+    setBucketMixReplaySelectionKey(replaySelectionKey);
     setAppliedBucketMixTarget({
       counts: appliedCounts,
       label: appliedLabel,
@@ -1015,11 +1107,21 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
       targetStageDrawCount: stageDrawContext?.targetStageDrawCount ?? summary.effectiveMonthDrawCount,
     });
     setBucketMixApplyMessage([
+      replayReference ? `Replay reference D${replayReference.drawOrdinal} (${replayReference.monthLengthLabel}): most common actual mix.` : "",
       `Applied bucket mix ${appliedLabel}: ${selected}/${requested} bucket placeholders selected.`,
       shortBuckets.length ? `Short buckets: ${shortBuckets.join(", ")}.` : "",
       row.stageMatchSupportCount ? `Stage-Match support: ${row.stageMatchSupportCount} path${row.stageMatchSupportCount === 1 ? "" : "s"}.` : "No exact Stage-Match path is attached to this mix.",
       "Swap exact numbers if desired, or turn on Use counts when constructing candidates to enforce the bucket quantities.",
     ].filter(Boolean).join(" "));
+  };
+
+  const applyBucketMixReplayChoice = (choice: typeof bucketMixReplayChoices[number]) => {
+    if (bucketMixAppliedSignature === bucketMixCountsSignature(choice.replay.mostCommonMix)) {
+      clearSelections();
+      return;
+    }
+    if (!choice.mix || choice.unavailableReason) return;
+    applyBucketMixRow(choice.mix, choice.replay);
   };
 
   const hasData = summary.rows.length > 0;
@@ -1189,6 +1291,76 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
               </table>
             </div>
           </div>
+
+          <div
+            data-testid="monthly-neighbour-atlas-context"
+            style={{ ...sectionStyle, background: "#f7fbff", borderColor: "#bfdbfe" }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
+              <div>
+                <strong style={{ color: "#0f172a" }}>Neighbour Atlas draw-stage comparison</strong>
+                <div style={{ marginTop: 3, color: "#64748b", fontSize: 12, lineHeight: 1.45 }}>
+                  Observe-only context from the shared Previous +/-1/+/-2 Atlas. It does not alter Monthly Buckets, Acceptance Needs, Stage IDM, or generation.
+                </div>
+              </div>
+              <span style={{ color: "#1d4ed8", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 999, padding: "3px 8px", fontSize: 11, fontWeight: 850 }}>
+                Observe-only
+              </span>
+            </div>
+
+            {!neighbourAtlasEvidence ? (
+              <div style={{ marginTop: 8, color: "#64748b", fontSize: 12 }}>
+                Atlas context is unavailable until the Previous +/-1/+/-2 Neighbour Diagnostics has published its current evidence snapshot.
+              </div>
+            ) : neighbourAtlasEvidence.targetDrawOrdinal !== stageDrawContext?.targetStageDrawCount ? (
+              <div style={{ marginTop: 8, color: "#92400e", fontSize: 12, lineHeight: 1.45 }}>
+                Comparison withheld: the Atlas targets D{neighbourAtlasEvidence.targetDrawOrdinal ?? "?"}, while Monthly Draw Summary currently targets D{stageDrawContext?.targetStageDrawCount ?? "?"}. These contexts must match before their draw-stage evidence is placed side by side.
+              </div>
+            ) : (
+              <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8 }}>
+                <div style={{ border: "1px solid #dbeafe", borderRadius: 8, padding: 8, background: "#fff" }}>
+                  <div style={{ color: "#64748b", fontSize: 11, fontWeight: 800 }}>Matched context</div>
+                  <div style={{ marginTop: 2, color: "#0f172a", fontWeight: 900 }}>
+                    D{neighbourAtlasEvidence.targetDrawOrdinal} of {stageDrawContext?.expectedDrawCount ?? neighbourAtlasEvidence.targetMonthExpectedDrawCount ?? "?"}
+                  </div>
+                  <div style={{ color: "#64748b", fontSize: 11 }}>
+                    {neighbourAtlasEvidence.historySourceLabel} · {neighbourAtlasEvidence.scope === "mains" ? "mains only" : "mains + supps"} · lookback {neighbourAtlasEvidence.lookbackDraws}
+                  </div>
+                </div>
+                <div style={{ border: "1px solid #dbeafe", borderRadius: 8, padding: 8, background: "#fff" }}>
+                  <div style={{ color: "#64748b", fontSize: 11, fontWeight: 800 }}>Observed vs random expectation</div>
+                  <div style={{ marginTop: 2, color: "#0f172a", fontWeight: 900 }}>
+                    {formatDecimal(neighbourAtlasEvidence.ordinalEvidence?.averageUniqueHits ?? 0)} vs {formatDecimal(neighbourAtlasEvidence.ordinalEvidence?.averageExpectedUniqueHits ?? 0)} · {formatAtlasLift(neighbourAtlasEvidence.ordinalEvidence?.lift ?? null)}
+                  </div>
+                  <div style={{ color: "#64748b", fontSize: 11 }}>
+                    {neighbourAtlasEvidence.ordinalEvidence?.trials ?? 0} D{neighbourAtlasEvidence.targetDrawOrdinal} trials · {neighbourAtlasEvidence.ordinalEvidence?.sampleQuality ?? "No sample"}
+                  </div>
+                </div>
+                <div style={{ border: "1px solid #dbeafe", borderRadius: 8, padding: 8, background: "#fff" }}>
+                  <div style={{ color: "#64748b", fontSize: 11, fontWeight: 800 }}>Historical target coverage</div>
+                  <div style={{ marginTop: 2, color: "#0f172a", fontWeight: 900 }}>
+                    ≥1 {formatSharePercent(neighbourAtlasEvidence.ordinalEvidence?.atLeastOneRate ?? 0)} · ≥3 {formatSharePercent(neighbourAtlasEvidence.ordinalEvidence?.atLeastThreeRate ?? 0)} · ≥4 {formatSharePercent(neighbourAtlasEvidence.ordinalEvidence?.atLeastFourRate ?? 0)}
+                  </div>
+                  <div style={{ color: "#64748b", fontSize: 11 }}>
+                    Top direction shape: {neighbourAtlasEvidence.ordinalEvidence?.topPattern || "none"}
+                  </div>
+                </div>
+              </div>
+            )}
+            {neighbourAtlasEvidence ? (
+              <div style={{ marginTop: 8, color: "#64748b", fontSize: 11, lineHeight: 1.4 }}>
+                Draw-ordinal evidence is pooled within the Atlas history source; it is not automatically restricted to months with the same final draw count.
+              </div>
+            ) : null}
+          </div>
+
+          <RwR45OutputSummary snapshot={rwR45Composition} view="monthly" />
+          <MonthlyTransitionInfluenceSummary
+            profile={monthlyTransitionInfluenceProfile}
+            bypassedByRandomCoverage={monthlyTransitionBypassed}
+            referenceOnly
+            onEdit={onEditMonthlyTransitionInfluence}
+          />
 
           <div style={sectionStyle}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
@@ -1482,6 +1654,35 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
               </div>
             ) : null}
 
+            <div style={{ marginTop: 10, maxWidth: 420 }}>
+              <HigField label={(
+                <>
+                  Sort order
+                  <InfoHelp label="Bucket mix sort order">
+                    Largest Undrawn count first, then most matching Stage paths, then largest Actual combinations.
+                    Reversing Undrawn keeps both tie-breakers highest first. This is a local display order;
+                    it does not change Acceptance Needs, the IDM target, or replay rankings.
+                  </InfoHelp>
+                </>
+              )}>
+                <select
+                  value={`${bucketMixSort.key}:${bucketMixSort.direction}`}
+                  onChange={(event) => {
+                    const [key, direction] = event.currentTarget.value.split(":");
+                    setBucketMixSort({ key: key as MonthlyBucketMixSortKey, direction: direction as MonthlyBucketMixSortDirection });
+                  }}
+                  style={{ ...selectStyle, width: "100%", minHeight: 32 }}
+                >
+                  <option value="undrawn:desc">Undrawn ↓ · Stage path ↓ · Actual combinations ↓</option>
+                  <option value="undrawn:asc">Undrawn ↑ · Stage path ↓ · Actual combinations ↓</option>
+                  <option value="stagePath:desc">Stage path ↓ · Actual combinations ↓</option>
+                  <option value="stagePath:asc">Stage path ↑ · Actual combinations ↓</option>
+                  <option value="actualCombinations:desc">Actual combinations ↓</option>
+                  <option value="actualCombinations:asc">Actual combinations ↑</option>
+                </select>
+              </HigField>
+            </div>
+
             <div style={{ marginTop: 10, overflowX: "auto", maxHeight: 360, border: "1px solid #e2e8f0", borderRadius: 8 }}>
               <table
                 data-testid="bucket-mix-combinatorics-table"
@@ -1489,23 +1690,41 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
               >
                 <thead style={{ position: "sticky", top: 0, background: "#f8fafc", zIndex: 1 }}>
                   <tr>
-                    <th style={thStyle}>Rank</th>
+                    <th style={thStyle}>Row</th>
                     {bucketMixCombinatorics.visibleBucketKeys.map((key) => {
                       const times = MONTHLY_BUCKET_KEYS.indexOf(key);
                       return (
-                        <th key={key} style={{ ...thStyle, textAlign: "center" }}>
-                          {bucketLabelForTimes(times)}
+                        <th
+                          key={key}
+                          style={{ ...thStyle, textAlign: "center" }}
+                          aria-sort={key === "undrawn" && bucketMixSort.key === "undrawn" ? (bucketMixSort.direction === "desc" ? "descending" : "ascending") : undefined}
+                        >
+                          {key === "undrawn" ? (
+                            <button
+                              type="button"
+                              className="windfall-table-sort-button"
+                              onClick={() => toggleBucketMixSort("undrawn")}
+                              aria-label={`Sort Undrawn ${bucketMixSort.key === "undrawn" && bucketMixSort.direction === "desc" ? "ascending" : "descending"}`}
+                              style={{ minHeight: 32, color: "#0f172a", fontWeight: 900, padding: 0, cursor: "pointer", font: "inherit" }}
+                            >
+                              {bucketLabelForTimes(times)} {bucketMixSort.key === "undrawn" ? (bucketMixSort.direction === "desc" ? "↓" : "↑") : "↕"}
+                            </button>
+                          ) : bucketLabelForTimes(times)}
                         </th>
                       );
                     })}
-                    <th style={{ ...thStyle, textAlign: "right" }}>
+                    <th
+                      style={{ ...thStyle, textAlign: "right" }}
+                      aria-sort={bucketMixSort.key === "actualCombinations" ? (bucketMixSort.direction === "desc" ? "descending" : "ascending") : "none"}
+                    >
                       <button
                         type="button"
                         className="windfall-table-sort-button"
-                        onClick={() => setBucketMixSortDirection((current) => current === "desc" ? "asc" : "desc")}
-                        aria-label={`Sort Actual combinations ${bucketMixSortDirection === "desc" ? "ascending" : "descending"}`}
+                        onClick={() => toggleBucketMixSort("actualCombinations")}
+                        aria-label={`Sort Actual combinations ${bucketMixSort.key === "actualCombinations" && bucketMixSort.direction === "desc" ? "ascending" : "descending"}`}
                         title="Sort by exact number-set count"
                         style={{
+                          minHeight: 32,
                           color: "#0f172a",
                           fontWeight: 900,
                           padding: 0,
@@ -1513,12 +1732,26 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
                           font: "inherit",
                         }}
                       >
-                        Actual combinations {bucketMixSortDirection === "desc" ? "↓" : "↑"}
+                        Actual combinations {bucketMixSort.key === "actualCombinations" ? (bucketMixSort.direction === "desc" ? "↓" : "↑") : "↕"}
                       </button>
                     </th>
                     <th style={{ ...thStyle, textAlign: "right" }}>Share</th>
                     <th style={thStyle}>Acceptance</th>
-                    <th style={thStyle}>Stage path</th>
+                    <th
+                      style={thStyle}
+                      aria-sort={bucketMixSort.key === "stagePath" ? (bucketMixSort.direction === "desc" ? "descending" : "ascending") : "none"}
+                    >
+                      <button
+                        type="button"
+                        className="windfall-table-sort-button"
+                        onClick={() => toggleBucketMixSort("stagePath")}
+                        aria-label={`Sort Stage path ${bucketMixSort.key === "stagePath" && bucketMixSort.direction === "desc" ? "ascending" : "descending"}`}
+                        title="Sort by matching Stage-Match playbook row count"
+                        style={{ minHeight: 32, color: "#0f172a", fontWeight: 900, padding: 0, cursor: "pointer", font: "inherit" }}
+                      >
+                        Stage path {bucketMixSort.key === "stagePath" ? (bucketMixSort.direction === "desc" ? "↓" : "↑") : "↕"}
+                      </button>
+                    </th>
                     <th style={thStyle}>Action</th>
                     <th style={thStyle}>Latest</th>
                   </tr>
@@ -1574,22 +1807,16 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
                           )}
                         </td>
                         <td style={tdStyle}>
-                          <button
-                            type="button"
+                          <HigButton
+                            size="compact"
                             onClick={() => applyBucketMixRow(row)}
                             aria-pressed={rowApplied}
-                            title="Load this bucket mix into Acceptance Needs as editable number placeholders"
-                            style={{
-                              minHeight: 30,
-                              whiteSpace: "nowrap",
-                              borderColor: rowApplied ? "#15803d" : undefined,
-                              background: rowApplied ? "#16a34a" : undefined,
-                              color: rowApplied ? "#fff" : undefined,
-                              fontWeight: rowApplied ? 900 : 800,
-                            }}
+                            aria-label={rowApplied ? "Clear applied bucket mix" : undefined}
+                            title={rowApplied ? "Clear this applied bucket mix and its Acceptance Needs" : "Load this bucket mix into Acceptance Needs as editable number placeholders"}
+                            style={rowApplied ? appliedBucketMixButtonStyle : bucketMixButtonStyle}
                           >
                             {rowApplied ? "Applied" : "Apply"}
-                          </button>
+                          </HigButton>
                         </td>
                         <td style={tdStyle}>
                           {latestMatch ? (
@@ -1645,10 +1872,17 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
                   style={{ ...selectStyle, minHeight: 32 }}
                 >
                   <option value="same-month-length" disabled={!bucketMixReplayTargetDrawCount}>
-                    Same month length{bucketMixReplay.targetMonthDrawCount ? ` (${bucketMixReplay.targetMonthDrawCount}D)` : ""}
+                    {bucketMixReplayLengthSource === "override" ? "Same selected month length" : "Same scheduled month length"}{bucketMixReplay.targetMonthDrawCount ? ` (${bucketMixReplay.targetMonthDrawCount}D)` : ""}
                   </option>
                   <option value="all-month-lengths">All month lengths</option>
                 </select>
+                <span style={{ maxWidth: 270, color: "#64748b", fontSize: 10, lineHeight: 1.35, textAlign: "right" }}>
+                  {bucketMixReplayTargetDrawCount
+                    ? bucketMixReplayLengthSource === "override"
+                      ? `${bucketMixReplayTargetMonthLabel}: ${bucketMixReplayTargetDrawCount} draws from the Stage IDM override.`
+                      : `${bucketMixReplayTargetMonthLabel}: ${bucketMixReplayTargetDrawCount} scheduled Monday/Wednesday/Friday draws.`
+                    : "No planning-month length is currently resolved."}
+                </span>
               </label>
             </div>
 
@@ -1690,6 +1924,13 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
               </div>
             )}
 
+            {appliedReplayChoice && (
+              <div role="status" data-testid="bucket-mix-replay-selection" style={{ marginTop: 10, color: "#166534", fontSize: 12, lineHeight: 1.45 }}>
+                Applied replay reference D{appliedReplayChoice.replay.drawOrdinal} ({appliedReplayChoice.replay.monthLengthLabel}): {formatCompactBucketMixCounts(appliedReplayChoice.replay.mostCommonMix)}.
+                {stageDrawContext ? ` Current target D${stageDrawContext.targetStageDrawCount}${appliedReplayChoice.replay.drawOrdinal !== stageDrawContext.targetStageDrawCount ? " (different ordinal; manually chosen reference)" : ""}.` : ""}
+              </div>
+            )}
+
             {bucketMixReplay.rows.length ? (
               <div style={{ marginTop: 10, overflowX: "auto", maxHeight: 380, border: "1px solid #e2e8f0", borderRadius: 8 }}>
                 <table
@@ -1698,6 +1939,16 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
                 >
                   <thead style={{ position: "sticky", top: 0, background: "#f8fafc", zIndex: 1 }}>
                     <tr>
+                      <th style={thStyle}>
+                        Use
+                        <InfoHelp label="Apply a replay bucket mix">
+                          Applies this row's Most common actual mix through the Explorer's existing Apply action.
+                          The matching Explorer row shows Applied. Press either Applied button again to clear the
+                          linked mix and its Acceptance Needs. Current exclusions still apply; unavailable mixes
+                          cannot be selected. Generation switches are unchanged. Top-3 lift describes this ordinal's
+                          historical leaderboard results, not the selected mix's predictive strength.
+                        </InfoHelp>
+                      </th>
                       <th style={thStyle}>Draw</th>
                       <th style={thStyle}>Length</th>
                       <th style={{ ...thStyle, textAlign: "right" }}>Trials</th>
@@ -1714,11 +1965,38 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
                     </tr>
                   </thead>
                   <tbody>
-                    {bucketMixReplay.rows.map((row, index) => (
+                    {bucketMixReplayChoices.map((choice, index) => {
+                      const row = choice.replay;
+                      const rowSelected = appliedReplayChoice?.selectionKey === choice.selectionKey;
+                      const rowApplied = bucketMixAppliedSignature === bucketMixCountsSignature(row.mostCommonMix);
+                      return (
                       <tr
                         key={row.key}
-                        style={{ background: row.hasLatestDraw ? "#fff7ed" : index % 2 === 0 ? "#fff" : "#f8fafc" }}
+                        aria-selected={rowSelected}
+                        data-replay-key={row.key}
+                        onClick={(event) => {
+                          if ((event.target as HTMLElement).closest("button")) return;
+                          applyBucketMixReplayChoice(choice);
+                        }}
+                        style={{ background: rowSelected ? "#f0fdf4" : row.hasLatestDraw ? "#fff7ed" : index % 2 === 0 ? "#fff" : "#f8fafc", cursor: choice.unavailableReason ? undefined : "pointer" }}
                       >
+                        <td style={{ ...tdStyle, minWidth: 100, maxWidth: 230 }}>
+                          <HigButton
+                            size="compact"
+                            disabled={!!choice.unavailableReason && !rowApplied}
+                            aria-pressed={rowApplied}
+                            aria-label={`${rowApplied ? "Clear" : "Apply"} replay D${row.drawOrdinal} ${row.monthLengthLabel} most common mix: ${formatCompactBucketMixCounts(row.mostCommonMix)}`}
+                            onClick={() => applyBucketMixReplayChoice(choice)}
+                            style={rowApplied ? appliedBucketMixButtonStyle : bucketMixButtonStyle}
+                          >
+                            {rowApplied ? "Applied" : "Use mix"}
+                          </HigButton>
+                          {choice.unavailableReason && (
+                            <div style={{ color: "#92400e", fontSize: 11, marginTop: 4, lineHeight: 1.35 }}>
+                              Unavailable: {choice.unavailableReason}
+                            </div>
+                          )}
+                        </td>
                         <td style={{ ...tdStyle, fontWeight: 900, whiteSpace: "nowrap" }}>
                           D{row.drawOrdinal}
                           {row.fixedStructural && (
@@ -1783,7 +2061,8 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
                           )}
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -1794,7 +2073,7 @@ export const MonthlyDrawsSummaryPanel: React.FC<MonthlyDrawsSummaryPanelProps> =
             )}
 
             <div style={{ marginTop: 8, color: "#64748b", fontSize: 12, lineHeight: 1.45 }}>
-              Top-k expected rates are calculated from the combinatorial share available before each historical draw. D1 is fixed because every first monthly draw starts from Undrawn 8. Replay results are diagnostic only and do not affect candidate generation.
+              Top-k expected rates are calculated from the combinatorial share available before each historical draw. D1 is fixed because every first monthly draw starts from Undrawn 8. Replay does not automatically affect generation. A manually chosen mix uses the Explorer's Apply action; generation switches remain unchanged.
             </div>
           </div>
 

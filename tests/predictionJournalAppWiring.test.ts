@@ -17,6 +17,10 @@ describe("Prediction Journal app wiring", () => {
     expect(app).toContain("handleViewPredictionEntries");
     expect(app).toContain("View Entries");
     expect(app).toContain("viewEntriesRequestId={predictionJournalEntriesRequestId || undefined}");
+    expect(app).toContain('onClick={() => handleNewPredictionDraft("playedGames")}');
+    expect(app).toContain("Paste Games");
+    expect(app).toContain("captureSession={predictionCaptureSession}");
+    expect(app).toContain("onSimulateGame={handleSimulateJournalGame}");
   });
 
   it("registers the journal as a favoriteable Validation panel", () => {

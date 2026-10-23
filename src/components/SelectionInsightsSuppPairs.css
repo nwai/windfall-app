@@ -1,0 +1,41 @@
+.supp-pairs-comparison {
+  grid-column: 1 / -1;
+  min-width: 0;
+  border-top: 1px solid var(--wf-rule);
+  padding-top: 12px;
+  color: var(--wf-text);
+  font-size: 12px;
+}
+
+.supp-pairs-comparison p { margin: 6px 0; line-height: 1.5; }
+.supp-pairs-heading { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.supp-pairs-heading h4 { margin: 0; font-size: 14px; }
+.supp-pairs-status { color: var(--wf-valid); font-weight: 700; }
+.supp-pairs-scope { font-weight: 700; }
+.supp-pairs-warning { color: var(--wf-caution); }
+.supp-pairs-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; padding: 10px 0; }
+.supp-pairs-choices > div { min-width: 0; }
+.supp-pairs-choices p { color: var(--wf-muted); overflow-wrap: anywhere; }
+.supp-pairs-choice { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.supp-pairs-choice > .supp-pairs-number { font-size: 18px; }
+.supp-pairs-number { color: var(--wf-valid); font-weight: 750; white-space: nowrap; }
+.supp-pairs-controls { display: flex; align-items: end; gap: 14px; flex-wrap: wrap; margin: 8px 0; }
+.supp-pairs-controls select { min-height: 32px; max-width: 100%; }
+.supp-pairs-controls > span { color: var(--wf-muted); }
+.supp-pairs-comparison .supp-pairs-scroll { max-height: 410px; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.supp-pairs-scroll table { width: 100%; min-width: 880px; border-collapse: separate; border-spacing: 0; font-variant-numeric: tabular-nums; }
+.supp-pairs-scroll th, .supp-pairs-scroll td { padding: 7px 10px; border-bottom: 1px solid var(--wf-soft-rule); text-align: right; }
+.supp-pairs-scroll thead th { background: #f5f7fa; vertical-align: middle; }
+.supp-pairs-scroll thead tr:first-child > th { text-align: center; }
+.supp-pairs-scroll th[scope="row"] { text-align: left; min-width: 140px; font-weight: 500; }
+.supp-pairs-row-label { display: block; color: var(--wf-muted); font-size: 10px; white-space: nowrap; }
+.supp-pairs-method { margin-top: 10px; }
+.supp-pairs-method summary { cursor: pointer; min-height: 32px; padding: 7px 0; font-weight: 700; }
+
+@media (max-width: 650px) {
+  .supp-pairs-choices { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .supp-pairs-controls { align-items: stretch; }
+  .supp-pairs-controls .windfall-hig-field { width: 100%; }
+  .supp-pairs-controls select { width: 100%; min-height: 44px; }
+  .supp-pairs-method summary { min-height: 44px; }
+}

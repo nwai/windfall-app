@@ -21,6 +21,36 @@ export interface MonthlyBucketMixCombinatoricsRow {
   stageMatchLabels: string[];
 }
 
+export type MonthlyBucketMixSortKey = "undrawn" | "actualCombinations" | "stagePath";
+export type MonthlyBucketMixSortDirection = "desc" | "asc";
+
+export const sortMonthlyBucketMixRows = (
+  rows: readonly MonthlyBucketMixCombinatoricsRow[],
+  key: MonthlyBucketMixSortKey,
+  direction: MonthlyBucketMixSortDirection,
+): MonthlyBucketMixCombinatoricsRow[] => (
+  [...rows].sort((left, right) => {
+    const order = direction === "desc" ? -1 : 1;
+    const combinationCompare = left.actualCombinations < right.actualCombinations
+      ? -1 : left.actualCombinations > right.actualCombinations ? 1 : 0;
+    const stageCompare = left.stageMatchSupportCount - right.stageMatchSupportCount;
+    if (key === "undrawn") {
+      const undrawnCompare = left.counts.undrawn - right.counts.undrawn;
+      if (undrawnCompare !== 0) return undrawnCompare * order;
+      if (stageCompare !== 0) return -stageCompare;
+      if (combinationCompare !== 0) return -combinationCompare;
+    } else if (key === "stagePath") {
+      if (stageCompare !== 0) return stageCompare * order;
+      if (combinationCompare !== 0) return -combinationCompare;
+    } else if (combinationCompare !== 0) {
+      return combinationCompare * order;
+    }
+    return MONTHLY_BUCKET_KEYS.reduce((result, bucket) => (
+      result !== 0 ? result : right.counts[bucket] - left.counts[bucket]
+    ), 0);
+  })
+);
+
 export interface MonthlyBucketMixCombinatoricsResult {
   bucketSizes: MonthlyBucketMixCounts;
   visibleBucketKeys: MonthlyBucketKey[];

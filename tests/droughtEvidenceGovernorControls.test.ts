@@ -28,16 +28,23 @@ describe("Drought Evidence Governor controls", () => {
     const root = createRoot(container);
     try {
       await act(async () => root.render(React.createElement(Harness)));
-      const switches = container.querySelectorAll<HTMLInputElement>('input[role="switch"]');
-      const [auto, manual, carryOver] = Array.from(switches);
+      const [off, auto, manual] = Array.from(container.querySelectorAll<HTMLInputElement>('input[type="radio"]'));
+      const carryOver = container.querySelector<HTMLInputElement>('input[role="switch"]')!;
+      expect(off.checked).toBe(true);
       expect(auto.checked).toBe(false);
       expect(manual.checked).toBe(false);
+      expect(new Set([off.name, auto.name, manual.name]).size).toBe(1);
+      expect(off.closest("fieldset")?.querySelector("legend")?.textContent).toBe("Mode");
+      expect(carryOver.disabled).toBe(true);
       expect(container.textContent).toContain("2026-09 13D D7");
       await act(async () => auto.click());
+      expect(off.checked).toBe(false);
       expect(auto.checked).toBe(true);
       expect(container.textContent).toContain("Auto · no boost applied");
       await act(async () => manual.click());
       expect(auto.checked).toBe(false);
+      expect(manual.checked).toBe(true);
+      await act(async () => manual.click());
       expect(manual.checked).toBe(true);
 
       const select = container.querySelector<HTMLSelectElement>('[aria-label="Strict soft weight"]')!;
@@ -55,10 +62,38 @@ describe("Drought Evidence Governor controls", () => {
       expect(row().querySelector("strong")?.textContent).toBe("1.17x");
       await act(async () => container.querySelector<HTMLInputElement>('[aria-label="Strict bucket 0x"]')!.click());
       expect(row().querySelector("strong")?.textContent).toBe("1.00x");
-      await act(async () => manual.click());
+      await act(async () => off.click());
+      expect(off.checked).toBe(true);
       expect(auto.checked).toBe(false);
       expect(manual.checked).toBe(false);
       expect(container.querySelector('[role="status"]')?.textContent).toContain("Off");
+      expect(carryOver.disabled).toBe(true);
+      expect(row().querySelector("strong")?.textContent).toBe("1.00x");
+      await act(async () => manual.click());
+      expect(container.querySelector<HTMLSelectElement>('[aria-label="Strict soft weight"]')?.value).toBe("1.20");
+      expect(row().querySelector<HTMLSelectElement>("select")?.value).toBe("1.17");
+      expect(container.querySelector<HTMLInputElement>('[aria-label="Strict bucket 0x"]')?.checked).toBe(false);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  it("keeps radio groups independent across mounted control instances", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => root.render(React.createElement(React.Fragment, null,
+        React.createElement(Harness), React.createElement(Harness))));
+      const panels = container.querySelectorAll("section");
+      const first = panels[0].querySelector<HTMLInputElement>('input[value="auto"]')!;
+      const second = panels[1].querySelector<HTMLInputElement>('input[value="off"]')!;
+      expect(first.name).not.toBe(second.name);
+      await act(async () => first.click());
+      expect(first.checked).toBe(true);
+      expect(second.checked).toBe(true);
+      expect(panels[1].querySelector('[role="status"]')?.textContent).toContain("Off");
     } finally {
       await act(async () => root.unmount());
       container.remove();

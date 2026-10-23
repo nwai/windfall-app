@@ -3,6 +3,7 @@ import React from "react";
 import type { Draw } from "../types";
 import {
   analyzeDgaAutoSuppLearningAudit,
+  DGA_AUTO_SUPP_AUDIT_VERSION,
   DGA_AUTO_SUPP_RANDOM_ANY_HIT_RATE,
   DGA_AUTO_SUPP_RANDOM_EXACT_RATE,
   DGA_AUTO_SUPP_RANDOM_MEAN_HITS,
@@ -50,6 +51,7 @@ const DgaAutoSuppLearningAuditPanel: React.FC<Props> = ({
   selectedNumbers,
 }) => {
   const [journalRevision, setJournalRevision] = React.useState(0);
+  const [expanded, setExpanded] = React.useState(false);
 
   React.useEffect(() => {
     if (typeof window === "undefined") return undefined;
@@ -62,18 +64,34 @@ const DgaAutoSuppLearningAuditPanel: React.FC<Props> = ({
     };
   }, []);
 
-  const result = React.useMemo(() => analyzeDgaAutoSuppLearningAudit(history, {
+  const result = React.useMemo(() => expanded ? analyzeDgaAutoSuppLearningAudit(history, {
     activeWindowSize: activeHistoryCount,
     selectedNumbers,
-  }), [activeHistoryCount, history, selectedNumbers]);
+  }) : null, [activeHistoryCount, expanded, history, selectedNumbers]);
 
   const journalEntries = React.useMemo(() => (
-    typeof window === "undefined" ? [] : loadPredictionJournalEntries()
-  ), [journalRevision]);
+    !expanded || typeof window === "undefined" ? [] : loadPredictionJournalEntries()
+  ), [expanded, journalRevision]);
   const journalAudit = React.useMemo(
-    () => analyzeDgaAutoSuppJournal(journalEntries, history),
-    [history, journalEntries],
+    () => expanded ? analyzeDgaAutoSuppJournal(journalEntries, history) : null,
+    [expanded, history, journalEntries],
   );
+  if (!result || !journalAudit) {
+    return (
+      <InlineCollapsibleCard
+        id="dga-auto-supp-learning-audit"
+        title="Auto Supp Learning & Self-Audit"
+        subtitle="Known-eight role replay; observe-only"
+        collapsedSummary={`${DGA_AUTO_SUPP_AUDIT_VERSION} · Open Review to run this history-only audit. Closed audits do not delay draw-history refreshes.`}
+        expanded={expanded}
+        onExpandedChange={setExpanded}
+        collapsedLabel="Review"
+        expandedLabel="Hide"
+      >
+        {null}
+      </InlineCollapsibleCard>
+    );
+  }
   const latestRecords = [...result.records].reverse().slice(0, 60);
   const selectedModelLabel = MODEL_SHORT_LABELS[result.selectedModel];
 
@@ -83,7 +101,8 @@ const DgaAutoSuppLearningAuditPanel: React.FC<Props> = ({
       title="Auto Supp Learning & Self-Audit"
       subtitle="Known-eight role replay; observe-only"
       collapsedSummary={`${result.modelVersion} · ${result.records.length} scored draws · ${CURRENT_GATE_LABELS[result.currentMethodGate.status]}`}
-      defaultExpanded={false}
+      expanded={expanded}
+      onExpandedChange={setExpanded}
       collapsedLabel="Review"
       expandedLabel="Hide"
     >

@@ -20,7 +20,7 @@ import {
   type MonthlyTransitionSupport,
 } from "../lib/monthlyBucketTransitions";
 import { useZPASettings } from "../context/ZPASettingsContext";
-import { getSavedZoneWeights, type WeightsByNumber } from "../lib/zpaStorage";
+import { useSavedZoneWeights } from "../hooks/useSavedZoneWeights";
 
 export { clampProbability };
 
@@ -320,13 +320,7 @@ export const SurvivalAnalyzer: React.FC<SurvivalAnalyzerProps> = ({
     [monthlyTransitionAnalysis],
   );
 
-  const savedZoneWeights: WeightsByNumber | null = useMemo(() => {
-    try {
-      return getSavedZoneWeights();
-    } catch {
-      return null;
-    }
-  }, []);
+  const savedZoneWeights = useSavedZoneWeights();
 
   const gpwfWeights = useMemo(() => buildGPWFNumberWeights(analysisHistory), [analysisHistory]);
   const hc3Weights = useMemo(() => buildHC3PenaltyWeights(analysisHistory), [analysisHistory]);

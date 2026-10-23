@@ -25,6 +25,9 @@ import type { DroughtEvidenceGovernorProfile } from "../lib/droughtEvidenceGover
 import type { MonthlyBucketTransitionGovernorProfile } from "../lib/monthlyBucketTransitionGovernor";
 import type { MonthlyBucketKey } from "../lib/monthlyDrawSummary";
 import type { RepeatedTerminalDigitFamilyOptions } from "../lib/repeatedTerminalDigitFamilies";
+import type { TerminalShapeQuotaOptions } from "../lib/terminalShapeQuotas";
+import type { TerminalRunRuleOptions } from "../lib/terminalDigitRuns";
+import type { OgaForecastBiasOptions } from "../lib/ogaDecileAcceptance";
 
 /** Monthly bucket options with arrays instead of Sets (for structured clone) */
 interface SerializedMonthlyBucketOptions {
@@ -98,7 +101,7 @@ export interface GenerateWorkerArgs {
   allowedTrendRatios?: string[];
   sumFilter?: { enabled?: boolean; min?: number; max?: number; includeSupp?: boolean };
   patternOptions?: any;
-  ogaBiasOptions?: any;
+  ogaBiasOptions?: OgaForecastBiasOptions;
   div5Options?: { maxMainCount?: number };
   mainZeroOptions?: MainDigitConstraintOptions;
   mainFiveOptions?: MainDigitConstraintOptions;
@@ -136,6 +139,8 @@ export interface GenerateWorkerArgs {
   monthlyBucketTransitionGovernorProfile?: MonthlyBucketTransitionGovernorProfile;
   /** Default-off hard rule for repeated terminal digit families. */
   repeatedTerminalDigitFamiliesOptions?: RepeatedTerminalDigitFamilyOptions;
+  terminalShapeQuotaOptions?: TerminalShapeQuotaOptions;
+  terminalRunRuleOptions?: TerminalRunRuleOptions;
 }
 
 function deserializeMonthlyBuckets(
@@ -259,6 +264,8 @@ ctx.addEventListener("message", (e: MessageEvent) => {
       args.monthlyBucketTransitionGovernorProfile,
       args.repeatedTerminalDigitFamiliesOptions,
       args.randomSeed === undefined ? Math.random : seededRandom(args.randomSeed),
+      args.terminalShapeQuotaOptions,
+      args.terminalRunRuleOptions,
     );
 
     ctx.postMessage({ type: "result", id, result });

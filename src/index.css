@@ -4,7 +4,13 @@
   --wf-charcoal: #1f232b;
   --wf-text: #18202b;
   --wf-muted: #6f7a89;
-  --wf-section-title: #1d5fbf;
+  --wf-section-title: #263445;
+  --wf-workflow-history: #235a70;
+  --wf-workflow-signals: #69418a;
+  --wf-workflow-validation: #79501a;
+  --wf-workflow-generation: #216346;
+  --wf-workflow-dga: #923947;
+  --wf-workflow-patterns: #3d4f8d;
   --wf-page: #f4f7fb;
   --wf-surface: #ffffff;
   --wf-glass-surface: rgba(255, 255, 255, 0.82);
@@ -33,6 +39,13 @@
   --wf-table-header-surface: rgba(248, 250, 252, 0.97);
   --wf-table-header-shadow: 0 1px 0 rgba(82, 94, 115, 0.22), 0 4px 10px rgba(15, 23, 42, 0.05);
 }
+
+[data-workflow-home="history"] { --wf-section-title: var(--wf-workflow-history); }
+[data-workflow-home="signals"] { --wf-section-title: var(--wf-workflow-signals); }
+[data-workflow-home="validation"] { --wf-section-title: var(--wf-workflow-validation); }
+[data-workflow-home="generation"] { --wf-section-title: var(--wf-workflow-generation); }
+[data-workflow-home="dga"] { --wf-section-title: var(--wf-workflow-dga); }
+[data-workflow-home="patterns"] { --wf-section-title: var(--wf-workflow-patterns); }
 
 * {
   box-sizing: border-box;
@@ -553,7 +566,7 @@ tbody tr:hover {
   border: 1px solid transparent;
   border-radius: var(--wf-control-radius);
   background: transparent;
-  color: var(--wf-charcoal);
+  color: var(--wf-section-title);
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.03em;
@@ -564,7 +577,7 @@ tbody tr:hover {
 .windfall-workflow-nav__link:hover {
   border-color: var(--wf-rule);
   background: rgba(255, 255, 255, 0.72);
-  color: var(--wf-primary);
+  color: var(--wf-section-title);
 }
 
 .windfall-workflow-anchor {
@@ -740,6 +753,15 @@ tbody tr:hover {
 
 .windfall-hig-field__control {
   min-width: 0;
+}
+
+.windfall-constellation-centre-number {
+  min-width: 88px;
+  min-height: 32px;
+}
+
+@media (pointer: coarse), (max-width: 600px) {
+  .windfall-constellation-centre-number { min-height: 44px; }
 }
 
 .windfall-hig-field__help {
@@ -1344,8 +1366,63 @@ tbody tr:hover {
   font-weight: 800;
 }
 
-.windfall-section[open] > .windfall-section__summary .windfall-section__title {
-  color: #053f8f;
+.windfall-panel-title-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.windfall-panel-help__trigger.windfall-hig-button {
+  flex: 0 0 32px;
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--wf-rule);
+  color: var(--wf-primary);
+  background: #fff;
+  font-weight: 700;
+}
+
+.windfall-panel-help {
+  width: min(620px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  box-sizing: border-box;
+  padding: 20px;
+  overflow: auto;
+  border: 1px solid var(--wf-rule);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--wf-ink);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.22);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.windfall-panel-help::backdrop { background: rgba(0, 0, 0, 0.3); }
+.windfall-panel-help__header,
+.windfall-panel-help__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.windfall-panel-help__header { align-items: flex-start; position: sticky; top: 0; background: #fff; z-index: 1; padding-bottom: 8px; }
+.windfall-panel-help__header h2 { margin: 0; font-size: 18px; overflow-wrap: anywhere; }
+.windfall-panel-help__purpose { margin: 16px 0; }
+.windfall-panel-help__facts { margin: 0; }
+.windfall-panel-help__facts > div { padding: 10px 0; border-top: 1px solid var(--wf-soft-rule); }
+.windfall-panel-help__facts dt { font-weight: 700; margin-bottom: 3px; }
+.windfall-panel-help__facts dd { margin: 0; overflow-wrap: anywhere; }
+.windfall-panel-help__footer { padding-top: 16px; flex-wrap: wrap; }
+
+@media (pointer: coarse) {
+  .windfall-panel-help__trigger.windfall-hig-button { flex-basis: 44px; width: 44px; min-width: 44px; height: 44px; min-height: 44px; }
+  .windfall-panel-help .windfall-hig-button { min-height: 44px; }
 }
 
 .windfall-section__hint {
@@ -1512,6 +1589,22 @@ tbody tr:hover {
 
 .windfall-inline-card {
   overflow: hidden;
+}
+
+.windfall-inline-card__header {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--wf-soft-rule);
+  background: rgba(255, 255, 255, 0.7);
+  padding-right: 10px;
+  gap: 6px;
+}
+
+.windfall-inline-card__header > .windfall-inline-card__button {
+  flex: 1;
+  min-width: 0;
+  border-bottom: 0;
+  background: transparent;
 }
 
 .windfall-inline-card__button {
@@ -2329,6 +2422,94 @@ tbody tr:hover {
   display: grid;
   gap: 14px;
   margin: 12px 0;
+}
+
+.windfall-number-trends__source-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+
+.windfall-number-trends__source-controls fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0 10px;
+  border: 1px solid var(--wf-rule);
+  border-radius: var(--wf-control-radius);
+  gap: 0 16px;
+  font-size: 13px;
+}
+
+.windfall-number-trends__source-controls legend {
+  padding: 0 5px;
+}
+
+.windfall-number-trends__source-controls label {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 6px;
+}
+
+.windfall-number-trends__source-controls .windfall-info-help__button,
+.windfall-number-trends__drought-key .windfall-info-help__button {
+  min-width: 32px;
+  min-height: 32px;
+}
+
+.windfall-number-trends__scope {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+
+@media (max-width: 760px) {
+  .windfall-number-trends__source-controls .windfall-info-help__button,
+  .windfall-number-trends__drought-key .windfall-info-help__button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+.windfall-number-trends__drought-key,
+.windfall-number-trend-row__context,
+.windfall-number-trend-row__drought-flags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  min-width: 0;
+}
+
+.windfall-number-trend-row__context {
+  grid-column: 2;
+}
+
+.windfall-number-trend-drought-flag {
+  border: 1px solid var(--wf-rule);
+  border-radius: 4px;
+  padding: 3px 5px;
+  color: var(--wf-muted);
+  background: transparent;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.windfall-number-trend-drought-flag[data-drought-family="strict"][data-drought-status="yes"] {
+  color: #b42318;
+  background: #fff1f1;
+  border-color: #f1a7a0;
+}
+
+.windfall-number-trend-drought-flag[data-drought-family="empirical"][data-drought-status="yes"] {
+  color: #1d4ed8;
+  background: #eff6ff;
+  border-color: #93c5fd;
 }
 
 .windfall-number-trends__grid {

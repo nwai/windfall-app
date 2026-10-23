@@ -42,6 +42,7 @@ export type CandidateSet = {
   supp: number[];
   score?: number;
   trace?: string[];
+  terminalRunQuota?: string;
   octagonalScore?: number;
   octagonalProfile?: number[];
   // OGA analytics
@@ -52,6 +53,8 @@ export type CandidateSet = {
   numMatches?: number;
   matchHistoryFrequency?: number;
   patternMatches?: number;
+  patternRankingBonus?: number;
+  selHitsRankingBonus?: number;
   finalCompositeAdj?: number;
   selHits?: number;
   recentHits?: number;

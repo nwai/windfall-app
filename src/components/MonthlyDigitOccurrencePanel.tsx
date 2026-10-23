@@ -195,7 +195,7 @@ export const MonthlyDigitOccurrencePanel: React.FC<MonthlyDigitOccurrencePanelPr
   const [includeSupp, setIncludeSupp] = useState<boolean>(false);
   const [latestFirst, setLatestFirst] = useState<boolean>(true);
   const [equalDrawCounts, setEqualDrawCounts] = useState<boolean>(false);
-  const [breakdownOpen, setBreakdownOpen] = useState<boolean>(true);
+  const [breakdownOpen, setBreakdownOpen] = useState<boolean>(false);
 
   const summary = useMemo(
     () => analyzeMonthlyDigitOccurrences(history, { includeSupp }),

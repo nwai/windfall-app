@@ -45,6 +45,12 @@ describe("MonthlyDigitOccurrencePanel", () => {
       root?.render(React.createElement(MonthlyDigitOccurrencePanel, { history: unevenHistory }));
     });
 
+    expect(container.querySelector('button[aria-expanded="false"]')).not.toBeNull();
+    expect(getMonthDrawCell("2024-01")).toBe("");
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')?.click();
+    });
+
     expect(getMonthDrawCell("2024-01")).toBe("3");
     expect(container.textContent).not.toContain("Showing first 2 draws per month.");
 

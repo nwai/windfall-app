@@ -14,6 +14,10 @@ import {
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 describe("panel favorites", () => {
+  it("moves a retired NDED favorite to its new generation-setup home without duplicates", () => {
+    expect(normalizeFavoritePanelIds(["next-draw-probabilities", "candidate-generation-influences", "number-trends"]))
+      .toEqual(["candidate-generation-influences", "number-trends"]);
+  });
   it("normalizes favorite ids to known unique panels", () => {
     expect(normalizeFavoritePanelIds([
       "generated-candidates",

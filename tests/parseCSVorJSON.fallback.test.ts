@@ -2,6 +2,15 @@ import { describe, expect, it } from "vitest";
 import { parseCSVorJSON } from "../src/parseCSVorJSON";
 
 describe("parseCSVorJSON official source fallbacks", () => {
+  it("ignores trailing history diagnostics without filling a missing supplementary slot from their digits",()=>{
+    const header="date,main1,main2,main3,main4,main5,main6,supp1,supp2,terminal_shape,terminal_runs";
+    expect(parseCSVorJSON(`${header}\n10/9/26,28,33,36,15,40,18,44,4,2+2+1+1+1+1,3-4-5-6`)).toEqual([
+      {date:"10/9/26",main:[28,33,36,15,40,18],supp:[44,4]},
+    ]);
+    expect(parseCSVorJSON(`${header}\n10/9/26,28,33,36,15,40,18,44,,2+2+1+1+1+1,3-4-5-6`)).toEqual([
+      {date:"10/9/26",main:[28,33,36,15,40,18],supp:[44]},
+    ]);
+  });
   it("parses theLott-style JSON payloads with DrawResults", () => {
     const input = JSON.stringify({
       DrawResults: [

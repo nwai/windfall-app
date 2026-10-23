@@ -29,6 +29,8 @@ export const PASTE_ENDING_0_NUMBERS = [10, 20, 30, 40] as const;
 export type PasteWeightedCandidateConstraintMode = "any" | "require" | "exclude";
 
 export interface PasteWeightedCandidateConstraints {
+  forcedNumbers?: readonly number[];
+  excludedNumbers?: readonly number[];
   ending5?: PasteWeightedCandidateConstraintMode;
   ending0?: PasteWeightedCandidateConstraintMode;
   oddEven?: {
@@ -150,6 +152,7 @@ const isAllowedByExclusions = (
   number: number,
   constraints: PasteWeightedCandidateConstraints,
 ): boolean => {
+  if (constraints.excludedNumbers?.includes(number)) return false;
   if (constraints.ending5 === "exclude" && ending5Set.has(number)) return false;
   if (constraints.ending0 === "exclude" && ending0Set.has(number)) return false;
   return true;
@@ -159,6 +162,8 @@ export function candidateSatisfiesPasteConstraints(
   main: number[],
   constraints: PasteWeightedCandidateConstraints = {},
 ): boolean {
+  if (main.some((number) => !isAllowedByExclusions(number, constraints))) return false;
+  if (constraints.forcedNumbers?.some((number) => !main.includes(number))) return false;
   if (constraints.ending5 === "require" && !hasAnyFromSet(main, ending5Set)) return false;
   if (constraints.ending5 === "exclude" && !hasNoneFromSet(main, ending5Set)) return false;
   if (constraints.ending0 === "require" && !hasAnyFromSet(main, ending0Set)) return false;
@@ -569,7 +574,18 @@ export function generatePasteWeightedCandidates(
     };
   }
 
-  const numbers = parsed.counts.map((item) => item.number);
+  const forcedNumbers = [...new Set(constraints.forcedNumbers ?? [])]
+    .filter((number) => Number.isInteger(number) && number >= MIN_NUMBER && number <= MAX_NUMBER);
+  if (forcedNumbers.length > MAIN_COUNT || forcedNumbers.some((number) => !isAllowedByExclusions(number, constraints))) {
+    return {
+      ...parsed,
+      candidates: [],
+      warnings: [forcedNumbers.length > MAIN_COUNT
+        ? `There are ${forcedNumbers.length} forced inclusions, but Paste-Weighted output has only six main slots.`
+        : "A forced inclusion conflicts with an active exclusion. Resolve the conflict before generating."],
+    };
+  }
+  const numbers = [...new Set([...parsed.counts.map((item) => item.number), ...forcedNumbers])];
   const weightByNumber = new Map(parsed.counts.map((item) => [item.number, item.count]));
   const constraintWarnings = unsatisfiedPasteConstraintWarnings(numbers, constraints);
 
@@ -582,7 +598,8 @@ export function generatePasteWeightedCandidates(
   }
 
   const eligibleNumbers = numbers.filter((number) => isAllowedByExclusions(number, constraints));
-  const eligibleWeights = eligibleNumbers.map((number) => weightByNumber.get(number) ?? 0);
+  const fillerNumbers = eligibleNumbers.filter((number) => !forcedNumbers.includes(number));
+  const fillerWeights = fillerNumbers.map((number) => weightByNumber.get(number) ?? 0);
   const stageIdmWarnings = stageIdmConstraint?.enabled
     ? stageIdmConstraintWarnings(eligibleNumbers, stageIdmConstraint, stageIdmTargetCounts)
     : [];
@@ -676,7 +693,7 @@ export function generatePasteWeightedCandidates(
   const oddEvenQuotaCounts: Record<string, number> = {};
   const adaptiveShapeQuotaCounts: Record<string, number> = {};
   const rng = options.rng ?? Math.random;
-  const maxUniqueCandidates = combinations(eligibleNumbers.length, MAIN_COUNT);
+  const maxUniqueCandidates = combinations(fillerNumbers.length, MAIN_COUNT - forcedNumbers.length);
   const targetCount = Math.min(requestedCount, maxUniqueCandidates);
   const candidates: CandidateSet[] = [];
   const seenCandidates = new Set<string>();
@@ -688,8 +705,9 @@ export function generatePasteWeightedCandidates(
   let attempts = 0;
 
   for (attempts = 0; candidates.length < targetCount && attempts < attemptLimit; attempts += 1) {
-    const main = weightedSampleWithoutReplacement(eligibleNumbers, eligibleWeights, MAIN_COUNT, rng)
-      .sort((left, right) => left - right);
+    const main = [...forcedNumbers, ...weightedSampleWithoutReplacement(
+      fillerNumbers, fillerWeights, MAIN_COUNT - forcedNumbers.length, rng,
+    )].sort((left, right) => left - right);
     if (!candidateSatisfiesPasteConstraints(main, constraints)) continue;
     const oddEvenRatio = oddEvenConstraint?.enabled ? oddEvenRatioForNumbers(main) : null;
     if (oddEvenRatio) {
@@ -714,6 +732,9 @@ export function generatePasteWeightedCandidates(
     seenCandidates.add(key);
     const score = main.reduce((sum, number) => sum + (weightByNumber.get(number) ?? 0), 0);
     const trace = [`Paste-weighted score ${score.toFixed(0)} from pasted number counts.`];
+    if (forcedNumbers.length > 0) {
+      trace.push(`Shared forced inclusions: ${forcedNumbers.join(", ")}; numbers absent from pasted rows add zero to the pasted-count score.`);
+    }
     if (stageIdmConstraint?.enabled) {
       trace.push("Stage IDM bucket mix matched as an exact mains-only descriptive quota.");
     }

@@ -4,6 +4,7 @@ import type {
   ScoredPredictionJournalEntry,
 } from "./predictionJournal";
 import { monthlyBucketTransitionGovernorModeLabel, normalizeMonthlyBucketTransitionGovernorMode } from "./monthlyBucketTransitionGovernor";
+import { formatPredictionSelectionReasons, getPredictionSelectionReasons } from "./predictionSelectionReasons";
 
 export const PREDICTION_JOURNAL_FINDINGS_VERSION = 1 as const;
 
@@ -47,6 +48,24 @@ export interface PredictionJournalFinding {
   groupKey?: string;
 }
 
+export interface PredictionJournalNeighbourAtlasAudit {
+  capturedEntries: number;
+  replayedEntries: number;
+  selectedCloudEntries: number;
+  observedCloudHits: number;
+  expectedCloudHits: number;
+  cloudLift: number | null;
+  selectedCloudNumbers: number;
+  selectedCloudHits: number;
+  entriesWithSelectedCloudHit: number;
+  sampleQualityCounts: {
+    broad: number;
+    limited: number;
+    thin: number;
+    unavailable: number;
+  };
+}
+
 export interface PredictionJournalFindingsReport {
   version: typeof PREDICTION_JOURNAL_FINDINGS_VERSION;
   scopeLabel: string;
@@ -63,6 +82,7 @@ export interface PredictionJournalFindingsReport {
   positiveRate: number;
   groups: PredictionJournalFindingGroup[];
   findings: PredictionJournalFinding[];
+  neighbourAtlasAudit: PredictionJournalNeighbourAtlasAudit;
   caveats: string[];
 }
 
@@ -124,6 +144,66 @@ const weightedSupportRate = (counts: PredictionJournalScoreCounts): number => (
 const positiveRate = (counts: PredictionJournalScoreCounts): number => (
   counts.checks > 0 ? (counts.hits + counts.partials) / counts.checks : 0
 );
+
+const buildNeighbourAtlasAudit = (
+  entries: ScoredPredictionJournalEntry[],
+  reviewedOnly: boolean,
+  includeArchived: boolean,
+): PredictionJournalNeighbourAtlasAudit => {
+  const audit: PredictionJournalNeighbourAtlasAudit = {
+    capturedEntries: 0,
+    replayedEntries: 0,
+    selectedCloudEntries: 0,
+    observedCloudHits: 0,
+    expectedCloudHits: 0,
+    cloudLift: null,
+    selectedCloudNumbers: 0,
+    selectedCloudHits: 0,
+    entriesWithSelectedCloudHit: 0,
+    sampleQualityCounts: { broad: 0, limited: 0, thin: 0, unavailable: 0 },
+  };
+
+  for (const entry of entries) {
+    if (!includeArchived && entry.archivedAt) continue;
+    if (reviewedOnly && normalizeReviewStatus(entry.reviewStatus) !== "reviewedByUser") continue;
+    const atlas = entry.provenance?.neighbourAtlas;
+    if (!atlas) continue;
+    audit.capturedEntries += 1;
+
+    const quality = atlas.snapshot.ordinalEvidence?.sampleQuality.toLowerCase();
+    if (quality === "broad" || quality === "limited" || quality === "thin") {
+      audit.sampleQualityCounts[quality] += 1;
+    } else {
+      audit.sampleQualityCounts.unavailable += 1;
+    }
+
+    const replay = entry.scores.find((score) => score.key === "neighbourAtlasReplay" && score.result === "recorded");
+    if (entry.status !== "scored" || !replay) continue;
+    audit.replayedEntries += 1;
+    const observedHits = Number.isFinite(replay.hitCount) ? Math.max(0, replay.hitCount ?? 0) : 0;
+    const predictedCount = Number.isFinite(replay.predictedCount) ? Math.max(0, replay.predictedCount ?? 0) : 0;
+    const actualCount = Number.isFinite(replay.actualCount) ? Math.max(0, replay.actualCount ?? 0) : 0;
+    audit.observedCloudHits += observedHits;
+    audit.expectedCloudHits += predictedCount * actualCount / 45;
+
+    const selectedTargets = atlas.selectedTargetNumbers;
+    if (!selectedTargets.length) continue;
+    audit.selectedCloudEntries += 1;
+    audit.selectedCloudNumbers += selectedTargets.length;
+    const actualNumbers = new Set([
+      ...(entry.targetDraws[0]?.main ?? []),
+      ...(entry.targetDraws[0]?.supp ?? []),
+    ]);
+    const selectedHits = selectedTargets.filter((number) => actualNumbers.has(number)).length;
+    audit.selectedCloudHits += selectedHits;
+    if (selectedHits > 0) audit.entriesWithSelectedCloudHit += 1;
+  }
+
+  audit.cloudLift = audit.expectedCloudHits > 0
+    ? audit.observedCloudHits / audit.expectedCloudHits
+    : null;
+  return audit;
+};
 
 const formatBucketMix = (entry: ScoredPredictionJournalEntry): string | null => {
   const buckets = entry.inputs.monthlyBuckets;
@@ -191,15 +271,11 @@ const collectSignals = (entry: ScoredPredictionJournalEntry): FindingSignal[] =>
   }
 
   if (entry.inputs.oddEvenRatio) addSignal(signals, "Prediction field", `Predicted odd/even ${entry.inputs.oddEvenRatio}`);
-  if (entry.inputs.selectionReason) {
+  for (const reason of getPredictionSelectionReasons(entry.inputs)) {
     addSignal(
       signals,
       "Selection reason",
-      entry.inputs.selectionReason.detail
-        ? entry.inputs.selectionReason.key === "other"
-          ? `${entry.inputs.selectionReason.label} - ${entry.inputs.selectionReason.detail}`
-          : `${entry.inputs.selectionReason.label} + Other - ${entry.inputs.selectionReason.detail}`
-        : entry.inputs.selectionReason.label,
+      formatPredictionSelectionReasons([reason]),
     );
   }
   const bucketMix = formatBucketMix(entry);
@@ -374,6 +450,7 @@ export function buildPredictionJournalFindingsReport(
   }
   scoreCounts.entries = eligible.length;
   const overallWeightedSupport = weightedSupportRate(scoreCounts);
+  const neighbourAtlasAudit = buildNeighbourAtlasAudit(entries, reviewedOnly, includeArchived);
 
   const groupAccumulator = new Map<string, {
     signal: FindingSignal;
@@ -460,11 +537,13 @@ export function buildPredictionJournalFindingsReport(
     positiveRate: positiveRate(scoreCounts),
     groups,
     findings: findings.slice(0, maxFindings),
+    neighbourAtlasAudit,
     caveats: [
       "Observe-only V1: this report does not influence candidate generation, ranking, filters, or forced numbers.",
       "Weighted support is a journal diagnostic: hit = 1, partial = 0.5, miss = 0 across scored fields. It is not a lottery probability.",
       "Small samples can flatter or punish a setup by chance. Treat findings as review prompts until they survive more scored entries.",
       "The report schema is versioned so future PJFR detectors can add new signal families without rewriting existing entries.",
+      "Neighbour Atlas usage is audited from voluntarily saved, reviewed journal entries. It is not the Atlas training source and may reflect user-selection bias.",
     ],
   };
 }

@@ -1,0 +1,19 @@
+.windfall-historical-oga { min-width: 0; font-size: 12px; line-height: 1.5; }
+.windfall-historical-oga p { margin: 0 0 10px; }
+.windfall-historical-oga .windfall-info-help__button { min-width: 32px; min-height: 32px; }
+.windfall-historical-oga__scope { color: var(--wf-muted); }
+.windfall-historical-oga__stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; margin: 12px 0; }
+.windfall-historical-oga__stats dt { color: var(--wf-muted); }
+.windfall-historical-oga__stats dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; }
+.windfall-historical-oga .windfall-historical-oga__table { max-height: 340px; overflow: auto; margin: 12px 0; }
+.windfall-historical-oga table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.windfall-historical-oga caption { position: sticky; top: 0; z-index: 21; box-sizing: border-box; height: 32px; line-height: 20px; text-align: left; font-weight: 600; padding: 6px 8px; background: var(--wf-table-header-surface); }
+.windfall-historical-oga .windfall-historical-oga__table table > thead { top: 32px; }
+.windfall-historical-oga th,
+.windfall-historical-oga td { padding: 7px 8px; border-bottom: 1px solid var(--wf-rule); text-align: right; white-space: nowrap; }
+.windfall-historical-oga th:first-child,
+.windfall-historical-oga td:nth-child(2),
+.windfall-historical-oga thead th:nth-child(2) { text-align: left; }
+@media (max-width: 760px) {
+  .windfall-historical-oga .windfall-info-help__button { min-width: 44px; min-height: 44px; }
+}

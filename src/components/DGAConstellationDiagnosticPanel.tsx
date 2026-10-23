@@ -3,6 +3,8 @@ import React, { useMemo, useState } from "react";
 import type { Draw } from "../types";
 import {
   buildDgaConstellationDiagnostic,
+  MAX_CONSTELLATION_RADIUS,
+  MAX_CONSTELLATION_HORIZON,
   type DgaConstellationCell,
   type DgaConstellationCellRole,
   type DgaConstellationMetric,
@@ -15,6 +17,8 @@ interface DGAConstellationDiagnosticPanelProps {
 
 const panelStyle: React.CSSProperties = {
   display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr)",
+  minWidth: 0,
   gap: 12,
 };
 
@@ -26,8 +30,9 @@ const controlsStyle: React.CSSProperties = {
 };
 
 const cardStyle: React.CSSProperties = {
+  minWidth: 0,
   border: "1px solid rgba(148, 163, 184, 0.32)",
-  borderRadius: 10,
+  borderRadius: 8,
   background: "rgba(255, 255, 255, 0.94)",
   padding: 10,
 };
@@ -70,8 +75,6 @@ const centerDrawInputStyle: React.CSSProperties = {
   maxWidth: "100%",
   fontVariantNumeric: "tabular-nums",
 };
-
-const MAX_CONSTELLATION_RADIUS = 8;
 
 const roleLabel = (role: DgaConstellationCellRole): string => (
   role === "main" ? "main" : role === "supp" ? "supplementary" : "not drawn"
@@ -150,7 +153,7 @@ export const DGAConstellationDiagnosticPanel: React.FC<DGAConstellationDiagnosti
     }),
     [centerDrawNumber, centerNumber, forwardHorizon, history, radius],
   );
-  const activeRadiusSummary = diagnostic.radiusSummaries[diagnostic.radiusSummaries.length - 1];
+  const activeRadiusSummary = diagnostic.radiusSummary;
   const matrixNumbers = diagnostic.matrixRows[0]?.cells.map((cell) => cell.number) ?? [];
   const recordedFollowThroughDraws = Math.max(0, Math.min(diagnostic.forwardHorizon, diagnostic.drawCount - diagnostic.centerDrawNumber));
 
@@ -198,13 +201,13 @@ export const DGAConstellationDiagnosticPanel: React.FC<DGAConstellationDiagnosti
           />
         </HigField>
         <HigField label="Centre number">
-          <input
-            type="number"
-            min={1}
-            max={45}
+          <select
             value={centerNumber}
             onChange={(event) => setCenterNumber(Number(event.target.value))}
-          />
+            className="windfall-constellation-centre-number"
+          >
+            {Array.from({ length: 45 }, (_, index) => index + 1).map(number => <option key={number} value={number}>{number}</option>)}
+          </select>
         </HigField>
         <HigField label="Radius">
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
@@ -212,6 +215,7 @@ export const DGAConstellationDiagnosticPanel: React.FC<DGAConstellationDiagnosti
               type="number"
               min={1}
               max={MAX_CONSTELLATION_RADIUS}
+              aria-label="Radius"
               value={radius}
               onChange={(event) => {
                 const value = Number(event.target.value);
@@ -224,12 +228,28 @@ export const DGAConstellationDiagnosticPanel: React.FC<DGAConstellationDiagnosti
           </div>
         </HigField>
         <HigField label="Band horizon">
-          <select value={forwardHorizon} onChange={(event) => setForwardHorizon(Number(event.target.value))}>
-            {[1, 2, 3, 4, 5].map((value) => <option key={value} value={value}>{value} draw{value === 1 ? "" : "s"}</option>)}
-          </select>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <input
+              type="number"
+              min={1}
+              max={MAX_CONSTELLATION_HORIZON}
+              aria-label="Band horizon"
+              value={forwardHorizon}
+              onChange={(event) => {
+                const value = Number(event.target.value);
+                if (!Number.isFinite(value)) return;
+                setForwardHorizon(Math.min(MAX_CONSTELLATION_HORIZON, Math.max(1, Math.round(value))));
+              }}
+              style={{ width: "7ch", fontVariantNumeric: "tabular-nums" }}
+            />
+            <span style={{ color: "#64748b", fontSize: 11, fontWeight: 800 }}>max {MAX_CONSTELLATION_HORIZON} draws</span>
+          </div>
         </HigField>
       </div>
 
+      <div style={{ ...cardStyle, ...mutedStyle }}>
+        These controls change this diagnostic only, not WFMQYH or generation. Number rows stop at 1 and 45; radius above 44 adds draw columns, not extra numbers. Wider maps scroll within the table.
+      </div>
       <div style={{ ...cardStyle, ...mutedStyle }}>
         <strong style={{ color: "#334155" }}>Band horizon h{diagnostic.forwardHorizon}:</strong>{" "}
         lead-in checks up to {diagnostic.forwardHorizon} earlier draw{diagnostic.forwardHorizon === 1 ? "" : "s"} and follow-through checks up to {diagnostic.forwardHorizon} later recorded draw{diagnostic.forwardHorizon === 1 ? "" : "s"}.{" "}
@@ -284,11 +304,11 @@ export const DGAConstellationDiagnosticPanel: React.FC<DGAConstellationDiagnosti
           <strong style={{ color: "#0f172a", fontSize: 13 }}>Mapped cells</strong>
           <span style={mutedStyle}>M = main · S = supplementary · mapped draw width follows the larger of radius and band horizon</span>
         </div>
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ borderCollapse: "separate", borderSpacing: 4, fontSize: 12 }}>
+        <div style={{ overflow: "auto", maxHeight: 560, maxWidth: "100%" }}>
+          <table className="windfall-table--custom-layout" style={{ borderCollapse: "separate", borderSpacing: 4, fontSize: 12 }}>
             <thead>
               <tr>
-                <th style={{ color: "#64748b", textAlign: "right", paddingRight: 6 }}>Number</th>
+                <th style={{ position: "sticky", top: 0, left: 0, zIndex: 3, background: "white", color: "#64748b", textAlign: "right", paddingRight: 6 }}>Number</th>
                 {diagnostic.matrixRows.map((row) => (
                   <th
                     key={row.drawNumber}
@@ -297,6 +317,10 @@ export const DGAConstellationDiagnosticPanel: React.FC<DGAConstellationDiagnosti
                       color: row.isFuture ? "#64748b" : "#334155",
                       fontWeight: 900,
                       minWidth: row.isFuture ? 46 : 30,
+                      position: "sticky",
+                      top: 0,
+                      zIndex: 2,
+                      background: "white",
                     }}
                   >
                     D{row.drawNumber}{row.isFuture ? " next" : ""}
@@ -307,7 +331,7 @@ export const DGAConstellationDiagnosticPanel: React.FC<DGAConstellationDiagnosti
             <tbody>
               {matrixNumbers.map((number) => (
                 <tr key={number}>
-                  <th style={{ color: "#334155", textAlign: "right", paddingRight: 6, whiteSpace: "nowrap" }}>
+                  <th style={{ position: "sticky", left: 0, zIndex: 1, background: "white", color: "#334155", textAlign: "right", paddingRight: 6, whiteSpace: "nowrap" }}>
                     {number}
                   </th>
                   {diagnostic.matrixRows.map((row) => {

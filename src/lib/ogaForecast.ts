@@ -60,7 +60,7 @@ function integratePDF(pdf: (x: number) => number, a: number, b: number, steps = 
 }
 
 /**
- * Estimate the next draw's OGA distribution from the given history.
+ * Describe the fitted historical OGA distribution; not a validated next-draw forecast.
  * baseline: draws used to compute OGA per draw (window or all).
  * Returns mean, percentiles, and KDE-derived band probabilities (≤p10, p10–p90, ≥p90).
  */

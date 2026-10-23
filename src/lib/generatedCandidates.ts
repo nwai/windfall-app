@@ -1,5 +1,27 @@
 import type { CandidateSet, Draw } from "../types";
 import { computeWeekdayWindfallPrizeDivision } from "./prizeDivisions";
+import { maximalTerminalDigitRuns } from "./terminalDigitRuns";
+import { terminalRepetitionShape } from "./terminalShapeQuotas";
+
+export function candidateTerminalComposition(candidate: CandidateSet): {
+  shape: string | null;
+  runs: string[];
+  assignedRun: string | null;
+} {
+  const numbers = [...candidate.main, ...candidate.supp];
+  const shape = candidate.main.length === 6 && candidate.supp.length === 2
+    ? terminalRepetitionShape(numbers)
+    : null;
+  if (!shape) return { shape: null, runs: [], assignedRun: null };
+  const runs = maximalTerminalDigitRuns(numbers).map((run) => run.key);
+  return {
+    shape,
+    runs,
+    assignedRun: candidate.terminalRunQuota && runs.includes(candidate.terminalRunQuota)
+      ? candidate.terminalRunQuota
+      : null,
+  };
+}
 
 export interface GeneratedCandidateViewRow<TCandidate = CandidateSet> {
   c: TCandidate;

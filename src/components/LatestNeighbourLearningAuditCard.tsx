@@ -3,6 +3,7 @@ import React from "react";
 import type { Draw } from "../types";
 import {
   analyzeLatestNeighbourLearningAudit,
+  LATEST_NEIGHBOUR_LEARNING_VERSION,
   LATEST_NEIGHBOUR_RANDOM_NUMBER_RATE,
   type LatestNeighbourAuditGateStatus,
   type LatestNeighbourModePreferenceStatus,
@@ -48,10 +49,27 @@ const LatestNeighbourLearningAuditCard: React.FC<Props> = ({
   liveMode,
   liveEnabled,
 }) => {
+  const [expanded, setExpanded] = React.useState(false);
   const result = React.useMemo(
-    () => analyzeLatestNeighbourLearningAudit(history, { currentMode: liveMode }),
-    [history, liveMode],
+    () => expanded ? analyzeLatestNeighbourLearningAudit(history, { currentMode: liveMode }) : null,
+    [expanded, history, liveMode],
   );
+  if (!result) {
+    return (
+      <InlineCollapsibleCard
+        id="latest-neighbour-learning-audit"
+        title="Latest Draw ±1/±2 Learning & Self-Audit"
+        subtitle="Exact live-screen replay; observe-only"
+        collapsedSummary={`${LATEST_NEIGHBOUR_LEARNING_VERSION} · Open Review to run this history-only audit. Closed audits do not delay draw-history refreshes.`}
+        expanded={expanded}
+        onExpandedChange={setExpanded}
+        collapsedLabel="Review"
+        expandedLabel="Hide"
+      >
+        {null}
+      </InlineCollapsibleCard>
+    );
+  }
   const current = result.currentOutcomes.find((row) => row.mode === liveMode);
   const latestRows = [...result.records].reverse().slice(0, 48);
 
@@ -61,7 +79,8 @@ const LatestNeighbourLearningAuditCard: React.FC<Props> = ({
       title="Latest Draw ±1/±2 Learning & Self-Audit"
       subtitle="Exact live-screen replay; observe-only"
       collapsedSummary={`${result.modelVersion} · ${result.records.length} scored draws · ${CURRENT_GATE_LABELS[result.currentGate.status]}`}
-      defaultExpanded={false}
+      expanded={expanded}
+      onExpandedChange={setExpanded}
       collapsedLabel="Review"
       expandedLabel="Hide"
     >

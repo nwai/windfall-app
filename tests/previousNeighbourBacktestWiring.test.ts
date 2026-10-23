@@ -14,6 +14,10 @@ describe("Previous ±1 neighbour backtest app wiring", () => {
     expect(appSource).toContain("auditDraws={baselineHistory}");
     expect(appSource).toContain("auditHistoryScopeLabel={baselineHistoryScopeLabel}");
     expect(appSource).toContain("onToggleUserSelectedNumber={toggleSharedUserSelectedNumber}");
+    expect(appSource).toContain("analyzePreviousNeighbourCountShapeAtlas(");
+    expect(appSource).toContain("buildPreviousNeighbourAtlasEvidence(previousNeighbourAtlasAnalysis");
+    expect(appSource).toContain("atlasAnalysis={previousNeighbourAtlasAnalysis}");
+    expect(appSource).toContain("<SelectionInsightsNeighbourAtlasCard");
   });
 
   it("documents the observe-only neighbour backtest in the user manual", () => {
@@ -25,5 +29,7 @@ describe("Previous ±1 neighbour backtest app wiring", () => {
     expect(manual).toContain("duplicated neighbour");
     expect(manual).toContain("LDN-SA-1");
     expect(manual).toContain("Latest Draw ±1/±2 Learning &amp; Self-Audit");
+    expect(manual).toContain("Shared Atlas references");
+    expect(manual).toContain("Thin samples remain visibly labelled and never create a boost");
   });
 });

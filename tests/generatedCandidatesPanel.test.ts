@@ -9,6 +9,7 @@ import {
   type GeneratedCandidatesPanelProps,
 } from "../src/components/candidates/GeneratedCandidatesPanel";
 import type { CandidateSet } from "../src/types";
+import type { PreviousNeighbourAtlasEvidenceSnapshot } from "../src/lib/previousNeighbourAtlasEvidence";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -45,7 +46,80 @@ function buildCandidate(index: number): CandidateSet {
   };
 }
 
+const neighbourAtlasEvidence: PreviousNeighbourAtlasEvidenceSnapshot = {
+  version: 1,
+  observeOnly: true,
+  historySource: "baseline",
+  historySourceLabel: "Baseline history",
+  scope: "mains-plus-supps",
+  lookbackDraws: 1,
+  transitionCount: 30,
+  validDraws: 31,
+  excludedTargetDraws: 0,
+  excludedTargetMonthLabels: [],
+  targetDrawOrdinal: 4,
+  targetMonthExpectedDrawCount: 13,
+  overall: { averageUniqueHits: 2, averageExpectedUniqueHits: 1.8, averageDirectionalHits: 2.2, lift: 1.11 },
+  composition: { oddLift: null, evenLift: null, oneDigitLift: null, twoDigitLift: null },
+  ordinalEvidence: null,
+  currentCloud: {
+    sourceDateLabel: "9/28/26",
+    sourceNumbers: [2, 10],
+    targetNumbers: [1, 3, 8, 9, 11, 12],
+    ambiguousTargetNumbers: [1],
+    targetCount: 6,
+    oddTargetCount: 4,
+    evenTargetCount: 2,
+    oneDigitTargetCount: 4,
+    twoDigitTargetCount: 2,
+    numbers: [
+      { number: 1, directions: ["-1", "+1"], ambiguous: true },
+      { number: 3, directions: ["+1"], ambiguous: false },
+      { number: 8, directions: ["-2"], ambiguous: false },
+      { number: 9, directions: ["-1"], ambiguous: false },
+      { number: 11, directions: ["+1"], ambiguous: false },
+      { number: 12, directions: ["+2"], ambiguous: false },
+    ],
+  },
+  warnings: [],
+};
+
 describe("GeneratedCandidatesPanel", () => {
+  it("disables main Generate for known conflicts and exposes the owning rule", () => {
+    const html = renderToStaticMarkup(React.createElement(GeneratedCandidatesPanel, buildProps({
+      generationPreflight: { mode: "standard", eligibleCount: 45, forcedNumbers: [7,17], notices: [],
+        blockers: [{ target: "endingDigits", message: "Two forced 7-endings exceed maximum 1." }] },
+      onReviewGenerationConflict: vi.fn(),
+    })));
+    const view = new DOMParser().parseFromString(html, "text/html");
+    const generate = Array.from(view.querySelectorAll("button")).find((button) => button.textContent === "Generate");
+    expect(generate?.disabled).toBe(true);
+    expect(view.querySelector('[aria-label="Pre-generation conflict summary"]')?.textContent).toContain("Needs attention");
+    expect(view.querySelector('[role="alert"]')?.textContent).toContain("Two forced 7-endings");
+  });
+  it("keeps Manual Prize Check independent of generation exclusions", async () => {
+    const setManualSimSelected = vi.fn();
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    try {
+      await act(async () => root.render(React.createElement(GeneratedCandidatesPanel, buildProps({
+        excludedNumbers: [28], manualSimSelected: [28], setManualSimSelected,
+      }))));
+      const manualHeading = Array.from(container.querySelectorAll("div"))
+        .find((element) => element.textContent === "Manual Prize Check (select up to 8; first 6 main, next 2 supp)");
+      expect(manualHeading).toBeDefined();
+      const manual = manualHeading!.parentElement!.parentElement!;
+      const checkbox = Array.from(manual.querySelectorAll("label"))
+        .find((element) => element.textContent?.trim() === "28")?.querySelector("input") as HTMLInputElement;
+      expect(checkbox.checked).toBe(true);
+      expect(checkbox.disabled).toBe(false);
+      expect(setManualSimSelected).not.toHaveBeenCalled();
+      await act(async () => checkbox.click());
+      expect(setManualSimSelected).toHaveBeenCalled();
+    } finally {
+      await act(async () => root.unmount());
+    }
+  });
   const monthlyBucketSets = (buckets: Partial<Record<
     "undrawn" | "times1" | "times2" | "times3" | "times4" | "times5" | "times6" | "times7" | "times8",
     number[]
@@ -74,6 +148,22 @@ describe("GeneratedCandidatesPanel", () => {
     expect(strip?.querySelectorAll('[aria-label^="Toggle user selected number"]').length).toBe(45);
     expect(strip?.querySelector('[aria-label="Toggle user selected number 3"]')?.getAttribute("aria-pressed")).toBe("true");
     expect(strip?.querySelector('[aria-label="Toggle user selected number 4"]')?.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("shows selected-row Atlas coverage without describing it as a ranking influence", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(GeneratedCandidatesPanel, buildProps({
+        candidates: [{ main: [1, 2, 3, 4, 5, 6], supp: [8, 12] }],
+        selectedCandidateIdx: 0,
+        neighbourAtlasEvidence,
+      })),
+    );
+    const document = new DOMParser().parseFromString(html, "text/html");
+    const card = document.querySelector('[data-testid="generated-candidates-neighbour-atlas"]');
+
+    expect(card?.textContent).toContain("Selected row #1: 4 unique Atlas targets (1, 3, 8, 12)");
+    expect(card?.textContent).toContain("ambiguous 1");
+    expect(card?.textContent).toContain("no rank or filter effect");
   });
 
   it("locks active exclusions in the compact generator user selected strip", async () => {
@@ -203,6 +293,12 @@ describe("GeneratedCandidatesPanel", () => {
       await act(async () => {
         checkbox?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       });
+      expect(finalSaveButton?.disabled).toBe(true);
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ Success: true, DrawResults: [{
+        ProductId: "MondayWednesdayFridayLotto", DrawDate: "2026-09-04T00:00:00", PrimaryNumbers: [1,2,3,4,5,6], SecondaryNumbers: [7,8],
+      }] }) }));
+      const checkButton = Array.from(container.querySelectorAll("button")).find(button => button.textContent === "Check against The Lott")!;
+      await act(async () => checkButton.click());
       expect(finalSaveButton?.disabled).toBe(false);
 
       await act(async () => {
@@ -215,6 +311,7 @@ describe("GeneratedCandidatesPanel", () => {
         root.unmount();
       });
       container.remove();
+      vi.unstubAllGlobals();
     }
   });
 
@@ -524,24 +621,89 @@ describe("GeneratedCandidatesPanel", () => {
     expect(document.querySelector('[aria-label="Win metric explanation"]')).toBeNull();
     expect(document.querySelector('[aria-label="Nrr metric explanation"]')).toBeNull();
     expect(document.querySelector('[aria-label="NS metric explanation"]')).toBeNull();
+    expect(document.querySelector('[aria-label="Terminal Repetition Shapes metric explanation"]')).not.toBeNull();
+    expect(document.querySelector('[aria-label="Terminal Run Quotas metric explanation"]')).not.toBeNull();
     expect(headers).toHaveLength(23);
     expect(headers).toEqual(expect.arrayContaining([
-      "#", "Main (6)", "Supp (2)", "Manual (M/S)", "Prize", "Odd/Even",
-      "SelHits", "RecentHits", "Prev±2", "Dup±2", "Dir±2",
+      "Main (6)", "Supp (2)", "Manual (M/S)", "Prize", "Odd/Even",
+      "Terminal shape", "Terminal runs", "RecentHits", "Prev±2", "Dup±2", "Dir±2",
       "0x", "1x", "2x", "3x", "4x", "5x", "6x", "7x", "8x+",
       "Conv", "Stage IDM", "Actions",
     ]));
-    for (const hiddenHeader of ["Comp%", "OGA Raw", "OGA%", "IDM", "Rdy", "Win", "Nrr", "NS"]) {
+    for (const hiddenHeader of ["#", "SelHits", "Sel/Forced Hits", "Comp%", "OGA Raw", "OGA%", "IDM", "Rdy", "Win", "Nrr", "NS"]) {
       expect(headers).not.toContain(hiddenHeader);
     }
     const firstRowCells = table?.querySelectorAll("tbody tr td") ?? [];
+    expect(firstRowCells[0]?.getAttribute("style")).toContain("white-space:nowrap");
     expect(firstRowCells[1]?.getAttribute("style")).toContain("white-space:nowrap");
-    expect(firstRowCells[2]?.getAttribute("style")).toContain("white-space:nowrap");
     expect(html).toContain("next draw-stage target");
     expect(html).not.toContain("not a calibrated next-draw probability");
     expect(html).not.toContain('title="Convergence:');
     expect(html).not.toContain('title="Ideal Draw Match:');
     expect(html).not.toContain('title="Readiness score:');
+  });
+
+  it("shows actual terminal composition with genuine quota attribution, not assumed rules", () => {
+    const html = renderToStaticMarkup(React.createElement(GeneratedCandidatesPanel, buildProps({
+      candidates: [
+        { main: [2, 12, 3, 4, 6, 16], supp: [7, 8], terminalRunQuota: "6-7-8" },
+        { main: [9, 10, 11, 19, 20, 21], supp: [30, 31], terminalRunQuota: "0-1" },
+        { main: [2, 12, 22, 32, 7, 17], supp: [27, 37] },
+        { main: [1, 2, 3, 4, 5, 6], supp: [], terminalRunQuota: "1-2-3-4-5-6" },
+      ],
+      forcedNumbers: [2],
+    })));
+    const document = new DOMParser().parseFromString(html, "text/html");
+    const table = document.querySelector('[data-testid="generated-candidates-scroll"] table');
+    const shapes = Array.from(table?.querySelectorAll("[data-terminal-shape]") ?? []).map((cell) => cell.textContent);
+    const runs = Array.from(table?.querySelectorAll("[data-terminal-runs]") ?? []).map((cell) => cell.textContent);
+    expect(shapes).toEqual(["2+2+1+1+1+1", "3+3+2", "4+4", "—"]);
+    expect(runs).toEqual(["2-3-4 · 6-7-8*", "9-0-1", "None", "—"]);
+    expect(table?.querySelectorAll('[aria-label$=", assigned quota"]')).toHaveLength(1);
+    expect(Array.from(table?.querySelectorAll("tbody tr") ?? []).every((row) => row.children.length === 23)).toBe(true);
+    expect(table?.querySelector("thead")?.textContent).not.toContain("Sel/Forced Hits");
+  });
+
+  it("sorts terminal composition while retaining generated positions and action callbacks", async () => {
+    const onSimulateCandidate = vi.fn();
+    const onKeepCandidate = vi.fn();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(React.createElement(GeneratedCandidatesPanel, buildProps({
+          candidates: [
+            { main: [2, 12, 22, 32, 7, 17], supp: [27, 37] },
+            { main: [2, 12, 3, 4, 6, 16], supp: [7, 8] },
+            { main: [1, 2, 3, 4, 5, 6], supp: [] },
+          ],
+          onSimulateCandidate,
+          onKeepCandidate,
+        })));
+      });
+      const table = container.querySelector('[data-testid="generated-candidates-scroll"] table');
+      const sort = container.querySelector<HTMLButtonElement>('[aria-label="Sort by Terminal Repetition Shapes"]');
+      await act(async () => sort?.click());
+      const positions = () => Array.from(table?.querySelectorAll("tbody tr") ?? []).map((row) => row.getAttribute("data-generated-position"));
+      expect(positions()).toEqual(["2", "1", "3"]);
+      expect(sort?.closest("th")?.getAttribute("aria-sort")).toBe("ascending");
+      const row = table?.querySelector("tbody tr");
+      await act(async () => row?.querySelector<HTMLButtonElement>('[aria-label="Simulate generated candidate 2"]')?.click());
+      await act(async () => row?.querySelector<HTMLButtonElement>('[aria-label^="Keep generated candidate 2 "]')?.click());
+      expect(onSimulateCandidate).toHaveBeenCalledWith(1);
+      expect(onKeepCandidate).toHaveBeenCalledWith(1);
+      await act(async () => sort?.click());
+      expect(positions()).toEqual(["1", "2", "3"]);
+      const runSort = container.querySelector<HTMLButtonElement>('[aria-label="Sort by Terminal Run Quotas"]');
+      await act(async () => runSort?.click());
+      expect(positions()).toEqual(["1", "2", "3"]);
+      await act(async () => runSort?.click());
+      expect(positions()).toEqual(["2", "1", "3"]);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
   });
 
   it("defaults to generated order and only applies prize ordering when Prize sort is selected", async () => {
@@ -554,11 +716,9 @@ describe("GeneratedCandidatesPanel", () => {
     const root = createRoot(container);
 
     const firstMainCellCompact = () => (
-      container.querySelector("tbody tr td:nth-child(2)")?.textContent ?? ""
+      container.querySelector('[data-testid="generated-candidates-scroll"] tbody tr td:nth-child(1)')?.textContent ?? ""
     ).replace(/\s+/g, "");
-    const firstPositionCell = () => (
-      container.querySelector("tbody tr td:nth-child(1)")?.textContent ?? ""
-    ).trim();
+    const firstPosition = () => container.querySelector('[data-testid="generated-candidates-scroll"] tbody tr')?.getAttribute("data-generated-position");
     const prizeHeader = () => Array.from(container.querySelectorAll("th"))
       .find((th) => th.textContent?.includes("Prize"));
 
@@ -572,14 +732,14 @@ describe("GeneratedCandidatesPanel", () => {
 
       expect(container.textContent).toContain("generated order");
       expect(firstMainCellCompact()).toBe("313233343536");
-      expect(firstPositionCell()).toBe("1");
+      expect(firstPosition()).toBe("1");
 
       await act(async () => {
         prizeHeader()?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       });
 
       expect(firstMainCellCompact()).toBe("123456");
-      expect(firstPositionCell()).toBe("2");
+      expect(firstPosition()).toBe("2");
 
       await act(async () => {
         root.render(React.createElement(GeneratedCandidatesPanel, buildProps({
@@ -589,7 +749,7 @@ describe("GeneratedCandidatesPanel", () => {
       });
 
       expect(firstMainCellCompact()).toBe("313233343536");
-      expect(firstPositionCell()).toBe("1");
+      expect(firstPosition()).toBe("1");
     } finally {
       await act(async () => {
         root.unmount();
@@ -829,6 +989,7 @@ describe("GeneratedCandidatesPanel", () => {
       });
 
       expect(container.textContent).toContain("Showing rows 1–29 of 120");
+      expect(Array.from(container.querySelectorAll('[data-testid="generated-candidates-scroll"] td[colspan]')).every((cell) => cell.getAttribute("colspan") === "23")).toBe(true);
       const scroller = container.querySelector('[data-testid="generated-candidates-scroll"]') as HTMLDivElement | null;
       expect(scroller).not.toBeNull();
 

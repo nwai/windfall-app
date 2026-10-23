@@ -119,10 +119,10 @@ export function parseCSVorJSON(input: string): ParsedDrawInput[] {
     header[1] === "main" &&
     header[2] === "supp";
   const isStandard =
-    header.length >= 3 &&
+    header.length >= 9 &&
     header[0] === "date" &&
     header.slice(1, 7).every((h) => h.startsWith("main") || h === "") &&
-    header.slice(-2).every((h) => h.startsWith("supp") || h === "");
+    header.slice(7, 9).every((h) => h.startsWith("supp") || h === "");
 
   if (isCompact || isStandard) {
     for (let i = headerLineIdx + 1; i < lines.length; ++i) {
@@ -149,7 +149,8 @@ export function parseCSVorJSON(input: string): ParsedDrawInput[] {
         const date = row[0] ?? "";
         const main: number[] = [];
         const supp: number[] = [];
-        for (let j = 1; j < header.length; ++j) {
+        // Trailing diagnostic columns are not additional draw numbers.
+        for (let j = 1; j < 9; ++j) {
           const h = header[j];
           const v = row[j];
           if (h.startsWith("main")) {

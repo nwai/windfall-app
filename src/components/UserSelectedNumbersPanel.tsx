@@ -1,4 +1,5 @@
 import React from "react";
+import { ForcedInclusionSummary, type ForcedInclusionSource } from "./shared/ForcedInclusionSummary";
 
 import {
   MAX_USER_SELECTED_NUMBER,
@@ -31,7 +32,11 @@ interface UserSelectedNumbersPanelProps {
   autoExcludeUnselected?: boolean;
   onToggleAutoExclude?: (enabled: boolean) => void;
   externalSelectedNumbers?: number[];
+  forcedInclusionSources?: readonly ForcedInclusionSource[];
+  onReviewForcedInclusions?: () => void;
+  numberConstraintSummary?: React.ReactNode;
   externalSelectedLabel?: string;
+  externalSelectionHref?: string;
   excludedNumbers?: number[];
   monthlyBuckets?: MonthlyBucketSets | null;
 }
@@ -47,7 +52,11 @@ export const UserSelectedNumbersPanel: React.FC<UserSelectedNumbersPanelProps> =
   autoExcludeUnselected = false,
   onToggleAutoExclude,
   externalSelectedNumbers = [],
+  forcedInclusionSources,
+  onReviewForcedInclusions,
+  numberConstraintSummary,
   externalSelectedLabel = "external forced selections",
+  externalSelectionHref,
   excludedNumbers = [],
   monthlyBuckets = null,
 }) => {
@@ -165,11 +174,15 @@ export const UserSelectedNumbersPanel: React.FC<UserSelectedNumbersPanelProps> =
           <div style={subtleText}>
             {selectedCount > 0 ? `Selected set: ${selectedNumbers.join(", ")}` : "Selected set: none"}
           </div>
-          {lockedExternalNumbers.length > 0 && (
+          {lockedExternalNumbers.length > 0 && !forcedInclusionSources && (
             <div style={{ ...subtleText, color: "#166534", marginTop: 3 }}>
-              Locked by {externalSelectedLabel}: {lockedExternalNumbers.join(", ")}
+              Locked by {externalSelectedLabel}: {lockedExternalNumbers.join(", ")}.
+              {externalSelectionHref && (
+                <> <a href={externalSelectionHref} style={manageExternalSelectionLink}>Manage there</a>.</>
+              )}
             </div>
           )}
+          {!numberConstraintSummary && <ForcedInclusionSummary numbers={externalSelectedNumbers} sources={forcedInclusionSources} onReview={onReviewForcedInclusions} />}
           {userExclusionReminder && (
             <div style={{ ...subtleText, color: "#475569", marginTop: 3 }}>
               {userExclusionReminder}. Clear the manual exclusion or turn off the rule that excludes them before selecting them here.
@@ -209,6 +222,7 @@ export const UserSelectedNumbersPanel: React.FC<UserSelectedNumbersPanelProps> =
         </div>
       </div>
 
+      {numberConstraintSummary}
       <div style={metricsGrid}>
         <Metric label="Selected" value={String(selectedCount)} />
         <Metric
@@ -254,6 +268,7 @@ export const UserSelectedNumbersPanel: React.FC<UserSelectedNumbersPanelProps> =
               data-user-excluded={userExcluded ? "true" : undefined}
             >
               {number}
+              {!userExcluded && externalSelectedNumbers.includes(number) && <sup aria-label="Forced inclusion" style={{ fontSize: 9, marginLeft: 2 }}>F</sup>}
             </button>
           );
         })}
@@ -322,6 +337,12 @@ const subtleText: React.CSSProperties = {
   fontSize: 12,
   color: "#64748b",
   lineHeight: 1.35,
+};
+
+const manageExternalSelectionLink: React.CSSProperties = {
+  color: "#166534",
+  fontWeight: 800,
+  textDecoration: "underline",
 };
 
 const toolbar: React.CSSProperties = {

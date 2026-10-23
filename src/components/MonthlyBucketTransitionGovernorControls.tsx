@@ -1,6 +1,7 @@
 import React from "react";
 import {
   MONTHLY_TRANSITION_MANUAL_WEIGHTS,
+  monthlyBucketTransitionGovernorDisplaySummary,
   normalizeMonthlyBucketTransitionGovernorMode,
   type MonthlyBucketTransitionGovernorMode,
   type MonthlyBucketTransitionGovernorProfile,
@@ -11,11 +12,12 @@ import "./MonthlyBucketTransitionGovernorControls.css";
 interface Props {
   profile: MonthlyBucketTransitionGovernorProfile;
   onModeChange: (mode: MonthlyBucketTransitionGovernorMode) => void;
+  bypassedByRandomCoverage?: boolean;
 }
 
 const percent = (value: number | null) => value === null ? "n/a" : `${(value * 100).toFixed(1)}%`;
 
-export function MonthlyBucketTransitionGovernorControls({ profile, onModeChange }: Props) {
+export function MonthlyBucketTransitionGovernorControls({ profile, onModeChange, bypassedByRandomCoverage = false }: Props) {
   const manual = profile.mode !== "off" && profile.mode !== "auto";
   return <section className="windfall-transition-governor" aria-label="Monthly Bucket Transition Governor">
     <div className="windfall-transition-governor__heading">
@@ -39,9 +41,11 @@ export function MonthlyBucketTransitionGovernorControls({ profile, onModeChange 
         </select>
       </HigField>
       <div role="status" className="windfall-transition-governor__status">
-        <strong>{profile.summaryLabel}</strong>
+        <strong>{monthlyBucketTransitionGovernorDisplaySummary(profile, bypassedByRandomCoverage)}</strong>
         <span>{profile.mode === "off"
           ? "No monthly-transition weighting applied."
+          : bypassedByRandomCoverage
+            ? "RwR45/PNUaRW45 does not apply these weights. Your selected mode is retained for standard generation."
           : manual
             ? "User-set experiment. Auto evidence gate bypassed; stage eligibility and hard filters remain."
             : "Auto chooses strength only when the current stage passes its historical evidence gate."}</span>
@@ -58,15 +62,15 @@ export function MonthlyBucketTransitionGovernorControls({ profile, onModeChange 
           <th scope="row">{rule.label}<span>{rule.sourceLabel} → {rule.targetLabel}: {rule.currentNumbers.join(", ") || "none"}</span></th>
           <td>{rule.evidence.trials} trials<span>At least one: {percent(rule.evidence.atLeastOneRate)} vs random {percent(rule.evidence.expectedRandomAtLeastOneRate)}</span><span>Per number: {percent(rule.evidence.perNumberRate)} vs random {percent(rule.evidence.expectedRandomPerNumberRate)}</span></td>
           <td>{rule.evidenceGatePassed ? "Passed" : "Not passed"}{manual && <span>Bypassed by user</span>}</td>
-          <td><strong>{rule.multiplier.toFixed(2)}x</strong><span>{rule.active ? rule.strength : "Neutral"}</span></td>
+          <td><strong>{(bypassedByRandomCoverage ? 1 : rule.multiplier).toFixed(2)}x</strong><span>{bypassedByRandomCoverage ? "Bypassed" : rule.active ? rule.strength : "Neutral"}</span></td>
         </tr>)}</tbody>
       </table>
     </div>}
     {profile.checkedRules.map((rule) => <details key={rule.rule}>
-      <summary>{rule.label}: {rule.active ? "why this weight applies" : "why no boost applies"}</summary>
+      <summary>{rule.label}: {bypassedByRandomCoverage ? "configured rule (bypassed)" : rule.active ? "why this weight applies" : "why no boost applies"}</summary>
       <p>{rule.reason}</p>
     </details>)}
-    {profile.numberDetails.length > 0 && <p className="windfall-transition-governor__ledger"><strong>Transition multiplier ledger:</strong>{" "}
+    {!bypassedByRandomCoverage && profile.numberDetails.length > 0 && <p className="windfall-transition-governor__ledger"><strong>Transition multiplier ledger:</strong>{" "}
       {profile.numberDetails.map((detail) => `${detail.number} (${detail.bucketLabel}) ×${detail.multiplier.toFixed(2)}`).join(" · ")}
     </p>}
   </section>;

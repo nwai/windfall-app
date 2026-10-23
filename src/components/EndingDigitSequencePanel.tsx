@@ -24,6 +24,7 @@ import {
 } from "../lib/monthlyDrawSummary";
 import { TerminalDigitStageSplitCard } from "./TerminalDigitStageSplitCard";
 import { TerminalStructureTransitionLab } from "./TerminalStructureTransitionLab";
+import { TerminalFamilyLeadershipPanel } from "./TerminalFamilyLeadershipPanel";
 import { InfoHelp } from "./shared/HigControls";
 
 interface EndingDigitSequencePanelProps {
@@ -102,6 +103,8 @@ const formatRuns = (draw: EndingDigitSequenceDrawStats): string => {
   if (!draw.maxRuns.length) return "—";
   return draw.maxRuns.map((run) => `${run.digits.join("-")} (${run.coveredNumbers})`).join(" | ");
 };
+const formatAllRuns = (draw: EndingDigitSequenceDrawStats): string => draw.allRuns.length
+  ? draw.allRuns.map((run) => `${run.digits.join("-")} (${run.coveredNumbers} numbers)`).join(" | ") : "No run of 2+ digits";
 
 const formatSequence = (digits: readonly number[]): string => digits.join("-");
 
@@ -297,6 +300,8 @@ export const EndingDigitSequencePanel: React.FC<EndingDigitSequencePanelProps> =
         includeSupp={includeSupp}
       />
 
+      <TerminalFamilyLeadershipPanel history={allDraws ?? draws} />
+
       <TerminalDigitMonthStageCard
         analysis={monthStageAnalysis}
         monthOptions={monthOptions}
@@ -337,7 +342,7 @@ export const EndingDigitSequencePanel: React.FC<EndingDigitSequencePanelProps> =
 
       <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, overflow: "hidden" }}>
         <div style={{ padding: "10px 12px", borderBottom: "1px solid #e5e7eb", background: "#fafcff", fontWeight: 700, color: "#223" }}>
-          Recent / strongest examples
+          Recent draws / all separate runs
         </div>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
@@ -346,6 +351,7 @@ export const EndingDigitSequencePanel: React.FC<EndingDigitSequencePanelProps> =
                 <th style={thLeft}>Date</th>
                 <th style={thLeft}>Numbers</th>
                 <th style={thLeft}>Endings</th>
+                <th style={thLeft}>All separate runs</th>
                 <th style={thLeft}>Strongest run(s)</th>
                 <th style={thRight}>Run len</th>
                 <th style={thRight}>Covered</th>
@@ -357,6 +363,7 @@ export const EndingDigitSequencePanel: React.FC<EndingDigitSequencePanelProps> =
                   <td style={tdLeft}>{draw.date}</td>
                   <td style={tdLeft}>{draw.numbers.join(" ")}</td>
                   <td style={tdLeft}>{draw.endings.join(" ")}</td>
+                  <td style={tdLeft}>{formatAllRuns(draw)}</td>
                   <td style={tdLeft}>{formatRuns(draw)}</td>
                   <td style={tdRight}>{draw.maxRunLength}</td>
                   <td style={tdRight}>{draw.coveredNumbers}</td>
@@ -364,7 +371,7 @@ export const EndingDigitSequencePanel: React.FC<EndingDigitSequencePanelProps> =
               ))}
               {sortedDraws.length === 0 && (
                 <tr>
-                  <td colSpan={6} style={{ padding: 12, color: "#999", textAlign: "center" }}>
+                  <td colSpan={7} style={{ padding: 12, color: "#999", textAlign: "center" }}>
                     No draws available for ending-digit sequence analysis.
                   </td>
                 </tr>

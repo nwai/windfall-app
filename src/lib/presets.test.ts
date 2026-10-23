@@ -47,6 +47,69 @@ function baseSnapshot(overrides: Partial<AppPresetSnapshot> = {}): AppPresetSnap
 }
 
 describe("normalizeAppPresetSnapshot", () => {
+  it("preserves shared Hot/Cold profile choices without inventing them in older snapshots", () => {
+    expect(normalizeAppPresetSnapshot(baseSnapshot()).hotColdRankingSettings).toBeUndefined();
+    const snapshot = baseSnapshot({ hotColdRankingSettings: {
+      includeSupp: false, recentWindowChoice: "WFMQYH", halfLifeChoice: "0",
+    } });
+    expect(normalizeAppPresetSnapshot(JSON.parse(JSON.stringify(snapshot))).hotColdRankingSettings)
+      .toEqual(snapshot.hotColdRankingSettings);
+  });
+  it("preserves terminal quota choices and defaults legacy presets to off", () => {
+    const legacy = normalizeAppPresetSnapshot(baseSnapshot());
+    expect(legacy.terminalShapeQuotaEnabled).toBe(false);
+    expect(legacy.selectedTerminalShapes).toEqual([]);
+    expect(legacy.terminalRunRuleEnabled).toBe(false);
+    expect(legacy.terminalRunMode).toBe("allocation");
+    expect(legacy.terminalRunUseAllObserved).toBe(false);
+    expect(legacy.terminalRunAllocationBasis).toBe("history");
+    expect(legacy.terminalRunManualSettings).toBeUndefined();
+    expect(legacy.selectedTerminalRuns).toEqual([]);
+    expect(legacy.terminalRunShapeLinkEnabled).toBe(false);
+    expect(legacy.terminalShapeIndependentSettings).toBeUndefined();
+    const restored = normalizeAppPresetSnapshot(baseSnapshot({
+      terminalShapeQuotaEnabled: true, selectedTerminalShapes: ["2+2+1+1+1+1", "3+1+1+1+1+1", "2+2+1+1+1+1"],
+      terminalRunRuleEnabled: true, terminalRunMode: "requireAll", selectedTerminalRuns: ["2-3-4", "6-7-8", "2-3-4"],
+      terminalRunEvidence: { modelVersion: "TRQ-1", validDraws: 13, rows: [{ run: "2-3-4", count: 2,
+        occurrencePercent: 2 / 13 * 100, exactRandomPercent: 4.5, candidateTarget: 8 }] },
+    }));
+    expect(restored.terminalShapeQuotaEnabled).toBe(true);
+    expect(restored.selectedTerminalShapes).toEqual(["2+2+1+1+1+1", "3+1+1+1+1+1"]);
+    expect(restored.terminalRunRuleEnabled).toBe(true);
+    expect(restored.terminalRunMode).toBe("requireAll");
+    expect(restored.selectedTerminalRuns).toEqual(["2-3-4", "6-7-8"]);
+    expect(restored.terminalRunEvidence?.rows[0].count).toBe(2);
+  });
+  it("keeps effective observed runs and manual test choices separate across preset round trips", () => {
+    const snapshot=baseSnapshot({terminalRunUseAllObserved:true,terminalRunMode:"allocation",terminalRunAllocationBasis:"history",
+      selectedTerminalRuns:["2-3-4","6-7-8"],terminalRunManualSettings:{mode:"requireAll",selectedRuns:["0-1-2","4-5-6","0-1-2"],allocationBasis:"equal"}});
+    const restored=normalizeAppPresetSnapshot(JSON.parse(JSON.stringify(snapshot)));
+    expect(restored.terminalRunUseAllObserved).toBe(true);expect(restored.terminalRunAllocationBasis).toBe("history");
+    expect(restored.selectedTerminalRuns).toEqual(["2-3-4","6-7-8"]);
+    expect(restored.terminalRunManualSettings).toEqual({mode:"requireAll",selectedRuns:["0-1-2","4-5-6"],allocationBasis:"equal"});
+  });
+  it("round trips effective linked shapes separately from independent settings", () => {
+    const snapshot = baseSnapshot({ terminalShapeQuotaEnabled: true, selectedTerminalShapes: ["4+2+1+1"],
+      terminalRunShapeLinkEnabled: true,
+      terminalShapeIndependentSettings: { enabled: false, selectedShapes: ["2+2+1+1+1+1", "2+2+1+1+1+1"] },
+      terminalShapeLinkEvidence: { modelVersion: "TRSL-1", sourceDraws: 13, matchingDraws: 2, mode: "allocation",
+        selectedRuns: ["2-3-4"], rows: [{ shape: "4+2+1+1", count: 2, percent: 100 }], error: null },
+    });
+    const restored = normalizeAppPresetSnapshot(JSON.parse(JSON.stringify(snapshot)));
+    expect(restored.terminalRunShapeLinkEnabled).toBe(true);
+    expect(restored.terminalShapeQuotaEnabled).toBe(true);
+    expect(restored.selectedTerminalShapes).toEqual(["4+2+1+1"]);
+    expect(restored.terminalShapeIndependentSettings).toEqual({ enabled: false, selectedShapes: ["2+2+1+1+1+1"], allocationBasis: "history" });
+    expect(restored.terminalShapeLinkEvidence).toEqual(snapshot.terminalShapeLinkEvidence);
+  });
+  it("retains manual shape allocations independently from effective historical linking", () => {
+    const snapshot = baseSnapshot({ terminalShapeAllocationBasis: "history", terminalRunShapeLinkEnabled: true,
+      terminalShapeIndependentSettings: { enabled: true, selectedShapes: ["5+3"], allocationBasis: "equal" } });
+    const restored = normalizeAppPresetSnapshot(JSON.parse(JSON.stringify(snapshot)));
+    expect(restored.terminalShapeAllocationBasis).toBe("history");
+    expect(restored.terminalShapeIndependentSettings?.allocationBasis).toBe("equal");
+    expect(restored.terminalShapeIndependentSettings?.selectedShapes).toEqual(["5+3"]);
+  });
   it.each(["off", "auto", "light", "normal", "strong"] as const)("restores monthly transition mode %s and its recorded applied weights", (mode) => {
     const restored = normalizeAppPresetSnapshot(JSON.parse(JSON.stringify(baseSnapshot({
       monthlyBucketTransitionGovernorMode: mode, monthlyBucketTransitionGovernorNumberMultipliers: { 17: 1.25 },

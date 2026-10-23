@@ -1,4 +1,5 @@
 import React, { useMemo } from "react";
+import { ForcedInclusionSummary } from "./shared/ForcedInclusionSummary";
 
 import type { DgaSuppSuggestion } from "../lib/dgaSuppSuggestion";
 import type { MonthlyBucketSets } from "../lib/monthlyDrawSummary";
@@ -73,6 +74,8 @@ export interface DGASimulateStripProps {
   scoringNumberDiagnostics?: Record<number, DGAScoringNumberDiagnostic>;
   suppSuggestion?: DgaSuppSuggestion | null;
   excludedNumbers?: number[];
+  forcedNumbers?: number[];
+  onReviewForcedInclusions?: () => void;
   hoveredNumber?: number | null;
   onHoverNumber?: (value: number | null) => void;
   includeHeaderSpacer?: boolean;
@@ -88,6 +91,8 @@ export const DGASimulateStrip: React.FC<DGASimulateStripProps> = ({
   scoringNumberDiagnostics,
   suppSuggestion,
   excludedNumbers = [],
+  forcedNumbers = [],
+  onReviewForcedInclusions,
   hoveredNumber,
   onHoverNumber,
   includeHeaderSpacer = true,
@@ -147,6 +152,7 @@ export const DGASimulateStrip: React.FC<DGASimulateStripProps> = ({
               {Array.from({ length: 45 }, (_, i) => i + 1).map((n) => {
                 const isUserExcluded = userExcludedSet.has(n);
                 const checked = !isUserExcluded && activeSelectedNumbers.includes(n);
+                const isForced = !isUserExcluded && forcedNumbers.includes(n);
                 const disabled = isUserExcluded;
                 const isHovered = hoveredNumber === n;
                 const bucketColor = stripBucketColor(n, monthlyBuckets);
@@ -192,7 +198,7 @@ export const DGASimulateStrip: React.FC<DGASimulateStripProps> = ({
                           boxShadow: isHovered ? "inset 0 0 0 1px rgba(21,101,192,0.30)" : "none",
                           padding: "0 4px 0 2px",
                         }}
-                        title={`${actionTitle}\n${diagnosticTitle}`}
+                        title={`${actionTitle}\n${diagnosticTitle}${isForced ? "\nForced inclusion from another control; separate from this simulation selection." : ""}`}
                       >
                         <input
                           data-testid={`${testIdPrefix}-number-${n}`}
@@ -223,6 +229,7 @@ export const DGASimulateStrip: React.FC<DGASimulateStripProps> = ({
                         >
                           {n}
                         </span>
+                        {isForced && <span data-testid={`${testIdPrefix}-forced-${n}`} aria-label={`${n} is a forced inclusion`} style={{ fontSize: 9, color: "#166534", fontWeight: 800 }}>F</span>}
                       </label>
                     </td>
                   </tr>
@@ -231,6 +238,7 @@ export const DGASimulateStrip: React.FC<DGASimulateStripProps> = ({
             </tbody>
           </table>
         </div>
+        <ForcedInclusionSummary numbers={forcedNumbers} onReview={onReviewForcedInclusions} compact />
         {selectedNumbers.length > 0 && (
           <button
             type="button"

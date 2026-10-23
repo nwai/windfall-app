@@ -1,11 +1,9 @@
 import React, { useMemo, useState } from "react";
 
 import type { Draw } from "../types";
-import {
-  buildMlndRiskAnalysis,
-  type MlndDrawScope,
-  type MlndRiskRow,
-} from "../lib/mlndExclusionRisk";
+import { type MlndDrawScope, type MlndRiskRow } from "../lib/mlndExclusionRisk";
+import { buildMlndCalibratedAnalysis, selectMlndCalibrationBudget } from "../lib/mlndCalibration";
+import { MlndCalibrationAudit } from "./MlndCalibrationAudit";
 
 interface MostLikelyNotDrawnPanelProps {
   history: Draw[];
@@ -16,6 +14,7 @@ interface MostLikelyNotDrawnPanelProps {
 const BUDGET_OPTIONS = [12, 18, 24, 30, 37] as const;
 
 const panelStyle: React.CSSProperties = {
+  minWidth: 0,
   background: "#f8fafc",
   border: "1px solid #dbe3ef",
   borderRadius: 8,
@@ -29,6 +28,7 @@ const cardGridStyle: React.CSSProperties = {
 };
 
 const cardStyle: React.CSSProperties = {
+  minWidth: 0,
   background: "#ffffff",
   border: "1px solid #e2e8f0",
   borderRadius: 8,
@@ -41,9 +41,9 @@ const subtleTextStyle: React.CSSProperties = {
   lineHeight: 1.45,
 };
 
-const numberPillStyle = (tone: "safe" | "watch" | "neutral" = "neutral"): React.CSSProperties => {
+const numberPillStyle = (tone: "comparison" | "watch" | "neutral" = "neutral"): React.CSSProperties => {
   const palette = {
-    safe: { background: "#ecfdf5", border: "#bbf7d0", color: "#14532d" },
+    comparison: { background: "#eff6ff", border: "#bfdbfe", color: "#0f3a74" },
     watch: { background: "#fff1f2", border: "#fecdd3", color: "#9f1239" },
     neutral: { background: "#eff6ff", border: "#bfdbfe", color: "#0f3a74" },
   }[tone];
@@ -63,12 +63,12 @@ const numberPillStyle = (tone: "safe" | "watch" | "neutral" = "neutral"): React.
   };
 };
 
-const formatNumber = (value: number, digits = 2): string => (
-  Number.isFinite(value) ? value.toFixed(digits) : "0.00"
+const formatNumber = (value: number | null, digits = 2): string => (
+  value != null && Number.isFinite(value) ? value.toFixed(digits) : "n/a"
 );
 
-const formatPercent = (value: number, digits = 1): string => (
-  `${formatNumber(value * 100, digits)}%`
+const formatPercent = (value: number | null, digits = 1): string => (
+  value == null ? "n/a" : `${formatNumber(value * 100, digits)}%`
 );
 
 const scopeLabel = (scope: MlndDrawScope): string => (
@@ -91,32 +91,43 @@ export const MostLikelyNotDrawnPanel: React.FC<MostLikelyNotDrawnPanelProps> = (
   const [showRows, setShowRows] = useState<number>(45);
 
   const sourceHistory = allHistory?.length ? allHistory : history;
-  const analysis = useMemo(
-    () => buildMlndRiskAnalysis(sourceHistory, {
+  const evidence = useMemo(
+    () => buildMlndCalibratedAnalysis(sourceHistory, {
       scope,
-      budget,
       minTrainingDraws,
-      bootstrapIters: 300,
     }),
-    [sourceHistory, scope, budget, minTrainingDraws],
+    [sourceHistory, scope, minTrainingDraws],
   );
+  const budgetAudit = useMemo(() => selectMlndCalibrationBudget(evidence, budget), [evidence, budget]);
+  const analysis = {
+    historyScope: evidence.historyScope, rows: evidence.rows,
+    excludedNumbers: budgetAudit.rawExcluded, allowedNumbers: budgetAudit.rawAllowed,
+    watchNumbers: evidence.rows.slice().sort((a, b) => b.riskScore - a.riskScore || a.number - b.number).slice(0, 8).map(row => row.number),
+    backtest: {
+      meanFalseExcluded: budgetAudit.meanFalseExcluded, randomMeanFalseExcluded: budgetAudit.fairFalseExcluded,
+      deltaVsRandom: budgetAudit.delta.mean, bootstrapCI: budgetAudit.delta.interval95,
+      zeroFalseExclusionRate: evidence.evaluationDraws ? evidence.records.filter(row => row.adjustedBrier != null)
+        .filter(row => !row.points.slice(0, budget).some(point => point.hit)).length / evidence.evaluationDraws : null,
+      drawsEvaluated: evidence.evaluationDraws,
+    },
+  };
 
   const randomExpectedText = `${formatNumber(analysis.backtest.randomMeanFalseExcluded, 2)} drawn ball${Math.abs(analysis.backtest.randomMeanFalseExcluded - 1) < 0.01 ? "" : "s"}`;
-  const modelExpectedText = `${formatNumber(analysis.backtest.meanFalseExcluded, 2)} drawn ball${Math.abs(analysis.backtest.meanFalseExcluded - 1) < 0.01 ? "" : "s"}`;
-  const deltaTone = analysis.backtest.deltaVsRandom > 0 ? "#166534" : analysis.backtest.deltaVsRandom < 0 ? "#be123c" : "#334155";
+  const modelExpectedText = `${formatNumber(analysis.backtest.meanFalseExcluded, 2)} drawn ball${Math.abs((analysis.backtest.meanFalseExcluded ?? 0) - 1) < 0.01 ? "" : "s"}`;
+  const deltaTone = (analysis.backtest.deltaVsRandom ?? 0) > 0 ? "#166534" : (analysis.backtest.deltaVsRandom ?? 0) < 0 ? "#be123c" : "#334155";
   const excludedMonthsText = analysis.historyScope.excludedMonthLabels.length
     ? analysis.historyScope.excludedMonthLabels.join(", ")
     : "none";
-  const visibleRows = analysis.rows.slice(0, showRows);
+  const visibleRows = evidence.currentTrainingDraws >= evidence.minTrainingDraws ? analysis.rows.slice(0, showRows) : [];
 
   return (
-    <div style={panelStyle}>
-      <div style={{ display: "grid", gap: 10 }}>
+    <div style={panelStyle} role="region" aria-label="Most Likely NOT Drawn">
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 10 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
           <div style={{ minWidth: 260, flex: "1 1 420px" }}>
             <div style={{ color: "#0f172a", fontWeight: 850, fontSize: 16 }}>Exclusion Risk Ledger</div>
             <div style={{ ...subtleTextStyle, marginTop: 3 }}>
-              Observe-only ranking of numbers that look least risky to exclude from the next 45-number pool. This does not force generator exclusions.
+              Sequentially adjusted risk estimates alongside the original raw diagnostic ranking. This does not force generator exclusions.
             </div>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end" }}>
@@ -158,29 +169,31 @@ export const MostLikelyNotDrawnPanel: React.FC<MostLikelyNotDrawnPanelProps> = (
           <div style={cardStyle}>
             <div style={subtleTextStyle}>Windfall All History definition</div>
             <div style={{ marginTop: 4, fontWeight: 850, color: "#0f172a" }}>
-              Opening partial month excluded
+              {analysis.historyScope.excludedMonthLabels.length ? "Opening partial month excluded" : "No opening month exclusion"}
             </div>
             <div style={{ ...subtleTextStyle, marginTop: 3 }}>
               Excluded baseline month: {excludedMonthsText}. WFMQYH is ignored here.
             </div>
           </div>
           <div style={cardStyle}>
-            <div style={subtleTextStyle}>Validation verdict</div>
-            <div style={{ marginTop: 4, fontWeight: 850, color: deltaTone }}>
-              {analysis.backtest.verdict}
+            <div style={subtleTextStyle}>Calibration evaluation</div>
+            <div style={{ marginTop: 4, fontWeight: 850, color: "#0f172a" }}>
+              {evidence.evaluationDraws} later target draws
             </div>
             <div style={{ ...subtleTextStyle, marginTop: 3 }}>
-              Walk-forward tests: {analysis.backtest.drawsEvaluated}
+              Raw and adjusted scores tested on the same targets.
             </div>
           </div>
         </div>
 
+        <MlndCalibrationAudit analysis={evidence} budget={budget} />
+
         <div style={{ ...cardStyle, display: "grid", gap: 8 }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
             <div>
-              <div style={{ fontWeight: 850, color: "#0f172a" }}>Risk budget</div>
+              <div style={{ fontWeight: 850, color: "#0f172a" }}>Exclusion comparison budget</div>
               <div style={subtleTextStyle}>
-                Choose how many numbers to exclude. Higher budgets are more aggressive and carry more false-exclusion risk.
+                Inspect a raw comparison set and check whether calibrated evidence supports it. Changing this count does not select numbers or retrain the correction.
               </div>
             </div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
@@ -208,7 +221,7 @@ export const MostLikelyNotDrawnPanel: React.FC<MostLikelyNotDrawnPanelProps> = (
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
             <div style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: 10, background: "#f8fafc" }}>
-              <div style={subtleTextStyle}>Model false exclusions</div>
+              <div style={subtleTextStyle}>Raw model false exclusions</div>
               <div style={{ marginTop: 4, fontSize: 20, fontWeight: 900, color: "#0f172a" }}>{modelExpectedText}</div>
             </div>
             <div style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: 10, background: "#f8fafc" }}>
@@ -218,10 +231,10 @@ export const MostLikelyNotDrawnPanel: React.FC<MostLikelyNotDrawnPanelProps> = (
             <div style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: 10, background: "#f8fafc" }}>
               <div style={subtleTextStyle}>Delta vs random</div>
               <div style={{ marginTop: 4, fontSize: 20, fontWeight: 900, color: deltaTone }}>
-                {analysis.backtest.deltaVsRandom >= 0 ? "+" : ""}{formatNumber(analysis.backtest.deltaVsRandom, 2)}
+                {analysis.backtest.deltaVsRandom != null && analysis.backtest.deltaVsRandom >= 0 ? "+" : ""}{formatNumber(analysis.backtest.deltaVsRandom, 2)}
               </div>
               <div style={subtleTextStyle}>
-                95% bootstrap CI: {analysis.backtest.bootstrapCI ? `${formatNumber(analysis.backtest.bootstrapCI[0], 2)} to ${formatNumber(analysis.backtest.bootstrapCI[1], 2)}` : "n/a"}
+                95% draw-level interval: {analysis.backtest.bootstrapCI ? `${formatNumber(analysis.backtest.bootstrapCI[0], 2)} to ${formatNumber(analysis.backtest.bootstrapCI[1], 2)}` : "n/a"}
               </div>
             </div>
             <div style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: 10, background: "#f8fafc" }}>
@@ -229,7 +242,7 @@ export const MostLikelyNotDrawnPanel: React.FC<MostLikelyNotDrawnPanelProps> = (
               <div style={{ marginTop: 4, fontSize: 20, fontWeight: 900, color: "#0f172a" }}>
                 {formatPercent(analysis.backtest.zeroFalseExclusionRate)}
               </div>
-              <div style={subtleTextStyle}>p-value: {analysis.backtest.pValue === null ? "n/a" : formatNumber(analysis.backtest.pValue, 3)}</div>
+              <div style={subtleTextStyle}>{analysis.backtest.drawsEvaluated} later evaluation draws; raw model only.</div>
             </div>
           </div>
         </div>
@@ -237,20 +250,20 @@ export const MostLikelyNotDrawnPanel: React.FC<MostLikelyNotDrawnPanelProps> = (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 10 }}>
           <div style={cardStyle}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
-              <div style={{ fontWeight: 850, color: "#14532d" }}>Lowest-risk exclusions ({analysis.excludedNumbers.length})</div>
-              <div style={subtleTextStyle}>Ranked least risky first</div>
+              <div style={{ fontWeight: 850, color: "#0f3a74" }}>Raw comparison exclusions ({analysis.excludedNumbers.length})</div>
+              <div style={subtleTextStyle}>Original raw-score order; not a calibrated recommendation</div>
             </div>
             <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 8 }}>
               {analysis.excludedNumbers.map((number) => (
-                <span key={`exclude-${number}`} style={numberPillStyle("safe")}>{number}</span>
+                <span key={`exclude-${number}`} style={numberPillStyle("comparison")}>{number}</span>
               ))}
             </div>
           </div>
 
           <div style={cardStyle}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
-              <div style={{ fontWeight: 850, color: "#9f1239" }}>Allowed / watch list ({analysis.allowedNumbers.length})</div>
-              <div style={subtleTextStyle}>Complement of the exclusions</div>
+              <div style={{ fontWeight: 850, color: "#334155" }}>Raw comparison remainder ({analysis.allowedNumbers.length})</div>
+              <div style={subtleTextStyle}>Complement of the raw set; not predicted winners</div>
             </div>
             <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 8 }}>
               {analysis.allowedNumbers.map((number) => (
@@ -265,7 +278,7 @@ export const MostLikelyNotDrawnPanel: React.FC<MostLikelyNotDrawnPanelProps> = (
             <div>
               <div style={{ fontWeight: 850, color: "#0f172a" }}>Number-level exclusion evidence</div>
               <div style={subtleTextStyle}>
-                Rows are sorted by lowest estimated draw risk first. Lower risk means safer to exclude, not guaranteed absent.
+                Rows retain the original raw-score order for comparison. Adjusted risks come from earlier out-of-sample outcomes; equal values mean tied evidence, not distinct ranks.
               </div>
             </div>
             <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "#334155" }}>
@@ -287,16 +300,16 @@ export const MostLikelyNotDrawnPanel: React.FC<MostLikelyNotDrawnPanelProps> = (
               <thead>
                 <tr style={{ background: "#f8fafc", color: "#475569" }}>
                   <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #e2e8f0" }}>#</th>
-                  <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid #e2e8f0" }}>Risk</th>
-                  <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid #e2e8f0" }}>Vs base</th>
-                  <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid #e2e8f0" }}>Score</th>
+                  <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid #e2e8f0" }}>Adjusted risk</th>
+                  <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid #e2e8f0" }}>Raw index</th>
+                  <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid #e2e8f0" }}>Raw score</th>
                   <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #e2e8f0" }}>Current gap</th>
                   <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid #e2e8f0" }}>13</th>
                   <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid #e2e8f0" }}>26</th>
                   <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid #e2e8f0" }}>52</th>
                   <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid #e2e8f0" }}>Full</th>
-                  <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid #e2e8f0" }}>Hazard</th>
-                  <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #e2e8f0" }}>Reason</th>
+                  <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid #e2e8f0" }}>Raw hazard</th>
+                  <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #e2e8f0" }}>Raw inputs</th>
                 </tr>
               </thead>
               <tbody>
@@ -304,12 +317,12 @@ export const MostLikelyNotDrawnPanel: React.FC<MostLikelyNotDrawnPanelProps> = (
                   const inExcludedSet = analysis.excludedNumbers.includes(row.number);
                   const inWatchSet = analysis.watchNumbers.includes(row.number);
                   return (
-                    <tr key={row.number} style={{ background: inExcludedSet ? "#f8fffb" : inWatchSet ? "#fff7f8" : "#ffffff" }}>
+                    <tr key={row.number} style={{ background: inExcludedSet ? "#f6faff" : inWatchSet ? "#fff7f8" : "#ffffff" }}>
                       <td style={{ padding: 8, borderBottom: "1px solid #edf2f7" }}>
-                        <span style={numberPillStyle(inExcludedSet ? "safe" : inWatchSet ? "watch" : "neutral")}>{row.number}</span>
+                        <span style={numberPillStyle(inExcludedSet ? "comparison" : inWatchSet ? "watch" : "neutral")}>{row.number}</span>
                       </td>
-                      <td style={{ padding: 8, borderBottom: "1px solid #edf2f7", textAlign: "right", ...riskTone(row) }}>{formatNumber(row.riskPercent, 2)}%</td>
-                      <td style={{ padding: 8, borderBottom: "1px solid #edf2f7", textAlign: "right" }}>{formatNumber(row.liftVsBaseline, 2)}x</td>
+                      <td style={{ padding: 8, borderBottom: "1px solid #edf2f7", textAlign: "right", fontWeight: 800 }}>{formatPercent(row.adjustedRisk, 2)}</td>
+                      <td style={{ padding: 8, borderBottom: "1px solid #edf2f7", textAlign: "right", ...riskTone(row) }}>{formatNumber(row.riskPercent, 2)}</td>
                       <td style={{ padding: 8, borderBottom: "1px solid #edf2f7", textAlign: "right" }}>{formatNumber(row.exclusionScore, 1)}</td>
                       <td style={{ padding: 8, borderBottom: "1px solid #edf2f7" }}>{row.currentGapLabel}</td>
                       <td style={{ padding: 8, borderBottom: "1px solid #edf2f7", textAlign: "right" }}>{row.recent13Hits}</td>
@@ -341,7 +354,7 @@ export const MostLikelyNotDrawnPanel: React.FC<MostLikelyNotDrawnPanelProps> = (
             lineHeight: 1.45,
           }}
         >
-          <b>Truthfulness note:</b> Excluding {budget} numbers leaves {45 - budget} allowed numbers, so a 37-number exclusion list is mathematically equivalent to proposing an 8-number draw universe. Treat this as calibrated exclusion-risk evidence, not as a promise that the listed numbers cannot appear.
+          <b>Truthfulness note:</b> Excluding {budget} numbers leaves {45 - budget} available numbers, so a 37-number exclusion list is mathematically equivalent to proposing an 8-number draw universe. The raw lists are diagnostic comparisons only. The adjusted-risk column uses a fitted sequential correction; calibration does not imply predictive advantage or guarantee absence. Unsupported or tied evidence never becomes a calibrated exclusion recommendation.
         </div>
       </div>
     </div>

@@ -1,0 +1,78 @@
+.terminal-leadership {
+  color: #25313b;
+  font-size: 12px;
+  line-height: 1.5;
+  min-width: 0;
+}
+.terminal-leadership__scope,
+.terminal-leadership__summary {
+  display: grid;
+  gap: 4px;
+  padding-block: 8px;
+  border-bottom: 1px solid #d6dce2;
+}
+.terminal-leadership__scope strong { color: #206445; }
+.terminal-leadership__scope span,
+.terminal-leadership__note { color: #52606c; }
+.terminal-leadership__definition {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding-block: 10px;
+}
+.terminal-leadership__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.terminal-leadership .windfall-hig-field { margin-top: 12px; max-width: 320px; }
+.terminal-leadership select {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid #aebbc6;
+  border-radius: 6px;
+  background: #fff;
+  color: #25313b;
+  font: inherit;
+  padding: 7px 8px;
+}
+.terminal-leadership__scroll {
+  max-height: 360px;
+  overflow: auto;
+  margin-block: 10px;
+  border: 1px solid #ccd5de;
+  border-radius: 6px;
+  scrollbar-gutter: stable;
+}
+.terminal-leadership__scroll table {
+  width: 100%;
+  min-width: 700px;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.terminal-leadership__scroll thead { position: sticky; top: 0; z-index: 2; background: #eff4f8; }
+.terminal-leadership__scroll th,
+.terminal-leadership__scroll td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #e0e6ec;
+  text-align: right;
+  white-space: nowrap;
+}
+.terminal-leadership__scroll th:first-child,
+.terminal-leadership__table-title { text-align: left !important; }
+.terminal-leadership__scroll tbody th { font-weight: 600; }
+.terminal-leadership__scroll tbody tr:nth-child(even) { background: #f8fafc; }
+.terminal-leadership__scroll tbody tr:nth-child(odd) { background: #fff; }
+.terminal-leadership__numbers { font-weight: 700; }
+.terminal-leadership__numbers.is-strict { color: #ae2440; }
+.terminal-leadership__numbers.is-empirical { color: #1959a5; }
+.terminal-leadership__members { display: flex; flex-wrap: wrap; gap: 4px 10px; justify-content: flex-end; }
+.terminal-leadership__members > span { display: inline-flex; align-items: baseline; gap: 4px; }
+.terminal-leadership__members small { color: #536476; font-size: 11px; }
+.terminal-leadership__warnings { padding: 4px 10px; border-left: 3px solid #b47d17; background: #fffaf0; }
+@media (max-width: 620px) {
+  .terminal-leadership__controls .windfall-hig-button { min-height: 44px; }
+  .terminal-leadership .windfall-hig-field { max-width: none; }
+}

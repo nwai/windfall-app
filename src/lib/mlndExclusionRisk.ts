@@ -114,28 +114,24 @@ export const buildMlndHistoryScope = (history: Draw[]): MlndHistoryScope => {
 };
 
 const weightedHits = (
-  history: Draw[],
-  scope: MlndDrawScope,
-  number: number,
+  draws: readonly number[][],
   lookback: number,
-): { hits: number; weightedRate: number } => {
-  const slice = history.slice(-Math.max(1, Math.min(lookback, history.length)));
-  if (!slice.length) return { hits: 0, weightedRate: 0 };
+): { hits: number; weightedRate: number }[] => {
+  const slice = draws.slice(-Math.max(1, Math.min(lookback, draws.length)));
   const halfLife = Math.max(2, slice.length / 3);
-  let numerator = 0;
+  const hits = Array<number>(46).fill(0);
+  const numerators = Array<number>(46).fill(0);
   let denominator = 0;
-  let hits = 0;
-  slice.forEach((draw, index) => {
+  slice.forEach((numbers, index) => {
     const age = slice.length - 1 - index;
     const weight = Math.exp(-age / halfLife);
-    const appeared = drawNumbersForScope(draw, scope).includes(number);
-    if (appeared) {
-      hits += 1;
-      numerator += weight;
+    for (const number of numbers) {
+      hits[number]++;
+      numerators[number] += weight;
     }
     denominator += weight;
   });
-  return { hits, weightedRate: denominator > 0 ? numerator / denominator : 0 };
+  return hits.map((count, number) => ({ hits: count, weightedRate: denominator > 0 ? numerators[number] / denominator : 0 }));
 };
 
 const currentGapForNumber = (history: Draw[], scope: MlndDrawScope, number: number): number => {
@@ -148,23 +144,28 @@ const currentGapForNumber = (history: Draw[], scope: MlndDrawScope, number: numb
 };
 
 interface HazardSamples {
-  perNumber: Map<number, { gap: number; hit: boolean }[]>;
-  global: { gap: number; hit: boolean }[];
+  perNumber: Map<number, Map<number, { hits: number; trials: number }>>;
+  global: Map<number, { hits: number; trials: number }>;
 }
 
 const buildHazardSamples = (history: Draw[], scope: MlndDrawScope): HazardSamples => {
   const gaps = Array(46).fill(0);
-  const perNumber = new Map<number, { gap: number; hit: boolean }[]>();
-  const global: { gap: number; hit: boolean }[] = [];
-  NUMBER_POOL.forEach((number) => perNumber.set(number, []));
+  const perNumber: HazardSamples["perNumber"] = new Map();
+  const global: HazardSamples["global"] = new Map();
+  NUMBER_POOL.forEach((number) => perNumber.set(number, new Map()));
 
   history.forEach((draw) => {
     const drawn = new Set(drawNumbersForScope(draw, scope));
     NUMBER_POOL.forEach((number) => {
-      const sample = { gap: gaps[number], hit: drawn.has(number) };
-      perNumber.get(number)?.push(sample);
-      global.push(sample);
-      gaps[number] = sample.hit ? 0 : gaps[number] + 1;
+      const gap = gaps[number];
+      const hit = drawn.has(number);
+      for (const counters of [perNumber.get(number)!, global]) {
+        const counter = counters.get(gap) ?? { hits: 0, trials: 0 };
+        counter.trials++;
+        counter.hits += Number(hit);
+        counters.set(gap, counter);
+      }
+      gaps[number] = hit ? 0 : gap + 1;
     });
   });
 
@@ -185,19 +186,28 @@ const estimateHazardRisk = (
   currentGap: number,
   baselineRisk: number,
 ): { risk: number; hits: number; trials: number } => {
-  const local = (samples.perNumber.get(number) ?? []).filter((sample) => similarGap(sample.gap, currentGap));
-  const global = samples.global.filter((sample) => similarGap(sample.gap, currentGap));
-  const localHits = local.filter((sample) => sample.hit).length;
-  const globalHits = global.filter((sample) => sample.hit).length;
-  const globalTrials = global.length;
+  const totals = (counters: Map<number, { hits: number; trials: number }>) => {
+    let hits = 0, trials = 0;
+    for (const [gap, counter] of counters) {
+      if (!similarGap(gap, currentGap)) continue;
+      hits += counter.hits;
+      trials += counter.trials;
+    }
+    return { hits, trials };
+  };
+  const local = totals(samples.perNumber.get(number)!);
+  const global = totals(samples.global);
+  const localHits = local.hits;
+  const globalHits = global.hits;
+  const globalTrials = global.trials;
   const globalRate = globalTrials > 0 ? globalHits / globalTrials : baselineRisk;
   const priorStrength = 18;
   const localPrior = Math.max(0, globalRate) * priorStrength;
-  const risk = (localHits + localPrior) / (local.length + priorStrength);
+  const risk = (localHits + localPrior) / (local.trials + priorStrength);
   return {
     risk,
     hits: localHits,
-    trials: local.length,
+    trials: local.trials,
   };
 };
 
@@ -225,14 +235,18 @@ export const buildMlndRiskRows = (
   const baselineRisk = drawSize / 45;
   const hazardSamples = buildHazardSamples(history, scope);
   const maxRiskCap = Math.max(0.0001, baselineRisk * 2.2);
+  const drawn = history.map(draw => drawNumbersForScope(draw, scope));
+  const recent13Rows = weightedHits(drawn, 13);
+  const recent26Rows = weightedHits(drawn, 26);
+  const recent52Rows = weightedHits(drawn, 52);
+  const fullCounts = Array<number>(46).fill(0);
+  for (const numbers of drawn) for (const number of numbers) fullCounts[number]++;
 
   const rawRows = NUMBER_POOL.map((number) => {
-    const recent13 = weightedHits(history, scope, number, 13);
-    const recent26 = weightedHits(history, scope, number, 26);
-    const recent52 = weightedHits(history, scope, number, 52);
-    const fullHits = history.reduce((count, draw) => (
-      count + (drawNumbersForScope(draw, scope).includes(number) ? 1 : 0)
-    ), 0);
+    const recent13 = recent13Rows[number];
+    const recent26 = recent26Rows[number];
+    const recent52 = recent52Rows[number];
+    const fullHits = fullCounts[number];
     const longRisk = (fullHits + baselineRisk * 24) / (history.length + 24);
     const currentGap = currentGapForNumber(history, scope, number);
     const hazard = estimateHazardRisk(hazardSamples, number, currentGap, baselineRisk);

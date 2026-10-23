@@ -1,9 +1,15 @@
-import React, { useMemo } from "react";
+import React, { useId, useMemo, useState } from "react";
 import type { Draw } from "../types";
 import { formatUserExclusionReminder, normalizeUserExclusionLocks } from "../lib/userExclusionLocks";
+import { filterRealDrawHistory } from "../lib/realDrawHistory";
+import { sortDrawsChronologically } from "../lib/recentDraws";
+import { strictValidateDraws } from "../lib/strictDrawValidation";
+import { formatIsoDateAsMdyy, normalizeHistoryDate } from "../lib/drawHistoryReview";
+import { InfoHelp } from "./shared/HigControls";
+import { NumberTrendMovementReplay } from "./NumberTrendMovementReplay";
+import { calculateNumberTrendRate, NUMBER_TREND_WEEK_DRAW_WINDOW, NUMBER_TREND_MONTH_DRAW_WINDOW } from "../lib/numberTrendMovement";
 
-export const NUMBER_TREND_WEEK_DRAW_WINDOW = 3;
-export const NUMBER_TREND_MONTH_DRAW_WINDOW = 13;
+export { NUMBER_TREND_WEEK_DRAW_WINDOW, NUMBER_TREND_MONTH_DRAW_WINDOW } from "../lib/numberTrendMovement";
 
 export type NumberTrend = {
   number: number;   // 1..45
@@ -27,6 +33,9 @@ export function NumberTrendsTable({
   externalSelectedLabel = "external forced selection",
   // New optional props to support usage in App.tsx
   history,
+  allHistory,
+  strictDroughtNumbers,
+  empiricalDroughtNumbers,
   excludedNumbers,
   trendSelectedNumbers,
   onExcludeToggle,
@@ -40,26 +49,47 @@ export function NumberTrendsTable({
   externalSelectedLabel?: string;
   // New optional props
   history?: Draw[];
+  allHistory?: Draw[];
+  strictDroughtNumbers?: readonly number[];
+  empiricalDroughtNumbers?: readonly number[];
   excludedNumbers?: number[];
   trendSelectedNumbers?: number[];
   onExcludeToggle?: (n: number) => void;
   onTrendSelectToggle?: (n: number) => void;
   onTrace?: (line: string) => void;
 }) {
-  // Compute trends from history if provided and no trends passed
+  const sourceId = useId();
+  const [historySource, setHistorySource] = useState<"window" | "all">("window");
+  const canSwitchSource = history !== undefined && allHistory !== undefined;
+  const useAllHistory = canSwitchSource && historySource === "all";
+  const sourceHistory = useAllHistory ? allHistory : history;
+  const evidence = useMemo(() => {
+    if (sourceHistory === undefined) return undefined;
+    const real = filterRealDrawHistory(sourceHistory, "Number Trends");
+    const valid = strictValidateDraws(real.history);
+    return { history: sortDrawsChronologically(valid), simulated: real.simulatedRowsIgnored, invalid: real.history.length - valid.length };
+  }, [sourceHistory]);
+  const analysisHistory = evidence?.history;
+  const recentDrawCount = Math.min(NUMBER_TREND_WEEK_DRAW_WINDOW, analysisHistory?.length ?? NUMBER_TREND_WEEK_DRAW_WINDOW);
+  const comparisonDrawCount = Math.min(NUMBER_TREND_MONTH_DRAW_WINDOW, analysisHistory?.length ?? NUMBER_TREND_MONTH_DRAW_WINDOW);
+  const dateLabel = (date: string) => formatIsoDateAsMdyy(normalizeHistoryDate(date));
+  const strictDroughtSet = useMemo(() => new Set(strictDroughtNumbers), [strictDroughtNumbers]);
+  const empiricalDroughtSet = useMemo(() => new Set(empiricalDroughtNumbers), [empiricalDroughtNumbers]);
+
+  // Keep this view's scope separate from the WFMQYH trend data used elsewhere.
   const computedTrends: NumberTrend[] = useMemo(() => {
-    if (!history || !history.length) return trends || [];
+    if (analysisHistory === undefined) return trends || [];
     const counts = (windowSize: number): number[] => {
       const arr = Array(46).fill(0) as number[];
-      const window = history.slice(-windowSize);
+      const window = analysisHistory.slice(-windowSize);
       for (const d of window) {
-        for (const n of [...d.main, ...d.supp]) arr[n] += 1;
+        for (const n of new Set([...d.main, ...d.supp])) arr[n] += 1;
       }
       return arr;
     };
     const allCounts = (() => {
       const arr = Array(46).fill(0) as number[];
-      for (const d of history) for (const n of [...d.main, ...d.supp]) arr[n] += 1;
+      for (const d of analysisHistory) for (const n of new Set([...d.main, ...d.supp])) arr[n] += 1;
       return arr;
     })();
     const d3 = counts(3);
@@ -81,7 +111,7 @@ export function NumberTrendsTable({
       all: allCounts[n] || 0,
     }));
     return res;
-  }, [history, trends]);
+  }, [analysisHistory, trends]);
 
   const ownSelected = trendSelectedNumbers || selected || [];
   const externalSelected = externalSelectedNumbers || [];
@@ -135,16 +165,7 @@ export function NumberTrendsTable({
 
   // Helpers for Δ column: latest week versus a typical calendar month.
   const colorForNumber = (n: number) => `hsl(${(n * 23) % 360}, 70%, 45%)`;
-  const shortTermDeltaPP = (t: NumberTrend) => {
-    const r3 = t.d3 / NUMBER_TREND_WEEK_DRAW_WINDOW;
-    const r13 = t.month / NUMBER_TREND_MONTH_DRAW_WINDOW;
-    const delta = r3 - r13;
-    const deltaPP = delta * 100;
-    const THRESH = 0.055;
-    const dir: "up" | "down" | "flat" =
-      delta > THRESH ? "up" : delta < -THRESH ? "down" : "flat";
-    return { r3, r13, deltaPP, dir };
-  };
+  const shortTermDeltaPP = (t: NumberTrend) => calculateNumberTrendRate(t.d3, t.month, recentDrawCount, comparisonDrawCount);
 
   const Arrow = ({
     dir,
@@ -187,6 +208,32 @@ export function NumberTrendsTable({
 
   return (
     <section className="windfall-number-trends" aria-label="Number trends by five-number range">
+      {canSwitchSource && (
+        <div className="windfall-number-trends__source-controls">
+          <fieldset>
+            <legend>History source</legend>
+            <label><input type="radio" name={`${sourceId}-history`} checked={!useAllHistory} onChange={() => setHistorySource("window")} />WFMQYH</label>
+            <label><input type="radio" name={`${sourceId}-history`} checked={useAllHistory} onChange={() => setHistorySource("all")} />All history</label>
+          </fieldset>
+          <span className="windfall-number-trends__note">Local to Number Trends; does not change global WFMQYH or generation.</span>
+          <InfoHelp label="About Number Trends history sources">
+            WFMQYH uses the active global draw window or range. All history uses every loaded real draw, including the opening partial month;
+            it is not the baseline-month slice. Simulated and malformed rows are not counted.
+            Each D count uses up to that many newest draws in the chosen source; All totals that source.
+            Short counts may stay the same in both views when the newest draws are shared.
+            Arrows and selected-number chart lines follow this local view. Forced inclusions and exclusions remain shared and unchanged.
+          </InfoHelp>
+        </div>
+      )}
+      {analysisHistory !== undefined && (
+        <div className="windfall-number-trends__scope windfall-number-trends__note" role="status">
+          <strong>{useAllHistory ? "All history" : "WFMQYH"} · {analysisHistory.length} real {analysisHistory.length === 1 ? "draw" : "draws"}</strong>
+          {analysisHistory.length > 0 && <span>{dateLabel(analysisHistory[0].date)} to {dateLabel(analysisHistory[analysisHistory.length - 1].date)}</span>}
+          <span>Mains + supps · All = total in this source</span>
+          {evidence && (evidence.simulated > 0 || evidence.invalid > 0) && <span>Ignored: {evidence.simulated} simulated, {evidence.invalid} malformed rows.</span>}
+        </div>
+      )}
+      <NumberTrendMovementReplay history={sourceHistory} sourceLabel={useAllHistory ? "All history" : "WFMQYH"} />
       {userExclusionReminder && (
         <div
           role="status"
@@ -196,6 +243,17 @@ export function NumberTrendsTable({
           {userExclusionReminder}. Clear the manual exclusion or turn off the rule that excludes them before selecting them here.
         </div>
       )}
+      {analysisHistory?.length === 0 ? <p className="windfall-number-trends__note" role="status">No real draws in this source. Historical counts and trend rates are unavailable.</p> : <>
+      <div className="windfall-number-trends__drought-key windfall-number-trends__note">
+        <span>Live drought flags: Strict / Empirical · Yes = on that shortlist, No = not listed.</span>
+        <InfoHelp label="About Number Trends drought flags">
+          Flags mirror the current top-eight lists in Drought-break shortlist, before generation exclusions.
+          Strict uses the full-history current drought of six or more draws; Empirical uses the active global WFMQYH evidence.
+          Switching this panel's History source does not recalculate the drought lists. A new real draw or a global WFMQYH change refreshes their membership.
+          A number may belong to both lists. Red Strict Yes and blue Empirical Yes identify membership only, not a prediction, boost, or forced inclusion.
+          An excluded number can still be listed but remains unavailable to select. n/a means the shortlist data is unavailable, not No.
+        </InfoHelp>
+      </div>
       <div className="windfall-number-trends__grid">
         {trendBlocks.map((block) => (
           <section
@@ -222,6 +280,9 @@ export function NumberTrendsTable({
                 const arrowColor = dir === "flat" ? "#666666" : clr;
                 const directionLabel = dir === "up" ? "Up" : dir === "down" ? "Down" : "Flat";
                 const signedDelta = `${deltaPP >= 0 ? "+" : ""}${deltaPP.toFixed(1)}`;
+                const strictMember = strictDroughtNumbers === undefined ? undefined : strictDroughtSet.has(trend.number);
+                const empiricalMember = empiricalDroughtNumbers === undefined ? undefined : empiricalDroughtSet.has(trend.number);
+                const droughtDescriptionId = `${sourceId}-drought-${trend.number}`;
                 const ariaLabel = isUserExcluded
                   ? `Number ${trend.number} is unavailable because it is excluded`
                   : isExternalOnly
@@ -244,6 +305,7 @@ export function NumberTrendsTable({
                     data-user-excluded={isUserExcluded ? "true" : undefined}
                     aria-pressed={isSelected}
                     aria-label={ariaLabel}
+                    aria-describedby={droughtDescriptionId}
                     disabled={isExternalOnly || isUserExcluded}
                     title={title}
                     style={{ "--number-trend-color": arrowColor } as React.CSSProperties}
@@ -267,13 +329,20 @@ export function NumberTrendsTable({
                       <Metric label="All" value={trend.all} />
                     </span>
 
-                    <span
-                      className="windfall-number-trend-row__delta"
-                      aria-label={`Short-term rate ${directionLabel}: 3D ${(r3 * 100).toFixed(1)} percent versus 13D ${(r13 * 100).toFixed(1)} percent, delta ${signedDelta} percentage points`}
-                    >
-                      <Arrow dir={dir} color={clr} sizePx={16} />
-                      <span>{directionLabel}</span>
-                      <strong>{signedDelta}</strong>
+                    <span className="windfall-number-trend-row__context">
+                      <span
+                        className="windfall-number-trend-row__delta"
+                        aria-label={`Short-term rate ${directionLabel}: 3D ${(r3 * 100).toFixed(1)} percent versus 13D ${(r13 * 100).toFixed(1)} percent, delta ${signedDelta} percentage points; available draws ${recentDrawCount} and ${comparisonDrawCount}`}
+                      >
+                        <Arrow dir={dir} color={clr} sizePx={16} />
+                        <span>{directionLabel}</span>
+                        <strong>{signedDelta}</strong>
+                      </span>
+                      <span className="windfall-number-trend-row__drought-flags" id={droughtDescriptionId}
+                        aria-label={`Current Strict drought shortlist: ${droughtFlagText(strictMember)}; current Empirical hazard shortlist: ${droughtFlagText(empiricalMember)}`}>
+                        <DroughtFlag family="strict" member={strictMember} />
+                        <DroughtFlag family="empirical" member={empiricalMember} />
+                      </span>
                     </span>
                   </button>
                 );
@@ -285,15 +354,28 @@ export function NumberTrendsTable({
 
       {/* Mini chart with slope arrows */}
       <div className="windfall-number-trends__chartScroller">
-        <TrendMiniChart series={selectedSeries} />
+        <TrendMiniChart series={selectedSeries} recentDrawCount={recentDrawCount} comparisonDrawCount={comparisonDrawCount} />
       </div>
 
       {/* Optional legend for the new column */}
       <div className="windfall-number-trends__note">
-        Δ 3→13 (pp) = (3D count / 3) − (13D count / 13). Positive = heating; negative = cooling.
+        Δ 3→13 (pp) = (3D count / {recentDrawCount}) − (13D count / {comparisonDrawCount}), multiplied by 100.
+        {" "}Uses {recentDrawCount} and {comparisonDrawCount} available draws in this source. Positive = heating; negative = cooling. Descriptive, not a next-draw probability.
       </div>
+      </>}
     </section>
   );
+}
+
+function droughtFlagText(member: boolean | undefined): string {
+  return member === undefined ? "unavailable" : member ? "Yes" : "No";
+}
+
+function DroughtFlag({ family, member }: { family: "strict" | "empirical"; member: boolean | undefined }) {
+  return <span className="windfall-number-trend-drought-flag" data-drought-family={family}
+    data-drought-status={member === undefined ? "unavailable" : member ? "yes" : "no"}>
+    {family === "strict" ? "Strict" : "Empirical"} {member === undefined ? "n/a" : droughtFlagText(member)}
+  </span>;
 }
 
 function emptyTrend(number: number): NumberTrend {
@@ -321,10 +403,14 @@ function Metric({ label, value }: { label: string; value: number }) {
 
 function TrendMiniChart({
   series,
+  recentDrawCount,
+  comparisonDrawCount,
   width = 1000,
   height = 260,
 }: {
   series: { number: number; values: number[] }[];
+  recentDrawCount: number;
+  comparisonDrawCount: number;
   width?: number;
   height?: number;
 }) {
@@ -344,7 +430,7 @@ function TrendMiniChart({
           background: "#fafafa",
         }}
       >
-        Select numbers above to visualize their trend over time…
+        Select numbers above to compare their counts across draw-window sizes…
       </div>
     );
   }
@@ -367,9 +453,6 @@ function TrendMiniChart({
   const colorForNumber = (n: number) => `hsl(${(n * 23) % 360}, 70%, 45%)`;
   const buildPath = (vals: number[]) =>
     vals.map((v, i) => `${i === 0 ? "M" : "L"} ${xToPx(i)} ${yToPx(v)}`).join(" ");
-
-  // Threshold for Δ 3→13 in pp per draw
-  const THRESH = 0.055;
 
   // Arrow utility with tooltip
   const arrowShape = (
@@ -408,7 +491,7 @@ function TrendMiniChart({
       width={width}
       height={height}
       role="img"
-      aria-label="Number trend lines for selected numbers"
+      aria-label="Draw-window count comparison for selected numbers"
       style={{ display: "block", background: "#fff", border: "1px solid #eee", borderRadius: 8 }}
     >
       {/* X axis */}
@@ -441,14 +524,11 @@ function TrendMiniChart({
         const c = colorForNumber(s.number);
         const v3 = s.values[0];   // first label is 3D
         const v13 = s.values[3];  // fourth label is 13D
-        const r3 = v3 / NUMBER_TREND_WEEK_DRAW_WINDOW;
-        const r13 = v13 / NUMBER_TREND_MONTH_DRAW_WINDOW;
-        const delta = r3 - r13;
-        const dir: "up" | "down" | "flat" = delta > THRESH ? "up" : delta < -THRESH ? "down" : "flat";
-        const size = 8 + Math.min(6, Math.abs(delta) * 100); // scale with pp magnitude, capped
+        const { r3, r13, deltaPP, dir } = calculateNumberTrendRate(v3, v13, recentDrawCount, comparisonDrawCount);
+        const size = 8 + Math.min(6, Math.abs(deltaPP)); // scale with pp magnitude, capped
         const x = arrowX === arrowXBase - 12 ? arrowX : arrowXAlt;
         const y = yToPx(v3);
-        const tooltip = `#${s.number} short-term rate: 3D ${(r3 * 100).toFixed(1)}% vs 13D ${(r13 * 100).toFixed(1)}% • Δ ${(delta * 100).toFixed(1)} pp (${dir})`;
+        const tooltip = `#${s.number} short-term rate: 3D ${(r3 * 100).toFixed(1)}% vs 13D ${(r13 * 100).toFixed(1)}% • Δ ${deltaPP.toFixed(1)} pp (${dir})`;
 
         return (
           <g key={`arrow-${s.number}`}>

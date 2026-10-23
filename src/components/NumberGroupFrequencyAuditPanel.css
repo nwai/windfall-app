@@ -1,0 +1,33 @@
+.number-group-audit { min-width: 0; font-size: 13px; line-height: 1.45; color: #202124; }
+.number-group-audit__status { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: baseline; padding: 8px 0; }
+.number-group-audit__status span, .number-group-audit__scope { color: #545a62; font-size: 12px; }
+.number-group-audit__controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 12px 0; border-bottom: 1px solid #d6d9df; }
+.number-group-audit__controls .windfall-hig-field { flex: 1 1 240px; min-width: 0; }
+.number-group-audit__controls select { min-height: 32px; width: 100%; max-width: 100%; }
+.number-group-audit__controls button { min-height: 32px; min-width: 32px; }
+.number-group-audit section { margin: 20px 0; min-width: 0; }
+.number-group-audit h3 { font-size: 15px; margin: 0 0 6px; }
+.number-group-audit p { margin: 8px 0; }
+.number-group-audit__notice { border-left: 3px solid #996400; background: #fff8e5; padding: 8px 12px; }
+.number-group-audit .number-group-audit__scroll { max-height: 360px; max-width: 100%; overflow: auto; border: 1px solid #d6d9df; border-radius: 4px; isolation: isolate; }
+.number-group-audit__scroll table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12px; font-variant-numeric: tabular-nums; }
+.number-group-audit__scroll caption { text-align: left; background: #f0f2f5; font-weight: 600; position: sticky; top: 0; height: 32px; box-sizing: border-box; padding: 7px 10px; z-index: 22; white-space: nowrap; }
+.number-group-audit .number-group-audit__scroll table > thead { position: sticky; top: 32px; z-index: 21; background: #f7f8fa; }
+.number-group-audit__scroll th, .number-group-audit__scroll td { padding: 7px 10px; border-bottom: 1px solid #e3e5e9; text-align: right; white-space: nowrap; vertical-align: middle; }
+.number-group-audit__scroll th:first-child, .number-group-audit__scroll td:nth-child(2) { text-align: left; }
+.number-group-audit__scroll tbody th { font-weight: 500; }
+.number-group-audit__scroll tbody tr:nth-child(even) { background: #fafbfc; }
+.number-group-audit__scroll small { display: block; color: #545a62; }
+.number-group-audit__details { border-top: 1px solid #d6d9df; padding: 8px 0; margin-top: 12px; }
+.number-group-audit__details > summary { cursor: pointer; min-height: 32px; align-content: center; font-weight: 600; }
+.number-group-audit__mains { color: #b42333; font-weight: 600; }
+.number-group-audit__supps { color: #207144; font-weight: 600; }
+.number-group-audit__trace { max-height: 260px; max-width: 100%; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; padding: 10px; background: #f0f2f5; }
+.number-group-audit__replay-inspect { min-width: 0; margin-top: 12px; }
+@media (max-width: 640px) {
+  .number-group-audit__controls .windfall-hig-field { flex-basis: 100%; }
+  .number-group-audit__controls select, .number-group-audit__controls button, .number-group-audit__details > summary { min-height: 44px; }
+  .number-group-audit__controls button { min-width: 44px; }
+  .number-group-generator-replay button { min-height: 44px; min-width: 44px; }
+  .number-group-audit .number-group-audit__scroll { max-height: 340px; }
+}

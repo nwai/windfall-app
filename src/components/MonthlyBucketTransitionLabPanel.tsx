@@ -13,10 +13,15 @@ import {
   type MonthlyUndrawnSurvivalRow,
 } from "../lib/monthlyBucketTransitions";
 import MonthlyStageEvidenceAuditCard from "./MonthlyStageEvidenceAuditCard";
+import type { MonthlyBucketTransitionGovernorProfile } from "../lib/monthlyBucketTransitionGovernor";
+import { MonthlyTransitionInfluenceSummary } from "./MonthlyTransitionInfluenceSummary";
 import { HigField, InfoHelp } from "./shared/HigControls";
 
 interface MonthlyBucketTransitionLabPanelProps {
   history: Draw[];
+  monthlyTransitionInfluenceProfile?: MonthlyBucketTransitionGovernorProfile | null;
+  monthlyTransitionBypassed?: boolean;
+  onEditMonthlyTransitionInfluence?: () => void;
 }
 
 type MonthLengthControl = "auto" | MonthlyTransitionLengthFilter;
@@ -467,7 +472,12 @@ const HeatBucketTable: React.FC<{ rows: MonthlyHeatBucketRow[] }> = ({ rows }) =
   </div>
 );
 
-export const MonthlyBucketTransitionLabPanel: React.FC<MonthlyBucketTransitionLabPanelProps> = ({ history }) => {
+export const MonthlyBucketTransitionLabPanel: React.FC<MonthlyBucketTransitionLabPanelProps> = ({
+  history,
+  monthlyTransitionInfluenceProfile,
+  monthlyTransitionBypassed = false,
+  onEditMonthlyTransitionInfluence,
+}) => {
   const [includeSupp, setIncludeSupp] = useState(true);
   const [monthLengthControl, setMonthLengthControl] = useState<MonthLengthControl>("auto");
 
@@ -545,6 +555,13 @@ export const MonthlyBucketTransitionLabPanel: React.FC<MonthlyBucketTransitionLa
           </select>
         </HigField>
       </div>
+
+      <MonthlyTransitionInfluenceSummary
+        profile={monthlyTransitionInfluenceProfile}
+        bypassedByRandomCoverage={monthlyTransitionBypassed}
+        referenceOnly
+        onEdit={onEditMonthlyTransitionInfluence}
+      />
 
       <div style={metricGridStyle}>
         <Metric label="Planning State" value={analysis.planningState ? `D${analysis.planningState.nextDrawOrdinal}` : "n/a"} detail={planningDetail} />

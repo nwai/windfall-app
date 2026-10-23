@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { HigButton } from "../shared/HigControls";
 import type { Draw, KeptGeneratedCandidateRow } from "../../types";
 import {
   buildPortfolioAdjacentComboEvidence,
@@ -42,6 +43,8 @@ interface PortfolioCompressionPanelProps {
   monthEndCarryOverBiasEnabled?: boolean;
   monthEndCarryOverWeights?: Record<number, number> | undefined;
   hotColdRows?: readonly PortfolioHotColdEvidenceRow[];
+  hotColdScopeLabel?: string;
+  onEditHotColdSettings?: () => void;
   windowShapeRows?: readonly PortfolioWindowShapeEvidenceDisplayRow[];
   adjacentComboHistory?: readonly Draw[];
   monthlyBuckets?: MonthlyBucketSets | null;
@@ -315,10 +318,10 @@ const evidenceSignalDefinitions: EvidenceSignalDefinition[] = [
   },
   {
     key: "hotCold",
-    name: "Hot/cold (mains + supps)",
+    name: "Hot/cold ranking",
     evidenceType: "Descriptive",
     defaultState: "off",
-    explanation: "Recent draw behaviour, mains + supps; descriptive, not a direct prediction.",
+    explanation: "Uses the shared Hot vs Cold history scope and ranking controls; descriptive, not a direct prediction.",
   },
   {
     key: "windowShape",
@@ -473,6 +476,8 @@ export const PortfolioCompressionPanel: React.FC<PortfolioCompressionPanelProps>
   monthEndCarryOverBiasEnabled = false,
   monthEndCarryOverWeights,
   hotColdRows = [],
+  hotColdScopeLabel,
+  onEditHotColdSettings,
   windowShapeRows = [],
   adjacentComboHistory = [],
   monthlyBuckets = null,
@@ -936,7 +941,7 @@ export const PortfolioCompressionPanel: React.FC<PortfolioCompressionPanelProps>
     enabledEvidenceSignals.hotCold
       ? {
         key: "hotCold",
-        heading: "Hot/cold (M+S)",
+        heading: "Hot/cold ranking",
         valueForNumber: hotColdEvidenceLabel,
       }
       : null,
@@ -1093,6 +1098,7 @@ export const PortfolioCompressionPanel: React.FC<PortfolioCompressionPanelProps>
 
   return (
     <section className="windfall-ledger-panel windfall-generator-panel" aria-label="Portfolio Compression / 12-Game Distiller">
+      {hotColdScopeLabel && <div role="note" style={mutedStyle}>{hotColdScopeLabel} {onEditHotColdSettings && <HigButton size="compact" variant="quiet" onClick={onEditHotColdSettings}>Hot vs Cold settings</HigButton>}</div>}
       <div style={headingStyle}>
         <div>
           <div style={mutedStyle}>Count compression and transparent portfolio concentration from supplied rows.</div>

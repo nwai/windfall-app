@@ -2,6 +2,7 @@ import type {
   SignalConfluenceFamilyKey,
   SignalConfluenceRow,
 } from "./signalConfluence";
+import type { EvidenceFamilyId } from "./evidenceFamilyRegistry";
 
 const LOTTERY_POOL_SIZE = 45;
 const DEFAULT_FALSE_DISCOVERY_RATE = 0.05;
@@ -21,16 +22,17 @@ const FAMILY_LABELS: Record<SignalConfluenceFamilyKey, string> = {
 };
 
 export interface SignalConfluenceFamilyAuditRow {
-  family: SignalConfluenceFamilyKey;
+  family: string;
   label: string;
   numbers: number[];
+  evidenceFamilies: EvidenceFamilyId[];
 }
 
 export interface SignalConfluencePairAuditRow {
-  leftFamily: SignalConfluenceFamilyKey;
+  leftFamily: string;
   leftLabel: string;
   leftSize: number;
-  rightFamily: SignalConfluenceFamilyKey;
+  rightFamily: string;
   rightLabel: string;
   rightSize: number;
   sharedNumbers: number[];
@@ -125,22 +127,31 @@ const applyBenjaminiHochberg = (rows: SignalConfluencePairAuditRow[]): SignalCon
 };
 
 const buildFamilyRows = (rows: readonly SignalConfluenceRow[]): SignalConfluenceFamilyAuditRow[] => {
-  const numbersByFamily = new Map<SignalConfluenceFamilyKey, Set<number>>();
+  const groups = new Map<string, {
+    label: string;
+    numbers: Set<number>;
+    evidenceFamilies: Set<EvidenceFamilyId>;
+  }>();
 
   for (const row of rows) {
-    for (const mention of row.supportMentions) {
-      if (mention.family === "user-state") continue;
-      const numbers = numbersByFamily.get(mention.family) ?? new Set<number>();
-      numbers.add(row.number);
-      numbersByFamily.set(mention.family, numbers);
+    for (const support of row.groupSupport) {
+      const group = groups.get(support.independenceGroup) ?? {
+        label: support.label,
+        numbers: new Set<number>(),
+        evidenceFamilies: new Set<EvidenceFamilyId>(),
+      };
+      group.numbers.add(row.number);
+      support.evidenceFamilies.forEach((family) => group.evidenceFamilies.add(family));
+      groups.set(support.independenceGroup, group);
     }
   }
 
-  return Array.from(numbersByFamily.entries())
-    .map(([family, numbers]) => ({
+  return Array.from(groups.entries())
+    .map(([family, group]) => ({
       family,
-      label: signalConfluenceFamilyLabel(family),
-      numbers: Array.from(numbers).sort((left, right) => left - right),
+      label: group.label,
+      numbers: Array.from(group.numbers).sort((left, right) => left - right),
+      evidenceFamilies: Array.from(group.evidenceFamilies).sort(),
     }))
     .filter((row) => row.numbers.length > 0)
     .sort((left, right) => left.label.localeCompare(right.label));

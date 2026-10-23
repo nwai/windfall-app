@@ -239,6 +239,8 @@ export function useGenerateWorker() {
                 args.monthlyBucketTransitionGovernorProfile,
                 args.repeatedTerminalDigitFamiliesOptions,
                 seededRandom(randomSeed),
+                args.terminalShapeQuotaOptions,
+                args.terminalRunRuleOptions,
             );
             latestPartialRef.current = null;
             onResult(result);

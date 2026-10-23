@@ -1,4 +1,5 @@
 import React, { act, useState } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { createRoot } from "react-dom/client";
 import { describe, expect, it } from "vitest";
 import { MonthlyBucketTransitionGovernorControls } from "../src/components/MonthlyBucketTransitionGovernorControls";
@@ -16,6 +17,19 @@ function Harness() {
 }
 
 describe("Monthly Bucket Transition Governor controls", () => {
+  it("shows neutral applied weights when RwR45 bypasses a retained manual choice", () => {
+    const profile = buildMonthlyBucketTransitionGovernorProfile({ mode: "strong", history: [],
+      monthlyBuckets: { undrawn: new Set(), times1: new Set(), times2: new Set(), times3: new Set([17, 22]), times4: new Set(), times5: new Set(), times6: new Set(), times7: new Set(), times8: new Set() },
+      targetMonthLabel: "2026-09", targetMonthExpectedDrawCount: 13, targetDrawOrdinal: 8,
+    });
+    const markup = renderToStaticMarkup(React.createElement(MonthlyBucketTransitionGovernorControls, {
+      profile, onModeChange: () => {}, bypassedByRandomCoverage: true,
+    }));
+    expect(markup).toContain("Manual strong · bypassed by RwR45/PNUaRW45");
+    expect(markup).toContain("<strong>1.00x</strong>");
+    expect(markup).not.toContain("Transition multiplier ledger:");
+  });
+
   it("shows each requested mode, applied weight, and manual evidence override", async () => {
     const container = document.createElement("div");
     document.body.appendChild(container);

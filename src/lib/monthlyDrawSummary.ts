@@ -1,5 +1,6 @@
 import type { Draw } from "../types";
 import { filterRowsForHistoryBaselines } from "./monthlyAverageScope";
+import { countScheduledDrawsInMonth } from "./planningDrawContext";
 
 export const MONTHLY_BUCKET_KEYS = [
   "undrawn",
@@ -466,8 +467,7 @@ export function analyzeMonthlyDrawSummary(
     maxObservedDrawsPerMonth,
     maxNumber,
     maxBucket,
-    expectedDrawCountForMonth: (monthLabel) => expectedDrawCountFromRhythmOrFallback({
-      parsed,
+    expectedDrawCountForMonth: (monthLabel) => expectedDrawCountFromScheduleOrFallback({
       monthLabel,
       fallback: maxObservedDrawsPerMonth,
     }),
@@ -576,8 +576,7 @@ export function resolveMonthlyStageDrawContext(
     maxObservedDrawsPerMonth,
     maxNumber,
     maxBucket,
-    expectedDrawCountForMonth: (monthLabel) => expectedDrawCountFromRhythmOrFallback({
-      parsed,
+    expectedDrawCountForMonth: (monthLabel) => expectedDrawCountFromScheduleOrFallback({
       monthLabel,
       fallback: maxObservedDrawsPerMonth,
     }),
@@ -590,8 +589,7 @@ export function resolveMonthlyStageDrawContext(
   const override = args.expectedDrawCountOverride;
   const inferredExpectedDrawCount = override && override !== "auto"
     ? Math.max(1, Math.floor(override))
-    : expectedDrawCountFromRhythmOrFallback({
-      parsed,
+    : expectedDrawCountFromScheduleOrFallback({
       monthLabel: workingMonthLabel,
       fallback: maxObservedDrawsPerMonth,
     });
@@ -636,8 +634,7 @@ export function analyzeStageIdealDrawModel(
     maxObservedDrawsPerMonth,
     maxNumber,
     maxBucket,
-    expectedDrawCountForMonth: (monthLabel) => expectedDrawCountFromRhythmOrFallback({
-      parsed,
+    expectedDrawCountForMonth: (monthLabel) => expectedDrawCountFromScheduleOrFallback({
       monthLabel,
       fallback: maxObservedDrawsPerMonth,
     }),
@@ -650,8 +647,7 @@ export function analyzeStageIdealDrawModel(
   const override = args.expectedDrawCountOverride;
   const inferredExpectedDrawCount = override && override !== "auto"
     ? Math.max(1, Math.floor(override))
-    : expectedDrawCountFromRhythmOrFallback({
-      parsed,
+    : expectedDrawCountFromScheduleOrFallback({
       monthLabel: workingMonthLabel,
       fallback: maxObservedDrawsPerMonth,
     });
@@ -749,8 +745,7 @@ export function analyzeStageMatchAcceptancePlaybook(
     maxObservedDrawsPerMonth,
     maxNumber,
     maxBucket,
-    expectedDrawCountForMonth: (monthLabel) => expectedDrawCountFromRhythmOrFallback({
-      parsed,
+    expectedDrawCountForMonth: (monthLabel) => expectedDrawCountFromScheduleOrFallback({
       monthLabel,
       fallback: maxObservedDrawsPerMonth,
     }),
@@ -763,8 +758,7 @@ export function analyzeStageMatchAcceptancePlaybook(
   const override = args.expectedDrawCountOverride;
   const inferredExpectedDrawCount = override && override !== "auto"
     ? Math.max(1, Math.floor(override))
-    : expectedDrawCountFromRhythmOrFallback({
-      parsed,
+    : expectedDrawCountFromScheduleOrFallback({
       monthLabel: workingMonthLabel,
       fallback: maxObservedDrawsPerMonth,
     });
@@ -1061,54 +1055,13 @@ function buildRowsFromParsedDraws(args: {
     }));
 }
 
-function inferExpectedDrawCountFromWeekdayRhythm(args: {
-  parsed: ParsedDraw[];
-  workingMonthLabel: string;
-}): number | null {
-  const monthLabels = [...new Set(args.parsed.map((draw) => draw.monthLabel))].sort();
-  const sourceMonthLabel = [...monthLabels]
-    .reverse()
-    .find((monthLabel) => monthLabel <= args.workingMonthLabel) ?? monthLabels[monthLabels.length - 1] ?? "";
-  const sourceMonthDraws = sourceMonthLabel
-    ? args.parsed.filter((draw) => draw.monthLabel === sourceMonthLabel)
-    : [];
-  const recent = sourceMonthDraws.length ? sourceMonthDraws : args.parsed.slice(-30);
-  const weekdays = new Set<number>();
-  for (const draw of recent) {
-    const date = new Date(draw.timestamp);
-    if (!Number.isNaN(date.getTime())) weekdays.add(date.getDay());
-  }
-  if (!weekdays.size || !args.workingMonthLabel) return null;
-
-  const [yearRaw, monthRaw] = args.workingMonthLabel.split("-");
-  const year = Number(yearRaw);
-  const month = Number(monthRaw);
-  if (!Number.isFinite(year) || !Number.isFinite(month)) return null;
-
-  let count = 0;
-  for (let day = 1; day <= 31; day++) {
-    const date = new Date(year, month - 1, day);
-    if (date.getMonth() !== month - 1) break;
-    if (weekdays.has(date.getDay())) count++;
-  }
-  return count > 0 ? count : null;
-}
-
-function expectedDrawCountFromRhythmOrFallback(args: {
-  parsed: ParsedDraw[];
+function expectedDrawCountFromScheduleOrFallback(args: {
   monthLabel: string;
   fallback: number;
 }): number {
   const fallback = Math.max(1, Math.floor(args.fallback));
-  const inferred = inferExpectedDrawCountFromWeekdayRhythm({
-    parsed: args.parsed,
-    workingMonthLabel: args.monthLabel,
-  });
-  if (!inferred) return fallback;
-
-  const plausibleUpperBound = Math.max(fallback + 1, Math.ceil(fallback * 1.25));
-  if (inferred > plausibleUpperBound) return fallback;
-  return Math.max(1, Math.floor(inferred));
+  const scheduled = countScheduledDrawsInMonth(args.monthLabel);
+  return scheduled > 0 ? scheduled : fallback;
 }
 
 function buildSyntheticMonthRow(args: {

@@ -99,20 +99,22 @@ describe("truthfulness wording guards", () => {
     expect(gapDispersionSource).not.toContain("nextEventProb");
   });
 
-  it("renames next-draw probabilities to empirical diagnostics and avoids calibrated probability wording", () => {
+  it("retires the next-draw OGA panel and keeps the relocated distribution explicitly retrospective", () => {
     const appSource = readProjectFile("src/App.tsx");
-    const panelSource = readProjectFile("src/components/NextDrawProbabilitiesPanel.tsx");
+    const panelSource = readProjectFile("src/components/HistoricalOgaDistribution.tsx");
     const favoritesSource = readProjectFile("src/lib/panelFavorites.ts");
     const combined = `${appSource}\n${panelSource}\n${favoritesSource}`;
 
-    expect(combined).toContain("Next Draw Empirical Diagnostics");
+    expect(combined).not.toContain("Next Draw Empirical Diagnostics");
+    expect(combined).toContain("Historical OGA distribution (advanced)");
     expect(combined).not.toContain("Next Draw Probabilities");
     expect(panelSource).not.toContain("Next OGA probabilities");
     expect(panelSource).not.toContain("KDE Prob%");
     expect(panelSource).not.toContain("Prob%</th>");
-    expect(panelSource).toContain("KDE support %");
-    expect(panelSource).toContain("Empirical share %");
-    expect(panelSource).toContain("filterRealDrawHistory");
+    expect(panelSource).toContain("Observed share");
+    expect(panelSource).toContain("Smoothed KDE share");
+    expect(panelSource).toContain("Retrospective description only");
+    expect(panelSource).toContain("not a no-lookahead replay");
   });
 
   it("keeps scoring system diagnostics observe-only and terminal-digit framed", () => {

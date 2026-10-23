@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildDgaConstellationDiagnostic } from "./dgaConstellation";
+import { buildDgaConstellationDiagnostic, MAX_CONSTELLATION_HORIZON, MAX_CONSTELLATION_RADIUS } from "./dgaConstellation";
 import type { Draw } from "../types";
 
 const emptyDraw = (date: string): Draw => ({ date, main: [1, 2, 3, 4, 5, 6], supp: [7, 8] });
@@ -25,7 +25,7 @@ describe("buildDgaConstellationDiagnostic", () => {
       centerNumber: 17,
       radius: 3,
     });
-    const radiusThree = diagnostic.radiusSummaries[2];
+    const radiusThree = diagnostic.radiusSummary;
 
     expect(diagnostic.centerCell).toMatchObject({
       drawNumber: 348,
@@ -52,7 +52,7 @@ describe("buildDgaConstellationDiagnostic", () => {
       centerNumber: 43,
       radius: 3,
     });
-    const radiusThree = diagnostic.radiusSummaries[2];
+    const radiusThree = diagnostic.radiusSummary;
 
     expect(diagnostic.centerCell).toMatchObject({
       drawNumber: 346,
@@ -80,8 +80,8 @@ describe("buildDgaConstellationDiagnostic", () => {
     });
 
     expect(wide.forwardHorizon).toBe(5);
-    expect(wide.radiusSummaries[0].leadIn.possibleCells).toBeGreaterThan(narrow.radiusSummaries[0].leadIn.possibleCells);
-    expect(wide.radiusSummaries[0].followThrough.possibleCells).toBeGreaterThan(narrow.radiusSummaries[0].followThrough.possibleCells);
+    expect(wide.radiusSummary.leadIn.possibleCells).toBeGreaterThan(narrow.radiusSummary.leadIn.possibleCells);
+    expect(wide.radiusSummary.followThrough.possibleCells).toBeGreaterThan(narrow.radiusSummary.followThrough.possibleCells);
     expect(wide.matrixRows[0].drawNumber).toBe(341);
     expect(wide.matrixRows.at(-1)).toMatchObject({
       drawNumber: 351,
@@ -89,14 +89,120 @@ describe("buildDgaConstellationDiagnostic", () => {
     });
   });
 
-  it("caps oversized radius values at 8", () => {
+  it("supports larger radius and horizon values, bounded by the shared limits", () => {
     const diagnostic = buildDgaConstellationDiagnostic(buildHistory(), {
       centerDrawNumber: 346,
       centerNumber: 23,
-      radius: 99,
+      radius: 999,
+      forwardHorizon: 999,
     });
 
-    expect(diagnostic.radius).toBe(8);
-    expect(diagnostic.radiusSummaries).toHaveLength(8);
+    expect(diagnostic.radius).toBe(MAX_CONSTELLATION_RADIUS);
+    expect(diagnostic.forwardHorizon).toBe(MAX_CONSTELLATION_HORIZON);
+    expect(diagnostic.radiusSummary.radius).toBe(MAX_CONSTELLATION_RADIUS);
+    expect(diagnostic.matrixRows[0].drawNumber).toBe(190);
+    expect(diagnostic.matrixRows.every(row => row.cells.length === 45)).toBe(true);
+    expect(diagnostic.matrixRows.at(-1)).toMatchObject({ drawNumber: 351, isFuture: true });
+  });
+
+  it("widens the band beyond eight draws without widening the number radius", () => {
+    const diagnostic = buildDgaConstellationDiagnostic(buildHistory(), {
+      centerDrawNumber: 325, centerNumber: 16, radius: 12, forwardHorizon: 20,
+    });
+    const active = diagnostic.radiusSummary;
+    expect(diagnostic.radius).toBe(12);
+    expect(diagnostic.forwardHorizon).toBe(20);
+    expect(diagnostic.matrixRows[0].drawNumber).toBe(305);
+    expect(diagnostic.matrixRows.at(-1)?.drawNumber).toBe(345);
+    expect(diagnostic.matrixRows[0].cells.map(cell => cell.number)).toEqual(Array.from({ length: 25 }, (_, index) => index + 4));
+    expect(active.leadIn.possibleCells).toBe(20 * 25);
+    expect(active.followThrough.possibleCells).toBe(20 * 25);
+  });
+
+  it("keeps wide-window density arithmetic finite instead of overflowing combinations", () => {
+    const diagnostic = buildDgaConstellationDiagnostic(buildHistory(), {
+      centerDrawNumber: 175, centerNumber: 23, radius: MAX_CONSTELLATION_RADIUS,
+    });
+    const metric = diagnostic.radiusSummary.localWindow;
+    expect(metric.possibleCells).toBe(313 * 45);
+    expect(metric.hitCount).toBe(313 * 8);
+    expect(metric.expectedHits).toBeCloseTo(313 * 8);
+    expect(metric.upperTailPValue).toBeGreaterThan(0.49);
+    expect(metric.upperTailPValue).toBeLessThan(0.53);
+    const summary = diagnostic.radiusSummary;
+    for (const value of [summary.localWindow, summary.diagonalCross, summary.leadIn, summary.followThrough]) {
+      expect(Number.isFinite(value.expectedHits)).toBe(true);
+      expect(value.upperTailPValue).not.toBeNaN();
+      expect(value.upperTailPValue).toBeGreaterThanOrEqual(0);
+      expect(value.upperTailPValue).toBeLessThanOrEqual(1);
+      expect(value.cells.some(cell => cell.isFuture)).toBe(false);
+    }
+  });
+
+  it("preserves the small-window binomial reference", () => {
+    const metric = buildDgaConstellationDiagnostic(buildHistory(), {
+      centerDrawNumber: 346, centerNumber: 43, radius: 3,
+    }).radiusSummary.diagonalCross;
+    const n = metric.possibleCells, p = metric.baselineRate;
+    let expectedTail = 0;
+    for (let k = metric.hitCount; k <= n; k++) {
+      let combinations = 1;
+      for (let j = 1; j <= k; j++) combinations *= (n - j + 1) / j;
+      expectedTail += combinations * p ** k * (1 - p) ** (n - k);
+    }
+    expect(metric.upperTailPValue).toBeCloseTo(expectedTail, 12);
+  });
+
+  it("clips wide maps at both number boundaries and excludes simulation rows", () => {
+    const history = [...buildHistory(), { ...emptyDraw("simulated"), isSimulated: true }];
+    for (const centerNumber of [1, 45]) {
+      const diagnostic = buildDgaConstellationDiagnostic(history, {
+        centerDrawNumber: 350, centerNumber, radius: MAX_CONSTELLATION_RADIUS, forwardHorizon: MAX_CONSTELLATION_HORIZON,
+      });
+      expect(diagnostic.drawCount).toBe(350);
+      expect(diagnostic.matrixRows[0].cells.map(cell => cell.number)).toEqual(Array.from({ length: 45 }, (_, index) => index + 1));
+      expect(diagnostic.matrixRows.filter(row => row.isFuture)).toHaveLength(1);
+      expect(diagnostic.radiusSummary.followThrough.possibleCells).toBe(0);
+    }
+  });
+
+  it("expands the time radius past 44 without extending or wrapping number rows", () => {
+    const narrow = buildDgaConstellationDiagnostic(buildHistory(), {
+      centerDrawNumber: 175, centerNumber: 16, radius: 44, forwardHorizon: 1,
+    });
+    const wide = buildDgaConstellationDiagnostic(buildHistory(), {
+      centerDrawNumber: 175, centerNumber: 16, radius: 78, forwardHorizon: 1,
+    });
+    expect(wide.radius).toBe(78);
+    expect(wide.matrixRows).toHaveLength(157);
+    expect(wide.matrixRows[0].drawNumber).toBe(97);
+    expect(wide.matrixRows.at(-1)?.drawNumber).toBe(253);
+    expect(wide.matrixRows.every(row => row.cells.length === 45)).toBe(true);
+    expect(wide.radiusSummary.localWindow.possibleCells).toBe(157 * 45);
+    expect(wide.radiusSummary.diagonalCross.cells).toEqual(narrow.radiusSummary.diagonalCross.cells);
+  });
+
+  it("extends the band past 52 independently of radius", () => {
+    const diagnostic = buildDgaConstellationDiagnostic(buildHistory(), {
+      centerDrawNumber: 175, centerNumber: 16, radius: 3, forwardHorizon: 156,
+    });
+    expect(diagnostic.matrixRows).toHaveLength(313);
+    expect(diagnostic.matrixRows[0].cells.map(cell => cell.number)).toEqual([13, 14, 15, 16, 17, 18, 19]);
+    expect(diagnostic.radiusSummary.leadIn.possibleCells).toBe(156 * 7);
+    expect(diagnostic.radiusSummary.followThrough.possibleCells).toBe(156 * 7);
+    expect(diagnostic.radiusSummary.localWindow.possibleCells).toBe(7 * 7);
+  });
+
+  it("has no fabricated recorded cells at large limits with empty history", () => {
+    const diagnostic = buildDgaConstellationDiagnostic([], {
+      centerDrawNumber: 1, centerNumber: 23, radius: 156, forwardHorizon: 156,
+    });
+    expect(diagnostic.drawCount).toBe(0);
+    expect(diagnostic.radiusSummary.localWindow.possibleCells).toBe(0);
+    expect(diagnostic.radiusSummary.leadIn.possibleCells).toBe(0);
+    expect(diagnostic.radiusSummary.followThrough.possibleCells).toBe(0);
+    expect(diagnostic.radiusSummary.localWindow.upperTailPValue).toBeNull();
+    expect(diagnostic.matrixRows).toHaveLength(1);
+    expect(diagnostic.matrixRows[0].isFuture).toBe(true);
   });
 });

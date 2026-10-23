@@ -1,0 +1,37 @@
+.supp-replay { grid-column: 1 / -1; min-width: 0; font-size: 12px; color: var(--wf-text); }
+.supp-replay p { margin: 8px 0; line-height: 1.5; white-space: normal; overflow-wrap: anywhere; }
+.supp-replay-scope { font-weight: 600; }
+.supp-replay-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 240px)) minmax(180px, 1fr); gap: 16px; align-items: start; margin: 12px 0; }
+.supp-replay-controls input { width: 100%; min-height: 32px; box-sizing: border-box; }
+.supp-replay-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.supp-replay select { min-height: 32px; max-width: 100%; }
+.supp-replay-warning { color: var(--wf-caution); font-weight: 600; }
+.supp-replay-progress { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-height: 32px; }
+.supp-replay-progress progress { width: min(260px, 100%); }
+.supp-replay-verdict { border-left: 3px solid var(--wf-accent, #007aff); padding: 8px 12px; margin: 12px 0; background: #f4f8fc; }
+.supp-replay-verdict ul { margin: 6px 0; padding-left: 20px; line-height: 1.5; }
+.supp-replay-verdict summary { min-height: 32px; box-sizing: border-box; padding: 8px 0; cursor: pointer; font-weight: 600; }
+.supp-replay-results { padding: 12px 0; border-bottom: 1px solid var(--wf-soft-rule); }
+.supp-replay-results h5 { font-size: 13px; margin: 0; }
+.supp-replay-scroll { max-height: 350px; overflow: auto; scrollbar-gutter: stable; overscroll-behavior: contain; }
+.supp-replay-scroll table { width: 100%; min-width: 900px; border-spacing: 0; border-collapse: separate; font-variant-numeric: tabular-nums; }
+.supp-replay-scroll th, .supp-replay-scroll td { padding: 8px 10px; border-bottom: 1px solid var(--wf-soft-rule); text-align: right; white-space: nowrap; }
+.supp-replay-scroll th[scope="row"] { text-align: left; font-weight: 600; }
+.supp-replay-scroll thead { position: sticky; top: 0; z-index: 2; }
+.supp-replay-scroll thead th { background: #f5f7fa; }
+.supp-replay-reference, .supp-replay-muted { color: var(--wf-muted); }
+.supp-replay-method { margin-top: 10px; }
+.supp-replay-method summary { min-height: 32px; box-sizing: border-box; padding: 8px 0; cursor: pointer; font-weight: 700; }
+.supp-replay-method > .windfall-hig-field { margin-bottom: 8px; }
+.supp-replay-ledger td { white-space: normal; min-width: 90px; }
+.supp-replay-ledger td:nth-last-child(2) { min-width: 240px; }
+.supp-replay-pair { color: var(--wf-valid); font-weight: 700; }
+@media (max-width: 800px) {
+  .supp-replay-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .supp-replay-actions { grid-column: 1 / -1; }
+}
+@media (max-width: 650px) {
+  .supp-replay-controls { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .supp-replay input, .supp-replay select, .supp-replay-method summary, .supp-replay-verdict summary, .supp-replay .windfall-hig-button { min-height: 44px; }
+  .supp-replay select { width: 100%; }
+}

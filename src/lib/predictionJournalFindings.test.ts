@@ -197,4 +197,63 @@ describe("buildPredictionJournalFindingsReport", () => {
       }),
     ]));
   });
+
+  it("audits frozen Neighbour Atlas snapshots separately from scored prediction fields", () => {
+    const entry = scoredEntry("atlas-audit", {
+      targetDraws: [{ date: "6/3/26", main: [2, 8, 10, 12, 20, 30], supp: [40, 45] }],
+      provenance: {
+        neighbourAtlas: {
+          version: 1,
+          selectedNumbers: [2, 4, 7],
+          selectedTargetNumbers: [2, 4],
+          snapshot: {
+            version: 1,
+            observeOnly: true,
+            historySource: "baseline",
+            historySourceLabel: "Baseline history",
+            scope: "mains-plus-supps",
+            lookbackDraws: 1,
+            transitionCount: 20,
+            validDraws: 21,
+            excludedTargetDraws: 0,
+            excludedTargetMonthLabels: [],
+            ordinalEvidence: {
+              drawOrdinal: 3,
+              label: "D3",
+              trials: 20,
+              sampleQuality: "Limited",
+              averageUniqueHits: 2,
+              averageExpectedUniqueHits: 1.78,
+              lift: 1.12,
+              atLeastOneRate: 0.8,
+              atLeastThreeRate: 0.3,
+              atLeastFourRate: 0.1,
+              topPattern: "-2:1 -1:1 +1:1 +2:0",
+              topPatternCount: 2,
+            },
+            currentCloud: null,
+            overall: { averageUniqueHits: 2, averageExpectedUniqueHits: 1.78, averageDirectionalHits: 2.2, lift: 1.12 },
+            composition: { oddLift: null, evenLift: null, oneDigitLift: null, twoDigitLift: null },
+            warnings: [],
+          },
+        },
+      } as ScoredPredictionJournalEntry["provenance"],
+      scores: [
+        { key: "oddEvenRatio", label: "Odd/even ratio", predicted: "4:4", actual: "4:4", result: "hit" },
+        { key: "neighbourAtlasReplay", label: "Neighbour Atlas replay", predicted: "cloud", actual: "draw", result: "recorded", hitCount: 2, predictedCount: 10, actualCount: 8 },
+      ],
+    });
+
+    const report = buildPredictionJournalFindingsReport([entry]);
+
+    expect(report.neighbourAtlasAudit.capturedEntries).toBe(1);
+    expect(report.neighbourAtlasAudit.replayedEntries).toBe(1);
+    expect(report.neighbourAtlasAudit.observedCloudHits).toBe(2);
+    expect(report.neighbourAtlasAudit.expectedCloudHits).toBeCloseTo(80 / 45);
+    expect(report.neighbourAtlasAudit.cloudLift).toBeCloseTo(1.125);
+    expect(report.neighbourAtlasAudit.selectedCloudHits).toBe(1);
+    expect(report.neighbourAtlasAudit.sampleQualityCounts.limited).toBe(1);
+    expect(report.scoreCounts.recorded).toBe(1);
+    expect(report.scoreCounts.checks).toBe(1);
+  });
 });

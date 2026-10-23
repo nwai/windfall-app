@@ -62,9 +62,6 @@ const scoringProfile: ScoringGenerationProfile = {
   scope: "mains-plus-supps",
   numberScores: Object.fromEntries(Array.from({ length: 45 }, (_, index) => [index + 1, 45 - index])),
   numberMultipliers: Object.fromEntries(Array.from({ length: 45 }, (_, index) => [index + 1, index < 10 ? 2 : 0.75])),
-  ratioScores: { "4:4": 300, "5:3": 240, "3:5": 216 },
-  terminalDigitSetScores: { "0,1,2,3,4,5,6,7": 80, "1,2,3,4,5,6,7,8": 75 },
-  straightRunScores: { "0,1,2,3,4,5,6,7": 25, "1,2,3,4,5,6,7,8": 20 },
   traceLabel: "Numbers diagnostic strong evidence weighting active; diagnostic support only.",
 };
 

@@ -1,0 +1,41 @@
+.windfall-number-constraint-sources {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 10px 14px;
+  margin: 10px 0;
+  min-width: 0;
+  width: 100%;
+  flex-basis: 100%;
+  font-size: 12px;
+}
+
+.windfall-number-constraint-sources__group { min-width: 0; margin: 0; padding: 8px 10px; border: 1px solid var(--wf-rule); border-radius: 6px; }
+.windfall-number-constraint-sources__group legend { font-weight: 700; padding: 0 5px; }
+.windfall-number-constraint-sources__numbers { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.windfall-number-constraint-sources__actions,
+.windfall-number-constraint-sources__source-heading,
+.windfall-number-constraint-sources__remove-numbers,
+.windfall-number-constraint-sources__footer { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.windfall-number-constraint-sources__actions { margin-top: 6px; }
+.windfall-number-constraint-sources__source-heading { justify-content: space-between; }
+.windfall-number-constraint-sources__source { padding: 8px 0; border-top: 1px solid var(--wf-rule); overflow-wrap: anywhere; }
+.windfall-number-constraint-sources__list { max-height: 260px; overflow: auto; margin-top: 8px; }
+.windfall-number-constraint-sources__note { color: var(--wf-muted); margin: 4px 0 0; font-size: 11px; }
+.windfall-number-constraint-sources__footer { grid-column: 1 / -1; color: var(--wf-muted); font-size: 11px; }
+.windfall-number-constraint-sources .windfall-hig-button { min-height: 32px; max-width: 100%; }
+.windfall-number-constraint-sources .windfall-info-help__button { min-height: 32px; min-width: 32px; }
+.windfall-number-constraint-dialog { box-sizing: border-box; width: 560px; max-width: calc(100vw - 24px); max-height: calc(100dvh - 32px); overflow: auto; margin: auto; padding: 20px; border: 1px solid #b9c2ca; border-radius: 8px; color: var(--wf-text); background: #fff; font: 13px var(--wf-font-sans); box-shadow: 0 16px 48px #0003; }
+.windfall-number-constraint-dialog::backdrop { background: #0005; }
+.windfall-number-constraint-dialog h3 { margin: 0 0 12px; font-size: 17px; }
+.windfall-number-constraint-dialog p,
+.windfall-number-constraint-dialog li { overflow-wrap: anywhere; line-height: 1.5; }
+.windfall-number-constraint-dialog li { margin-bottom: 8px; }
+.windfall-number-constraint-dialog__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+.windfall-number-constraint-dialog__actions button { min-height: 44px; }
+@media (max-width: 760px) {
+  .windfall-number-constraint-sources { grid-template-columns: minmax(0, 1fr); }
+  .windfall-number-constraint-sources .windfall-hig-button,
+  .windfall-number-constraint-sources .windfall-info-help__button { min-height: 44px; }
+  .windfall-number-constraint-sources .windfall-info-help__button { min-width: 44px; }
+}

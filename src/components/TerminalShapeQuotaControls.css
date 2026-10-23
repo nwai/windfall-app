@@ -1,0 +1,22 @@
+.draw-composition-quotas { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; align-items: start; }
+.draw-composition-quotas h3 { font-size: 15px; margin: 0 0 12px; }
+.terminal-shape-quotas { min-width: 0; }
+.terminal-shape-quotas__heading { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.terminal-shape-quotas__heading h3 { margin: 0; }
+.terminal-shape-quotas__help-example { display: block; margin: 8px 0; }
+.terminal-shape-quotas__toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.terminal-shape-quotas__toolbar label { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
+.terminal-shape-quotas__toolbar select { min-height: 44px; max-width: 100%; }
+.terminal-shape-quotas__toggle { min-height: 44px; display: flex; gap: 8px; align-items: center; font-size: 13px; }
+.terminal-shape-quotas__scope, .terminal-shape-quotas__status { font-size: 12px; color: #485463; line-height: 1.5; margin: 8px 0; }
+.terminal-shape-quotas__scroll { --wf-table-scroll-max-height: 340px; max-height: 340px; overflow: auto; border: 1px solid #d5d9df; border-radius: 6px; }
+.terminal-shape-quotas table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12px; white-space: nowrap; }
+.terminal-shape-quotas th, .terminal-shape-quotas td { padding: 4px 8px; border-bottom: 1px solid #e6e8eb; text-align: right; }
+.terminal-shape-quotas th:nth-child(2), .terminal-shape-quotas th[scope="row"] { text-align: left; }
+.terminal-shape-quotas thead th { position: sticky; top: 0; z-index: 1; background: #f3f4f6; height: 36px; }
+.terminal-shape-quotas tbody tr[data-selected="true"] { background: #edf5ff; }
+.terminal-shape-quotas__selection { display: flex; min-width: 32px; min-height: 32px; align-items: center; justify-content: center; }
+.terminal-shape-quotas small { display: block; color: #64707e; font-weight: 400; }
+.terminal-shape-quotas [role="alert"] { color: #a52b22; }
+@media (max-width: 900px) { .draw-composition-quotas { grid-template-columns: minmax(0, 1fr); gap: 20px; } }
+@media (pointer: coarse) { .terminal-shape-quotas__selection { min-height: 44px; min-width: 44px; } }

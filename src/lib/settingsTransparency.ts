@@ -1,4 +1,4 @@
-export const SETTINGS_MODEL_VERSION = "WF-settings-2";
+export const SETTINGS_MODEL_VERSION = "WF-settings-5";
 
 export function lastDrawBiasMultiplier(bias: number, minimum: number): number {
   const strength = Number.isFinite(bias) ? Math.max(0, Math.min(5, bias)) : 0;

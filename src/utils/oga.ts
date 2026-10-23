@@ -34,7 +34,7 @@ export function getSpokeProfile(numbers: number[], ranges: number[][]): number[]
 
 /**
  * Compute OGA score for a candidate set of numbers.
- * Lower == more similar to history.
+ * Lower favours historically common number groups; this is not a geometric distance.
  * @param nums - candidate numbers (main + supp)
  * @param history - array of past draws
  * @param spokeCount - number of spokes (defaults to 9)
@@ -43,7 +43,7 @@ export function computeOGA(nums: number[], history: Draw[] = [], spokeCount: num
   const ranges = buildSpokeRanges(spokeCount);
   const candidateProfile = getSpokeProfile(nums, ranges);
 
-  // If no history, just sum the variance from the mean
+  // Without a reference, use a separate absolute-deviation fallback.
   if (!history.length) {
     const mean = nums.length / ranges.length;
     return candidateProfile.reduce((sum, c) => sum + Math.abs(c - mean), 0);

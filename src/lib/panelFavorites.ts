@@ -7,11 +7,11 @@ export interface FavoritePanelMeta {
 export const PANEL_FAVORITES_STORAGE_KEY = "windfall:panel-favorites:v1";
 
 export const FAVORITE_PANEL_REGISTRY: FavoritePanelMeta[] = [
-  { id: "number-trends", title: "Number Trends Table", workflow: "History" },
+  { id: "windfall-predictor", title: "Windfall Predictor", workflow: "Generation" },
   { id: "draw-history-manager", title: "Draw History Manager", workflow: "History" },
-  { id: "next-draw-probabilities", title: "Next Draw Empirical Diagnostics", workflow: "History" },
   { id: "windowed-draw-filtering", title: "Windowed Draw Filtering (WFMQYH)", workflow: "History" },
-  { id: "odd-even-ratio-filters", title: "Odd/Even Ratio Filters", workflow: "Signals" },
+  { id: "number-trends", title: "Number Trends Table", workflow: "History" },
+  { id: "odd-even-ratio-filters", title: "Draw Composition Quotas", workflow: "Signals" },
   { id: "odd-even-ratio-cadence", title: "Odd/Even Ratio Cadence", workflow: "Signals" },
   { id: "scoring-system-diagnostics", title: "Scoring System Diagnostics", workflow: "Signals" },
   { id: "survival-analyzer", title: "Survival Analyzer", workflow: "Signals" },
@@ -21,14 +21,17 @@ export const FAVORITE_PANEL_REGISTRY: FavoritePanelMeta[] = [
   { id: "most-likely-not-drawn", title: "Most Likely NOT Drawn", workflow: "Signals" },
   { id: "next-draw-evidence-ensemble", title: "Next-Draw Evidence Ensemble (6+2)", workflow: "Validation" },
   { id: "prediction-journal", title: "Prediction Journal & Scorecard", workflow: "Validation" },
+  { id: "evidence-portfolio", title: "Evidence Portfolio", workflow: "Validation" },
   { id: "research-diary", title: "Research Diary & Draw Reminders", workflow: "Validation" },
   { id: "backtest-validation", title: "Backtest Validation", workflow: "Validation" },
   { id: "trend-ratio-history", title: "Trend Ratio Diagnostics", workflow: "Validation" },
   { id: "group-pattern-analyzer", title: "Group Pattern Analyzer", workflow: "Validation" },
-  { id: "pattern-stats", title: "Pattern Stats", workflow: "Validation" },
+  { id: "pattern-stats", title: "Historical Draw Composition", workflow: "Validation" },
+  { id: "number-group-frequency-audit", title: "Number-Group Frequency Audit", workflow: "Validation" },
   { id: "number-frequency", title: "Number Frequency", workflow: "Validation" },
   { id: "draw-bucket-patterns", title: "Draw Bucket Patterns", workflow: "Validation" },
   { id: "ending-digit-sequences", title: "Ending Digit Sequences", workflow: "Validation" },
+  { id: "terminal-family-leadership", title: "Terminal Family Leadership & Handover", workflow: "Validation" },
   { id: "adjacent-combos", title: "Adjacent Combos (Pairs / Triples)", workflow: "Validation" },
   { id: "window-stats", title: "Window Stats", workflow: "Validation" },
   { id: "signal-confluence-ledger", title: "Signal Confluence / Number Consensus Ledger", workflow: "Validation" },
@@ -44,6 +47,7 @@ export const FAVORITE_PANEL_REGISTRY: FavoritePanelMeta[] = [
   { id: "monthly-first-last-hits", title: "Monthly First <-> Last Draw Hits", workflow: "Generation" },
   { id: "monthly-draws-summary", title: "Monthly Draws Summary", workflow: "Generation" },
   { id: "monthly-bucket-transition-lab", title: "Monthly Bucket Transition Lab", workflow: "Generation" },
+  { id: "decade-monthly-bucket-watch", title: "Decade × Monthly Bucket Watch", workflow: "Validation" },
   { id: "month-end-carry-over-buckets", title: "Month-End Carry-Over Buckets", workflow: "Generation" },
   { id: "monthly-digit-occurrences", title: "Monthly 1-Digit vs 2-Digit Occurrences", workflow: "Generation" },
   { id: "hot-cold-ranking", title: "Hot vs Cold Ranking", workflow: "Generation" },
@@ -52,7 +56,7 @@ export const FAVORITE_PANEL_REGISTRY: FavoritePanelMeta[] = [
   { id: "paste-weighted-candidate-generator", title: "Paste-Weighted Candidate Generator", workflow: "Generation" },
   { id: "portfolio-compression", title: "Portfolio Compression / 12-Game Distiller", workflow: "Generation" },
   { id: "generated-candidates", title: "Generated Candidates", workflow: "Generation" },
-  { id: "candidate-generation-influences", title: "Candidate Generation Influences", workflow: "Generation" },
+  { id: "candidate-generation-influences", title: "Candidate Generation Setup", workflow: "Generation" },
   { id: "pick-six", title: "Pick Six", workflow: "Generation" },
   { id: "next-hot-blocks", title: "Next Hot Blocks", workflow: "DGA" },
   { id: "diamond-grid-analysis", title: "Diamond Grid Analysis (DGA)", workflow: "DGA" },
@@ -75,9 +79,11 @@ export function normalizeFavoritePanelIds(input: unknown): string[] {
   const output: string[] = [];
 
   for (const value of input) {
-    if (typeof value !== "string" || !PANEL_ID_SET.has(value) || seen.has(value)) continue;
-    seen.add(value);
-    output.push(value);
+    // The retired NDED panel's OGA information now lives in generation setup.
+    const id = value === "next-draw-probabilities" ? "candidate-generation-influences" : value;
+    if (typeof id !== "string" || !PANEL_ID_SET.has(id) || seen.has(id)) continue;
+    seen.add(id);
+    output.push(id);
   }
 
   return output;

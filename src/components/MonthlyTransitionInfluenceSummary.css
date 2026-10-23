@@ -1,0 +1,26 @@
+.monthly-transition-mirror {
+  min-width: 0;
+  margin: 10px 0;
+  padding: 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.monthly-transition-mirror__heading,
+.monthly-transition-mirror__state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+}
+.monthly-transition-mirror__heading { justify-content: space-between; margin-bottom: 6px; }
+.monthly-transition-mirror p { margin: 5px 0; }
+.monthly-transition-mirror summary { min-height: 44px; display: flex; align-items: center; gap: 8px; list-style: none; cursor: pointer; }
+.monthly-transition-mirror summary::-webkit-details-marker { display: none; }
+.monthly-transition-mirror details[open] .windfall-section__disclosure-icon { transform: rotate(90deg); }
+.monthly-transition-mirror ul { display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 0; list-style: none; }
+.monthly-transition-mirror li { font-variant-numeric: tabular-nums; }

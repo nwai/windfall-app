@@ -84,6 +84,9 @@ export interface DGAVisualizerProps {
   cellSize?: number;
   gridToolbar?: React.ReactNode;
   gridSidecar?: React.ReactNode;
+  atlasOverlayNumbers?: number[];
+  atlasOverlayLabels?: Record<number, string>;
+  showAtlasOverlay?: boolean;
 }
 
 type SolveMode = 'center-and-targets' | 'targets-only';
@@ -227,6 +230,9 @@ export const DGAVisualizer: React.FC<DGAVisualizerProps> = ({
   cellSize = 20,
   gridToolbar,
   gridSidecar,
+  atlasOverlayNumbers = [],
+  atlasOverlayLabels = {},
+  showAtlasOverlay = false,
 }) => {
   // Defensive defaults
   grid = grid || [];
@@ -236,6 +242,10 @@ export const DGAVisualizer: React.FC<DGAVisualizerProps> = ({
   numberLabels = numberLabels || [];
   numberCounts = numberCounts || [];
   highlights = highlights || [];
+  const atlasOverlaySet = useMemo(
+    () => new Set(atlasOverlayNumbers.filter((number) => Number.isInteger(number) && number >= 1 && number <= 45)),
+    [atlasOverlayNumbers],
+  );
 
   /* Mode Toggles */
   const [includeNextCol, setIncludeNextCol] = useState(true);
@@ -1889,6 +1899,8 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
             style={(() => {
               const cIdx = drawLabels.length;
               const opacity = getColOpacity(cIdx);
+              const rowNumber = rIdx + 1;
+              const isAtlasTarget = showAtlasOverlay && atlasOverlaySet.has(rowNumber);
               const highlightInfos = getHighlightInfos(rIdx, cIdx);
               const hasHighlight = highlightInfos.length > 0;
               const firstHighlight = hasHighlight ? highlights[highlightInfos[0].idx] : undefined;
@@ -1945,6 +1957,7 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
               style.boxShadow = mergeBoxShadows(
                 gridLineShadow(isFocusedRow ? '#ff9800' : borderColor, isFocusedRow ? 2 : 1),
                 isFocusedRow ? 'inset 0 0 0 9999px rgba(255,235,59,0.08)' : undefined,
+                isAtlasTarget ? 'inset 0 0 0 2px #2563eb' : undefined,
               );
 
               return style;
@@ -1984,16 +1997,48 @@ const selectedDiamond = diamondOptions[selectedDiamondIdx]?.d; // DiamondWithId 
               }
               const isPred = predictions && predictions.includes(rIdx + 1);
               if (isPred) tt += '\nType: Prediction';
+              if (showAtlasOverlay && atlasOverlaySet.has(rIdx + 1)) {
+                tt += `\nNeighbour Atlas: ${atlasOverlayLabels[rIdx + 1] || 'current cloud target'}; observe-only next-draw overlay`;
+              }
               tt += `\nOpacity: ${opacity}`;
               return tt;
             })()}
           >
             {(() => {
               const nextCell = rowArr[drawLabels.length] ?? 0;
-              if (nextCell === 1) return <span style={{ color: '#c62828' }}>⬢</span>;
-              if (nextCell === 2) return <span style={{ color: '#2e7d32' }}>◯</span>;
-              if (predictions && predictions.includes(rIdx + 1)) return '•';
-              return '';
+              const symbol = nextCell === 1
+                ? <span style={{ color: '#c62828' }}>⬢</span>
+                : nextCell === 2
+                  ? <span style={{ color: '#2e7d32' }}>◯</span>
+                  : predictions && predictions.includes(rIdx + 1)
+                    ? '•'
+                    : '';
+              const isAtlasTarget = showAtlasOverlay && atlasOverlaySet.has(rIdx + 1);
+              if (!isAtlasTarget) return symbol;
+              return (
+                <span style={{ position: 'relative', display: 'inline-flex', width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' }}>
+                  {symbol}
+                  <span
+                    aria-label={`Neighbour Atlas target ${rIdx + 1}`}
+                    style={{
+                      position: 'absolute',
+                      top: 1,
+                      right: 1,
+                      width: 11,
+                      height: 11,
+                      lineHeight: '11px',
+                      borderRadius: 6,
+                      background: '#2563eb',
+                      color: '#fff',
+                      fontSize: 8,
+                      fontWeight: 900,
+                      textAlign: 'center',
+                    }}
+                  >
+                    A
+                  </span>
+                </span>
+              );
             })()}
           </td>
         )}

@@ -1,0 +1,24 @@
+.prediction-games-draft { display: grid; gap: 14px; min-width: 0; font-size: 13px; color: #334155; }
+.prediction-games-draft__heading, .prediction-games-draft__actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.prediction-games-draft__heading > strong { font-size: 16px; }
+.prediction-games-draft__grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
+.prediction-games-draft fieldset { margin: 0; min-width: 0; padding: 12px; border: 1px solid #dbe3ec; border-radius: 8px; background: #fff; }
+.prediction-games-draft legend { padding: 0 5px; font-size: 12px; font-weight: 800; }
+.prediction-games-draft textarea { width: 100%; min-height: 90px; box-sizing: border-box; resize: vertical; }
+.prediction-games-draft .windfall-hig-field input { width: 100%; max-width: 640px; min-width: 0; box-sizing: border-box; }
+.prediction-games-draft__errors { color: #b91c1c; padding-left: 20px; line-height: 1.6; }
+.prediction-games-draft__games { max-height: 440px; overflow: auto; }
+.prediction-games-draft__game { border-bottom: 1px solid #e2e8f0; }
+.prediction-games-draft__game summary { cursor: pointer; padding: 10px 4px; min-height: 32px; display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; }
+.prediction-games-draft__game summary strong { color: #b91c1c; font-variant-numeric: tabular-nums; }
+.prediction-games-draft__game summary::-webkit-details-marker { display: none; }
+.prediction-games-draft__game[open] > summary .windfall-section__disclosure-icon { transform: rotate(90deg); }
+.prediction-games-draft__game-body { padding: 2px 6px 12px; }
+.prediction-games-draft__check { display: flex; align-items: center; gap: 8px; min-height: 36px; font-weight: 750; }
+[data-panel-id="prediction-journal"] > .windfall-section__summary { flex-wrap: wrap; }
+[data-panel-id="prediction-journal"] > .windfall-section__summary > .windfall-section__actions { flex-wrap: wrap; max-width: 100%; }
+@media (max-width: 700px) {
+  .windfall-ledger-panel { --prediction-reason-target: 44px; }
+  .prediction-games-draft__grid { grid-template-columns: minmax(0, 1fr); }
+  .prediction-games-draft__check { min-height: 44px; }
+}

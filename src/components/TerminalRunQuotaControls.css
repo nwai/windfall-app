@@ -1,0 +1,25 @@
+.terminal-run-quotas { grid-column: 1 / -1; min-width: 0; border-top: 1px solid #d5d9df; padding-top: 16px; }
+.terminal-run-quotas__heading { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.terminal-run-quotas__heading h3 { margin: 0; }
+.terminal-run-quotas__toolbar, .terminal-run-quotas__selected { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.terminal-run-quotas__toolbar label { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.terminal-run-quotas__toolbar select { min-height: 44px; max-width: 100%; }
+.terminal-run-quotas__toggle { min-height: 44px; }
+.terminal-run-quotas__scope, .terminal-run-quotas__status { font-size: 12px; line-height: 1.5; color: #485463; margin: 8px 0; }
+.terminal-run-quotas__selected { margin-bottom: 8px; }
+.terminal-run-quotas__link { display: flex; flex-wrap: wrap; align-items: center; gap: 0 8px; margin: 8px 0; }
+.terminal-run-quotas__link-status { flex-basis: 100%; font-size: 12px; line-height: 1.5; color: #485463; }
+.terminal-run-quotas__scroll { --wf-table-scroll-max-height: 340px; max-height: 340px; overflow: auto; border: 1px solid #d5d9df; border-radius: 6px; }
+.terminal-run-quotas table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12px; white-space: nowrap; }
+.terminal-run-quotas td, .terminal-run-quotas th { text-align: right; padding: 4px 8px; border-bottom: 1px solid #e6e8eb; }
+.terminal-run-quotas th[scope="row"], .terminal-run-quotas thead th:nth-child(2) { text-align: left; }
+.terminal-run-quotas thead th { position: sticky; top: 0; z-index: 1; background: #f3f4f6; height: 36px; }
+.terminal-run-quotas .terminal-run-quotas__sort { border: 0; background: transparent; color: inherit; font: inherit; letter-spacing: 0; text-transform: none; padding: 0 3px; }
+.terminal-run-quotas__sort span { width: 12px; }
+.terminal-run-quotas__sort:focus-visible { outline: 2px solid #007aff; outline-offset: 2px; }
+.terminal-run-quotas tbody tr[data-selected="true"] { background: #edf5ff; }
+.terminal-run-quotas__selection { display: flex; min-height: 32px; min-width: 32px; justify-content: center; align-items: center; }
+.terminal-run-quotas small { display: block; font-weight: 400; color: #64707e; }
+.terminal-run-quotas [role="alert"] { color: #a52b22; }
+@media (pointer: coarse) { .terminal-run-quotas__selection { min-width: 44px; min-height: 44px; } .terminal-run-quotas__sort { min-height: 44px; } }
+@media (max-width: 600px) { .terminal-run-quotas__toolbar label { flex-wrap: wrap; } }

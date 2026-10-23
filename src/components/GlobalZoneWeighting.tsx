@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { useZPASettings } from "../context/ZPASettingsContext";
 import { showToast } from "../lib/toastBus";
+import CollapsibleSection from "./shared/CollapsibleSection";
 
 // Stable, top-level component. Controlled <details> so it won't "blip close".
 export const GlobalZoneWeighting: React.FC = React.memo(() => {
@@ -10,15 +11,14 @@ export const GlobalZoneWeighting: React.FC = React.memo(() => {
   const [open, setOpen] = useState<boolean>(false);
 
   return (
-    <details
+    <CollapsibleSection
+      panelId="global-zone-weighting"
+      title="Global Zone Weighting"
+      summaryHint="applies to panels that opt in"
+      favoriteable={false}
       open={open}
-      onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}
-      style={{ marginTop: 10 }}
+      onOpenChange={setOpen}
     >
-      <summary>
-        <b>Global Zone Weighting</b>{" "}
-        <span style={{ fontWeight: 400, color: "#666" }}>(applies to panels that opt-in)</span>
-      </summary>
 
       <div
         style={{
@@ -60,6 +60,6 @@ export const GlobalZoneWeighting: React.FC = React.memo(() => {
       <div style={{ fontSize: 12, color: "#555", marginTop: 6 }}>
         Per-number zone weights come from ZPA (saved). Panels that support zone bias read these values here.
       </div>
-    </details>
+    </CollapsibleSection>
   );
 });

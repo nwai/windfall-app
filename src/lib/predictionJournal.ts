@@ -1,5 +1,7 @@
 import type { Draw } from "../types";
 import type { AppPresetSnapshot } from "./presets";
+import { isEvidencePortfolioSnapshot, portfolioIsoDate, type EvidencePortfolioSnapshot } from "./evidencePortfolio";
+import { isWindfallPredictorSnapshot, scoreWindfallPredictor, type WindfallPredictorSnapshot } from "./windfallPredictor";
 import { monthlyBucketTransitionGovernorModeLabel, normalizeMonthlyBucketTransitionGovernorMode } from "./monthlyBucketTransitionGovernor";
 import {
   formatRepeatedTerminalDigitFamilyRule,
@@ -7,9 +9,15 @@ import {
 } from "./repeatedTerminalDigitFamilies";
 import type { SelectionInsightsSnapshot } from "./selectionInsights";
 import {
+  normalizePreviousNeighbourAtlasEvidence,
+  type PreviousNeighbourAtlasEvidenceSnapshot,
+} from "./previousNeighbourAtlasEvidence";
+import {
   clonePredictionCaptureBatch,
   type PredictionCaptureBatch,
 } from "./predictionCapture";
+import { normalizePredictionSelectionReason, normalizePredictionSelectionReasons, type PredictionJournalSelectionReason } from "./predictionSelectionReasons";
+export { PREDICTION_JOURNAL_SELECTION_REASON_LABELS, type PredictionJournalSelectionReason, type PredictionJournalSelectionReasonKey } from "./predictionSelectionReasons";
 
 export const PREDICTION_JOURNAL_STORAGE_KEY = "windfall:prediction-journal:v1";
 export const PREDICTION_JOURNAL_UPDATED_EVENT = "windfall:prediction-journal-updated";
@@ -33,29 +41,6 @@ export type PredictionScoreResult = "hit" | "partial" | "miss" | "recorded";
 export type PredictionJournalStatus = "pending" | "locked" | "scored" | "void";
 export type PredictionJournalReviewStatus = "notReviewed" | "reviewedByUser";
 
-export const PREDICTION_JOURNAL_SELECTION_REASON_LABELS = {
-  selectedRandomly: "Selected randomly",
-  dgaPattern: "Observed pattern in DGA grid",
-  dgaConstellationDiagnostic: "Used DGA constellation diagnostic",
-  monthlyBucketStatePattern: "Observed pattern in Monthly bucket state",
-  idmBuckets: "Adhered to IDM buckets",
-  stageMatchAcceptancePlaybook: "Used Stage-Match Acceptance Playbook",
-  latestNeighbourMainSix: "Used ± to choose main 6",
-  selectionInsights: "Used Selection insights to choose numbers",
-  nextDrawEvidenceEnsemble: "Used Next-Draw Evidence Ensemble",
-  officialQuickpickPasteWeighted: "Created official TattsLotto quickpick to generate candidates, then pasted them into Paste-weighted generator",
-  other: "Other",
-} as const;
-
-export type PredictionJournalSelectionReasonKey = keyof typeof PREDICTION_JOURNAL_SELECTION_REASON_LABELS;
-
-export interface PredictionJournalSelectionReason {
-  version: 1;
-  key: PredictionJournalSelectionReasonKey;
-  label: string;
-  detail?: string;
-}
-
 export interface PredictionBucketCounts extends Partial<Record<PredictionBucketKey, number>> {}
 
 export interface PredictionJournalInputs {
@@ -74,6 +59,7 @@ export interface PredictionJournalInputs {
   ogaRange?: { min?: number; max?: number };
   confidence?: number;
   selectionReason?: PredictionJournalSelectionReason;
+  selectionReasons?: PredictionJournalSelectionReason[];
   notes?: string;
 }
 
@@ -127,6 +113,13 @@ export interface PredictionJournalSelectionInsightsProvenance {
   allTopCompanionNumbers: number[];
   predictedCompanionNumbers: number[];
   predictedCompanions: SelectionInsightsSnapshot["predictedCompanions"];
+}
+
+export interface PredictionJournalNeighbourAtlasProvenance {
+  version: 1;
+  snapshot: PreviousNeighbourAtlasEvidenceSnapshot;
+  selectedNumbers: number[];
+  selectedTargetNumbers: number[];
 }
 
 export interface PredictionJournalDgaAutoSuppProvenance {
@@ -207,6 +200,7 @@ export interface PredictionJournalProvenance {
   strictDroughtQuota: PredictionJournalStrictDroughtQuotaWatch;
   dgaAutoSupps?: PredictionJournalDgaAutoSuppProvenance;
   selectionInsights?: PredictionJournalSelectionInsightsProvenance;
+  neighbourAtlas?: PredictionJournalNeighbourAtlasProvenance;
 }
 
 export interface PredictionJournalEntry {
@@ -225,6 +219,9 @@ export interface PredictionJournalEntry {
   setupSummary?: PredictionJournalSetupSummary;
   provenance?: PredictionJournalProvenance;
   captureBatch?: PredictionCaptureBatch;
+  inputMode?: "playedGames" | "shortlist";
+  evidencePortfolio?: EvidencePortfolioSnapshot;
+  windfallPredictor?: WindfallPredictorSnapshot;
 }
 
 export interface PredictionJournalBackup {
@@ -260,6 +257,9 @@ export interface BuildPredictionJournalEntryOptions {
   reviewStatus?: PredictionJournalReviewStatus;
   previousEntry?: PredictionJournalEntry;
   captureBatch?: PredictionCaptureBatch | null;
+  inputMode?: "playedGames" | "shortlist" | null;
+  evidencePortfolio?: EvidencePortfolioSnapshot | null;
+  windfallPredictor?: WindfallPredictorSnapshot | null;
 }
 
 export interface PredictionJournalComputedStatus {
@@ -423,24 +423,6 @@ const normalizeRange = (input: unknown): { min?: number; max?: number } | undefi
   if (min === undefined && max === undefined) return undefined;
   if (min !== undefined && max !== undefined && min > max) return { min: max, max: min };
   return { min, max };
-};
-
-const isSelectionReasonKey = (value: unknown): value is PredictionJournalSelectionReasonKey => (
-  typeof value === "string" && Object.prototype.hasOwnProperty.call(PREDICTION_JOURNAL_SELECTION_REASON_LABELS, value)
-);
-
-const normalizeSelectionReason = (input: unknown): PredictionJournalSelectionReason | undefined => {
-  if (!input || typeof input !== "object") return undefined;
-  const key = (input as Record<string, unknown>).key;
-  if (!isSelectionReasonKey(key)) return undefined;
-  const detail = (input as Record<string, unknown>).detail;
-  const trimmedDetail = typeof detail === "string" ? detail.trim() : "";
-  return {
-    version: 1,
-    key,
-    label: PREDICTION_JOURNAL_SELECTION_REASON_LABELS[key],
-    ...(trimmedDetail ? { detail: trimmedDetail } : {}),
-  };
 };
 
 const normalizeReviewStatus = (value: unknown): PredictionJournalReviewStatus => (
@@ -652,6 +634,21 @@ const normalizeSelectionInsightsSnapshotForJournal = (
   };
 };
 
+const buildNeighbourAtlasProvenanceForJournal = (
+  value: unknown,
+  selectedNumbers: number[],
+): PredictionJournalNeighbourAtlasProvenance | undefined => {
+  const snapshot = normalizePreviousNeighbourAtlasEvidence(value);
+  if (!snapshot) return undefined;
+  const targetSet = new Set(snapshot.currentCloud?.targetNumbers ?? []);
+  return {
+    version: 1,
+    snapshot,
+    selectedNumbers: [...selectedNumbers],
+    selectedTargetNumbers: selectedNumbers.filter((number) => targetSet.has(number)),
+  };
+};
+
 const normalizeDgaAutoSuppProvenanceForJournal = (
   setup: Partial<AppPresetSnapshot> & Record<string, any>,
 ): PredictionJournalDgaAutoSuppProvenance | undefined => {
@@ -728,6 +725,7 @@ export function buildPredictionJournalProvenance(
   const empiricalHazardShortlistNumbers = setupNumberList(setup, "droughtBreakEmpiricalHazardNumbers");
   const strictDroughtQuota = buildStrictDroughtQuotaWatch(setup, strictThreshold, shortlistTop);
   const selectionInsights = normalizeSelectionInsightsSnapshotForJournal(setup.selectionInsightsSnapshot);
+  const neighbourAtlas = buildNeighbourAtlasProvenanceForJournal(setup.neighbourAtlasEvidence, selectedNumbers);
   const dgaAutoSupps = normalizeDgaAutoSuppProvenanceForJournal(setup);
   const strictSet = new Set(strictDroughtShortlistNumbers);
   const empiricalSet = new Set(empiricalHazardShortlistNumbers);
@@ -799,6 +797,7 @@ export function buildPredictionJournalProvenance(
     strictDroughtQuota,
     ...(dgaAutoSupps ? { dgaAutoSupps } : {}),
     ...(selectionInsights ? { selectionInsights } : {}),
+    ...(neighbourAtlas ? { neighbourAtlas } : {}),
   };
 }
 
@@ -831,6 +830,29 @@ const formatSelectionInsightsProvenanceNote = (
     `all-history (${selectionInsights.allDrawCount} draws) top companions ${formatDraftNumbers(selectionInsights.allTopCompanionNumbers)}`,
     `Predicted companion shortlist ${formatDraftNumbers(selectionInsights.predictedCompanionNumbers)}`,
     "companion evidence is observe-only and not a calibrated probability",
+  ].join("; ") + ".";
+};
+
+const formatNeighbourAtlasProvenanceNote = (
+  neighbourAtlas: PredictionJournalNeighbourAtlasProvenance | undefined,
+): string => {
+  if (!neighbourAtlas) return "Neighbour Atlas snapshot: not captured.";
+  const { snapshot } = neighbourAtlas;
+  const cloud = snapshot.currentCloud;
+  const ordinal = snapshot.ordinalEvidence;
+  if (!cloud) {
+    return `Neighbour Atlas snapshot: ${snapshot.historySourceLabel}; no valid pre-draw target cloud was available.`;
+  }
+  return [
+    `Neighbour Atlas snapshot: ${snapshot.historySourceLabel}`,
+    `${snapshot.transitionCount} transitions`,
+    snapshot.targetDrawOrdinal ? `target D${snapshot.targetDrawOrdinal}` : "target ordinal unavailable",
+    `cloud ${formatDraftNumbers(cloud.targetNumbers)}`,
+    `selected-cloud matches ${formatDraftNumbers(neighbourAtlas.selectedTargetNumbers)}`,
+    ordinal
+      ? `${ordinal.sampleQuality} stage sample (${ordinal.trials} trials; lift ${ordinal.lift == null ? "n/a" : `${ordinal.lift.toFixed(3)}x`})`
+      : "stage sample unavailable",
+    "observe-only; no generation influence",
   ].join("; ") + ".";
 };
 
@@ -1034,6 +1056,7 @@ export function buildPredictionJournalDraftFromSetup(snapshot: AppPresetSnapshot
   notes.push(formatDroughtBreakProvenanceNote(draftProvenance.droughtBreakShortlist));
   notes.push(formatStrictDroughtQuotaWatchNote(draftProvenance.strictDroughtQuota));
   notes.push(formatSelectionInsightsProvenanceNote(draftProvenance.selectionInsights));
+  notes.push(formatNeighbourAtlasProvenanceNote(draftProvenance.neighbourAtlas));
   notes.push(`Numbers diagnostic influence: ${setup.scoringGenerationInfluence ?? "off"}; selected-number boost: ${setup.selectedBoostEnabled ? `ON x${setup.selectedBoostFactor ?? "-"}` : "OFF"}.`);
   notes.push(`Drought Evidence Governor: ${(setup.droughtEvidenceGovernorMode === "auto" || setup.droughtEvidenceGovernorMode === "manual") ? (setup.droughtEvidenceGovernorSummaryLabel ?? setup.droughtEvidenceGovernorMode) : "off"}${setup.droughtEvidenceGovernorActive ? `; boosted ${formatDraftNumbers(setupNumberList(setup, "droughtEvidenceGovernorBoostedNumbers"))}` : ""}.`);
   notes.push(`Monthly Bucket Transition Governor: ${normalizeMonthlyBucketTransitionGovernorMode(setup.monthlyBucketTransitionGovernorMode) !== "off" ? (setup.monthlyBucketTransitionGovernorSummaryLabel ?? monthlyBucketTransitionGovernorModeLabel(setup.monthlyBucketTransitionGovernorMode)) : "off"}${setup.monthlyBucketTransitionGovernorActive ? `; boosted ${formatDraftNumbers(setupNumberList(setup, "monthlyBucketTransitionGovernorBoostedNumbers"))}` : ""}.`);
@@ -1118,13 +1141,27 @@ export function summarizePredictionJournalSetup(snapshot: AppPresetSnapshot | nu
   if (selectionInsights?.enabled) {
     selections.push(`Selection insights: predicted companions ${formatDraftNumbers(selectionInsights.predictedCompanionNumbers)}`);
   }
+  const neighbourAtlas = buildNeighbourAtlasProvenanceForJournal(
+    setup.neighbourAtlasEvidence,
+    setupNumberList(setup, "userSelectedNumbers"),
+  );
+  if (neighbourAtlas) {
+    selections.push(`Neighbour Atlas: ${neighbourAtlas.snapshot.historySourceLabel}; ${neighbourAtlas.selectedTargetNumbers.length} selected-cloud matches; observe-only`);
+  }
 
   return {
     window: formatWindowSummary(setup),
     oddEvenRatios: Array.isArray(setup.selectedRatios) && setup.selectedRatios.length
       ? setup.selectedRatios.join(", ")
       : "Off",
-    generation,
+    generation: [...generation, `Terminal shape quotas: ${setup.terminalShapeQuotaEnabled
+      ? Array.isArray(setup.selectedTerminalShapes) && setup.selectedTerminalShapes.length ? setup.selectedTerminalShapes.join(", ") : "ON; none selected"
+      : "Off"}`, `Terminal shape allocation shares: ${setup.terminalShapeAllocationBasis === "equal" ? "equal manual plan, not historical support" : "real historical counts"}`, `Terminal run / shape link: ${setup.terminalRunShapeLinkEnabled
+        ? setup.terminalRunRuleEnabled ? `On; ${setup.terminalShapeLinkEvidence?.matchingDraws ?? "unrecorded"} matching real draws; each draw counted once; historical association only`
+          : "Paused; run rules off; independent shape settings"
+        : "Off; independent shape settings"}`, `Exact terminal run rules: ${setup.terminalRunRuleEnabled
+        ? `${setup.terminalRunUseAllObserved ? "all observed runs" : "manual selection"}; ${setup.terminalRunMode ?? "allocation"}${setup.terminalRunMode !== "requireAll" ? `; ${setup.terminalRunAllocationBasis === "equal" ? "equal user allocation, not historical support" : "real WFMQYH count shares"}` : ""}; ${Array.isArray(setup.selectedTerminalRuns) && setup.selectedTerminalRuns.length ? setup.selectedTerminalRuns.join(", ") : "none selected"}; maximal circular runs only`
+        : "Off"}`],
     filters,
     selections,
   };
@@ -1141,7 +1178,7 @@ export function normalizePredictionJournalInputs(inputs: PredictionJournalInputs
   const sumRange = normalizeRange(inputs.sumRange);
   const ogaRange = normalizeRange(inputs.ogaRange);
   const confidence = normalizeInteger(inputs.confidence);
-  const selectionReason = normalizeSelectionReason(inputs.selectionReason);
+  const selectionReason = normalizePredictionSelectionReason(inputs.selectionReason);
 
   if (oddEvenRatio) output.oddEvenRatio = oddEvenRatio;
   if (numbers) output.numbers = numbers;
@@ -1157,7 +1194,11 @@ export function normalizePredictionJournalInputs(inputs: PredictionJournalInputs
   if (normalizeInteger(inputs.carryOverCount) !== undefined) output.carryOverCount = normalizeInteger(inputs.carryOverCount);
   if (ogaRange) output.ogaRange = ogaRange;
   if (confidence !== undefined) output.confidence = Math.min(100, confidence);
-  if (selectionReason) output.selectionReason = selectionReason;
+  if (Array.isArray(inputs.selectionReasons)) {
+    const reasons = normalizePredictionSelectionReasons(inputs.selectionReasons);
+    if (reasons.length) output.selectionReasons = reasons;
+  }
+  else if (selectionReason) output.selectionReason = selectionReason;
   if (typeof inputs.notes === "string" && inputs.notes.trim()) output.notes = inputs.notes.trim();
 
   return output;
@@ -1169,13 +1210,33 @@ export function drawFingerprint(draw: Draw): string {
   return `${draw.date}|main:${main}|supp:${supp}`;
 }
 
+export function normalizePredictionJournalShortlistInputs(inputs: PredictionJournalInputs): PredictionJournalInputs {
+  return normalizePredictionJournalInputs({
+    numbers: inputs.numbers,
+    confidence: inputs.confidence,
+    selectionReason: inputs.selectionReason,
+    selectionReasons: inputs.selectionReasons,
+    notes: inputs.notes,
+  });
+}
+
 export function buildPredictionJournalEntry(options: BuildPredictionJournalEntryOptions): PredictionJournalEntry {
   const now = options.now ?? new Date().toISOString();
   const previous = options.previousEntry;
-  const setupSnapshot = options.setupSnapshot === undefined
+  if (options.windfallPredictor && !isWindfallPredictorSnapshot(options.windfallPredictor)) throw new Error("The Windfall Predictor receipt is invalid. Nothing was saved.");
+  const windfallPredictor = previous?.windfallPredictor ?? (options.windfallPredictor
+    ? JSON.parse(JSON.stringify(options.windfallPredictor)) as WindfallPredictorSnapshot : undefined);
+  const evidencePortfolio = previous?.evidencePortfolio ?? (
+    options.evidencePortfolio && isEvidencePortfolioSnapshot(options.evidencePortfolio)
+      ? JSON.parse(JSON.stringify(options.evidencePortfolio)) as EvidencePortfolioSnapshot : undefined
+  );
+  const setupSnapshot = windfallPredictor ? previous?.setupSnapshot : evidencePortfolio ? cloneSetupSnapshot(evidencePortfolio.settingsSnapshot) : options.setupSnapshot === undefined
     ? previous?.setupSnapshot
     : cloneSetupSnapshot(options.setupSnapshot);
-  const inputs = normalizePredictionJournalInputs(options.inputs);
+  const inputMode = options.inputMode === null ? undefined : options.inputMode ?? previous?.inputMode;
+  const inputs = inputMode === "shortlist"
+    ? normalizePredictionJournalShortlistInputs(options.inputs)
+    : normalizePredictionJournalInputs(options.inputs);
   const reviewStatus = normalizeReviewStatus(options.reviewStatus ?? previous?.reviewStatus);
   const reviewedAt = reviewStatus === "reviewedByUser"
     ? previous?.reviewStatus === "reviewedByUser" && previous.reviewedAt ? previous.reviewedAt : now
@@ -1191,15 +1252,18 @@ export function buildPredictionJournalEntry(options: BuildPredictionJournalEntry
     revision: previous ? previous.revision + 1 : 1,
     anchorLatestDrawDate: previous?.anchorLatestDrawDate ?? options.latestDraw.date,
     anchorDrawFingerprint: previous?.anchorDrawFingerprint ?? drawFingerprint(options.latestDraw),
-    targetKind: options.targetKind,
+    targetKind: evidencePortfolio || windfallPredictor ? "nextDraw" : options.targetKind,
     reviewStatus,
     reviewedAt,
     archivedAt: previous?.archivedAt,
     inputs,
     setupSnapshot,
     setupSummary: setupSnapshot ? summarizePredictionJournalSetup(setupSnapshot) : previous?.setupSummary,
-    provenance: buildPredictionJournalProvenance(inputs, setupSnapshot),
+    provenance: windfallPredictor ? undefined : buildPredictionJournalProvenance(inputs, setupSnapshot),
     captureBatch,
+    inputMode,
+    evidencePortfolio,
+    windfallPredictor,
   };
 }
 
@@ -1240,6 +1304,10 @@ const findAnchorIndex = (entry: PredictionJournalEntry, ordered: OrderedDraw[]):
 };
 
 const targetDrawsForEntry = (entry: PredictionJournalEntry, ordered: OrderedDraw[], anchorIndex: number): Draw[] => {
+  if (entry.windfallPredictor) return ordered.filter(row => portfolioIsoDate(row.draw.date) === entry.windfallPredictor!.targetDate).map(row => row.draw).slice(0, 1);
+  if (entry.evidencePortfolio) {
+    return ordered.filter(row => portfolioIsoDate(row.draw.date) === entry.evidencePortfolio!.targetDate).map(row => row.draw).slice(0, 1);
+  }
   const anchor = ordered[anchorIndex];
   const future = ordered.slice(anchorIndex + 1);
   if (entry.targetKind === "nextDraw") return future.slice(0, 1).map((row) => row.draw);
@@ -1369,7 +1437,37 @@ export function scorePredictionJournalEntry(entry: PredictionJournalEntry, histo
   const actualNumberSet = new Set(actualNumbers);
   const scores: PredictionScore[] = [];
 
-  if (status.targetDraws.length === 0) {
+  if (entry.windfallPredictor) {
+    const checked = scoreWindfallPredictor(entry.windfallPredictor, history);
+    if (checked.actual) checked.games.forEach((game, index) => scores.push({
+      key: `windfallPredictorGame${index + 1}`, label: `WP-1 game ${index + 1} · ${game.recipe}`,
+      predicted: `Mains ${game.main.join(", ")} · suggested supps ${game.supp.join(", ")}`,
+      actual: `${game.hits}/8 overlap · six-main prize ${game.division}`,
+      result: game.status === "Hit" ? "hit" : game.status === "Partial" ? "partial" : "miss",
+      hitCount: game.hits!, predictedCount: 8, actualCount: 8,
+      detail: "Hit means all eight overlap; partial means one to seven, not a prize. Prize checking uses only the six listed mains. Suggested supplementary roles are scored separately.",
+    }));
+    return { ...entry, ...status, scores };
+  }
+
+  if (status.targetDraws.length === 0 || entry.inputMode === "playedGames") {
+    return { ...entry, ...status, scores };
+  }
+
+  if (entry.inputMode === "shortlist") {
+    const pool = [...new Set(inputs.numbers ?? [])];
+    const hits = pool.filter(number => actualNumberSet.has(number));
+    if (pool.length) scores.push({
+      key: "shortlistCoverage",
+      label: "Shortlist coverage",
+      predicted: formatNumberList(pool),
+      actual: formatNumberList([...actualNumberSet].sort((a, b) => a - b)),
+      result: "recorded",
+      detail: `${hits.length} of ${actualNumberSet.size} distinct target numbers covered by a ${pool.length}-number pool. ${hits.length ? `Covered: ${formatNumberList(hits)}. ` : ""}Coverage only, not a played-game prize or a predictive hit/miss score. Larger pools naturally cover more numbers.`,
+      hitCount: hits.length,
+      predictedCount: pool.length,
+      actualCount: actualNumberSet.size,
+    });
     return { ...entry, ...status, scores };
   }
 
@@ -1422,6 +1520,35 @@ export function scorePredictionJournalEntry(entry: PredictionJournalEntry, histo
       hitCount: suppHits.length,
       predictedCount: 2,
       actualCount: actualSupps.length,
+    });
+  }
+
+  const neighbourAtlas = entry.provenance?.neighbourAtlas
+    ?? buildPredictionJournalProvenance(inputs, entry.setupSnapshot).neighbourAtlas;
+  const neighbourAtlasCloud = neighbourAtlas?.snapshot.currentCloud;
+  if (neighbourAtlasCloud?.targetNumbers.length) {
+    const firstTargetDraw = status.targetDraws[0];
+    const firstTargetNumbers = [...new Set(drawNumbers(firstTargetDraw))].sort((left, right) => left - right);
+    const firstTargetSet = new Set(firstTargetNumbers);
+    const cloudHits = neighbourAtlasCloud.targetNumbers.filter((number) => firstTargetSet.has(number));
+    const ordinal = neighbourAtlas?.snapshot.ordinalEvidence ?? null;
+    scores.push({
+      key: "neighbourAtlasReplay",
+      label: "Neighbour Atlas replay",
+      predicted: formatNumberList(neighbourAtlasCloud.targetNumbers),
+      actual: formatNumberList(firstTargetNumbers),
+      result: "recorded",
+      detail: [
+        `${cloudHits.length}/${neighbourAtlasCloud.targetNumbers.length} unique cloud targets appeared in the first target draw${firstTargetDraw.date ? ` (${firstTargetDraw.date})` : ""}`,
+        cloudHits.length ? `observed ${formatNumberList(cloudHits)}` : "no cloud targets observed",
+        ordinal
+          ? `${ordinal.sampleQuality.toLowerCase()} D${ordinal.drawOrdinal} reference (${ordinal.trials} trials)`
+          : "draw-stage reference unavailable",
+        "observe-only audit; not scored as a predictive hit or miss",
+      ].join("; ") + ".",
+      hitCount: cloudHits.length,
+      predictedCount: neighbourAtlasCloud.targetNumbers.length,
+      actualCount: firstTargetNumbers.length,
     });
   }
 
@@ -1519,20 +1646,29 @@ const isPredictionJournalEntry = (value: unknown): value is PredictionJournalEnt
     && typeof entry.anchorDrawFingerprint === "string"
     && ["nextDraw", "next2Draws", "next3Draws", "restOfMonth"].includes(entry.targetKind)
     && !!entry.inputs
-    && typeof entry.inputs === "object";
+    && typeof entry.inputs === "object"
+    && (entry.windfallPredictor === undefined || isWindfallPredictorSnapshot(entry.windfallPredictor));
 };
 
 const normalizeStoredPredictionJournalEntry = (entry: PredictionJournalEntry): PredictionJournalEntry => {
-  const inputs = normalizePredictionJournalInputs(entry.inputs);
+  const inputs = entry.inputMode === "shortlist"
+    ? normalizePredictionJournalShortlistInputs(entry.inputs)
+    : normalizePredictionJournalInputs(entry.inputs);
   const reviewStatus = normalizeReviewStatus(entry.reviewStatus);
+  const evidencePortfolio = isEvidencePortfolioSnapshot(entry.evidencePortfolio) ? entry.evidencePortfolio : undefined;
+  const windfallPredictor = isWindfallPredictorSnapshot(entry.windfallPredictor) ? entry.windfallPredictor : undefined;
   return {
     ...entry,
+    targetKind: evidencePortfolio || windfallPredictor ? "nextDraw" : entry.targetKind,
     inputs,
     reviewStatus,
     reviewedAt: reviewStatus === "reviewedByUser" && typeof entry.reviewedAt === "string" ? entry.reviewedAt : undefined,
     archivedAt: typeof entry.archivedAt === "string" ? entry.archivedAt : undefined,
-    provenance: buildPredictionJournalProvenance(inputs, entry.setupSnapshot),
+    provenance: windfallPredictor ? undefined : buildPredictionJournalProvenance(inputs, entry.setupSnapshot),
     captureBatch: clonePredictionCaptureBatch(entry.captureBatch),
+    inputMode: entry.inputMode === "playedGames" || entry.inputMode === "shortlist" ? entry.inputMode : undefined,
+    evidencePortfolio,
+    windfallPredictor,
   };
 };
 

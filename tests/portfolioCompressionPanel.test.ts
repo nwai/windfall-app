@@ -411,7 +411,7 @@ describe("PortfolioCompressionPanel", () => {
     expect(html).toContain("Paste-weighted frequency");
     expect(html).toContain("Adjacent combos");
     expect(html).toContain("Hot/cold");
-    expect(html).toContain("Recent draw behaviour, mains + supps");
+    expect(html).toContain("Uses the shared Hot vs Cold history scope and ranking controls");
     expect(html).toContain("Window shape");
     expect(html).toContain("Recent low/mid/high, odd/even, and sum profile, mains only");
     expect(html).toContain("Monthly buckets");
@@ -779,7 +779,7 @@ describe("PortfolioCompressionPanel", () => {
     expect(container.textContent).toContain("1, 2, 3, 4, 5, 6");
 
     const hotColdToggle = container.querySelector(
-      "input[aria-label='Toggle Hot/cold (mains + supps) evidence']",
+      "input[aria-label='Toggle Hot/cold ranking evidence']",
     ) as HTMLInputElement | null;
     expect(hotColdToggle).not.toBeNull();
 

@@ -1,4 +1,5 @@
 import React from "react";
+import CollapsibleSection from "./shared/CollapsibleSection";
 
 export type GuidedWorkflowTone = "ready" | "review" | "optional" | "after";
 
@@ -51,6 +52,7 @@ export const GuidedWorkflowPanel: React.FC<GuidedWorkflowPanelProps> = ({
   preDrawSteps,
   postDrawSteps,
 }) => (
+  <CollapsibleSection panelId="guided-setup" title="Guided Setup" favoriteable={false}>
   <section className="windfall-guided-workflow" aria-labelledby="windfall-guided-workflow-title">
     <div className="windfall-guided-workflow__header">
       <div>
@@ -88,6 +90,7 @@ export const GuidedWorkflowPanel: React.FC<GuidedWorkflowPanelProps> = ({
       </div>
     </div>
   </section>
+  </CollapsibleSection>
 );
 
 export default GuidedWorkflowPanel;

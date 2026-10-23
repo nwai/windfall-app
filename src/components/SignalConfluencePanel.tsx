@@ -7,6 +7,7 @@ import type { DrawBucketPatternGenerationInfluenceRow } from "../lib/drawBucketP
 import type { NumberDiagnosticRow } from "../lib/scoringSystemDiagnostics";
 import type { SelectionInsightPredictedCompanionRow } from "../lib/selectionInsights";
 import type { NextDrawEvidenceResult } from "../lib/nextDrawEvidenceEnsemble";
+import type { PreviousNeighbourAtlasEvidenceSnapshot } from "../lib/previousNeighbourAtlasEvidence";
 import {
   monthlyBucketDisplayForNumber,
   type MonthlyBucketNumberDisplay,
@@ -28,6 +29,10 @@ import {
   type SignalConfluenceVisibilityMode,
 } from "../lib/signalConfluence";
 import { auditSignalConfluenceIndependence } from "../lib/signalConfluenceIndependence";
+import {
+  EVIDENCE_PORTFOLIO_RULES,
+  EVIDENCE_PORTFOLIO_VERSION,
+} from "../lib/evidenceFamilyRegistry";
 import { HigButton } from "./shared/HigControls";
 import "./SignalConfluencePanel.css";
 
@@ -42,10 +47,13 @@ interface SignalConfluencePanelProps {
   empiricalDroughtNumbers: readonly number[];
   sharedAnalysisSelectionNumbers: readonly number[];
   hotColdRows: readonly PortfolioHotColdEvidenceRow[];
+  hotColdScopeLabel?: string;
+  onEditHotColdSettings?: () => void;
   drawBucketPatternRows: readonly DrawBucketPatternGenerationInfluenceRow[];
   scoringNumberRows: readonly NumberDiagnosticRow[];
   selectionInsightRows: readonly SelectionInsightPredictedCompanionRow[];
   nextDrawEvidenceResult: NextDrawEvidenceResult | null;
+  neighbourAtlasEvidence?: PreviousNeighbourAtlasEvidenceSnapshot | null;
   monthlyBuckets?: MonthlyBucketSets | null;
   userSelectedNumbers: readonly number[];
   forcedNumbers: readonly number[];
@@ -139,6 +147,34 @@ const buildLatestNeighbourMentions = (
       label: Array.from(meta.labels).sort().join("/"),
       detail: `from ${Array.from(meta.sources).sort((left, right) => left - right).join(", ")}${meta.duplicated ? "; duplicated target" : ""}`,
       strength: meta.duplicated ? 1 : 0.82,
+    }));
+};
+
+const buildNeighbourAtlasMentions = (
+  evidence: PreviousNeighbourAtlasEvidenceSnapshot,
+  mode: LatestNeighbourSupportMode,
+): SignalConfluenceMention[] => {
+  const cloud = evidence.currentCloud;
+  if (!cloud) return [];
+  const allowedLabels = new Set(mode === "pm1pm2" ? ["-2", "-1", "+1", "+2"] : ["-1", "+1"]);
+  const ordinal = evidence.ordinalEvidence;
+  const stageDetail = ordinal
+    ? `${ordinal.label} ${ordinal.sampleQuality.toLowerCase()} sample; ${ordinal.trials} trials; lift ${ordinal.lift == null ? "n/a" : `${ordinal.lift.toFixed(3)}x`}`
+    : "target-stage evidence unavailable";
+
+  return cloud.numbers
+    .map((row) => {
+      const directions = row.directions.filter((label) => allowedLabels.has(label));
+      return { ...row, directions, ambiguous: directions.length > 1 };
+    })
+    .filter((row) => row.directions.length > 0)
+    .map((row) => ({
+      number: row.number,
+      family: "latest-neighbour",
+      source: `Neighbour Atlas ${formatLatestNeighbourMode(mode)}`,
+      label: row.directions.join("/"),
+      detail: `${row.ambiguous ? "ambiguous target" : "single target path"}; frozen from ${cloud.sourceDateLabel}; ${stageDetail}; stage evidence adds no score`,
+      strength: row.ambiguous ? 1 : 0.82,
     }));
 };
 
@@ -282,6 +318,7 @@ const buildSelectionInsightMentions = (rows: readonly SelectionInsightPredictedC
     label: `Comp ${row.supportScore.toFixed(1)}`,
     detail: `WFMQYH ${row.windowCount}; all ${row.allCount}`,
     strength: strengthFromValue(row.supportScore, maxSupport, 0.3),
+    tone: "context" as const,
   }));
 };
 
@@ -296,6 +333,7 @@ const buildNextDrawEvidenceMentions = (result: NextDrawEvidenceResult | null): S
       label: `NDEE #${index + 1}`,
       detail: row ? `estimate ${(row.inclusionEstimate * 100).toFixed(1)}%; ${row.selectedRole}` : undefined,
       strength: rankedStrength(index, result.topEight.length, 0.35),
+      tone: "context" as const,
     };
   });
 };
@@ -334,8 +372,8 @@ const buildStateMentions = (
 
 const Chip: React.FC<{ mention: SignalConfluenceMention }> = ({ mention }) => (
   <span
-    className={`signal-confluence-panel__chip signal-confluence-panel__chip--${mention.tone === "caution" ? "caution" : mention.family}`}
-    title={`${mention.source}: ${mention.label}${mention.detail ? ` - ${mention.detail}` : ""}`}
+    className={`signal-confluence-panel__chip signal-confluence-panel__chip--${mention.tone === "caution" ? "caution" : mention.tone === "context" ? "context" : mention.family}`}
+    title={`${mention.source}: ${mention.label}${mention.detail ? ` - ${mention.detail}` : ""}${mention.contextReason ? ` - ${mention.contextReason}` : ""}`}
   >
     {mention.label}
   </span>
@@ -389,7 +427,9 @@ const NumberAction: React.FC<{
     : forcedLimitReached
       ? `Eight forced numbers are already active. Release another forced number before adding ${row.number}.`
       : !hasSupport && !isSignalConfluenceForced
-        ? `Number ${row.number} has no Signal Confluence support to force from this panel.`
+        ? row.contextMentions.length > 0
+          ? `Number ${row.number} has context-only mentions but no independent Signal Confluence support to force.`
+          : `Number ${row.number} has no Signal Confluence support to force from this panel.`
         : isSignalConfluenceForced
           ? `Remove ${row.number} as a Signal Confluence forced inclusion.`
           : `Force ${row.number} from Signal Confluence. This is user-controlled and will affect generation.`;
@@ -428,10 +468,13 @@ export const SignalConfluencePanel: React.FC<SignalConfluencePanelProps> = ({
   empiricalDroughtNumbers,
   sharedAnalysisSelectionNumbers,
   hotColdRows,
+  hotColdScopeLabel,
+  onEditHotColdSettings,
   drawBucketPatternRows,
   scoringNumberRows,
   selectionInsightRows,
   nextDrawEvidenceResult,
+  neighbourAtlasEvidence = null,
   monthlyBuckets = null,
   userSelectedNumbers,
   forcedNumbers,
@@ -447,8 +490,11 @@ export const SignalConfluencePanel: React.FC<SignalConfluencePanelProps> = ({
   const [showIndependenceAudit, setShowIndependenceAudit] = useState(false);
 
   const rows = useMemo(() => {
+    const latestNeighbourMentions = neighbourAtlasEvidence?.currentCloud
+      ? buildNeighbourAtlasMentions(neighbourAtlasEvidence, latestNeighbourMode)
+      : buildLatestNeighbourMentions(latestNeighbourRows, latestNeighbourMode);
     const mentions: SignalConfluenceMention[] = [
-      ...buildLatestNeighbourMentions(latestNeighbourRows, latestNeighbourMode),
+      ...latestNeighbourMentions,
       ...buildWeekdayNeighbourMentions(activeHistory, latestNeighbourRows, latestNeighbourMode, targetDrawDate),
       ...buildRankedSignalConfluenceMentions(strictDroughtNumbers, "drought", "Strict drought shortlist", "Strict", 8),
       ...buildRankedSignalConfluenceMentions(empiricalDroughtNumbers, "drought", "Empirical drought shortlist", "Emp", 8),
@@ -475,6 +521,7 @@ export const SignalConfluencePanel: React.FC<SignalConfluencePanelProps> = ({
     hotColdRows,
     latestNeighbourMode,
     latestNeighbourRows,
+    neighbourAtlasEvidence,
     nextDrawEvidenceResult,
     scoringNumberRows,
     selectionInsightRows,
@@ -498,8 +545,12 @@ export const SignalConfluencePanel: React.FC<SignalConfluencePanelProps> = ({
     [rows],
   );
 
-  const supportFamilyCount = useMemo(() => (
-    new Set(rows.flatMap((row) => row.supportMentions.map((mention) => mention.family))).size
+  const supportGroupCount = useMemo(() => (
+    new Set(rows.flatMap((row) => row.groupSupport.map((support) => support.independenceGroup))).size
+  ), [rows]);
+
+  const contextSourceCount = useMemo(() => (
+    new Set(rows.flatMap((row) => row.contextMentions.map((mention) => mention.sourcePanelId).filter(Boolean))).size
   ), [rows]);
 
   const supportedRows = rows.filter((row) => row.rawMentionCount > 0 && !row.isExcluded);
@@ -512,7 +563,7 @@ export const SignalConfluencePanel: React.FC<SignalConfluencePanelProps> = ({
     [forcedNumbers],
   );
   const topRow = supportedRows[0] ?? null;
-  const ndeeStatus = nextDrawEvidenceResult ? "included" : "not run";
+  const ndeeStatus = nextDrawEvidenceResult ? "context only" : "not run";
   const supportSortLabel = sortKey === "support"
     ? `Support ${supportSortDirection === "descending" ? "desc" : "asc"}`
     : "Support sort";
@@ -532,25 +583,38 @@ export const SignalConfluencePanel: React.FC<SignalConfluencePanelProps> = ({
 
   return (
     <section className="signal-confluence-panel" aria-label="Signal Confluence Number Consensus Ledger">
+      {hotColdScopeLabel && <div role="note">{hotColdScopeLabel} {onEditHotColdSettings && <HigButton size="compact" variant="quiet" onClick={onEditHotColdSettings}>Hot vs Cold settings</HigButton>}</div>}
       <div className="signal-confluence-panel__intro">
         <div>
           <span className="signal-confluence-panel__kicker">Observe-only ledger</span>
           <p>
-            This panel counts where different app signal families mention the same numbers. Repeated mentions are capped within each family, and the independence audit below checks cross-family overlap separately. It changes candidate generation only when you deliberately force a supported number from this table.
+            This panel compares where registered evidence sources mention the same numbers. Direct evidence is capped once per independence group; downstream aggregators, consumer output, and user state remain visible as context without adding another vote. It changes candidate generation only when you deliberately force a directly supported number from this table.
           </p>
         </div>
+      </div>
+
+      <div className="signal-confluence-panel__portfolio-policy" role="note">
+        <strong>{EVIDENCE_PORTFOLIO_VERSION}</strong>
+        <span>
+          Fixed before the target draw: strongest eligible mention within each independence group, maximum {EVIDENCE_PORTFOLIO_RULES.scoreCapPerIndependenceGroup.toFixed(0)} point per group, then an equal bounded sum across groups. No outcome-selected family or weight.
+        </span>
       </div>
 
       <div className="signal-confluence-panel__summary">
         <div className="signal-confluence-panel__metric">
           <div className="signal-confluence-panel__metric-label">Top available</div>
           <div className="signal-confluence-panel__metric-value">{topRow ? topRow.number : "-"}</div>
-          <div className="signal-confluence-panel__metric-detail">{topRow ? `${topRow.familyCount} families; ${topRow.rawMentionCount} mentions` : "No support mentions yet"}</div>
+          <div className="signal-confluence-panel__metric-detail">{topRow ? `${topRow.familyCount} independent groups; ${topRow.rawMentionCount} direct mentions` : "No direct support mentions yet"}</div>
         </div>
         <div className="signal-confluence-panel__metric">
-          <div className="signal-confluence-panel__metric-label">Support families</div>
-          <div className="signal-confluence-panel__metric-value">{supportFamilyCount}</div>
-          <div className="signal-confluence-panel__metric-detail">capped before scoring</div>
+          <div className="signal-confluence-panel__metric-label">Independent groups</div>
+          <div className="signal-confluence-panel__metric-value">{supportGroupCount}</div>
+          <div className="signal-confluence-panel__metric-detail">each capped at one point</div>
+        </div>
+        <div className="signal-confluence-panel__metric">
+          <div className="signal-confluence-panel__metric-label">Context-only sources</div>
+          <div className="signal-confluence-panel__metric-value">{contextSourceCount}</div>
+          <div className="signal-confluence-panel__metric-detail">visible, never scored</div>
         </div>
         <div className="signal-confluence-panel__metric">
           <div className="signal-confluence-panel__metric-label">Active WFMQYH</div>
@@ -560,9 +624,18 @@ export const SignalConfluencePanel: React.FC<SignalConfluencePanelProps> = ({
         <div className="signal-confluence-panel__metric">
           <div className="signal-confluence-panel__metric-label">NDEE source</div>
           <div className="signal-confluence-panel__metric-value">{ndeeStatus}</div>
-          <div className="signal-confluence-panel__metric-detail">only after fixed replay runs</div>
+          <div className="signal-confluence-panel__metric-detail">downstream ensemble; never another vote</div>
         </div>
       </div>
+
+      {neighbourAtlasEvidence ? (
+        <div role="note" style={{ border: "1px solid #bfdbfe", borderRadius: 8, background: "#eff6ff", color: "#1e3a8a", padding: "8px 10px", fontSize: 12, lineHeight: 1.45 }}>
+          <b>Neighbour Atlas bridge:</b> {neighbourAtlasEvidence.historySourceLabel} · {neighbourAtlasEvidence.transitionCount} transitions
+          {neighbourAtlasEvidence.targetDrawOrdinal ? ` · D${neighbourAtlasEvidence.targetDrawOrdinal}` : ""}
+          {neighbourAtlasEvidence.ordinalEvidence ? ` · ${neighbourAtlasEvidence.ordinalEvidence.sampleQuality} (${neighbourAtlasEvidence.ordinalEvidence.trials} trials)` : ""}.
+          It replaces the older latest-neighbour mention instead of adding a second support family. Stage lift and sample quality are context only and never increase the ledger score.
+        </div>
+      ) : null}
 
       <div className="signal-confluence-panel__audit">
         <div className="signal-confluence-panel__audit-header">
@@ -570,7 +643,7 @@ export const SignalConfluencePanel: React.FC<SignalConfluencePanelProps> = ({
             <span className="signal-confluence-panel__kicker">Truthfulness audit</span>
             <strong>Signal Confluence Independence Audit</strong>
             <p>
-              Tests whether different support families currently point to more of the same numbers than fixed-size random sets would. This is a current-set redundancy check, not proof that any pair is independent.
+              Tests whether scored independence groups currently point to more of the same numbers than fixed-size random sets would. This is a current-set redundancy check, not proof that any pair is independent.
             </p>
           </div>
           <HigButton
@@ -586,7 +659,7 @@ export const SignalConfluencePanel: React.FC<SignalConfluencePanelProps> = ({
 
         <div className="signal-confluence-panel__audit-summary">
           <div>
-            <span>Active families</span>
+            <span>Active groups</span>
             <strong>{independenceAudit.activeFamilyCount}</strong>
           </div>
           <div>
@@ -607,8 +680,8 @@ export const SignalConfluencePanel: React.FC<SignalConfluencePanelProps> = ({
           {independenceAudit.activeFamilyCount < 2
             ? "At least two active support families are required before pair overlap can be checked."
             : independenceAudit.flaggedPairCount > 0
-              ? `${independenceAudit.flaggedPairCount} family pair${independenceAudit.flaggedPairCount === 1 ? "" : "s"} currently overlap above the 5% false-discovery-rate threshold. Treat their agreement as potentially redundant.`
-              : "No family pair currently clears the overlap audit threshold. This is not evidence that the families are independent."}
+              ? `${independenceAudit.flaggedPairCount} group pair${independenceAudit.flaggedPairCount === 1 ? "" : "s"} currently overlaps above the 5% false-discovery-rate threshold. Treat that agreement as potentially redundant.`
+              : "No independence-group pair currently clears the overlap audit threshold. This is not evidence that the groups are independent."}
         </div>
 
         {showIndependenceAudit ? (
@@ -623,7 +696,7 @@ export const SignalConfluencePanel: React.FC<SignalConfluencePanelProps> = ({
                 <table className="signal-confluence-panel__audit-table">
                   <thead>
                     <tr>
-                      <th>Family pair</th>
+                      <th>Group pair</th>
                       <th>Set sizes</th>
                       <th>Shared numbers</th>
                       <th>Observed / expected</th>
@@ -655,7 +728,7 @@ export const SignalConfluencePanel: React.FC<SignalConfluencePanelProps> = ({
               </div>
             ) : null}
             <p className="signal-confluence-panel__audit-method">
-              Each family is reduced to its unique supported-number set. Expected overlap is |A| x |B| / 45. The audit uses an exact one-sided hypergeometric overlap test and Benjamini-Hochberg correction across every active family pair at a 5% false discovery rate. A non-flag is inconclusive; it does not certify independence. Results never alter ledger rank or generation.
+              Each scored independence group is reduced to its unique supported-number set. Expected overlap is |A| x |B| / 45. The audit uses an exact one-sided hypergeometric overlap test and Benjamini-Hochberg correction across every active group pair at a 5% false discovery rate. A non-flag is inconclusive; it does not certify independence. Results never alter ledger rank or generation.
             </p>
           </div>
         ) : null}
@@ -675,7 +748,7 @@ export const SignalConfluencePanel: React.FC<SignalConfluencePanelProps> = ({
               aria-pressed={visibilityMode === "supported-only"}
               onClick={() => setVisibilityMode("supported-only")}
             >
-              Supported only
+              Evidence/context
             </HigButton>
             <HigButton
               variant={visibilityMode === "all-45" ? "primary" : "quiet"}
@@ -688,7 +761,7 @@ export const SignalConfluencePanel: React.FC<SignalConfluencePanelProps> = ({
             </HigButton>
           </div>
           <span className="signal-confluence-panel__control-help">
-            Supported only also keeps active selected, forced, or excluded rows visible so conflicts are not concealed.
+            Evidence/context keeps direct support, context-only mentions, and active selected, forced, or excluded rows visible so dependencies and conflicts are not concealed.
           </span>
         </div>
         {visibilityMode === "supported-only" ? (
@@ -722,9 +795,9 @@ export const SignalConfluencePanel: React.FC<SignalConfluencePanelProps> = ({
                 </button>
               </th>
               <th>Number</th>
-              <th>Family score</th>
-              <th>Families</th>
-              <th>Raw</th>
+              <th>Bounded score</th>
+              <th>Groups</th>
+              <th>Direct</th>
               <th>State</th>
               <th aria-sort={sortKey === "support" ? supportSortDirection : "none"}>
                 <button
@@ -737,6 +810,7 @@ export const SignalConfluencePanel: React.FC<SignalConfluencePanelProps> = ({
                 </button>
               </th>
               <th>Caution</th>
+              <th>Context</th>
             </tr>
           </thead>
           <tbody>
@@ -779,12 +853,19 @@ export const SignalConfluencePanel: React.FC<SignalConfluencePanelProps> = ({
                         )) : "-"}
                       </div>
                     </td>
+                    <td>
+                      <div className="signal-confluence-panel__chip-row">
+                        {row.contextMentions.length ? row.contextMentions.map((mention, index) => (
+                          <Chip key={`${mention.family}-${mention.source}-${mention.label}-${index}`} mention={mention} />
+                        )) : "-"}
+                      </div>
+                    </td>
                   </tr>
                 );
               })
             ) : (
               <tr>
-                <td colSpan={8} className="signal-confluence-panel__empty">No signal support rows to show yet.</td>
+                <td colSpan={9} className="signal-confluence-panel__empty">No direct evidence or contextual rows to show yet.</td>
               </tr>
             )}
           </tbody>
@@ -792,7 +873,7 @@ export const SignalConfluencePanel: React.FC<SignalConfluencePanelProps> = ({
       </div>
 
       <div className="signal-confluence-panel__footnote">
-        Family score is capped support by source family. Raw is the uncapped support mention count. Signal Confluence forcing is a user action, not an automatic prediction. Excluded numbers remain visible for conflict awareness, but rank below available numbers.
+        Bounded score counts at most one capped contribution per registered independence group. Direct is the uncapped direct-evidence mention count. Context chips never add score and cannot make a number forceable. Signal Confluence forcing remains a user action, not an automatic prediction.
       </div>
     </section>
   );

@@ -1,9 +1,12 @@
 import { drawScheduleDateError } from "./historyScheduleAudit";
 import { datePartsToIso, parseDrawDateParts } from "./planningDrawContext";
+import { terminalRepetitionShape } from "./terminalShapeQuotas";
+import { maximalTerminalDigitRuns } from "./terminalDigitRuns";
 
 /* Utilities to read, parse, prepend, and write draw history CSV using the File System Access API.
    CSV schema (matches your file):
-   - Header: date,main1,main2,main3,main4,main5,main6,supp1,supp2
+   - Core columns: date,main1,main2,main3,main4,main5,main6,supp1,supp2
+   - Derived columns: terminal_shape,terminal_runs (separate runs joined with "; ")
    - Date format: M/D/YY (e.g., 10/27/25), newest rows first
 */
 export type DrawRow = {
@@ -19,6 +22,13 @@ export type CsvParseResult = {
 };
 
 const DEFAULT_HEADER = ["date","main1","main2","main3","main4","main5","main6","supp1","supp2"];
+const TERMINAL_HEADER = ["terminal_shape", "terminal_runs"];
+
+export function drawHistoryTerminalComposition(main: readonly number[], supp: readonly number[]) {
+  if (main.length !== 6 || supp.length !== 2) return { shape: null, runs: null };
+  const numbers = [...main, ...supp], shape = terminalRepetitionShape(numbers);
+  return { shape, runs: shape ? maximalTerminalDigitRuns(numbers).map((run) => run.key) : null };
+}
 
 export function parseCsv(content: string): CsvParseResult {
   const lines = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n").filter(l => l.trim().length > 0);
@@ -45,21 +55,25 @@ export function parseCsv(content: string): CsvParseResult {
 }
 
 export function formatRow(row: DrawRow): string {
-  return [row.date, ...row.mains, ...row.supps].join(",");
+  const { shape, runs } = drawHistoryTerminalComposition(row.mains, row.supps);
+  return [row.date, ...row.mains, ...row.supps, shape ?? "", runs?.join("; ") ?? ""].join(",");
 }
 
 export function toCsv(rows: DrawRow[], header: string[] = DEFAULT_HEADER): string {
+  const realRows = rows.filter((row) => !row.isSimulated);
   const dates = new Set<string>();
-  for (const row of rows) {
-    if (row.isSimulated) continue;
+  for (const row of realRows) {
     const error = drawScheduleDateError(row.date);
     if (error) throw new Error(`CSV not saved. ${error} Use Smart History Review to correct this row.`);
+    if (!drawHistoryTerminalComposition(row.mains, row.supps).shape) {
+      throw new Error(`CSV not saved. ${row.date} needs six mains and two supplementary numbers, all unique whole numbers from 1 to 45.`);
+    }
     const key = datePartsToIso(parseDrawDateParts(row.date)!);
     if (dates.has(key)) throw new Error(`CSV not saved. More than one result uses ${key}. Resolve the duplicate date in Smart History Review.`);
     dates.add(key);
   }
   const head = header.length >= 9 ? header.slice(0, 9) : DEFAULT_HEADER;
-  return [head.join(","), ...rows.map(formatRow)].join("\n");
+  return [[...head, ...TERMINAL_HEADER].join(","), ...realRows.map(formatRow)].join("\n");
 }
 
 // Prepend so newest is first after header

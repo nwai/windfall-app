@@ -27,6 +27,40 @@ describe("signal confluence ledger", () => {
     expect(seven?.rank).toBeLessThan(eight?.rank ?? 99);
   });
 
+  it("caps related registered families once per independence group", () => {
+    const rows = buildSignalConfluenceRows([
+      { number: 7, family: "active-frequency", source: "frequency", label: "Freq #1", strength: 0.7 },
+      { number: 7, family: "temperature", source: "hot/cold", label: "Hot #1", strength: 1 },
+      { number: 7, family: "drought", source: "strict", label: "Strict #1", strength: 0.5 },
+    ]);
+    const seven = rows.find((row) => row.number === 7);
+
+    expect(seven?.rawMentionCount).toBe(3);
+    expect(seven?.evidenceFamilyCount).toBe(2);
+    expect(seven?.familyCount).toBe(2);
+    expect(seven?.familyScore).toBeCloseTo(1.5, 5);
+    expect(seven?.groupSupport.map((group) => group.independenceGroup)).toEqual([
+      "drought-state",
+      "frequency-state",
+    ]);
+  });
+
+  it("keeps downstream aggregators and consumer selections as context without scoring them", () => {
+    const rows = buildSignalConfluenceRows([
+      { number: 12, family: "selection-insights", source: "Selection Insights", label: "Comp 3", strength: 1 },
+      { number: 12, family: "next-draw-evidence", source: "NDEE", label: "NDEE #1", strength: 1 },
+      { number: 12, family: "shared-selection", source: "Survival", label: "Shared #1", strength: 1 },
+    ]);
+    const twelve = rows.find((row) => row.number === 12);
+
+    expect(twelve?.familyScore).toBe(0);
+    expect(twelve?.familyCount).toBe(0);
+    expect(twelve?.rawMentionCount).toBe(0);
+    expect(twelve?.supportMentions).toEqual([]);
+    expect(twelve?.contextMentions).toHaveLength(3);
+    expect(filterSignalConfluenceRows(rows, "supported-only").some((row) => row.number === 12)).toBe(true);
+  });
+
   it("marks user state and moves active exclusions below equally supported available numbers", () => {
     const rows = buildSignalConfluenceRows([
       { number: 11, family: "scoring-numbers", source: "score", label: "Score #1", strength: 1 },

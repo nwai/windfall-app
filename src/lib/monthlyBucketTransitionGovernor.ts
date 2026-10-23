@@ -88,6 +88,15 @@ export interface MonthlyBucketTransitionGovernorProfile {
   contextLabel: string;
 }
 
+export const monthlyBucketTransitionGovernorDisplaySummary = (
+  profile: MonthlyBucketTransitionGovernorProfile,
+  bypassedByRandomCoverage = false,
+): string => (
+  profile.userEnabled && bypassedByRandomCoverage
+    ? `${monthlyBucketTransitionGovernorModeLabel(profile.mode)} · bypassed by RwR45/PNUaRW45`
+    : profile.summaryLabel
+);
+
 export interface BuildMonthlyBucketTransitionGovernorOptions {
   mode: MonthlyBucketTransitionGovernorMode;
   history: readonly Draw[];

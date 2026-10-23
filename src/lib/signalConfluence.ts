@@ -1,6 +1,15 @@
+import {
+  EVIDENCE_PORTFOLIO_RULES,
+  getEvidenceFamily,
+  getEvidenceIndependenceGroupLabel,
+  getPanelOwnership,
+  panelCanProvideIndependentPortfolioEvidence,
+  type EvidenceFamilyId,
+} from "./evidenceFamilyRegistry";
+
 const LOTTERY_MIN = 1;
 const LOTTERY_MAX = 45;
-const DEFAULT_FAMILY_CAP = 1;
+const DEFAULT_FAMILY_CAP = EVIDENCE_PORTFOLIO_RULES.scoreCapPerIndependenceGroup;
 
 export type SignalConfluenceFamilyKey =
   | "latest-neighbour"
@@ -15,7 +24,30 @@ export type SignalConfluenceFamilyKey =
   | "weekday-neighbour"
   | "user-state";
 
-export type SignalConfluenceMentionTone = "support" | "caution" | "state";
+export type SignalConfluenceMentionTone = "support" | "context" | "caution" | "state";
+
+export type SignalConfluenceSourceDisposition = "eligible-support" | "context-only" | "state-only";
+
+export interface SignalConfluenceSourceDefinition {
+  family: SignalConfluenceFamilyKey;
+  sourcePanelId: string;
+  evidenceFamily: EvidenceFamilyId;
+  disposition: SignalConfluenceSourceDisposition;
+}
+
+export const SIGNAL_CONFLUENCE_SOURCE_REGISTRY: Record<SignalConfluenceFamilyKey, SignalConfluenceSourceDefinition> = {
+  "latest-neighbour": { family: "latest-neighbour", sourcePanelId: "previous-neighbour-backtest", evidenceFamily: "previous-neighbour", disposition: "eligible-support" },
+  drought: { family: "drought", sourcePanelId: "drought-break-shortlist", evidenceFamily: "drought", disposition: "eligible-support" },
+  "shared-selection": { family: "shared-selection", sourcePanelId: "survival-analyzer", evidenceFamily: "survival", disposition: "context-only" },
+  "active-frequency": { family: "active-frequency", sourcePanelId: "number-frequency", evidenceFamily: "frequency-recency", disposition: "eligible-support" },
+  "terminal-bucket": { family: "terminal-bucket", sourcePanelId: "draw-bucket-patterns", evidenceFamily: "terminal-digit", disposition: "eligible-support" },
+  temperature: { family: "temperature", sourcePanelId: "hot-cold-ranking", evidenceFamily: "frequency-recency", disposition: "eligible-support" },
+  "scoring-numbers": { family: "scoring-numbers", sourcePanelId: "scoring-system-diagnostics", evidenceFamily: "scoring", disposition: "eligible-support" },
+  "selection-insights": { family: "selection-insights", sourcePanelId: "selection-insights", evidenceFamily: "evidence-aggregation", disposition: "context-only" },
+  "next-draw-evidence": { family: "next-draw-evidence", sourcePanelId: "next-draw-evidence-ensemble", evidenceFamily: "evidence-aggregation", disposition: "context-only" },
+  "weekday-neighbour": { family: "weekday-neighbour", sourcePanelId: "previous-neighbour-backtest", evidenceFamily: "previous-neighbour", disposition: "eligible-support" },
+  "user-state": { family: "user-state", sourcePanelId: "user-selected-numbers", evidenceFamily: "user-intent", disposition: "state-only" },
+};
 
 export interface SignalConfluenceMention {
   number: number;
@@ -25,6 +57,18 @@ export interface SignalConfluenceMention {
   strength?: number;
   detail?: string;
   tone?: SignalConfluenceMentionTone;
+  evidenceFamily?: EvidenceFamilyId;
+  sourcePanelId?: string;
+  independenceGroup?: string;
+  contextReason?: string;
+}
+
+export interface SignalConfluenceGroupSupport {
+  independenceGroup: string;
+  label: string;
+  strength: number;
+  evidenceFamilies: EvidenceFamilyId[];
+  mentions: SignalConfluenceMention[];
 }
 
 export interface SignalConfluenceRow {
@@ -32,8 +76,11 @@ export interface SignalConfluenceRow {
   rank: number;
   familyScore: number;
   familyCount: number;
+  evidenceFamilyCount: number;
   rawMentionCount: number;
+  groupSupport: SignalConfluenceGroupSupport[];
   supportMentions: SignalConfluenceMention[];
+  contextMentions: SignalConfluenceMention[];
   cautionMentions: SignalConfluenceMention[];
   stateMentions: SignalConfluenceMention[];
   isExcluded: boolean;
@@ -104,6 +151,7 @@ export function filterSignalConfluenceRows(
   if (visibilityMode === "all-45") return rows.slice();
   return rows.filter((row) => (
     row.rawMentionCount > 0
+    || row.contextMentions.length > 0
     || row.isForced
     || row.isUserSelected
     || row.isExcluded
@@ -120,6 +168,42 @@ export function rankedStrength(rankIndex: number, total: number, floor = 0.35): 
 const clampStrength = (value: unknown): number => {
   if (typeof value !== "number" || !Number.isFinite(value)) return 1;
   return Math.max(0, Math.min(1, value));
+};
+
+const contextReasonForSource = (definition: SignalConfluenceSourceDefinition): string => {
+  const ownership = getPanelOwnership(definition.sourcePanelId);
+  if (definition.disposition === "state-only" || ownership?.role === "control") {
+    return "User or control state is visible for provenance but cannot create evidence support.";
+  }
+  if (ownership?.role === "aggregator") {
+    return "Aggregator output is visible for comparison but cannot be counted again as independent evidence.";
+  }
+  if (ownership?.role === "consumer") {
+    return "Consumer output depends on upstream evidence and is visible as context rather than another vote.";
+  }
+  return "This source is registered as context-only and does not add to the bounded evidence score.";
+};
+
+export const resolveSignalConfluenceMention = (mention: SignalConfluenceMention): SignalConfluenceMention => {
+  const sourceDefinition = SIGNAL_CONFLUENCE_SOURCE_REGISTRY[mention.family];
+  const evidenceFamily = getEvidenceFamily(sourceDefinition.evidenceFamily);
+  const requestedTone = mention.tone ?? "support";
+  const sourceIsEligible = sourceDefinition.disposition === "eligible-support"
+    && panelCanProvideIndependentPortfolioEvidence(sourceDefinition.sourcePanelId)
+    && getPanelOwnership(sourceDefinition.sourcePanelId)?.primaryFamily === sourceDefinition.evidenceFamily;
+  const tone: SignalConfluenceMentionTone = requestedTone === "support" && !sourceIsEligible
+    ? "context"
+    : requestedTone;
+
+  return {
+    ...mention,
+    strength: clampStrength(mention.strength),
+    tone,
+    evidenceFamily: sourceDefinition.evidenceFamily,
+    sourcePanelId: sourceDefinition.sourcePanelId,
+    independenceGroup: evidenceFamily?.independenceGroup,
+    contextReason: tone === "context" ? contextReasonForSource(sourceDefinition) : mention.contextReason,
+  };
 };
 
 const compareRows = (left: SignalConfluenceRow, right: SignalConfluenceRow): number => {
@@ -169,11 +253,7 @@ export function buildSignalConfluenceRows(
 
   for (const mention of mentions) {
     if (!isValidSignalConfluenceNumber(mention.number)) continue;
-    const safeMention: SignalConfluenceMention = {
-      ...mention,
-      strength: clampStrength(mention.strength),
-      tone: mention.tone ?? "support",
-    };
+    const safeMention = resolveSignalConfluenceMention(mention);
     const current = mentionsByNumber.get(safeMention.number) ?? [];
     current.push(safeMention);
     mentionsByNumber.set(safeMention.number, current);
@@ -183,24 +263,51 @@ export function buildSignalConfluenceRows(
     const number = index + 1;
     const numberMentions = mentionsByNumber.get(number) ?? [];
     const supportMentions = numberMentions.filter((mention) => (mention.tone ?? "support") === "support");
+    const contextMentions = numberMentions.filter((mention) => mention.tone === "context");
     const cautionMentions = numberMentions.filter((mention) => mention.tone === "caution");
     const stateMentions = numberMentions.filter((mention) => mention.tone === "state");
-    const familyStrengths = new Map<SignalConfluenceFamilyKey, number>();
+    const supportByGroup = new Map<string, {
+      strength: number;
+      evidenceFamilies: Set<EvidenceFamilyId>;
+      mentions: SignalConfluenceMention[];
+    }>();
 
     for (const mention of supportMentions) {
-      familyStrengths.set(
-        mention.family,
-        Math.max(familyStrengths.get(mention.family) ?? 0, Math.min(familyCap, clampStrength(mention.strength))),
-      );
+      if (!mention.independenceGroup || !mention.evidenceFamily) continue;
+      const current = supportByGroup.get(mention.independenceGroup) ?? {
+        strength: 0,
+        evidenceFamilies: new Set<EvidenceFamilyId>(),
+        mentions: [],
+      };
+      current.strength = Math.max(current.strength, Math.min(familyCap, clampStrength(mention.strength)));
+      current.evidenceFamilies.add(mention.evidenceFamily);
+      current.mentions.push(mention);
+      supportByGroup.set(mention.independenceGroup, current);
     }
+
+    const groupSupport = Array.from(supportByGroup.entries())
+      .map(([independenceGroup, group]): SignalConfluenceGroupSupport => ({
+        independenceGroup,
+        label: getEvidenceIndependenceGroupLabel(independenceGroup),
+        strength: group.strength,
+        evidenceFamilies: Array.from(group.evidenceFamilies).sort(),
+        mentions: group.mentions,
+      }))
+      .sort((left, right) => left.label.localeCompare(right.label));
+    const evidenceFamilyCount = new Set(
+      supportMentions.flatMap((mention) => mention.evidenceFamily ? [mention.evidenceFamily] : []),
+    ).size;
 
     return {
       number,
       rank: 0,
-      familyScore: Array.from(familyStrengths.values()).reduce((sum, value) => sum + value, 0),
-      familyCount: familyStrengths.size,
+      familyScore: groupSupport.reduce((sum, group) => sum + group.strength, 0),
+      familyCount: groupSupport.length,
+      evidenceFamilyCount,
       rawMentionCount: supportMentions.length,
+      groupSupport,
       supportMentions,
+      contextMentions,
       cautionMentions,
       stateMentions,
       isExcluded: excludedSet.has(number),

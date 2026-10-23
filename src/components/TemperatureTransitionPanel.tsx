@@ -7,7 +7,7 @@ import {
 } from "../lib/backtestTemperatureTransitions";
 import { computeTemperatureCategories, Temperature, TemperatureClassifierOptions } from "../lib/temperatureCategories";
 import { sweepWindows, WindowSweepMode, SweepMetric } from "../lib/ttpWindowSweep";
-import { getSavedZoneWeights, WeightsByNumber } from "../lib/zpaStorage";
+import { useSavedZoneWeights } from "../hooks/useSavedZoneWeights";
 import { useZPASettings } from "../context/ZPASettingsContext";
 import { filterRealDrawHistory } from "../lib/realDrawHistory";
 import {
@@ -337,10 +337,7 @@ export const TemperatureTransitionPanel: React.FC<TemperatureTransitionPanelProp
   // Global Zone Weighting (single source of truth)
   const { zoneWeightingEnabled, zoneGamma } = useZPASettings();
 
-  // Load saved per-number weights (from ZPA panel) once
-  const savedZoneWeights: WeightsByNumber | null = useMemo(() => {
-    try { return getSavedZoneWeights(); } catch { return null; }
-  }, []);
+  const savedZoneWeights = useSavedZoneWeights();
 
   const realHistory = useMemo(
     () => filterRealDrawHistory(history, "temperature-transition diagnostics"),

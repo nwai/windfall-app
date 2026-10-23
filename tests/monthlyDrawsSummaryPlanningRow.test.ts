@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import MonthlyDrawsSummaryPanel from "../src/components/MonthlyDrawsSummaryPanel";
 import type { MonthlyBucketSets } from "../src/lib/monthlyDrawSummary";
+import type { PreviousNeighbourAtlasEvidenceSnapshot } from "../src/lib/previousNeighbourAtlasEvidence";
 import type { Draw } from "../src/types";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -271,6 +272,61 @@ describe("MonthlyDrawsSummaryPanel planning month rollover", () => {
     expect(robustBaselineIndex).toBeGreaterThan(acceptanceNeedsIndex);
   });
 
+  it("shows matching draw-stage Atlas evidence as observe-only context", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-05T12:00:00"));
+    const history = [
+      ...repeatDraws("2026-01", 13, 1),
+      ...repeatDraws("2026-03", 13, 4),
+      draw("2026-07-01", [1, 2, 3, 4, 5, 6], [7, 8]),
+    ];
+    const neighbourAtlasEvidence: PreviousNeighbourAtlasEvidenceSnapshot = {
+      version: 1,
+      observeOnly: true,
+      historySource: "baseline",
+      historySourceLabel: "Baseline history",
+      scope: "mains-plus-supps",
+      lookbackDraws: 2,
+      transitionCount: 24,
+      validDraws: 26,
+      excludedTargetDraws: 1,
+      excludedTargetMonthLabels: ["2024-05"],
+      targetDrawOrdinal: 2,
+      targetMonthExpectedDrawCount: 13,
+      overall: { averageUniqueHits: 2.1, averageExpectedUniqueHits: 1.9, averageDirectionalHits: 2.4, lift: 1.11 },
+      composition: { oddLift: null, evenLift: null, oneDigitLift: null, twoDigitLift: null },
+      ordinalEvidence: {
+        drawOrdinal: 2,
+        label: "D2",
+        trials: 18,
+        sampleQuality: "Limited",
+        averageUniqueHits: 2.2,
+        averageExpectedUniqueHits: 1.8,
+        lift: 1.22,
+        atLeastOneRate: 0.9,
+        atLeastThreeRate: 0.4,
+        atLeastFourRate: 0.2,
+        topPattern: "-2:1 -1:1 +1:2 +2:0",
+        topPatternCount: 3,
+      },
+      currentCloud: null,
+      warnings: [],
+    };
+
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(React.createElement(MonthlyDrawsSummaryPanel, { history, neighbourAtlasEvidence }));
+    });
+
+    const card = container.querySelector('[data-testid="monthly-neighbour-atlas-context"]');
+    expect(card?.textContent).toContain("Matched contextD2 of");
+    expect(card?.textContent).toContain("2.2 vs 1.8 · x1.22");
+    expect(card?.textContent).toContain("18 D2 trials · Limited");
+    expect(card?.textContent).toContain("does not alter Monthly Buckets, Acceptance Needs, Stage IDM, or generation");
+  });
+
   it("colours Acceptance Needs number pills by monthly bucket", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-05T12:00:00"));
@@ -338,5 +394,29 @@ describe("MonthlyDrawsSummaryPanel planning month rollover", () => {
     expect(container.textContent).toContain("Showing 2 of 3 months");
     expect(container.textContent).toContain("Active buckets: 2026-03");
     expect(filteredRows.join(" ")).not.toContain("2026-02");
+  });
+
+  it("labels an incomplete October from the full scheduled month instead of observed weekdays", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-06T12:00:00"));
+    const history = [
+      ...repeatDraws("2026-09", 13, 1),
+      draw("2026-10-02", [1, 2, 3, 4, 5, 6], [7, 8]),
+      draw("2026-10-05", [9, 10, 11, 12, 13, 14], [15, 16]),
+    ];
+
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(React.createElement(MonthlyDrawsSummaryPanel, { history }));
+    });
+
+    const replayScope = Array.from(container.querySelectorAll("select"))
+      .find((select) => Array.from(select.options).some((option) => option.textContent?.includes("Same scheduled month length")));
+    expect(replayScope).toBeTruthy();
+    expect(Array.from(replayScope?.options ?? []).map((option) => option.textContent)).toContain("Same scheduled month length (13D)");
+    expect(container.textContent).toContain("2026-10: 13 scheduled Monday/Wednesday/Friday draws.");
+    expect(container.textContent).not.toContain("Same scheduled month length (9D)");
   });
 });

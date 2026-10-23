@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 
 import { HigSlider } from "./shared/HigControls";
+import { PanelHelp } from "./shared/PanelHelp";
 import { normalizeDgaSelectedNumbers } from "../lib/dgaSelectedNumbers";
 import type { MonthlyBucketTimelineDrawState, MonthlyBucketTimelineEntry } from "../lib/monthlyBucketTimeline";
 import type { MonthlyBucketSets } from "../lib/monthlyDrawSummary";
@@ -275,6 +276,7 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
         overflow: "hidden",
       }}
     >
+      <div style={{ display: "flex", alignItems: "center", paddingRight: 10, gap: 6 }}>
       <button
         type="button"
         onClick={() => setExpanded((value) => !value)}
@@ -305,6 +307,8 @@ export const DGAMonthlyBucketStateGrid: React.FC<DGAMonthlyBucketStateGridProps>
             {expanded ? "Hide ▲" : `Show (${orderedTimeline.length} months) ▼`}
         </span>
       </button>
+        <PanelHelp title="Monthly bucket state grid" onReveal={() => setExpanded(true)} />
+      </div>
 
       {!expanded ? (
         <div style={{ padding: "0 12px 10px", color: "#64748b", fontSize: 12 }}>

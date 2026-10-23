@@ -22,6 +22,7 @@ import {
   type DroughtShortlistHitDetail,
   type DroughtShortlistSourceReplayResult,
 } from "../lib/droughtShortlistSourceReplay";
+import DroughtHazardCalibrationAuditPanel from "./DroughtHazardCalibrationAuditPanel";
 import DroughtLearningAuditPanel from "./DroughtLearningAuditPanel";
 
 type DroughtDisplayMode = "strict" | "empirical";
@@ -38,6 +39,7 @@ export const DroughtHazardPanel: React.FC<{
   strictThreshold?: number;
   defaultMode?: DroughtDisplayMode;
   onToggleNumber?: (n: number) => void;
+  onClearForcedNumbers?: () => void;
   forcedNumbers?: number[];
   excludedNumbers?: number[];
   maxForcedSelections?: number;
@@ -57,6 +59,7 @@ export const DroughtHazardPanel: React.FC<{
   strictThreshold = STRICT_DROUGHT_DEFAULT_THRESHOLD,
   defaultMode = "strict",
   onToggleNumber,
+  onClearForcedNumbers,
   forcedNumbers = [],
   excludedNumbers = [],
   maxForcedSelections,
@@ -101,6 +104,10 @@ export const DroughtHazardPanel: React.FC<{
     () => new Set(removeUserExcludedNumbers(forcedNumbers, userExcludedNumbers)),
     [forcedNumbers, userExcludedNumbers],
   );
+  const activeForcedNumbers = React.useMemo(
+    () => Array.from(forcedSet).sort((a, b) => a - b),
+    [forcedSet],
+  );
   const forcedCount = forcedSet.size;
   const maxReached = typeof maxForcedSelections === "number" && forcedCount >= maxForcedSelections;
   const fallbackLabels = React.useMemo(() => {
@@ -117,6 +124,14 @@ export const DroughtHazardPanel: React.FC<{
     [byNumber, top]
   );
   const strictRows = React.useMemo(() => strict.rows.slice(0, top), [strict.rows, top]);
+  const displayedRowNumbers = React.useMemo(
+    () => new Set((mode === "strict" ? strictRows : empiricalRows).map((row) => row.number)),
+    [empiricalRows, mode, strictRows],
+  );
+  const forcedOutsideDisplayedRows = React.useMemo(
+    () => activeForcedNumbers.filter((number) => !displayedRowNumbers.has(number)),
+    [activeForcedNumbers, displayedRowNumbers],
+  );
   const maturity = React.useMemo(() => {
     if (!targetMonthLabel || !targetDrawOrdinal || !targetMonthExpectedDrawCount) return null;
     return analyzeDroughtBucketMaturity({
@@ -144,6 +159,7 @@ export const DroughtHazardPanel: React.FC<{
     () => new Map((maturity?.byNumber ?? []).map((row) => [row.number, row])),
     [maturity],
   );
+  const latestReplay = droughtSourceReplay.latestRows[0] ?? null;
 
   const renderNumberButton = (number: number) => {
     const isUserExcluded = userExcludedSet.has(number);
@@ -160,7 +176,13 @@ export const DroughtHazardPanel: React.FC<{
       ? `Clear the active exclusion or turn off the rule before selecting ${number}.`
       : toggleLabel;
 
-    if (!onToggleNumber) return number;
+    if (!onToggleNumber) {
+      return (
+        <span style={sourceNumberTokenStyle(mode)} data-drought-source={mode}>
+          {number}
+        </span>
+      );
+    }
 
     return (
       <button
@@ -170,8 +192,9 @@ export const DroughtHazardPanel: React.FC<{
         aria-pressed={isForced}
         aria-label={toggleLabel}
         title={title}
-        style={numberButton(isForced, disabled)}
+        style={numberButton(mode, isForced, disabled)}
         data-drought-number-button="true"
+        data-drought-source={mode}
         data-user-excluded={isUserExcluded ? "true" : undefined}
       >
         {number}
@@ -207,6 +230,58 @@ export const DroughtHazardPanel: React.FC<{
       <div style={{ fontSize: 12, color: "#666", marginBottom: 8 }}>
         Strict mode ranks numbers with a full-history current drought of {strict.threshold}+ draws before using historical drought behavior as support. Empirical hazard mode shows pooled next-appearance evidence by drought length, shrunk toward the {(baselineProbability * 100).toFixed(1)}% neutral 8-of-45 baseline.
       </div>
+      <CurrentForecastReplayCard
+        strictNumbers={strictRows.map((row) => row.number)}
+        empiricalNumbers={empiricalRows.map((row) => row.number)}
+        topK={top}
+        targetDrawDate={targetDrawDate}
+        targetDrawOrdinal={targetDrawOrdinal}
+        targetMonthExpectedDrawCount={targetMonthExpectedDrawCount}
+        replay={latestReplay}
+        replayScopeLabel={replayScopeLabel}
+      />
+      {activeForcedNumbers.length > 0 && onToggleNumber && (
+        <div role="status" style={activeForcedCardStyle}>
+          <div style={activeForcedHeaderStyle}>
+            <div>
+              <div style={activeForcedTitleStyle}>Active forced inclusions</div>
+              <div style={activeForcedCopyStyle}>
+                Selected manually. Drought learning and self-audit never add these numbers. Remove them here even if rank, history scope, or display mode changes.
+              </div>
+            </div>
+            {onClearForcedNumbers && (
+              <button
+                type="button"
+                onClick={onClearForcedNumbers}
+                style={clearForcedButtonStyle}
+              >
+                Clear all
+              </button>
+            )}
+          </div>
+          <div role="group" aria-label="Active drought-break forced inclusions" style={activeForcedListStyle}>
+            {activeForcedNumbers.map((number) => (
+              <button
+                key={number}
+                type="button"
+                onClick={() => onToggleNumber(number)}
+                aria-label={`Remove drought-break forced inclusion ${number}`}
+                title={`Remove ${number} from drought-break forced inclusions`}
+                style={activeForcedNumberButtonStyle}
+                data-active-drought-forced-number={number}
+              >
+                <span>{number}</span>
+                <span aria-hidden="true" style={activeForcedRemoveMarkStyle}>x</span>
+              </button>
+            ))}
+          </div>
+          {forcedOutsideDisplayedRows.length > 0 && (
+            <div style={activeForcedWarningStyle}>
+              Not in the current {mode === "strict" ? `Strict top ${top}` : `Empirical top ${top}`}: {forcedOutsideDisplayedRows.join(", ")}. They remain hard inclusions until removed.
+            </div>
+          )}
+        </div>
+      )}
       <div role="group" aria-label="Drought shortlist mode" style={segmentedControl}>
         <button
           type="button"
@@ -252,6 +327,12 @@ export const DroughtHazardPanel: React.FC<{
           />
         )}
       </div>
+      <div style={{ marginTop: 12 }}>
+        <DroughtHazardCalibrationAuditPanel
+          history={baselineHistory?.length ? baselineHistory : fullHistory?.length ? fullHistory : history}
+          historyScopeLabel={baselineHistoryScopeLabel}
+        />
+      </div>
       <DroughtSourceReplayAudit
         result={droughtSourceReplay}
         scope={replayScope}
@@ -268,6 +349,7 @@ export const DroughtHazardPanel: React.FC<{
         <div style={{ marginTop: 12 }}>
           <DroughtLearningAuditPanel
             history={baselineHistory?.length ? baselineHistory : fullHistory?.length ? fullHistory : history}
+            fullHistory={fullHistory?.length ? fullHistory : history}
             historyScopeLabel={baselineHistoryScopeLabel}
             threshold={strict.threshold}
             topK={top}
@@ -280,6 +362,145 @@ export const DroughtHazardPanel: React.FC<{
     </section>
   );
 };
+
+const CurrentForecastReplayCard: React.FC<{
+  strictNumbers: number[];
+  empiricalNumbers: number[];
+  topK: number;
+  targetDrawDate?: string;
+  targetDrawOrdinal?: number;
+  targetMonthExpectedDrawCount?: number;
+  replay: DroughtShortlistSourceReplayResult["latestRows"][number] | null;
+  replayScopeLabel: string;
+}> = ({
+  strictNumbers,
+  empiricalNumbers,
+  topK,
+  targetDrawDate,
+  targetDrawOrdinal,
+  targetMonthExpectedDrawCount,
+  replay,
+  replayScopeLabel,
+}) => {
+  const strictReplayHits = replay
+    ? [...replay.strictOnlyHits, ...replay.overlappingHits].sort(
+      (left, right) => (left.strictRank ?? Number.MAX_SAFE_INTEGER) - (right.strictRank ?? Number.MAX_SAFE_INTEGER),
+    )
+    : [];
+  const empiricalReplayHits = replay
+    ? [...replay.empiricalOnlyHits, ...replay.overlappingHits].sort(
+      (left, right) => (left.empiricalRank ?? Number.MAX_SAFE_INTEGER) - (right.empiricalRank ?? Number.MAX_SAFE_INTEGER),
+    )
+    : [];
+  const targetStage = targetMonthExpectedDrawCount && targetDrawOrdinal
+    ? `${targetMonthExpectedDrawCount}D D${targetDrawOrdinal}`
+    : null;
+
+  return (
+    <section aria-labelledby="drought-forecast-replay-title" style={forecastReplayCardStyle}>
+      <div style={forecastReplayHeaderStyle}>
+        <div>
+          <div id="drought-forecast-replay-title" style={forecastReplayTitleStyle}>Current forecast and latest draw replay</div>
+          <div style={auditFinePrintStyle}>Two different time positions, kept separate so a post-draw shortlist cannot be mistaken for a pre-draw result.</div>
+        </div>
+        <div aria-label="Drought shortlist source colors" style={sourceLegendStyle}>
+          <span style={sourceLegendItemStyle("strict")}>Strict</span>
+          <span style={sourceLegendItemStyle("empirical")}>Empirical</span>
+        </div>
+      </div>
+
+      <div style={forecastReplayGridStyle}>
+        <div style={forecastReplaySubcardStyle}>
+          <div style={forecastReplaySubcardHeaderStyle}>
+            <span>Current forecast</span>
+            <span style={forecastReplayMetaStyle}>
+              {targetDrawDate ? `Targets ${targetDrawDate}` : "Targets the next unsaved draw"}{targetStage ? ` · ${targetStage}` : ""}
+            </span>
+          </div>
+          <SourceNumberRow source="strict" label={`Strict top ${topK}`} numbers={strictNumbers} />
+          <SourceNumberRow source="empirical" label={`Empirical top ${topK}`} numbers={empiricalNumbers} />
+          <div style={forecastReplayExplanationStyle}>
+            Calculated after the latest saved draw. Strict uses full-history current drought; Empirical uses the active WFMQYH window. These rows therefore forecast the next draw and do not score the draw just saved.
+          </div>
+        </div>
+
+        <div style={forecastReplaySubcardStyle}>
+          <div style={forecastReplaySubcardHeaderStyle}>
+            <span>Latest draw replay</span>
+            <span style={forecastReplayMetaStyle}>
+              {replay ? `${replay.targetDate} · ${formatStage(replay.targetMonthDrawCount, replay.targetDrawOrdinal, replay.targetMonthComplete)}` : "No eligible replay row"}
+            </span>
+          </div>
+          {replay ? (
+            <>
+              <ReplayHitRow
+                source="strict"
+                label={`Strict hits ${replay.strictHitCount}/${replay.strictShortlist.length}`}
+                hits={strictReplayHits}
+              />
+              <ReplayHitRow
+                source="empirical"
+                label={`Empirical hits ${replay.empiricalHitCount}/${replay.empiricalShortlist.length}`}
+                hits={empiricalReplayHits}
+              />
+              <div style={forecastReplayResultStyle}>
+                Unique union hits: <strong>{replay.unionHitCount} of 8 drawn numbers</strong>. Rebuilt from {replay.trainingDraws} prior draws only.
+              </div>
+            </>
+          ) : (
+            <div style={forecastReplayEmptyStyle}>Not enough prior real draws in this replay scope to score the latest draw.</div>
+          )}
+          <div style={forecastReplayExplanationStyle}>
+            {replayScopeLabel}. The replay hides its target draw until both lists have been rebuilt. Change the replay scope below to inspect sensitivity without changing the live shortlist above.
+          </div>
+        </div>
+      </div>
+
+      <div style={modelGovernanceStyle}>
+        <strong>Model governance:</strong> the existing Strict ordering remains the live champion. DLA-1 keeps its stage-conditioned challenger observe-only and may prefer it inside the audit only after at least 60 paired no-lookahead draws, a paired 95% interval wholly above zero, and performance above an equal-size random list. Neither policy changes generation automatically.
+      </div>
+    </section>
+  );
+};
+
+const SourceNumberRow: React.FC<{
+  source: DroughtDisplayMode;
+  label: string;
+  numbers: number[];
+}> = ({ source, label, numbers }) => (
+  <div style={sourceNumberRowStyle}>
+    <span style={sourceNumberRowLabelStyle(source)}>{label}</span>
+    <span style={sourceNumberListStyle}>
+      {numbers.length
+        ? numbers.map((number) => <SourceNumberToken key={`${source}-${number}`} number={number} source={source} />)
+        : <span style={forecastReplayEmptyInlineStyle}>none</span>}
+    </span>
+  </div>
+);
+
+const ReplayHitRow: React.FC<{
+  source: DroughtDisplayMode;
+  label: string;
+  hits: DroughtShortlistHitDetail[];
+}> = ({ source, label, hits }) => (
+  <div style={sourceNumberRowStyle}>
+    <span style={sourceNumberRowLabelStyle(source)}>{label}</span>
+    <span style={sourceNumberListStyle}>
+      {hits.length ? hits.map((hit) => (
+        <span key={`${source}-${hit.number}`} style={replayHitStyle}>
+          <SourceNumberToken number={hit.number} source={source} />
+          <span style={replayHitMetaStyle}>
+            {source === "strict" ? `S${hit.strictRank ?? "?"}` : `E${hit.empiricalRank ?? "?"}`} · {hit.where}
+          </span>
+        </span>
+      )) : <span style={forecastReplayEmptyInlineStyle}>none</span>}
+    </span>
+  </div>
+);
+
+const SourceNumberToken: React.FC<{ number: number; source: DroughtDisplayMode }> = ({ number, source }) => (
+  <span style={sourceNumberTokenStyle(source)} data-drought-source={source}>{number}</span>
+);
 
 const DroughtSourceReplayAudit: React.FC<{
   result: DroughtShortlistSourceReplayResult;
@@ -461,9 +682,9 @@ const LatestSourceRowsTable: React.FC<{ rows: DroughtShortlistSourceReplayResult
               <td style={{ ...compactTd, textAlign: "left" }}>{row.targetDate}</td>
               <td style={compactTd}>{formatStage(row.targetMonthDrawCount, row.targetDrawOrdinal, row.targetMonthComplete)}</td>
               <td style={compactTd}>{row.unionHitCount}</td>
-              <td style={{ ...compactTd, textAlign: "left" }}>{formatHits(row.strictOnlyHits)}</td>
-              <td style={{ ...compactTd, textAlign: "left" }}>{formatHits(row.empiricalOnlyHits)}</td>
-              <td style={{ ...compactTd, textAlign: "left" }}>{formatHits(row.overlappingHits)}</td>
+              <td style={{ ...compactTd, textAlign: "left" }}><DroughtAuditHitList hits={row.strictOnlyHits} /></td>
+              <td style={{ ...compactTd, textAlign: "left" }}><DroughtAuditHitList hits={row.empiricalOnlyHits} /></td>
+              <td style={{ ...compactTd, textAlign: "left" }}><DroughtAuditHitList hits={row.overlappingHits} /></td>
             </tr>
           ))}
         </tbody>
@@ -473,16 +694,46 @@ const LatestSourceRowsTable: React.FC<{ rows: DroughtShortlistSourceReplayResult
   </div>
 );
 
-const formatHits = (hits: DroughtShortlistHitDetail[]): string => {
-  if (!hits.length) return "—";
-  return hits.map((hit) => {
-    const rank = hit.source === "both"
-      ? `S${hit.strictRank ?? "?"}/E${hit.empiricalRank ?? "?"}`
-      : hit.source === "strict-only"
-        ? `S${hit.strictRank ?? "?"}`
-        : `E${hit.empiricalRank ?? "?"}`;
-    return `${hit.number} ${rank} ${hit.where}`;
-  }).join(" · ");
+const DroughtAuditHitList: React.FC<{ hits: DroughtShortlistHitDetail[] }> = ({ hits }) => {
+  if (!hits.length) return <span style={auditHitEmptyStyle}>—</span>;
+
+  return (
+    <span style={auditHitListStyle}>
+      {hits.map((hit) => (
+        <span
+          key={`${hit.source}-${hit.number}-${hit.where}`}
+          style={auditHitDetailStyle}
+          aria-label={auditHitAriaLabel(hit)}
+        >
+          <span
+            style={auditHitNumberStyle(hit.source)}
+            data-drought-audit-source={hit.source}
+          >
+            {hit.number}
+          </span>
+          <span style={auditHitRankGroupStyle}>
+            {hit.source !== "empirical-only" ? (
+              <span style={auditHitRankStyle("strict")}>S{hit.strictRank ?? "?"}</span>
+            ) : null}
+            {hit.source === "both" ? <span aria-hidden="true" style={auditHitRankSeparatorStyle}>/</span> : null}
+            {hit.source !== "strict-only" ? (
+              <span style={auditHitRankStyle("empirical")}>E{hit.empiricalRank ?? "?"}</span>
+            ) : null}
+          </span>
+          <span style={auditHitRoleStyle}>{hit.where}</span>
+        </span>
+      ))}
+    </span>
+  );
+};
+
+const auditHitAriaLabel = (hit: DroughtShortlistHitDetail): string => {
+  const source = hit.source === "both"
+    ? `Strict rank ${hit.strictRank ?? "unknown"} and Empirical rank ${hit.empiricalRank ?? "unknown"}`
+    : hit.source === "strict-only"
+      ? `Strict-only rank ${hit.strictRank ?? "unknown"}`
+      : `Empirical-only rank ${hit.empiricalRank ?? "unknown"}`;
+  return `Number ${hit.number}, ${source}, drawn as ${hit.where}`;
 };
 
 const formatStage = (
@@ -699,6 +950,84 @@ const segmentedControl: React.CSSProperties = {
   marginBottom: 8,
 };
 
+const activeForcedCardStyle: React.CSSProperties = {
+  border: "1px solid #bbf7d0",
+  borderRadius: 8,
+  background: "#f0fdf4",
+  display: "grid",
+  gap: 8,
+  marginBottom: 10,
+  padding: "9px 10px",
+};
+
+const activeForcedHeaderStyle: React.CSSProperties = {
+  alignItems: "flex-start",
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 8,
+  justifyContent: "space-between",
+};
+
+const activeForcedTitleStyle: React.CSSProperties = {
+  color: "#14532d",
+  fontSize: 12,
+  fontWeight: 900,
+};
+
+const activeForcedCopyStyle: React.CSSProperties = {
+  color: "#166534",
+  fontSize: 11,
+  lineHeight: 1.4,
+  marginTop: 2,
+};
+
+const activeForcedListStyle: React.CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 6,
+};
+
+const activeForcedNumberButtonStyle: React.CSSProperties = {
+  alignItems: "center",
+  background: "#ffffff",
+  border: "1px solid #16a34a",
+  borderRadius: 999,
+  color: "#14532d",
+  cursor: "pointer",
+  display: "inline-flex",
+  fontSize: 12,
+  fontVariantNumeric: "tabular-nums",
+  fontWeight: 900,
+  gap: 6,
+  minHeight: 32,
+  padding: "5px 9px",
+};
+
+const activeForcedRemoveMarkStyle: React.CSSProperties = {
+  color: "#15803d",
+  fontSize: 12,
+  fontWeight: 900,
+};
+
+const clearForcedButtonStyle: React.CSSProperties = {
+  background: "#ffffff",
+  border: "1px solid #86efac",
+  borderRadius: 6,
+  color: "#166534",
+  cursor: "pointer",
+  fontSize: 12,
+  fontWeight: 800,
+  minHeight: 32,
+  padding: "5px 9px",
+};
+
+const activeForcedWarningStyle: React.CSSProperties = {
+  color: "#166534",
+  fontSize: 11,
+  fontWeight: 700,
+  lineHeight: 1.4,
+};
+
 const modeButton = (active: boolean): React.CSSProperties => ({
   minHeight: 32,
   border: `1px solid ${active ? "#0f172a" : "#cbd5e1"}`,
@@ -711,17 +1040,255 @@ const modeButton = (active: boolean): React.CSSProperties => ({
   padding: "5px 10px",
 });
 
-const numberButton = (active: boolean, disabled: boolean): React.CSSProperties => ({
-  minWidth: 34,
-  minHeight: 30,
-  border: `1px solid ${active ? "#15803d" : "#cbd5e1"}`,
-  borderRadius: 8,
-  background: active ? "#dcfce7" : "#ffffff",
-  color: disabled ? "#94a3b8" : active ? "#14532d" : "#0f172a",
-  cursor: disabled ? "not-allowed" : "pointer",
-  fontWeight: 800,
+const DROUGHT_SOURCE_TONES: Record<DroughtDisplayMode, {
+  background: string;
+  border: string;
+  text: string;
+}> = {
+  strict: { background: "#fff1f1", border: "#f1a7a0", text: "#b42318" },
+  empirical: { background: "#eff6ff", border: "#93c5fd", text: "#1d4ed8" },
+};
+
+const sourceNumberTokenStyle = (source: DroughtDisplayMode): React.CSSProperties => {
+  const tone = DROUGHT_SOURCE_TONES[source];
+  return {
+    alignItems: "center",
+    background: tone.background,
+    border: `1px solid ${tone.border}`,
+    borderRadius: 999,
+    color: tone.text,
+    display: "inline-flex",
+    fontSize: 12,
+    fontVariantNumeric: "tabular-nums",
+    fontWeight: 900,
+    justifyContent: "center",
+    minHeight: 26,
+    minWidth: 30,
+    padding: "2px 7px",
+  };
+};
+
+const auditHitListStyle: React.CSSProperties = {
+  alignItems: "center",
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 6,
+};
+
+const auditHitDetailStyle: React.CSSProperties = {
+  alignItems: "center",
+  display: "inline-flex",
+  gap: 4,
+  whiteSpace: "nowrap",
+};
+
+const auditHitNumberStyle = (source: DroughtShortlistHitDetail["source"]): React.CSSProperties => {
+  if (source === "strict-only") return sourceNumberTokenStyle("strict");
+  if (source === "empirical-only") return sourceNumberTokenStyle("empirical");
+  return {
+    ...sourceNumberTokenStyle("strict"),
+    background: "linear-gradient(90deg, #fff1f1 0 50%, #eff6ff 50% 100%)",
+    borderColor: "#94a3b8",
+    boxShadow: "inset 3px 0 0 #b42318, inset -3px 0 0 #1d4ed8",
+    color: "#334155",
+  };
+};
+
+const auditHitRankGroupStyle: React.CSSProperties = {
+  alignItems: "baseline",
+  display: "inline-flex",
+  fontSize: 10,
   fontVariantNumeric: "tabular-nums",
+  fontWeight: 850,
+};
+
+const auditHitRankStyle = (source: DroughtDisplayMode): React.CSSProperties => ({
+  color: DROUGHT_SOURCE_TONES[source].text,
 });
+
+const auditHitRankSeparatorStyle: React.CSSProperties = {
+  color: "#64748b",
+  padding: "0 1px",
+};
+
+const auditHitRoleStyle: React.CSSProperties = {
+  color: "#64748b",
+  fontSize: 10,
+  fontWeight: 750,
+};
+
+const auditHitEmptyStyle: React.CSSProperties = {
+  color: "#94a3b8",
+};
+
+const numberButton = (
+  source: DroughtDisplayMode,
+  active: boolean,
+  disabled: boolean,
+): React.CSSProperties => {
+  const tone = DROUGHT_SOURCE_TONES[source];
+  return {
+    minWidth: 34,
+    minHeight: 32,
+    border: `1px solid ${tone.border}`,
+    borderRadius: 8,
+    background: tone.background,
+    boxShadow: active ? "0 0 0 2px #16a34a" : undefined,
+    color: disabled ? "#94a3b8" : tone.text,
+    cursor: disabled ? "not-allowed" : "pointer",
+    fontWeight: 900,
+    fontVariantNumeric: "tabular-nums",
+    opacity: disabled ? 0.52 : 1,
+  };
+};
+
+const forecastReplayCardStyle: React.CSSProperties = {
+  background: "#fbfdff",
+  border: "1px solid #dbe4ee",
+  borderRadius: 8,
+  display: "grid",
+  gap: 10,
+  marginBottom: 10,
+  padding: 10,
+};
+
+const forecastReplayHeaderStyle: React.CSSProperties = {
+  alignItems: "flex-start",
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 10,
+  justifyContent: "space-between",
+};
+
+const forecastReplayTitleStyle: React.CSSProperties = {
+  color: "#0f172a",
+  fontSize: 13,
+  fontWeight: 900,
+};
+
+const sourceLegendStyle: React.CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 6,
+};
+
+const sourceLegendItemStyle = (source: DroughtDisplayMode): React.CSSProperties => {
+  const tone = DROUGHT_SOURCE_TONES[source];
+  return {
+    background: tone.background,
+    border: `1px solid ${tone.border}`,
+    borderRadius: 999,
+    color: tone.text,
+    fontSize: 11,
+    fontWeight: 900,
+    padding: "3px 7px",
+  };
+};
+
+const forecastReplayGridStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 8,
+  gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+};
+
+const forecastReplaySubcardStyle: React.CSSProperties = {
+  background: "#ffffff",
+  border: "1px solid #e2e8f0",
+  borderRadius: 8,
+  display: "grid",
+  gap: 8,
+  minWidth: 0,
+  padding: 10,
+};
+
+const forecastReplaySubcardHeaderStyle: React.CSSProperties = {
+  alignItems: "baseline",
+  color: "#0f172a",
+  display: "flex",
+  flexWrap: "wrap",
+  fontSize: 12,
+  fontWeight: 900,
+  gap: "4px 10px",
+  justifyContent: "space-between",
+};
+
+const forecastReplayMetaStyle: React.CSSProperties = {
+  color: "#64748b",
+  fontSize: 11,
+  fontWeight: 750,
+};
+
+const sourceNumberRowStyle: React.CSSProperties = {
+  alignItems: "flex-start",
+  display: "grid",
+  gap: 8,
+  gridTemplateColumns: "minmax(104px, auto) minmax(0, 1fr)",
+};
+
+const sourceNumberRowLabelStyle = (source: DroughtDisplayMode): React.CSSProperties => ({
+  color: DROUGHT_SOURCE_TONES[source].text,
+  fontSize: 11,
+  fontWeight: 900,
+  paddingTop: 5,
+  whiteSpace: "nowrap",
+});
+
+const sourceNumberListStyle: React.CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 5,
+  minWidth: 0,
+};
+
+const replayHitStyle: React.CSSProperties = {
+  alignItems: "center",
+  display: "inline-flex",
+  gap: 4,
+};
+
+const replayHitMetaStyle: React.CSSProperties = {
+  color: "#475569",
+  fontSize: 10,
+  fontVariantNumeric: "tabular-nums",
+  fontWeight: 750,
+  whiteSpace: "nowrap",
+};
+
+const forecastReplayResultStyle: React.CSSProperties = {
+  color: "#334155",
+  fontSize: 12,
+  lineHeight: 1.4,
+};
+
+const forecastReplayExplanationStyle: React.CSSProperties = {
+  borderTop: "1px solid #eef2f7",
+  color: "#64748b",
+  fontSize: 11,
+  lineHeight: 1.45,
+  paddingTop: 7,
+};
+
+const forecastReplayEmptyStyle: React.CSSProperties = {
+  color: "#64748b",
+  fontSize: 12,
+  padding: "4px 0",
+};
+
+const forecastReplayEmptyInlineStyle: React.CSSProperties = {
+  color: "#64748b",
+  fontSize: 11,
+  paddingTop: 5,
+};
+
+const modelGovernanceStyle: React.CSSProperties = {
+  background: "#f8fafc",
+  border: "1px solid #e2e8f0",
+  borderRadius: 8,
+  color: "#475569",
+  fontSize: 11,
+  lineHeight: 1.45,
+  padding: "8px 10px",
+};
 
 const auditCardStyle: React.CSSProperties = {
   border: "1px solid #e2e8f0",

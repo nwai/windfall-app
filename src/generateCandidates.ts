@@ -1,5 +1,15 @@
 import { CandidateSet, Draw, Knobs } from "./types";
+import {
+  CompositionQuotaCollector, buildTerminalShapeQuotas, compositionFeasibleCount,
+  terminalRepetitionShape, terminalShapeSelectionError, applyCompositionQuotas,
+  type TerminalShapeQuotaOptions,
+} from "./lib/terminalShapeQuotas";
+import { buildTerminalRunQuotas, selectedMaximalRuns, satisfiesTerminalRunRule, terminalRunSelectionError, terminalRunAvailabilityError, type TerminalRunRuleOptions } from "./lib/terminalDigitRuns";
+import { RunCompositionQuotaCollector } from "./lib/terminalRunQuotas";
+import { normalizeMainDigitCountRule, violatesMainDigitCountRule, formatMainDigitCountRule, type MainDigitConstraintOptions } from "./lib/endingDigitRules";
 import { lastDrawBiasMultiplier } from "./lib/settingsTransparency";
+import { countCandidateWindowPatternMatches } from "./lib/windowPatternMatching";
+import { buildOgaDecileGate, ogaDecileAcceptance, ogaForecastBiasSummary, type OgaForecastBiasOptions } from "./lib/ogaDecileAcceptance";
 import { entropy, precomputeHistoryBitmasks, minHammingBit, maxJaccardBit, toBitmask } from "./analytics";
 import { getSDE1FilteredPool } from "./sde1";
 import { getHC3OverlapNumbers, getMostRecentDraw } from "./lib/recentDraws";
@@ -115,6 +125,8 @@ export interface GenerateCandidatesResult {
     mainNineSet: number;
     digitWidth: number;
     repeatedTerminalFamilies: number;
+    terminalShapes?: number;
+    terminalRuns?: number;
     exclusions: number;
     totalAttempts: number;
     accepted: number;
@@ -123,99 +135,16 @@ export interface GenerateCandidatesResult {
 
 export type GenerateCandidatesProgressSetter = (result: GenerateCandidatesResult) => void;
 
-type MainDigitCountMode = "atLeast" | "exactly" | "atMost";
-
-interface MainDigitConstraintOptions {
-  maxCount?: number;
-  countMode?: MainDigitCountMode;
-  targetCount?: number;
-  boost?: number;
-  singleDigitBoost?: number;
-  twoDigitBoost?: number;
+/** An audit-only caller can test fixed sampling weights without enabling a live control. */
+export interface GeneratorSamplingAuditOptions {
+  label: string;
+  numberMultipliers: Record<number, number>;
 }
-
-const MAIN_DIGIT_COUNT_MODES = new Set<MainDigitCountMode>(["atLeast", "exactly", "atMost"]);
-
-interface NormalizedMainDigitCountRule {
-  mode: MainDigitCountMode;
-  count: number;
-}
-
-const normalizeMainDigitCountRule = (
-  options?: MainDigitConstraintOptions,
-): NormalizedMainDigitCountRule | null => {
-  const explicitMode = options?.countMode;
-  if (explicitMode && MAIN_DIGIT_COUNT_MODES.has(explicitMode)) {
-    const rawCount = options.targetCount ?? options.maxCount;
-    const numericCount = typeof rawCount === "number" ? rawCount : Number(rawCount);
-    return {
-      mode: explicitMode,
-      count: Math.max(0, Math.round(Number.isFinite(numericCount) ? numericCount : 0)),
-    };
-  }
-
-  const legacyMaxCount = typeof options?.maxCount === "number" ? options.maxCount : Number(options?.maxCount);
-  if (Number.isFinite(legacyMaxCount) && legacyMaxCount >= 0) {
-    return {
-      mode: "atMost",
-      count: Math.max(0, Math.round(legacyMaxCount)),
-    };
-  }
-
-  return null;
-};
-
-const violatesMainDigitCountRule = (digitCount: number, rule: NormalizedMainDigitCountRule): boolean => {
-  if (rule.mode === "atLeast") return digitCount < rule.count;
-  if (rule.mode === "exactly") return digitCount !== rule.count;
-  return digitCount > rule.count;
-};
-
-const formatMainDigitCountRule = (rule: NormalizedMainDigitCountRule): string => {
-  if (rule.mode === "atLeast") return `at least=${rule.count}`;
-  if (rule.mode === "exactly") return `exactly=${rule.count}`;
-  return `at most=${rule.count}`;
-};
 
 type MainDecadeBiases = Partial<Record<'decade0x' | 'decade1x' | 'decade2x' | 'decade3x' | 'decade4x', number>>;
 
 const DEBUG = false;
 const MONTHLY_SELECTED_NUMBER_BIAS_REPEATS = 3;
-
-/* ------------------------ Pattern helpers (top-level) ----------------------- */
-
-const SUM_LOW_MAX = 22;
-
-function computeCandidatePattern(main: number[], supp: number[]) {
-  const all = [...main, ...supp];
-  const low = all.filter(n => n <= SUM_LOW_MAX).length;
-  const high = all.length - low;
-  const even = all.filter(n => n % 2 === 0).length;
-  const odd = all.length - even;
-  const sum = all.reduce((a, b) => a + b, 0);
-  return { low, high, odd, even, sum };
-}
-
-function matchesAnyPattern(
-  pat: { low: number; high: number; odd: number; even: number; sum: number },
-  set: { low: number; high: number; odd: number; even: number; sum: number }[] | undefined,
-  sumTol: number
-): number {
-  if (!set || set.length === 0) return 0;
-  let m = 0;
-  for (const s of set) {
-    if (
-      s.low === pat.low &&
-      s.high === pat.high &&
-      s.even === pat.even &&
-      s.odd === pat.odd &&
-      Math.abs(s.sum - pat.sum) <= sumTol
-    ) {
-      m++;
-    }
-  }
-  return m;
-}
 
 /**
  * Generate candidate draw sets with layered rejection filters.
@@ -254,14 +183,7 @@ export function generateCandidates(
     sumTolerance?: number;  // default 0 means exact sum
   },
   // NEW: OGA forecast bias options
-  ogaBiasOptions?: {
-    enabled?: boolean;
-    preferredBand?: 'auto' | 'low' | 'mid' | 'high';
-    bands?: { low: number; mid: number; high: number }; // probabilities from KDE
-    // NEW: decile-based selection
-    deciles?: { thresholds: number[]; probs: number[] };
-    preferredDeciles?: { index: number; weight: number }[]; // allow multiple decile bands with weights
-  },
+  ogaBiasOptions?: OgaForecastBiasOptions,
   // NEW: divisible-by-5 constraint options
   div5Options?: {
     /** Maximum count allowed in the 6 main numbers only; undefined = off */
@@ -322,6 +244,9 @@ export function generateCandidates(
   /** Default-off hard rule for repeated terminal digit families. */
   repeatedTerminalDigitFamiliesOptions?: RepeatedTerminalDigitFamilyOptions,
   rng: () => number = Math.random,
+  terminalShapeQuotaOptions?: TerminalShapeQuotaOptions,
+  terminalRunRuleOptions?: TerminalRunRuleOptions,
+  samplingAuditOptions?: GeneratorSamplingAuditOptions,
 ): GenerateCandidatesResult {
 
   if (DEBUG) {
@@ -349,6 +274,14 @@ export function generateCandidates(
     ? buildOddEvenRatioQuotas(num, selectedOddEvenRatios, ratioOptions)
     : {};
   const oddEvenQuotaCounts: Record<string, number> = {};
+  const shapeQuotas = terminalShapeQuotaOptions?.enabled ? buildTerminalShapeQuotas(num, terminalShapeQuotaOptions) : {};
+  const runAllocation = terminalRunRuleOptions?.enabled && terminalRunRuleOptions.mode === "allocation";
+  const runQuotas = runAllocation ? buildTerminalRunQuotas(num, terminalRunRuleOptions) : {};
+  const compositionCollector = runAllocation
+    ? new RunCompositionQuotaCollector<CandidateSet>(num, oddEvenQuotas, shapeQuotas, runQuotas, terminalRunRuleOptions)
+    : terminalShapeQuotaOptions?.enabled
+    ? new CompositionQuotaCollector<CandidateSet>(num, oddEvenQuotas, shapeQuotas) : null;
+  const acceptedCount = () => compositionCollector?.size ?? candidates.length;
 
   const selectedBoostSet = new Set<number>((selectedNumbersForBoost ?? []).filter(n => n >= 1 && n <= 45));
   const boostFactorRaw = selectedBoostOptions?.factor ?? 1;
@@ -394,6 +327,8 @@ export function generateCandidates(
     mainNineSet: 0,
     digitWidth: 0,
     repeatedTerminalFamilies: 0,
+    terminalShapes: 0,
+    terminalRuns: 0,
     exclusions: 0,
     totalAttempts: 0,
     accepted: 0
@@ -402,6 +337,7 @@ export function generateCandidates(
   let lastProgressAt = 0;
   let lastProgressAccepted = 0;
   const buildResultSnapshot = (): GenerateCandidatesResult => {
+    if (compositionCollector) candidates = compositionCollector.values();
     stats.totalAttempts = attempts;
     stats.accepted = candidates.length;
     const acceptedCandidates = candidates.slice(0, num);
@@ -417,10 +353,11 @@ export function generateCandidates(
     };
   };
   const maybeEmitProgress = (force = false) => {
-    if (!progressSetter || candidates.length === 0) return;
+    if (!progressSetter || acceptedCount() === 0) return;
     const now = Date.now();
-    const acceptedSinceLast = candidates.length - lastProgressAccepted;
-    if (!force && candidates.length !== 1 && acceptedSinceLast < 25 && now - lastProgressAt < 500) return;
+    const acceptedSinceLast = acceptedCount() - lastProgressAccepted;
+    if (!force && acceptedCount() !== 1 && now - lastProgressAt < 500
+      && (compositionCollector || acceptedSinceLast < 25)) return;
     progressSetter(buildResultSnapshot());
     lastProgressAt = now;
     lastProgressAccepted = candidates.length;
@@ -431,8 +368,28 @@ export function generateCandidates(
     traceSetter(`[TRACE] Generation blocked: ${message}. Requested constraints were not relaxed.`);
     return { ...buildResultSnapshot(), quotaWarning: `${message}. Requested constraints were not relaxed.` };
   };
+  if (samplingAuditOptions) {
+    if (Object.keys(samplingAuditOptions.numberMultipliers).length !== 45 || Array.from({ length: 45 }, (_, i) => samplingAuditOptions.numberMultipliers[i + 1])
+      .some(weight => !Number.isFinite(weight) || weight <= 0)) return blocked("Sampling audit requires 45 finite, positive multipliers; no neutral fallback was substituted");
+    traceSetter(`[TRACE] ${samplingAuditOptions.label}: audit-only sampling multipliers active before hard filters; not a calibrated next-draw probability.`);
+  }
+  const ogaDecileGate = buildOgaDecileGate(ogaBiasOptions);
+  if (ogaBiasOptions?.enabled && ogaDecileGate.error) return blocked(ogaDecileGate.error);
+  const ogaDecileChecks = { unselectedOrZero: 0, weightedRejects: 0, passed: 0 };
+  if (ogaBiasOptions?.enabled) {
+    traceSetter(`[TRACE] OGA acceptance bias: ${ogaForecastBiasSummary(ogaBiasOptions)}; reference ${ogaBiasOptions.baselineLabel ?? "active generation history"}; evidence ${ogaBiasOptions.evidenceDrawCount ?? "not supplied"}. Band weights control algorithm acceptance, not candidate quotas or draw probabilities.`);
+    if (ogaDecileGate.selected) traceSetter(`[TRACE] OGA exact decile cutoffs: ${JSON.stringify(ogaDecileGate.thresholds)}; cutoff ties belong to the lower interval.`);
+  }
   const hasSplitFiveBucketConstraint = normalizeMainDigitCountRule(mainZeroOptions) !== null || normalizeMainDigitCountRule(mainFiveOptions) !== null;
   const repeatedTerminalDigitFamilyRule = normalizeRepeatedTerminalDigitFamilyRule(repeatedTerminalDigitFamiliesOptions);
+  if (terminalShapeQuotaOptions?.enabled) {
+    const error = terminalShapeSelectionError(terminalShapeQuotaOptions);
+    if (error) return blocked(error);
+  }
+  if (terminalRunRuleOptions?.enabled) {
+    const error = terminalRunSelectionError(terminalRunRuleOptions);
+    if (error) return blocked(error);
+  }
   const clampMainDigitBoost = (boost: number | undefined): number => {
     const numericBoost = typeof boost === "number" ? boost : Number(boost);
     return Math.max(0, Math.min(5, Number.isFinite(numericBoost) ? numericBoost : 0));
@@ -907,6 +864,7 @@ export function generateCandidates(
       neighbour: latestNeighbourSupport.active && latestNeighbourSupportSet.has(n) ? latestNeighbourSupport.supportBoostFactor : 1,
       strictQuota: strictDroughtQuotaActive && strictDroughtQuotaSet.has(n) ? strictDroughtQuotaMultiplier(n) : 1,
       empiricalQuota: empiricalDroughtQuotaActive && empiricalDroughtQuotaSet.has(n) ? empiricalDroughtQuotaMultiplier(n) : 1,
+      ...(samplingAuditOptions ? { samplingAudit: samplingAuditOptions.numberMultipliers[n] } : {}),
     };
     const base = Object.values(components).reduce((product, factor) => product * factor, 1);
     const digit = mainDigitBoostMultiplier(n);
@@ -988,7 +946,40 @@ export function generateCandidates(
   // Main generation loop
   const effectiveAttemptMultiplier = Math.max(1, Math.floor(attemptMultiplier ?? 400));
   const maxAttempts = num * effectiveAttemptMultiplier; // user-tunable cap (was num * 120, then 400)
-  while (candidates.length < num && attempts < maxAttempts) {
+  if (terminalRunRuleOptions?.enabled) {
+    const error = terminalRunAvailabilityError(terminalRunRuleOptions, suppBasePool, forcedClean);
+    if (error) return blocked(error);
+    traceSetter(`[TRACE] Terminal run rules ON: ${terminalRunRuleOptions.mode}; ${terminalRunRuleOptions.useAllObservedRuns ? "all observed runs" : "manual selection"}; ${runAllocation ? terminalRunRuleOptions.allocationBasis === "equal" ? "equal user allocation, not historical support; " : "real WFMQYH count shares; " : ""}exact maximal circular runs ${terminalRunRuleOptions.selectedRuns.join(", ")}; ${runAllocation
+      ? `assigned targets ${Object.entries(runQuotas).map(([run, count]) => `${run}=${count}`).join(", ")}; one allocation per candidate; bounded joint odd/even/shape/run solver`
+      : "every selected run required in each candidate"}. Sub-runs are never counted separately; other filters remain enforced.`);
+  }
+  if (terminalShapeQuotaOptions?.enabled || terminalRunRuleOptions?.enabled) {
+    const digitOptions = [mainZeroOptions, mainOneOptions, mainTwoOptions, mainThreeOptions, mainFourOptions,
+      mainFiveOptions, mainSixOptions, mainSevenOptions, mainEightOptions, mainNineOptions];
+    const bounds = digitOptions.map((options) => {
+      const rule = normalizeMainDigitCountRule(options);
+      return { min: rule && rule.mode !== "atMost" ? rule.count : 0, max: rule && rule.mode !== "atLeast" ? rule.count : 8 };
+    });
+    const repeatedAllowed = repeatedTerminalDigitFamilyRule?.scope === "mainAndSupp"
+      ? (count: number) => !violatesRepeatedTerminalDigitFamilyRule(count, repeatedTerminalDigitFamilyRule) : undefined;
+    for (const requested of new Set([num, terminalRunRuleOptions?.finalRequested ?? terminalShapeQuotaOptions?.finalRequested ?? num])) {
+      const ratios = buildOddEvenRatioQuotas(requested, selectedOddEvenRatios, ratioOptions);
+      const shapes: Record<string, number> = terminalShapeQuotaOptions?.enabled ? buildTerminalShapeQuotas(requested, terminalShapeQuotaOptions) : { "*": requested };
+      const vectorNumbers = (vector: number[]) => vector.flatMap((count, digit) => count ? [digit || 10] : []);
+      const feasible = compositionFeasibleCount(requested, ratios, shapes, suppBasePool, forcedClean, bounds, repeatedAllowed,
+        terminalRunRuleOptions?.enabled ? (vector) => satisfiesTerminalRunRule(vectorNumbers(vector), terminalRunRuleOptions) : undefined);
+      if (feasible < requested) return blocked(`Joint odd/even and terminal ${terminalRunRuleOptions?.enabled ? "run/shape" : "shape"} quotas are structurally incompatible for ${requested} candidates (${feasible}/${requested} feasible), considering exclusions, forced numbers, ending-digit counts and full-eight repeated-family rules`);
+      if (runAllocation && terminalRunRuleOptions) {
+        const targets = buildTerminalRunQuotas(requested, terminalRunRuleOptions);
+        const runFeasible = compositionFeasibleCount(requested, ratios, targets, suppBasePool, forcedClean, bounds, repeatedAllowed,
+          terminalShapeQuotaOptions?.enabled ? (vector) => !!shapes[vector.filter(Boolean).sort((a, b) => b - a).join("+")] : undefined,
+          (vector) => selectedMaximalRuns(vectorNumbers(vector), terminalRunRuleOptions));
+        if (runFeasible < requested) return blocked(`Odd/even and exact terminal run allocations are structurally incompatible for ${requested} candidates (${runFeasible}/${requested} feasible). Review selected runs, ratios and hard number rules`);
+      }
+    }
+    if (terminalShapeQuotaOptions?.enabled) traceSetter(`[TRACE] Terminal shape quotas ON: ${Object.entries(shapeQuotas).map(([shape, count]) => `${shape}=${count}`).join(", ")}; all 8 numbers; ${terminalShapeQuotaOptions.allocationBasis === "equal" ? "equal manual shares (not historical support)" : "real WFMQYH count shares"}; jointly allocated with odd/even. Other filters may still cause shortfalls.`);
+  }
+  while (acceptedCount() < num && attempts < maxAttempts) {
     attempts++;
 
     // Start candidate with forced seeds
@@ -1274,13 +1265,15 @@ export function generateCandidates(
     }
 
     let oddEvenRatio: string | null = null;
+    if (terminalShapeQuotaOptions?.enabled && !(shapeQuotas[terminalRepetitionShape(nums8) ?? ""] > 0)) { stats.terminalShapes++; continue; }
+    if (!satisfiesTerminalRunRule(nums8, terminalRunRuleOptions)) { stats.terminalRuns++; continue; }
 
     // Odd/Even ratio quota filter
     if (selectedOddEvenRatios.length > 0) {
       const odd = nums8.filter(n => n % 2 === 1).length;
       oddEvenRatio = `${odd}:${8 - odd}`;
       const quota = oddEvenQuotas[oddEvenRatio] ?? 0;
-      if (quota <= 0 || (oddEvenQuotaCounts[oddEvenRatio] ?? 0) >= quota) { stats.oddEven++; continue; }
+      if (quota <= 0 || (!compositionCollector && (oddEvenQuotaCounts[oddEvenRatio] ?? 0) >= quota)) { stats.oddEven++; continue; }
     }
 
     // Tricky rule (reject extreme all-odd/all-even patterns)
@@ -1330,14 +1323,13 @@ export function generateCandidates(
       }
     }
 
-    // NEW: Pattern constraint (restrict mode only; boost happens in App ranking)
-if (patternOptions?.constraints?.length && patternOptions?.mode === 'restrict') {
-      const pat = computeCandidatePattern(main, supp);
+    // Restrict rejects here; Boost adds a final survivor-ranking bonus in App.
+    if (patternOptions?.constraints?.length && patternOptions?.mode === 'restrict') {
       const sumTol = Math.max(0, patternOptions?.sumTolerance ?? 0);
-      const m = matchesAnyPattern(pat, patternOptions.constraints, sumTol);
+      const m = countCandidateWindowPatternMatches({ main, supp }, patternOptions.constraints, sumTol);
       if (m === 0) {
         stats.patternConstraint++;
-        if (DEBUG) console.log('[generateCandidates] pattern reject', pat);
+        if (DEBUG) console.log('[generateCandidates] pattern reject', { main, supp });
         continue;
       }
     }
@@ -1349,30 +1341,25 @@ if (patternOptions?.constraints?.length && patternOptions?.mode === 'restrict') 
     if (knobs.enableJaccard && maxJaccardBit(candidateMainMask, main.length, histBitmasks) > jaccardThreshold) { stats.jaccard++; continue; }
 
     let candidateOGA: number | null = null;
-    if (ogaBiasOptions?.enabled || minOGAFloorEnabled) {
+    if (minOGAFloorEnabled) {
       candidateOGA = computeOGA(nums8, history, spokeCount);
     }
 
-    // OGA forecast bias acceptance — deterministic by raw candidate OGA vs bands/deciles
-    if (ogaBiasOptions?.enabled && candidateOGA !== null) {
-      let acceptedByDecile = false;
-      if (ogaBiasOptions.deciles && Array.isArray(ogaBiasOptions.preferredDeciles) && ogaBiasOptions.preferredDeciles.length) {
-        const th = ogaBiasOptions.deciles.thresholds || [];
-        // Determine decile index: 0..9
-        let idx = 0;
-        while (idx < th.length && candidateOGA > th[idx]) idx++;
-        // Weighted acceptance based on selected deciles
-        const match = ogaBiasOptions.preferredDeciles.find(d => d.index === idx);
-        const weightSum = ogaBiasOptions.preferredDeciles.reduce((s, d) => s + Math.max(0, d.weight), 0) || 0;
-        const w = match ? Math.max(0, match.weight) : 0;
-        const prob = weightSum > 0 ? (w / weightSum) : 0;
-        if (rng() <= prob) acceptedByDecile = true;
-
-        const selList = (ogaBiasOptions.preferredDeciles ?? []).map(d=>`D${d.index}x${d.weight}`).join(', ');
-        traceSetter(`[TRACE] OGA decile check: OGA=${candidateOGA.toFixed(2)} → D${idx} weight=${w} prob=${prob.toFixed(2)} sel=${selList}`);
-      }
-      if (!acceptedByDecile) {
-        // Fallback to low/mid/high deterministic band matching or probabilistic acceptance
+    if (ogaBiasOptions?.enabled) {
+      const baseline = ogaBiasOptions.baselineHistory ?? history;
+      const forecastCandidateOGA = baseline === history && candidateOGA !== null
+        ? candidateOGA : computeOGA(nums8, baseline, spokeCount);
+      if (ogaDecileGate.selected) {
+        const check = ogaDecileAcceptance(forecastCandidateOGA, ogaDecileGate, rng);
+        if (!check.accepted) {
+          if (check.probability === 0) ogaDecileChecks.unselectedOrZero += 1;
+          else ogaDecileChecks.weightedRejects += 1;
+          stats.ogaBias++;
+          continue;
+        }
+        ogaDecileChecks.passed += 1;
+      } else {
+        // Broad bands apply only when no detailed OGA deciles are selected.
         const pb = ogaBiasOptions.preferredBand ?? 'auto';
         const bands = ogaBiasOptions.bands ?? { low: 0.1, mid: 0.8, high: 0.1 };
         // Compute p10/p90 proxies if available from deciles
@@ -1380,7 +1367,7 @@ if (patternOptions?.constraints?.length && patternOptions?.mode === 'restrict') 
         const p10 = th && th[0] !== undefined ? th[0] : undefined;
         const p90 = th && th[8] !== undefined ? th[8] : undefined;
         if (p10 !== undefined && p90 !== undefined) {
-          const band = candidateOGA <= p10 ? 'low' : candidateOGA >= p90 ? 'high' : 'mid';
+          const band = forecastCandidateOGA <= p10 ? 'low' : forecastCandidateOGA >= p90 ? 'high' : 'mid';
           const targetBand: 'low' | 'mid' | 'high' = pb === 'auto'
             ? (bands.low >= bands.mid && bands.low >= bands.high ? 'low' : (bands.mid >= bands.high ? 'mid' : 'high'))
             : pb;
@@ -1391,7 +1378,7 @@ if (patternOptions?.constraints?.length && patternOptions?.mode === 'restrict') 
             ? (bands.low >= bands.mid && bands.low >= bands.high ? 'low' : (bands.mid >= bands.high ? 'mid' : 'high'))
             : pb;
           const acceptProb = targetBand === 'low' ? bands.low : targetBand === 'mid' ? bands.mid : bands.high;
-          if (rng() > acceptProb) { stats.ogaBias++; continue; }
+          if (!(rng() < acceptProb)) { stats.ogaBias++; continue; }
         }
       }
     }
@@ -1409,13 +1396,12 @@ if (patternOptions?.constraints?.length && patternOptions?.mode === 'restrict') 
     const candidateKey = `${main.join(',')};${supp.join(',')}`;
     if (seenKeys.has(candidateKey)) { continue; }
     seenKeys.add(candidateKey);
-    recordBucketCoverageAcceptedSignature(nums8);
+    if (!compositionCollector) recordBucketCoverageAcceptedSignature(nums8);
 
     let patternMatches = 0;
     if (patternOptions?.constraints?.length) {
-      const pat = computeCandidatePattern(main, supp);
       const sumTol = Math.max(0, patternOptions?.sumTolerance ?? 0);
-      patternMatches = matchesAnyPattern(pat, patternOptions.constraints, sumTol);
+      patternMatches = countCandidateWindowPatternMatches({ main, supp }, patternOptions.constraints, sumTol);
     }
     const candidate: CandidateSet = { main, supp, patternMatches };
     if (scoringGenerationProfile?.enabled) {
@@ -1435,8 +1421,10 @@ if (patternOptions?.constraints?.length && patternOptions?.mode === 'restrict') 
         candidate.trace = [...(candidate.trace ?? []), ...terminalMomentumEvidence.trace];
       }
     }
-    candidates.push(candidate);
-    if (oddEvenRatio) {
+    if (compositionCollector) {
+      if (!compositionCollector.add(candidate)) { if (runAllocation) stats.terminalRuns++; else stats.terminalShapes++; continue; }
+    } else candidates.push(candidate);
+    if (oddEvenRatio && !compositionCollector) {
       oddEvenQuotaCounts[oddEvenRatio] = (oddEvenQuotaCounts[oddEvenRatio] ?? 0) + 1;
     }
     stats.accepted++;
@@ -1444,6 +1432,32 @@ if (patternOptions?.constraints?.length && patternOptions?.mode === 'restrict') 
   }
 
   stats.totalAttempts = attempts;
+  if (terminalRunRuleOptions?.enabled && terminalRunRuleOptions.mode === "requireAll") {
+    traceSetter(`[TRACE] Terminal run require-all results: ${acceptedCount()}/${num} passing rows; runs ${terminalRunRuleOptions.selectedRuns.join(", ")}; rejected for exact-run mismatch ${stats.terminalRuns}. No sub-run credit or rule relaxation.`);
+  }
+  if (compositionCollector && runAllocation && terminalRunRuleOptions) {
+    candidates = compositionCollector.values();
+    bucketCoverageAcceptedSignatures.clear();
+    candidates.forEach((candidate) => recordBucketCoverageAcceptedSignature([...candidate.main, ...candidate.supp]));
+    const counts: Record<string, number> = {};
+    candidates.forEach((candidate) => {
+      const ratio = `${[...candidate.main, ...candidate.supp].filter((n) => n % 2 === 1).length}:${[...candidate.main, ...candidate.supp].filter((n) => n % 2 === 0).length}`;
+      oddEvenQuotaCounts[ratio] = (oddEvenQuotaCounts[ratio] ?? 0) + 1;
+      if (candidate.terminalRunQuota) counts[candidate.terminalRunQuota] = (counts[candidate.terminalRunQuota] ?? 0) + 1;
+    });
+    const warning = (compositionCollector as RunCompositionQuotaCollector<CandidateSet>).warning;
+    if (warning) warnings.push(warning);
+    if (candidates.length < num) warnings.push(`Terminal run joint allocation kept ${candidates.length}/${num}; assigned targets were not relaxed. Bounded search or other filters may cause a shortfall`);
+    traceSetter(`[TRACE] Terminal run quotas results: ${Object.entries(runQuotas).map(([run, count]) => `${run}=${counts[run] ?? 0}/${count}`).join(", ")}; ${candidates.length}/${num} verified rows; rejects/reserve limits ${stats.terminalRuns}. ${warning ?? "Each candidate counted once; no sub-run credit."}`);
+  } else if (compositionCollector && terminalShapeQuotaOptions) {
+    candidates = compositionCollector.values();
+    bucketCoverageAcceptedSignatures.clear();
+    candidates.forEach((candidate) => recordBucketCoverageAcceptedSignature([...candidate.main, ...candidate.supp]));
+    const allocation = applyCompositionQuotas(candidates, num, selectedOddEvenRatios, ratioOptions ?? [], terminalShapeQuotaOptions);
+    Object.assign(oddEvenQuotaCounts, allocation.ratioCounts);
+    if (allocation.warning) warnings.push(allocation.warning);
+    traceSetter(`[TRACE] Terminal shape quotas results: kept ${candidates.length}/${num}; ${Object.entries(allocation.shapeCounts).map(([shape, count]) => `${shape}=${count}/${shapeQuotas[shape]}`).join(", ")}; rejects or quota-reserve attempts ${stats.terminalShapes}.`);
+  }
 
   if (candidates.length < num && attempts >= maxAttempts) {
      warnings.push(`Stopped after ${attempts} attempts; generated ${candidates.length}/${num}. Consider loosening constraints (e.g., main ending-digit max rules) or increasing attempt multiplier (currently ${effectiveAttemptMultiplier}).`);
@@ -1477,6 +1491,9 @@ if (patternOptions?.constraints?.length && patternOptions?.mode === 'restrict') 
       traceSetter(`[TRACE] ${label}: ${formatMainDigitCountRule(rule)} rejects=${rejects}`);
     }
   });
+  if (ogaBiasOptions?.enabled && ogaDecileGate.selected) {
+    traceSetter(`[TRACE] OGA decile gate results: unselected/zero-weight rejects ${ogaDecileChecks.unselectedOrZero}; weighted rejects ${ogaDecileChecks.weightedRejects}; gate passes ${ogaDecileChecks.passed}. No broad-band fallback; gate passes are not final accepted-row counts.`);
+  }
   if (digitWidthTargets.enabled) {
     traceSetter(
       `[TRACE] Digit-width rule: ${digitWidthTargets.singleDigitPercent}%/${digitWidthTargets.twoDigitPercent}% ${formatDigitWidthScopeLabel(digitWidthTargets.scope)} -> target ${digitWidthTargets.singleDigitCount}/${digitWidthTargets.twoDigitCount} rejects=${stats.digitWidth}`
@@ -1628,6 +1645,7 @@ if (patternOptions?.constraints?.length && patternOptions?.mode === 'restrict') 
   }
 
   const acceptedCandidates = candidates.slice(0, num);
+  stats.accepted = acceptedCandidates.length;
   const ratioSummary = summarizeOddEvenRatios(
     acceptedCandidates,
     num,

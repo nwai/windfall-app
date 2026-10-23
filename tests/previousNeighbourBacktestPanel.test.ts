@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { PreviousNeighbourBacktestPanel } from "../src/components/PreviousNeighbourBacktestPanel";
+import { analyzePreviousNeighbourCountShapeAtlas } from "../src/lib/previousNeighbourCountShapeAtlas";
 import type { Draw } from "../src/types";
 
 const draw = (date: string, main: number[], supp: number[] = []): Draw => ({ date, main, supp });
@@ -23,24 +24,41 @@ describe("PreviousNeighbourBacktestPanel", () => {
       userSelectedNumbers: [14],
       excludedNumbers: [18],
       onToggleUserSelectedNumber: () => undefined,
+      atlasAnalysis: analyzePreviousNeighbourCountShapeAtlas(draws),
+      scope: "mains-plus-supps",
+      onScopeChange: () => undefined,
+      directionalLookback: 1,
+      onDirectionalLookbackChange: () => undefined,
+      atlasHistorySource: "baseline",
+      onAtlasHistorySourceChange: () => undefined,
     }));
 
-    expect(html).toContain("Previous Draw ±1/±2 Directional Pattern Lab");
+    expect(html).toContain("Neighbour Count &amp; Shape Atlas");
+    expect(html).toContain("Count &amp; stage");
+    expect(html).toContain("Transition ledger");
+    expect(html).toContain("Unique-hit count by monthly draw ordinal");
+    expect(html).toContain("Avg cloud");
+    expect(html).toContain("Immediate next-draw translation");
+    expect(html).toContain("The draw-stage table estimates a count, not which members will appear");
+    expect(html).toContain("Cloud-size-controlled draw-stage evidence");
+    expect(html).toContain("95% excess interval");
+    expect(html).toContain("intentionally unranked");
+    expect(html).toContain("Read lift, not raw totals");
+    expect(html).toContain("Unique numbers and directional paths are deliberately separate");
+    expect(html).toContain("Auditable transition ledger");
+    expect(html).toContain("No future result used");
     expect(html).toContain("Live hand-off read + latest ±1/±2 targets");
-    expect(html).toContain("No repeated fingerprints in this WFMQYH window");
-    expect(html).toContain("Try a larger WFMQYH window for recurrence evidence");
     expect(html).toContain("hit-side wins / miss-side wins / ties");
     expect(html).toContain("Possible latest-draw ±1/±2 numbers");
     expect(html).toContain("All targets from 2026-01-12");
     expect(html).toContain("Selectable helper");
     expect(html).toContain("aria-pressed=\"true\"");
     expect(html).toContain("Number 18 is unavailable because it is currently excluded.");
-    expect(html).toContain("Current selection helper target cloud");
     expect(html).toContain("Prev");
     expect(html).toContain("Observe-only");
     expect(html).toContain("Anti-lookahead");
-    expect(html).toContain("Duplicated neighbours");
-    expect(html).toContain("Soft-rule candidate check");
+    expect(html).toContain("Advanced soft-rule replay settings");
+    expect(html).not.toContain("Soft-rule candidate check");
     expect(html).toContain("does not alter candidate generation");
     expect(html).toContain("Hit vs missed neighbour hand-off test");
     expect(html).toContain("Observe-only hand-off");
@@ -48,9 +66,7 @@ describe("PreviousNeighbourBacktestPanel", () => {
     expect(html).toContain("Current missed-side helper");
     expect(html).toContain("Fresh ±1/±2 cloud from missed sources");
     expect(html).toContain("Helper only");
-    expect(html).toContain("±1 History Table");
-    expect(html).toContain("Previous draw");
-    expect(html).toContain("Current draw");
+    expect(html).not.toContain("±1 History Table");
     expect(html).toContain("34");
   });
 });

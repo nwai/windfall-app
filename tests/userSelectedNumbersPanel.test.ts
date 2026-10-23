@@ -28,6 +28,7 @@ describe("UserSelectedNumbersPanel", () => {
         setUserSelectedNumbers: vi.fn(),
         externalSelectedNumbers: [7],
         externalSelectedLabel: "Drought-break shortlist",
+        externalSelectionHref: "#panel-drought-break-shortlist",
       }),
     );
     const document = new DOMParser().parseFromString(html, "text/html");
@@ -36,6 +37,8 @@ describe("UserSelectedNumbersPanel", () => {
 
     expect(document.body.textContent).toContain("Selected set: 4");
     expect(document.body.textContent).toContain("Locked by Drought-break shortlist: 7");
+    expect(document.body.textContent).toContain("Manage there");
+    expect(document.querySelector("a[href='#panel-drought-break-shortlist']")).not.toBeNull();
     expect(document.body.textContent).toContain("Selected1");
     expect(userSelectedButton?.getAttribute("aria-pressed")).toBe("true");
     expect(userSelectedButton?.getAttribute("disabled")).toBeNull();

@@ -59,6 +59,8 @@ describe("PredictionJournalPanel", () => {
 
     expect(html).toContain("Prediction Journal &amp; Scorecard");
     expect(html).toContain("Prediction Journal Findings Report");
+    expect(html).toContain("Neighbour Atlas usage audit");
+    expect(html).toContain("usage audit rather than the Atlas training source");
     expect(html).toContain("Stored locally for this browser address");
     expect(html).toContain("Changing the hostname, port, or browser profile opens a separate local journal");
     expect(html).toContain("Backup JSON");
@@ -219,8 +221,9 @@ describe("PredictionJournalPanel", () => {
       constellationReason.dispatchEvent(new Event("change", { bubbles: true }));
     });
 
-    expect(notesTextArea.value).not.toContain("Selection reason: Observed pattern in DGA grid.");
-    expect(notesTextArea.value).toContain("Selection reason: Used DGA constellation diagnostic.");
+    expect(dgaReason.type).toBe("checkbox");
+    expect(dgaReason.checked).toBe(true);
+    expect(notesTextArea.value).toContain("Observed pattern in DGA grid + Used DGA constellation diagnostic");
 
     const stageMatchReason = container.querySelector("input[value='stageMatchAcceptancePlaybook']") as HTMLInputElement;
     await act(async () => {
@@ -228,8 +231,10 @@ describe("PredictionJournalPanel", () => {
       stageMatchReason.dispatchEvent(new Event("change", { bubbles: true }));
     });
 
-    expect(notesTextArea.value).not.toContain("Selection reason: Used DGA constellation diagnostic.");
-    expect(notesTextArea.value).toContain("Selection reason: Used Stage-Match Acceptance Playbook.");
+    expect(constellationReason.checked).toBe(true);
+    expect(notesTextArea.value).toContain("Observed pattern in DGA grid + Used DGA constellation diagnostic + Used Stage-Match Acceptance Playbook");
+    await act(async () => { dgaReason.click(); });
+    expect(dgaReason.checked).toBe(false);
 
     const otherReason = Array.from(container.querySelectorAll<HTMLInputElement>("input[type='checkbox']"))
       .find((input) => input.parentElement?.textContent?.trim() === "Other") as HTMLInputElement;
@@ -244,7 +249,7 @@ describe("PredictionJournalPanel", () => {
     });
 
     expect(notesTextArea.value).not.toContain("Selection reason: Observed pattern in DGA grid.");
-    expect(notesTextArea.value).toContain("Selection reason: Used Stage-Match Acceptance Playbook + Other - Testing a split diagonal.");
+    expect(notesTextArea.value).toContain("Selection reason: Used DGA constellation diagnostic + Used Stage-Match Acceptance Playbook + Other - Testing a split diagonal.");
 
     const saveButton = Array.from(container.querySelectorAll("button"))
       .find((button) => button.textContent === "Save prediction") as HTMLButtonElement;
@@ -254,16 +259,12 @@ describe("PredictionJournalPanel", () => {
     });
 
     const saved = JSON.parse(window.localStorage.getItem(PREDICTION_JOURNAL_STORAGE_KEY) ?? "[]");
-    expect(saved[0].inputs.selectionReason).toEqual({
-      version: 1,
-      key: "stageMatchAcceptancePlaybook",
-      label: "Used Stage-Match Acceptance Playbook",
-      detail: "Testing a split diagonal.",
-    });
-    expect(saved[0].inputs.notes).toContain("Selection reason: Used Stage-Match Acceptance Playbook + Other - Testing a split diagonal.");
+    expect(saved[0].inputs.selectionReasons.map((reason: { key: string }) => reason.key)).toEqual(["dgaConstellationDiagnostic", "stageMatchAcceptancePlaybook", "other"]);
+    expect(saved[0].inputs.selectionReasons[2].detail).toBe("Testing a split diagonal.");
+    expect(saved[0].inputs.notes).toContain("Selection reason: Used DGA constellation diagnostic + Used Stage-Match Acceptance Playbook + Other - Testing a split diagonal.");
 
     const rowButton = container.querySelector("button[aria-controls^='prediction-journal-entry-']") as HTMLButtonElement;
-    expect(rowButton.textContent).toContain("Reason: Used Stage-Match Acceptance Playbook + Other - Testing a split diagonal.");
+    expect(rowButton.textContent).toContain("Reason: Used DGA constellation diagnostic + Used Stage-Match Acceptance Playbook + Other - Testing a split diagonal.");
 
     await act(async () => {
       root.unmount();
@@ -792,10 +793,10 @@ describe("PredictionJournalPanel", () => {
 
     const draftCollision = container.querySelector("[data-testid='prediction-draft-prize-collision']");
     expect(draftCollision).toBeTruthy();
-    expect(draftCollision?.textContent).toContain("Rare historical D1/D2 collision found");
+    expect(draftCollision?.textContent).toContain("Historical D1/D2 saved-line match found");
     expect(draftCollision?.textContent).toContain("Stored line check");
-    expect(draftCollision?.textContent).toContain("Div1 on 6/1/26");
-    expect(draftCollision?.textContent).toContain("Selected-set subset check");
+    expect(draftCollision?.textContent).toContain("Div1 on 2026-06-01");
+    expect(draftCollision?.textContent).toContain("Combined selected-pool coverage, not a played-game prize");
 
     const reviewedRadio = container.querySelector("input[value='reviewedByUser']") as HTMLInputElement;
     await act(async () => {
@@ -812,7 +813,7 @@ describe("PredictionJournalPanel", () => {
 
     const saveAlert = container.querySelector("[data-testid='prediction-historical-prize-collision-save-alert']");
     expect(saveAlert).toBeTruthy();
-    expect(saveAlert?.textContent).toContain("Historical Division 1/2 collision found");
+    expect(saveAlert?.textContent).toContain("Historical Division 1/2 saved-line match found");
     expect(container.querySelector("button[aria-controls^='prediction-journal-entry-']")).toBeNull();
 
     const saveAnywayButton = Array.from(container.querySelectorAll("button"))
@@ -834,9 +835,9 @@ describe("PredictionJournalPanel", () => {
 
     const savedCollision = container.querySelector("[data-testid='prediction-historical-prize-collision']");
     expect(savedCollision).toBeTruthy();
-    expect(savedCollision?.textContent).toContain("Rare historical D1/D2 collision found");
+    expect(savedCollision?.textContent).toContain("Historical D1/D2 saved-line match found");
     expect(savedCollision?.textContent).toContain("Checked against 3 real historical draws");
-    expect(savedCollision?.textContent).toContain("archive rarity check, not a future probability signal");
+    expect(savedCollision?.textContent).toContain("does not establish a prize for any entered game or a future probability advantage");
 
     await act(async () => {
       root.unmount();
@@ -1019,6 +1020,100 @@ describe("PredictionJournalPanel", () => {
       archivedRowButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     expect(container.textContent).toContain("Restore");
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it("shows the frozen Neighbour Atlas capture and neutral replay inside a saved entry", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const history = [
+      draw("6/24/26", [10, 11, 12, 13, 14, 15], [16, 17]),
+      draw("6/26/26", [1, 7, 12, 14, 22, 34], [3, 45]),
+    ];
+    const entry = buildPredictionJournalEntry({
+      id: "prediction-panel-neighbour-atlas",
+      now: "2026-06-24T10:30:00.000Z",
+      latestDraw: history[0],
+      targetKind: "nextDraw",
+      reviewStatus: "reviewedByUser",
+      inputs: { numbers: [3, 12] },
+      setupSnapshot: {
+        windowEnabled: true,
+        windowMode: "Custom",
+        customDrawCount: 13,
+        selectedRatios: [],
+        knobs: {},
+        userSelectedNumbers: [3, 12],
+        neighbourAtlasEvidence: {
+          version: 1,
+          observeOnly: true,
+          historySource: "baseline",
+          historySourceLabel: "Baseline history",
+          scope: "mains-plus-supps",
+          lookbackDraws: 1,
+          transitionCount: 30,
+          validDraws: 31,
+          excludedTargetDraws: 0,
+          excludedTargetMonthLabels: [],
+          targetDrawOrdinal: 8,
+          overall: { averageUniqueHits: 3, averageExpectedUniqueHits: 2.8, averageDirectionalHits: 3.2, lift: 1.071 },
+          composition: { oddLift: 1, evenLift: 1.1, oneDigitLift: 0.9, twoDigitLift: 1.1 },
+          ordinalEvidence: {
+            drawOrdinal: 8,
+            label: "D8",
+            trials: 3,
+            sampleQuality: "Thin",
+            averageUniqueHits: 3,
+            averageExpectedUniqueHits: 2.8,
+            lift: 1.071,
+            atLeastOneRate: 1,
+            atLeastThreeRate: 0.67,
+            atLeastFourRate: 0.33,
+            topPattern: "1/1/1/0",
+            topPatternCount: 1,
+          },
+          currentCloud: {
+            sourceDateLabel: "6/24/26",
+            sourceNumbers: [10, 11, 12, 13, 14, 15, 16, 17],
+            targetNumbers: [3, 12, 45],
+            ambiguousTargetNumbers: [],
+            targetCount: 3,
+            oddTargetCount: 2,
+            evenTargetCount: 1,
+            oneDigitTargetCount: 1,
+            twoDigitTargetCount: 2,
+            numbers: [
+              { number: 3, directions: ["-1"], ambiguous: false },
+              { number: 12, directions: ["+1"], ambiguous: false },
+              { number: 45, directions: ["+2"], ambiguous: false },
+            ],
+          },
+          warnings: ["Thin evidence"],
+        },
+      } as any,
+    });
+
+    await act(async () => {
+      root.render(React.createElement(PredictionJournalPanel, { history, initialEntries: [entry] }));
+    });
+    const rowButton = container.querySelector("button[aria-controls^='prediction-journal-entry-']") as HTMLButtonElement;
+    await act(async () => {
+      rowButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    const provenance = container.querySelector("[data-testid='prediction-structured-provenance']");
+    const scorecard = container.querySelector("[data-testid='prediction-scorecard-grid']");
+    expect(provenance?.textContent).toContain("Neighbour Atlas capture");
+    expect(provenance?.textContent).toContain("Selected-cloud matches 3, 12");
+    expect(provenance?.textContent).toContain("Thin sample · 3 trials · lift 1.071x");
+    expect(scorecard?.textContent).toContain("Neighbour Atlas replay");
+    expect(scorecard?.textContent).toContain("Recorded");
+    expect(scorecard?.textContent).toContain("not scored as a predictive hit or miss");
 
     await act(async () => {
       root.unmount();

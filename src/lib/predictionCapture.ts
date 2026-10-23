@@ -6,6 +6,7 @@ import {
   type WeekdayWindfallPrizeDivision,
 } from "./prizeDivisions";
 import type { CandidateSet, Draw } from "../types";
+import { normalizePredictionSelectionReasons, type PredictionJournalSelectionReason } from "./predictionSelectionReasons";
 
 export const PREDICTION_CAPTURE_FORMAT = "windfall-prediction-capture";
 export const PREDICTION_CAPTURE_VERSION = 1;
@@ -75,6 +76,8 @@ export interface PredictionCapturePlayedGame {
   mainKey: string;
   quantity: number;
   inputSources: PredictionCaptureInputSource[];
+  /** Absent means inherit the batch reasons; an empty list explicitly means none. */
+  selectionReasonOverride?: PredictionJournalSelectionReason[];
   provenance: {
     status: "matched" | "external";
     rowIds: string[];
@@ -103,6 +106,7 @@ export interface PredictionCaptureBatch {
   games: PredictionCapturePlayedGame[];
   analyticalForecasts: PredictionCaptureAnalyticalForecast[];
   runSnapshots: PredictionCaptureRunSnapshot[];
+  selectionReasons?: PredictionJournalSelectionReason[];
   sourceSummary: {
     capturedGames: number;
     externalGames: number;
@@ -317,21 +321,24 @@ export const summarizePredictionCaptureGames = (
   ));
 };
 
-export const parsePredictionCaptureRows = (text: string): ParsedPredictionCaptureRow[] => (
+export const parsePredictionCaptureRows = (text: string, options: { playedOnly?: boolean } = {}): ParsedPredictionCaptureRow[] => (
   text
     .split(/\r?\n/)
     .map((raw, index): ParsedPredictionCaptureRow | null => {
       if (!raw.trim()) return null;
       const numbers = (raw.match(/-?\d+/g) ?? []).map(Number);
       const lineNumber = index + 1;
+      if (options.playedOnly && raw.trim().split(/[\s,;\[\]()]+/).filter(Boolean).some(token => !/^\d+$/.test(token))) {
+        return { lineNumber, raw, numbers, game: null, forecast: null, error: "Use six whole numbers separated by commas or spaces; no labels or decimal values." };
+      }
       if (numbers.some((number) => !validLotteryNumber(number))) {
         return { lineNumber, raw, numbers, game: null, forecast: null, error: "Numbers must be unique values from 1 to 45." };
       }
       if (uniqueNumbers(numbers).length !== numbers.length) {
         return { lineNumber, raw, numbers, game: null, forecast: null, error: "Duplicate values are not valid within a played line." };
       }
-      if (numbers.length !== 6 && numbers.length !== 8) {
-        return { lineNumber, raw, numbers, game: null, forecast: null, error: "Enter exactly 6 played numbers, or 8 values when preserving a 6+2 analytical forecast." };
+      if (numbers.length !== 6 && (options.playedOnly || numbers.length !== 8)) {
+        return { lineNumber, raw, numbers, game: null, forecast: null, error: options.playedOnly ? "Enter exactly 6 numbers for this game." : "Enter exactly 6 played numbers, or 8 values when preserving a 6+2 analytical forecast." };
       }
       const game = normalizePredictionCaptureGame(numbers.slice(0, 6));
       const forecast = numbers.length === 8
@@ -576,8 +583,17 @@ export const clonePredictionCaptureBatch = (
   batch: PredictionCaptureBatch | null | undefined,
 ): PredictionCaptureBatch | undefined => {
   if (!batch || !isPredictionCaptureBatch(batch)) return undefined;
-  return JSON.parse(JSON.stringify(batch)) as PredictionCaptureBatch;
+  const copy = JSON.parse(JSON.stringify(batch)) as PredictionCaptureBatch;
+  if (Array.isArray(copy.selectionReasons)) copy.selectionReasons = normalizePredictionSelectionReasons(copy.selectionReasons);
+  copy.games = copy.games.map(game => ({ ...game,
+    ...(Array.isArray(game.selectionReasonOverride) ? { selectionReasonOverride: normalizePredictionSelectionReasons(game.selectionReasonOverride) } : {}),
+  }));
+  return copy;
 };
+
+export const predictionCaptureGameReasons = (batch: PredictionCaptureBatch, game: PredictionCapturePlayedGame): PredictionJournalSelectionReason[] => (
+  normalizePredictionSelectionReasons(game.selectionReasonOverride ?? batch.selectionReasons)
+);
 
 export const serializePredictionCaptureSession = (session: PredictionCaptureSession): string => (
   JSON.stringify(session, null, 2)

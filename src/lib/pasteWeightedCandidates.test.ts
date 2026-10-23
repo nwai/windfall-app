@@ -15,6 +15,44 @@ const seededRng = (seed: number): (() => number) => {
   };
 };
 
+describe("shared hard-number constraints in Paste-Weighted generation", () => {
+  it("seeds unpasted forced numbers, excludes blocked numbers, and does not invent counts", () => {
+    const result = generatePasteWeightedCandidates("28,33,36,15,40,18", {
+      candidateCount: 4, rng: seededRng(7), constraints: { forcedNumbers: [7], excludedNumbers: [28] },
+    });
+    expect(result.candidates).toHaveLength(1);
+    expect(result.candidates[0].main).toEqual([7, 15, 18, 33, 36, 40]);
+    expect(result.candidates[0].score).toBe(5);
+    expect(result.counts.some((row) => row.number === 7)).toBe(false);
+    expect(result.counts.find((row) => row.number === 28)?.count).toBe(1);
+  });
+
+  it("rejects forced/excluded conflicts and more than six forced numbers without truncation", () => {
+    for (const constraints of [
+      { forcedNumbers: [7], excludedNumbers: [7] },
+      { forcedNumbers: [5], ending5: "exclude" as const },
+      { forcedNumbers: [1, 2, 3, 4, 5, 6, 7] },
+    ]) {
+      const result = generatePasteWeightedCandidates("1,2,3,4,5,6,7,8", { candidateCount: 4, constraints });
+      expect(result.candidates).toHaveLength(0);
+      expect(result.warnings.join(" ")).toMatch(/conflict|six main slots/);
+    }
+  });
+
+  it("preserves every forced number in all returned rows", () => {
+    const result = generatePasteWeightedCandidates("1,2,3,4,5,6,7,8,9,10", {
+      candidateCount: 12, rng: seededRng(8), constraints: { forcedNumbers: [44, 45], excludedNumbers: [1, 2] },
+    });
+    expect(result.candidates).toHaveLength(12);
+    for (const candidate of result.candidates) {
+      expect(candidate.main).toHaveLength(6);
+      expect(candidate.main).toEqual(expect.arrayContaining([44, 45]));
+      expect(candidate.main).not.toEqual(expect.arrayContaining([1]));
+      expect(candidate.main).not.toEqual(expect.arrayContaining([2]));
+    }
+  });
+});
+
 const monthlyBuckets = (bucketNumbers: Partial<Record<keyof MonthlyBucketSets, number[]>>): MonthlyBucketSets => ({
   undrawn: new Set(bucketNumbers.undrawn ?? []),
   times1: new Set(bucketNumbers.times1 ?? []),

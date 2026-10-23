@@ -5,7 +5,6 @@ import {
   isFilePickerCancelError,
   parseCsv,
   pickCsvFile,
-  readCsvFromHandle,
   toCsv,
   writeCsvToHandle,
   type CsvFileHandle,
@@ -32,6 +31,10 @@ import {
 import { showToast } from "../lib/toastBus";
 import { getExcludedMonthLabelsForHistoryBaselines } from "../lib/monthlyAverageScope";
 import { parseDrawDateToEpoch } from "../lib/recentDraws";
+import { useOfficialDrawCheck } from "../hooks/useOfficialDrawCheck";
+import OfficialDrawCheckCard from "./OfficialDrawCheckCard";
+import { HigButton } from "./shared/HigControls";
+import { readCsvHistoryTarget, type CsvHistoryTarget } from "../lib/csvHistoryTarget";
 
 type Props = {
   onDrawsUpdated?: (rows: DrawRow[], summaryMessage?: string) => void;
@@ -41,6 +44,9 @@ type Props = {
   minNumber?: number;
   maxNumber?: number;
   csvPathHint?: string;
+  csvTarget?: CsvHistoryTarget | null;
+  onCsvTargetSelected?: (target: CsvHistoryTarget) => Promise<void>;
+  onForgetCsvTarget?: () => Promise<void>;
 };
 
 type ActiveMode = "idle" | "entry" | "compare";
@@ -105,18 +111,25 @@ export default function DrawHistoryManager({
   minNumber = 1,
   maxNumber = 45,
   csvPathHint,
+  csvTarget,
+  onCsvTargetSelected,
+  onForgetCsvTarget,
 }: Props) {
   const fallbackFileInputRef = useRef<HTMLInputElement | null>(null);
   const compareFileInputRef = useRef<HTMLInputElement | null>(null);
   const busyRef = useRef(false);
 
   const [activeMode, setActiveMode] = useState<ActiveMode>("idle");
-  const [fileHandle, setFileHandle] = useState<CsvFileHandle | null>(null);
-  const [lastFileName, setLastFileName] = useState<string | null>(null);
-  const [csvText, setCsvText] = useState<string | null>(null);
+  const [localFileHandle, setFileHandle] = useState<CsvFileHandle | null>(null);
+  const [localFileName, setLastFileName] = useState<string | null>(null);
+  const [localCsvText, setCsvText] = useState<string | null>(null);
+  const fileHandle = onCsvTargetSelected ? csvTarget?.handle ?? null : localFileHandle;
+  const lastFileName = onCsvTargetSelected ? csvTarget?.fileName ?? localFileName : localFileName;
+  const csvText = onCsvTargetSelected ? csvTarget?.csvText ?? localCsvText : localCsvText;
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [mains, setMains] = useState<string[]>(() => Array(mainCount).fill(""));
   const [supps, setSupps] = useState<string[]>(() => Array(suppCount).fill(""));
+  const [editingDate, setEditingDate] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [compareInput, setCompareInput] = useState("");
@@ -129,6 +142,7 @@ export default function DrawHistoryManager({
 
   const supportsFileSystemAccess = typeof window !== "undefined" && "showOpenFilePicker" in window;
   const localRows = useMemo(() => sortHistoryRows(currentRows, "desc"), [currentRows]);
+  const officialCheck = useOfficialDrawCheck({ date, mains: mains.map(Number), supps: supps.map(Number) });
   const summary = useMemo(() => buildDrawHistorySummary(localRows), [localRows]);
   const excludedBaselineMonths = useMemo(() => getExcludedMonthLabelsForHistoryBaselines(
     localRows.filter(row => !row.isSimulated),
@@ -149,10 +163,19 @@ export default function DrawHistoryManager({
   }), [localRows, mainCount, maxNumber, minNumber, suppCount]);
 
   const resetEntry = useCallback(() => {
+    setEditingDate(null);
     setDate(new Date().toISOString().slice(0, 10));
     setMains(Array(mainCount).fill(""));
     setSupps(Array(suppCount).fill(""));
   }, [mainCount, suppCount]);
+
+  const editDraw = (row: DrawRow) => {
+    const isoDate = normalizeHistoryDate(row.date);
+    if (!isoDate) return;
+    setEditingDate(isoDate); setDate(isoDate);
+    setMains(row.mains.map(String)); setSupps(row.supps.map(String));
+    setActiveMode("entry"); setError(null); setStatus(null);
+  };
 
   const setMainSlot = useCallback((slot: number, value: string) => {
     setMains((current) => {
@@ -197,14 +220,11 @@ export default function DrawHistoryManager({
           }
         }
         if (handle) {
-          try {
-            const file = await handle.getFile();
-            fileName = file.name;
-            existingCsv = await readCsvFromHandle(handle);
-            setLastFileName(fileName);
-          } catch {
-            existingCsv = "";
-          }
+          const readable = await readCsvHistoryTarget(handle, true);
+          if (!readable) { setStatus("CSV read permission was not granted. Draw history was not changed."); return false; }
+          fileName = readable.fileName;
+          existingCsv = readable.csvText ?? "";
+          setLastFileName(fileName);
         }
       }
 
@@ -215,6 +235,7 @@ export default function DrawHistoryManager({
       if (supportsFileSystemAccess && handle) {
         try {
           await writeCsvToHandle(handle, csv);
+          await onCsvTargetSelected?.({ handle, fileName, csvText: csv });
           setStatus(`${successMessage} Saved to ${fileName}.`);
         } catch {
           downloadCsvFallback(fileName, csv);
@@ -237,7 +258,7 @@ export default function DrawHistoryManager({
     } finally {
       busyRef.current = false;
     }
-  }, [csvText, fileHandle, lastFileName, onDrawsUpdated, supportsFileSystemAccess]);
+  }, [csvText, fileHandle, lastFileName, onDrawsUpdated, onCsvTargetSelected, supportsFileSystemAccess]);
 
   const handleFallbackFilePicked = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     try {
@@ -262,11 +283,13 @@ export default function DrawHistoryManager({
         fallbackFileInputRef.current?.click();
         return;
       }
-      const handle = await pickCsvFile(fileHandle ?? undefined);
+      const handle = await pickCsvFile();
       const file = await handle.getFile();
       setFileHandle(handle);
       setLastFileName(file.name);
-      setCsvText(await file.text());
+      const text = await file.text();
+      setCsvText(text);
+      await onCsvTargetSelected?.({ handle, fileName: file.name, csvText: text });
       setStatus(`Selected CSV target: ${file.name}`);
       setError(null);
     } catch (caught) {
@@ -278,13 +301,17 @@ export default function DrawHistoryManager({
       setError(caught instanceof Error ? caught.message : String(caught));
       setStatus(null);
     }
-  }, [fileHandle, supportsFileSystemAccess]);
+  }, [onCsvTargetSelected, supportsFileSystemAccess]);
 
   const saveEntry = useCallback(async () => {
     const validated = validateDrawEntry({ date, mains, supps }, validationOptions);
     if (!validated.ok) {
       setError(validated.message);
       setStatus(null);
+      return;
+    }
+    if (!officialCheck.allowSave) {
+      setError("Check the official result before saving. A published mismatch cannot be saved.");
       return;
     }
 
@@ -296,18 +323,24 @@ export default function DrawHistoryManager({
     }
 
     const normalizedDate = normalizeHistoryDate(validated.row.date);
-    if (localRows.some((row) => normalizeHistoryDate(row.date) === normalizedDate)) {
+    if (localRows.some((row) => normalizeHistoryDate(row.date) === normalizedDate) && !editingDate) {
       setError("A different draw is already stored for that date. Resolve the date conflict before saving another version.");
       setStatus(null);
       return;
     }
 
-    const nextRows = sortHistoryRows([validated.row, ...localRows.filter((row) => !row.isSimulated)], "desc");
-    const saved = await persistRows(nextRows, `Saved draw ${validated.row.date}.`);
+    if (editingDate && normalizedDate !== editingDate) {
+      setError("A correction keeps its original draw date. Use Add draw to enter a different date."); return;
+    }
+    const nextRows = editingDate
+      ? replaceLocalDateWithSourceRow(localRows.filter(row => !row.isSimulated), validated.row)
+      : sortHistoryRows([validated.row, ...localRows.filter((row) => !row.isSimulated)], "desc");
+    const verificationLabel = officialCheck.result?.status === "matched" ? "Official result matched" : "Manually checked; not automatically verified";
+    const saved = await persistRows(nextRows, `${editingDate ? "Corrected" : "Saved"} draw ${validated.row.date}. ${verificationLabel}.`);
     if (!saved) return;
     broadcastDrawHistoryUpdated({ rows: nextRows, added: validated.row });
     resetEntry();
-  }, [date, localRows, mains, persistRows, resetEntry, supps, validationOptions]);
+  }, [date, localRows, mains, persistRows, resetEntry, supps, validationOptions, editingDate, officialCheck.allowSave, officialCheck.result]);
 
   const handleCompareFilePicked = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     try {
@@ -400,6 +433,7 @@ export default function DrawHistoryManager({
           <div style={subtleTextStyle}>
             {lastFileName ? `CSV target: ${lastFileName}` : "No CSV write target selected."}
           </div>
+          {!supportsFileSystemAccess ? <div style={subtleTextStyle}>This browser cannot reconnect a local CSV target automatically. File selection applies to this visit; saves create a CSV download.</div> : null}
           <div style={{ ...subtleTextStyle, marginTop: 3 }}>
             Baseline opening-month exclusion: {excludedBaselineMonths.join(", ") || "none"}.
             {" "}A late-start opening month is omitted from baseline calculations only. All real history remains available; this check does not certify internal gaps or month completion.
@@ -407,7 +441,14 @@ export default function DrawHistoryManager({
         </div>
         <div style={buttonRowStyle}>
           <button type="button" onClick={pickTargetCsv}>{lastFileName ? "Change CSV target" : "Select CSV target"}</button>
-          <button type="button" onClick={() => { setActiveMode("entry"); setError(null); setStatus(null); }}>Add draw</button>
+          {csvTarget && onForgetCsvTarget ? <HigButton size="compact" variant="quiet" onClick={async () => {
+            await onForgetCsvTarget();
+            setFileHandle(null); setLastFileName(null); setCsvText(null);
+          }}>Forget CSV target</HigButton> : null}
+          <button type="button" onClick={() => { resetEntry(); setActiveMode("entry"); setError(null); setStatus(null); }}>Add draw</button>
+          <HigButton size="compact" disabled={!localRows.some(row => !row.isSimulated)} onClick={() => {
+            const row = localRows.find(row => !row.isSimulated); if (row) editDraw(row);
+          }}>Edit latest draw</HigButton>
           <button type="button" onClick={() => { setActiveMode("compare"); setCompareError(null); }}>Compare reference</button>
         </div>
       </header>
@@ -416,7 +457,7 @@ export default function DrawHistoryManager({
         <SummaryCard label="Rows" value={`${summary.realRows} real / ${summary.totalRows} loaded`} tone={dataTone} />
         <SummaryCard label="Latest" value={summary.latestDate ?? "none"} tone={summary.latestDate ? "neutral" : "warn"} />
         <SummaryCard label="Coverage" value={summary.earliestDate && summary.latestDate ? `${summary.earliestDate} to ${summary.latestDate}` : "none"} />
-        <SummaryCard label="Integrity" value={summary.issueCount === 0 ? "clear" : `${summary.issueCount} issue${summary.issueCount === 1 ? "" : "s"}`} tone={integrityTone} />
+        <SummaryCard label="Format integrity (not official verification)" value={summary.issueCount === 0 ? "clear" : `${summary.issueCount} issue${summary.issueCount === 1 ? "" : "s"}`} tone={integrityTone} />
       </div>
 
       {summary.simulatedRows > 0 && (
@@ -429,10 +470,18 @@ export default function DrawHistoryManager({
 
       {activeMode === "entry" && (
         <div style={{ marginTop: 12, border: "1px solid #e2e8f0", borderRadius: 8, padding: 10, background: "#f8fafc" }}>
+          {editingDate && <label style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+            Draw to correct
+            <select aria-label="Draw to correct" value={editingDate} style={{ minHeight: 44 }} onChange={event => {
+              const row = localRows.find(row => normalizeHistoryDate(row.date) === event.target.value); if (row) editDraw(row);
+            }}>
+              {localRows.filter(row => !row.isSimulated).map(row => <option key={row.date} value={normalizeHistoryDate(row.date) ?? row.date}>{row.date}</option>)}
+            </select>
+          </label>}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10, alignItems: "end" }}>
             <label style={{ display: "grid", gap: 4, fontSize: 12, color: "#374151" }}>
               Date
-              <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+              <input type="date" value={date} disabled={!!editingDate} style={{ minHeight: 44 }} onChange={(event) => setDate(event.target.value)} />
             </label>
             <div>
               <div style={{ fontSize: 12, color: "#374151", marginBottom: 4 }}>Main numbers</div>
@@ -445,7 +494,7 @@ export default function DrawHistoryManager({
                     aria-label={`Main number ${slot + 1}`}
                     value={mains[slot] ?? ""}
                     onChange={(event) => setMainSlot(slot, event.target.value)}
-                    style={{ width: 54 }}
+                    style={{ width: 54, minHeight: 44 }}
                   />
                 ))}
               </div>
@@ -461,14 +510,15 @@ export default function DrawHistoryManager({
                     aria-label={`Supplementary number ${slot + 1}`}
                     value={supps[slot] ?? ""}
                     onChange={(event) => setSuppSlot(slot, event.target.value)}
-                    style={{ width: 54 }}
+                    style={{ width: 54, minHeight: 44 }}
                   />
                 ))}
               </div>
             </div>
           </div>
+          <OfficialDrawCheckCard check={officialCheck} onUseOfficial={row => { setMains(row.mains.map(String)); setSupps(row.supps.map(String)); }} />
           <div style={{ ...buttonRowStyle, marginTop: 10 }}>
-            <button type="button" onClick={saveEntry}>Save draw</button>
+            <HigButton size="compact" disabled={!officialCheck.allowSave} onClick={saveEntry}>{editingDate ? "Save correction" : "Save draw"}</HigButton>
             <button type="button" onClick={resetEntry}>Clear</button>
             <button type="button" onClick={() => setActiveMode("idle")}>Close</button>
           </div>

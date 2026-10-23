@@ -6,6 +6,8 @@ import {
   chooseBigInt,
   formatBigInt,
   getLatestDrawBucketOriginMix,
+  sortMonthlyBucketMixRows,
+  type MonthlyBucketMixCombinatoricsRow,
 } from "./monthlyBucketMixCombinatorics";
 import { createEmptyMonthlyBucketSets, type MonthlyBucketSets, type MonthlyFrequencyConstraints } from "./monthlyDrawSummary";
 
@@ -83,6 +85,85 @@ describe("analyzeMonthlyBucketMixCombinatorics", () => {
     expect(meetingRow?.acceptanceNeedsShortfall).toEqual([]);
     expect(shortRow?.meetsAcceptanceNeeds).toBe(false);
     expect(shortRow?.acceptanceNeedsShortfall).toEqual(["undrawn"]);
+  });
+});
+
+describe("sortMonthlyBucketMixRows", () => {
+  const row = (stageMatches: number, combinations: bigint, undrawn = 6): MonthlyBucketMixCombinatoricsRow => ({
+    counts: {
+      undrawn, times1: 8 - undrawn, times2: 0, times3: 0, times4: 0,
+      times5: 0, times6: 0, times7: 0, times8: 0,
+    },
+    actualCombinations: combinations,
+    shareOfAvailable: 0,
+    meetsAcceptanceNeeds: null,
+    acceptanceNeedsShortfall: [],
+    stageMatchSupportCount: stageMatches,
+    stageMatchLabels: [],
+  });
+
+  it("sorts Undrawn first, then Stage path, then exact Actual combinations without mutating evidence", () => {
+    const mostUndrawn = row(0, 1n, 7);
+    const fewerUndrawn = row(20, 999_999n, 5);
+    const moreStagePaths = row(3, 1n);
+    const lowerCombinations = row(2, 9_007_199_254_740_992n);
+    const higherCombinations = row(2, 9_007_199_254_740_993n);
+    const fewerStagePaths = row(1, 999_999_999_999_999_999n);
+    const rows = [fewerUndrawn, lowerCombinations, fewerStagePaths, mostUndrawn, moreStagePaths, higherCombinations];
+    const originalOrder = [...rows];
+
+    expect(sortMonthlyBucketMixRows(rows, "undrawn", "desc"))
+      .toEqual([mostUndrawn, moreStagePaths, higherCombinations, lowerCombinations, fewerStagePaths, fewerUndrawn]);
+    expect(sortMonthlyBucketMixRows(rows, "undrawn", "asc"))
+      .toEqual([fewerUndrawn, moreStagePaths, higherCombinations, lowerCombinations, fewerStagePaths, mostUndrawn]);
+    expect(rows).toEqual(originalOrder);
+    expect(sortMonthlyBucketMixRows(rows, "undrawn", "desc")[0]).toBe(mostUndrawn);
+  });
+
+  it("still sorts Stage path and combinations when every Undrawn count is zero", () => {
+    const largerSpace = row(0, 1_000n, 0);
+    const supportedSmallSpace = row(2, 1n, 0);
+    const supportedLargeSpace = row(2, 100n, 0);
+    expect(sortMonthlyBucketMixRows([largerSpace, supportedSmallSpace, supportedLargeSpace], "undrawn", "desc"))
+      .toEqual([supportedLargeSpace, supportedSmallSpace, largerSpace]);
+  });
+
+  it("resolves equal Undrawn, Stage path and combinations by the remaining bucket counts", () => {
+    const moreTimes1 = row(2, 30n, 5);
+    const fewerTimes1 = { ...moreTimes1, counts: { ...moreTimes1.counts, times1: 2, times2: 1 } };
+    expect(sortMonthlyBucketMixRows([fewerTimes1, moreTimes1], "undrawn", "desc"))
+      .toEqual([moreTimes1, fewerTimes1]);
+  });
+
+  it("sorts Stage path numerically in both directions, with none counted as zero", () => {
+    const rows = [row(2, 20n), row(0, 100n), row(10, 10n), row(1, 50n)];
+    expect(sortMonthlyBucketMixRows(rows, "stagePath", "desc").map((item) => item.stageMatchSupportCount))
+      .toEqual([10, 2, 1, 0]);
+    expect(sortMonthlyBucketMixRows(rows, "stagePath", "asc").map((item) => item.stageMatchSupportCount))
+      .toEqual([0, 1, 2, 10]);
+    expect(rows.map((item) => item.stageMatchSupportCount)).toEqual([2, 0, 10, 1]);
+  });
+
+  it("resolves equal Stage path counts by larger combination count then bucket counts", () => {
+    const smaller = row(2, 10n);
+    const lowerUndrawn = row(2, 30n, 5);
+    const higherUndrawn = row(2, 30n, 7);
+    const rows = [smaller, lowerUndrawn, higherUndrawn];
+    for (const direction of ["asc", "desc"] as const) {
+      expect(sortMonthlyBucketMixRows(rows, "stagePath", direction))
+        .toEqual([higherUndrawn, lowerUndrawn, smaller]);
+    }
+  });
+
+  it("preserves exact Actual combinations sorting without changing row objects", () => {
+    const small = row(10, 9_007_199_254_740_992n);
+    const large = row(0, 9_007_199_254_740_993n);
+    const rows = [small, large];
+    const descending = sortMonthlyBucketMixRows(rows, "actualCombinations", "desc");
+    expect(descending[0]).toBe(large);
+    expect(descending[1]).toBe(small);
+    expect(sortMonthlyBucketMixRows(rows, "actualCombinations", "asc")).toEqual([small, large]);
+    expect(rows).toEqual([small, large]);
   });
 });
 

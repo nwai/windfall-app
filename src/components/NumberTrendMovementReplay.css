@@ -1,0 +1,93 @@
+.windfall-trend-replay {
+  display: grid;
+  gap: 14px;
+  color: var(--wf-text);
+  font-size: 12px;
+  min-width: 0;
+}
+
+.windfall-trend-replay__controls,
+.windfall-trend-replay__heading,
+.windfall-trend-replay__legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+}
+
+.windfall-trend-replay__controls select {
+  min-height: 32px;
+  min-width: 100px;
+}
+
+.windfall-trend-replay .windfall-info-help__button {
+  min-width: 32px;
+  min-height: 32px;
+}
+
+.windfall-trend-replay__scope,
+.windfall-trend-replay__note,
+.windfall-trend-replay__metrics > div > span {
+  color: var(--wf-muted);
+}
+
+.windfall-trend-replay__note,
+.windfall-trend-replay__notice,
+.windfall-trend-replay h4 {
+  margin: 0;
+}
+
+.windfall-trend-replay__notice {
+  border-left: 3px solid #b36a12;
+  padding: 8px 12px;
+  background: #fff8e9;
+  color: #73480d;
+}
+
+.windfall-trend-replay__metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr));
+  gap: 14px;
+  margin: 0;
+}
+
+.windfall-trend-replay__metrics > div {
+  min-width: 0;
+  padding-left: 12px;
+  border-left: 2px solid var(--wf-rule);
+}
+
+.windfall-trend-replay__metrics dt { font-weight: 600; }
+.windfall-trend-replay__metrics dd { font-size: 18px; font-weight: 700; margin: 4px 0; }
+.windfall-trend-replay__metrics small { font-size: 12px; font-weight: 400; }
+.windfall-trend-replay__chart-scroll { overflow-x: auto; min-width: 0; }
+.windfall-trend-replay__chart-scroll svg { display: block; width: 100%; min-width: 640px; height: 270px; }
+.windfall-trend-replay__chart-scroll text { font: 12px var(--wf-font-sans); fill: #52606b; }
+.windfall-trend-replay__main { color: #b42318; font-weight: 700; }
+.windfall-trend-replay__supp { color: #237f52; font-weight: 700; }
+.windfall-trend-replay__scrubber { display: flex; gap: 12px; align-items: center; }
+.windfall-trend-replay__scrubber .windfall-hig-field { flex: 1; min-width: 0; }
+.windfall-trend-replay__scrubber input { width: 100%; }
+.windfall-trend-replay__inspection { display: flex; flex-wrap: wrap; gap: 6px 18px; border-left: 3px solid #2c6ca3; padding: 8px 12px; background: #f1f7fc; }
+.windfall-trend-replay__inspection > strong { flex-basis: 100%; }
+.windfall-trend-replay__section { display: grid; gap: 8px; padding-top: 14px; border-top: 1px solid var(--wf-rule); min-width: 0; }
+.windfall-trend-replay h4 { font-size: 13px; }
+.windfall-trend-replay .windfall-trend-replay__table { max-width: 100%; max-height: 340px; overflow: auto; }
+.windfall-trend-replay__table table { width: 100%; border-collapse: collapse; text-align: right; font-variant-numeric: tabular-nums; }
+.windfall-trend-replay__table th,
+.windfall-trend-replay__table td { padding: 8px 10px; border-bottom: 1px solid var(--wf-rule); white-space: nowrap; }
+.windfall-trend-replay__table th:first-child { text-align: left; }
+.windfall-trend-replay__table th { font-weight: 600; }
+.windfall-trend-replay__table [data-current-band="true"] { background: #edf5ff; }
+.windfall-trend-replay__current-band { margin-left: 8px; color: #1d5c9b; font-size: 11px; font-weight: 700; }
+.windfall-trend-replay .windfall-trend-replay__log { max-height: 380px; }
+
+@media (max-width: 760px) {
+  .windfall-number-trends #number-trends-movement-replay { scroll-margin-top: 160px; }
+  .windfall-trend-replay__controls select,
+  .windfall-trend-replay .windfall-hig-button,
+  .windfall-trend-replay__scrubber input { min-height: 44px; }
+  .windfall-trend-replay .windfall-info-help__button { min-width: 44px; min-height: 44px; }
+  .windfall-trend-replay__scope { flex-basis: 100%; }
+}
+.windfall-number-trends #number-trends-movement-replay { scroll-margin-top: 120px; }

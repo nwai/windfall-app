@@ -1,18 +1,28 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { EffectiveSettings } from "./shared/EffectiveSettings";
+import { EvidencePortfolioRecord, type EvidencePortfolioSimulationSource } from "./EvidencePortfolioPanel";
+import { WindfallPredictorRecord } from "./WindfallPredictorPanel";
+import { scoreWindfallPredictor, type PredictorGame } from "../lib/windfallPredictor";
+import type { PortfolioCandidate } from "../lib/evidencePortfolio";
+import { PREDICTION_JOURNAL_UPDATED_EVENT } from "../lib/predictionJournal";
 
 import { HigButton, HigField, InfoHelp } from "./shared/HigControls";
+import { PredictionSelectionReasonOptions } from "./PredictionSelectionReasonOptions";
+import { PredictionJournalGamesDraft, type PlayedGamesDraftValue } from "./PredictionJournalGamesDraft";
+import { PredictionGameReview } from "./PredictionGameInspection";
+import { looksLikePastedGameRows, preparePredictionGameHistory } from "../lib/predictionGameHistory";
+import { formatPredictionSelectionReasons, getPredictionSelectionReasons, type PredictionJournalSelectionReason } from "../lib/predictionSelectionReasons";
 import type { Draw } from "../types";
 import type { AppPresetSnapshot } from "../lib/presets";
 import { buildMonthEndCarryOverWeighting } from "../lib/monthEndCarryOver";
 import {
-  PREDICTION_JOURNAL_SELECTION_REASON_LABELS,
   buildPredictionJournalDraftFromSetup,
   buildPredictionJournalEntry,
   canEditPredictionJournalEntry,
   loadPredictionJournalEntries,
   mergePredictionJournalEntries,
   normalizePredictionJournalInputs,
+  normalizePredictionJournalShortlistInputs,
   parsePredictionJournalBackup,
   parsePredictionJournalDate,
   savePredictionJournalEntries,
@@ -23,7 +33,6 @@ import {
   type PredictionJournalInputs,
   type PredictionJournalProvenance,
   type PredictionJournalReviewStatus,
-  type PredictionJournalSelectionReasonKey,
   type PredictionJournalStatus,
   type PredictionScoreResult,
   type PredictionTargetKind,
@@ -58,15 +67,21 @@ import {
 import {
   scorePredictionCaptureBatch,
   type PredictionCaptureBatch,
+  type PredictionCaptureSession,
+  predictionCaptureGameReasons,
 } from "../lib/predictionCapture";
 
 export interface PredictionJournalPanelProps {
   history: Draw[];
+  onSimulateEvidencePortfolioCandidate?: (candidate: PortfolioCandidate, source: EvidencePortfolioSimulationSource) => void;
   initialEntries?: PredictionJournalEntry[];
   now?: () => string;
   getSetupSnapshot?: () => AppPresetSnapshot | undefined;
   newPredictionDraft?: PredictionJournalDraftRequest | null;
   viewEntriesRequestId?: number;
+  captureSession?: PredictionCaptureSession | null;
+  onSimulateGame?: (numbers: number[]) => void;
+  onSimulatePredictorGame?: (game: PredictorGame) => void;
 }
 
 export interface PredictionJournalDraftRequest {
@@ -75,6 +90,7 @@ export interface PredictionJournalDraftRequest {
   inputOverrides?: PredictionJournalInputs;
   sourceLabel?: string;
   captureBatch?: PredictionCaptureBatch;
+  inputMode?: "playedGames";
 }
 
 type PredictionJournalViewMode = "entries" | "draft";
@@ -163,41 +179,7 @@ const reviewStatusLabels: Record<PredictionJournalReviewStatus, string> = {
   reviewedByUser: "Reviewed by user",
 };
 
-type PredictionJournalPrimarySelectionReasonKey = Exclude<PredictionJournalSelectionReasonKey, "other">;
-type PredictionJournalSelectionReasonFormValue = PredictionJournalPrimarySelectionReasonKey | "";
-
 const SELECTION_REASON_NOTE_PREFIX = "Selection reason:";
-
-const selectionReasonOptions = Object.entries(PREDICTION_JOURNAL_SELECTION_REASON_LABELS)
-  .filter(([key]) => key !== "other")
-  .map(([key, label]) => ({ key: key as PredictionJournalPrimarySelectionReasonKey, label }));
-
-const selectionReasonSummary = (reason: PredictionJournalInputs["selectionReason"]): string => {
-  if (!reason) return "";
-  if (!reason.detail) return reason.label;
-  return reason.key === "other" ? `${reason.label} - ${reason.detail}` : `${reason.label} + Other - ${reason.detail}`;
-};
-
-const selectionReasonNoteLine = (
-  key: PredictionJournalSelectionReasonFormValue,
-  includeOther: boolean,
-  detail: string,
-): string | null => {
-  const cleanedDetail = includeOther ? detail.trim() : "";
-  if (!key && !includeOther) return null;
-  const primaryLabel = key ? PREDICTION_JOURNAL_SELECTION_REASON_LABELS[key] : "";
-  const detailText = cleanedDetail && /[.!?]$/.test(cleanedDetail) ? cleanedDetail : `${cleanedDetail}.`;
-
-  if (key && includeOther) {
-    return cleanedDetail
-      ? `${SELECTION_REASON_NOTE_PREFIX} ${primaryLabel} + Other - ${detailText}`
-      : `${SELECTION_REASON_NOTE_PREFIX} ${primaryLabel} + Other.`;
-  }
-  if (key) return `${SELECTION_REASON_NOTE_PREFIX} ${primaryLabel}.`;
-  return cleanedDetail
-    ? `${SELECTION_REASON_NOTE_PREFIX} ${PREDICTION_JOURNAL_SELECTION_REASON_LABELS.other} - ${detailText}`
-    : `${SELECTION_REASON_NOTE_PREFIX} ${PREDICTION_JOURNAL_SELECTION_REASON_LABELS.other}.`;
-};
 
 const notesWithoutSelectionReason = (value: string): string => (
   value
@@ -209,13 +191,12 @@ const notesWithoutSelectionReason = (value: string): string => (
 
 const mergeSelectionReasonIntoNotes = (
   currentNotes: string,
-  key: PredictionJournalSelectionReasonFormValue,
-  includeOther: boolean,
-  detail: string,
+  reasons: PredictionJournalSelectionReason[],
 ): string => {
   const baseNotes = notesWithoutSelectionReason(currentNotes);
-  const reasonLine = selectionReasonNoteLine(key, includeOther, detail);
-  if (!reasonLine) return baseNotes;
+  const summary = formatPredictionSelectionReasons(reasons);
+  if (!summary) return baseNotes;
+  const reasonLine = `${SELECTION_REASON_NOTE_PREFIX} ${summary}${/[.!?]$/.test(summary) ? "" : "."}`;
   return baseNotes ? `${baseNotes}\n${reasonLine}` : reasonLine;
 };
 
@@ -401,8 +382,11 @@ const renderReplayNumberPills = (
   );
 };
 
-const renderCollapsedPickedNumbers = (numbers: number[] | undefined): React.ReactNode => {
+const renderCollapsedPickedNumbers = (numbers: number[] | undefined, shortlist = false): React.ReactNode => {
   if (!numbers?.length) return null;
+  if (shortlist) return <span data-testid="prediction-journal-collapsed-picked-numbers" style={{ display: "block", marginTop: 5, fontSize: 12, color: "#475569", overflowWrap: "anywhere" }}>
+    <strong>Shortlist ({numbers.length}):</strong> {numbers.join(", ")} · no main/supp roles
+  </span>;
   const mainNumbers = numbers.slice(0, 6);
   const suppNumbers = numbers.slice(6, 8);
   const extraNumbers = numbers.slice(8);
@@ -602,6 +586,39 @@ const renderStructuredProvenance = (provenance: PredictionJournalProvenance) => 
           </div>
         </div>
       ) : null}
+      {provenance.neighbourAtlas ? (
+        <div style={{ borderTop: "1px solid #edf2f7", paddingTop: 8, marginTop: 8 }}>
+          <div style={{ fontSize: 12, fontWeight: 850, color: "#334155", marginBottom: 5 }}>
+            Neighbour Atlas capture
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            <span style={provenanceChipStyle()}>
+              Source {provenance.neighbourAtlas.snapshot.historySourceLabel}
+            </span>
+            <span style={provenanceChipStyle()}>
+              Target {provenance.neighbourAtlas.snapshot.targetDrawOrdinal
+                ? `D${provenance.neighbourAtlas.snapshot.targetDrawOrdinal}`
+                : "stage unavailable"}
+            </span>
+            <span style={provenanceChipStyle()}>
+              Cloud {provenance.neighbourAtlas.snapshot.currentCloud?.targetCount ?? 0} numbers
+            </span>
+            <span style={provenanceChipStyle(provenance.neighbourAtlas.selectedTargetNumbers.length ? "good" : "neutral")}>
+              Selected-cloud matches {formatJournalNumbers(provenance.neighbourAtlas.selectedTargetNumbers)}
+            </span>
+            {provenance.neighbourAtlas.snapshot.ordinalEvidence ? (
+              <span style={provenanceChipStyle()}>
+                {provenance.neighbourAtlas.snapshot.ordinalEvidence.sampleQuality} sample · {provenance.neighbourAtlas.snapshot.ordinalEvidence.trials} trials · lift {provenance.neighbourAtlas.snapshot.ordinalEvidence.lift == null
+                  ? "-"
+                  : `${provenance.neighbourAtlas.snapshot.ordinalEvidence.lift.toFixed(3)}x`}
+              </span>
+            ) : null}
+          </div>
+          <div style={{ marginTop: 7, fontSize: 12, color: "#64748b", lineHeight: 1.45 }}>
+            Frozen before the target draw. The first real target draw is replayed later as a neutral audit row; it never changes generation and is not scored as predictive success.
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 };
@@ -693,6 +710,9 @@ const renderPredictionCaptureScorecard = (
   batch: PredictionCaptureBatch,
   targetDraw: Draw | undefined,
   reviewStatus: PredictionJournalReviewStatus,
+  history: Draw[],
+  cutoffDate: string,
+  onSimulateGame?: (numbers: number[]) => void,
 ) => {
   const score = targetDraw ? scorePredictionCaptureBatch(batch, targetDraw) : null;
   return (
@@ -709,10 +729,11 @@ const renderPredictionCaptureScorecard = (
           </div>
         </div>
         <span style={provenanceChipStyle(reviewStatus === "reviewedByUser" ? "good" : "warn")}>
-          {reviewStatus === "reviewedByUser" ? "Reviewed pre-draw evidence" : "Not reviewed · excluded from formal audit"}
+          {reviewStatus === "reviewedByUser" ? "Reviewed by user" : "Not reviewed · excluded from formal audit"}
         </span>
       </div>
 
+      <PredictionGameReview batch={batch} history={history} cutoffDate={cutoffDate} targetDraw={targetDraw} onSimulate={onSimulateGame} />
       {score ? (
         <>
           <div style={{ marginTop: 9, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(135px, 1fr))", gap: 7 }}>
@@ -734,7 +755,7 @@ const renderPredictionCaptureScorecard = (
             <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 650, fontSize: 12 }}>
               <thead style={{ position: "sticky", top: 0, zIndex: 1, background: "#f1f5f9" }}>
                 <tr>
-                  {['Game', 'Qty', 'Main hits', 'Supp hits', 'Prize', 'Source'].map((heading) => (
+                  {['Game', 'Qty', 'Main hits', 'Supp hits', 'Prize', 'Source', 'Reasons'].map((heading) => (
                     <th key={heading} style={{ padding: "7px 8px", textAlign: heading === "Game" ? "left" : "center", borderBottom: "1px solid #cbd5e1", whiteSpace: "nowrap" }}>{heading}</th>
                   ))}
                 </tr>
@@ -750,6 +771,10 @@ const renderPredictionCaptureScorecard = (
                       <td style={{ padding: "7px 8px", borderBottom: "1px solid #edf2f7", textAlign: "center" }}>{gameScore.suppHits}</td>
                       <td style={{ padding: "7px 8px", borderBottom: "1px solid #edf2f7", textAlign: "center", fontWeight: 900, color: gameScore.division === "—" ? "#64748b" : "#166534" }}>{gameScore.division === "—" ? "None" : gameScore.division}</td>
                       <td style={{ padding: "7px 8px", borderBottom: "1px solid #edf2f7", textAlign: "center" }}>{game?.provenance.status === "matched" ? `Captured · ${game.provenance.runIds.length} run${game.provenance.runIds.length === 1 ? "" : "s"}` : "External / unknown"}</td>
+                      <td style={{ padding: "7px 8px", borderBottom: "1px solid #edf2f7", minWidth: 210, maxWidth: 320, whiteSpace: "normal" }}>
+                        {game?.selectionReasonOverride !== undefined ? "Custom: " : "Shared: "}
+                        {game ? formatPredictionSelectionReasons(predictionCaptureGameReasons(batch, game)) || "No reasons recorded" : "Unavailable"}
+                      </td>
                     </tr>
                   );
                 })}
@@ -887,6 +912,58 @@ const renderPredictionJournalFindingsReport = (report: PredictionJournalFindings
             </div>
           </div>
         </div>
+
+        <section
+          data-testid="prediction-journal-neighbour-atlas-audit"
+          aria-label="Neighbour Atlas usage audit"
+          style={{ border: "1px solid #bfdbfe", borderRadius: 8, background: "#f7fbff", padding: 10, display: "grid", gap: 8 }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
+            <div>
+              <strong style={{ color: "#26313d", fontSize: 13 }}>Neighbour Atlas usage audit</strong>
+              <div style={{ color: "#64748b", fontSize: 11, lineHeight: 1.4 }}>
+                Checks saved Atlas snapshots against subsequent real draws. Journal capture is voluntary, so this is a usage audit rather than the Atlas training source.
+              </div>
+            </div>
+            <span style={findingSeverityStyle("info")}>Observe-only</span>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(135px, 1fr))", gap: 8 }}>
+            <div style={findingsMetricCardStyle}>
+              <div style={{ color: "#64748b", fontSize: 11, fontWeight: 850 }}>Captured / replayed</div>
+              <div style={{ color: "#26313d", fontSize: 18, fontWeight: 900 }}>
+                {report.neighbourAtlasAudit.capturedEntries} / {report.neighbourAtlasAudit.replayedEntries}
+              </div>
+              <div style={{ color: "#64748b", fontSize: 11 }}>reviewed snapshots / completed replays</div>
+            </div>
+            <div style={findingsMetricCardStyle}>
+              <div style={{ color: "#64748b", fontSize: 11, fontWeight: 850 }}>Cloud hits vs random</div>
+              <div style={{ color: "#26313d", fontSize: 18, fontWeight: 900 }}>
+                {report.neighbourAtlasAudit.observedCloudHits} / {report.neighbourAtlasAudit.expectedCloudHits.toFixed(2)}
+              </div>
+              <div style={{ color: "#64748b", fontSize: 11 }}>
+                lift {report.neighbourAtlasAudit.cloudLift === null ? "n/a" : `x${report.neighbourAtlasAudit.cloudLift.toFixed(2)}`}
+              </div>
+            </div>
+            <div style={findingsMetricCardStyle}>
+              <div style={{ color: "#64748b", fontSize: 11, fontWeight: 850 }}>Selected cloud picks</div>
+              <div style={{ color: "#26313d", fontSize: 18, fontWeight: 900 }}>
+                {report.neighbourAtlasAudit.selectedCloudHits} / {report.neighbourAtlasAudit.selectedCloudNumbers}
+              </div>
+              <div style={{ color: "#64748b", fontSize: 11 }}>
+                hits across {report.neighbourAtlasAudit.selectedCloudEntries} entries; {report.neighbourAtlasAudit.entriesWithSelectedCloudHit} had at least one
+              </div>
+            </div>
+            <div style={findingsMetricCardStyle}>
+              <div style={{ color: "#64748b", fontSize: 11, fontWeight: 850 }}>Saved sample labels</div>
+              <div style={{ color: "#26313d", fontSize: 12, fontWeight: 850, lineHeight: 1.45 }}>
+                Broad {report.neighbourAtlasAudit.sampleQualityCounts.broad} · Limited {report.neighbourAtlasAudit.sampleQualityCounts.limited} · Thin {report.neighbourAtlasAudit.sampleQualityCounts.thin} · n/a {report.neighbourAtlasAudit.sampleQualityCounts.unavailable}
+              </div>
+            </div>
+          </div>
+          <div style={{ color: "#64748b", fontSize: 11, lineHeight: 1.4 }}>
+            Random expectation uses cloud size x actual draw size / 45. These totals never change candidates, filters, rankings, or forced selections.
+          </div>
+        </section>
 
         <div style={{ display: "grid", gap: 8 }}>
           {report.findings.map(renderFindingCard)}
@@ -1086,7 +1163,7 @@ type ImmediateNextDrawScore = {
   hits: number[];
   predicted: string;
   predictedCount: number;
-  result: Exclude<PredictionScoreResult, "recorded">;
+  result: PredictionScoreResult;
 };
 
 type LatestDrawReplayRow = ImmediateNextDrawScore & {
@@ -1142,7 +1219,9 @@ const historicalPrizeCollisionPillStyle = (hasCollision: boolean): React.CSSProp
 };
 
 const formatHistoricalPrizeCollisionHit = (hit: HistoricalPrizeCollisionHit): string => (
-  `${hit.division} on ${hit.date} · ${hit.mainHits} main / ${hit.suppHits} supp`
+  hit.kind === "selected-set"
+    ? `${hit.date} · ${hit.mainHits} main / ${hit.suppHits} supp in selected pool`
+    : `${hit.division} on ${hit.date} · ${hit.mainHits} main / ${hit.suppHits} supp`
 );
 
 const renderHistoricalPrizeCollisionHitList = (
@@ -1169,7 +1248,7 @@ const renderHistoricalPrizeCollisionHitList = (
           </details>
         ))}
         {hits.length > 3 ? (
-          <div style={{ color: "#64748b" }}>+{hits.length - 3} more historical collision{hits.length - 3 === 1 ? "" : "s"}.</div>
+          <div style={{ color: "#64748b" }}>+{hits.length - 3} more historical {hits[0].kind === "selected-set" ? "coverage case" : "saved-line match"}{hits.length - 3 === 1 ? "" : "s"}.</div>
         ) : null}
       </div>
     ) : (
@@ -1181,8 +1260,11 @@ const renderHistoricalPrizeCollisionHitList = (
 const renderHistoricalPrizeCollision = (
   result: HistoricalPrizeCollisionResult,
   variant: "draft" | "entry" = "entry",
+  coverageOnly = false,
 ) => {
   if (result.selectedNumbers.length === 0) return null;
+  const hasLineMatch = !coverageOnly && result.storedLineHits.length > 0;
+  const hasSubsetCoverage = result.selectedSetHits.length > 0;
   const checkedLabel = `${result.checkedDraws} real historical draw${result.checkedDraws === 1 ? "" : "s"}`;
   return (
     <section
@@ -1190,24 +1272,24 @@ const renderHistoricalPrizeCollision = (
       aria-label="Historical prize collision check"
       style={{
         marginTop: 10,
-        border: `1px solid ${result.hasRarePrizeCollision ? "#fed7aa" : "#dbe3ec"}`,
+        border: `1px solid ${hasLineMatch ? "#fed7aa" : "#dbe3ec"}`,
         borderRadius: 8,
         padding: 10,
-        background: result.hasRarePrizeCollision ? "#fffaf5" : "#fff",
+        background: hasLineMatch ? "#fffaf5" : "#fff",
       }}
     >
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
         <div>
           <div style={{ fontSize: 12, color: "#64748b", fontWeight: 850 }}>Historical prize collision check</div>
           <div style={{ marginTop: 2, fontSize: 17, color: "#26313d", fontWeight: 850 }}>
-            {result.hasRarePrizeCollision ? "Rare historical D1/D2 collision found" : "No historical D1/D2 collision found"}
+            {hasLineMatch ? "Historical D1/D2 saved-line match found" : hasSubsetCoverage ? "Selected-set historical coverage found" : coverageOnly ? "No historical selected-pool coverage found" : "No historical D1/D2 saved-line match found"}
           </div>
           <div style={{ marginTop: 2, fontSize: 12, color: "#64748b" }}>
             Checked against {checkedLabel}. Simulated and incomplete rows are excluded.
           </div>
         </div>
-        <span style={historicalPrizeCollisionPillStyle(result.hasRarePrizeCollision)}>
-          {result.bestDivision ?? "Clear"}
+        <span style={historicalPrizeCollisionPillStyle(hasLineMatch)}>
+          {hasLineMatch ? result.storedLineHits[0].division : hasSubsetCoverage ? "Coverage only" : "No match"}
         </span>
       </div>
       <div
@@ -1219,23 +1301,23 @@ const renderHistoricalPrizeCollision = (
           fontSize: 12,
         }}
       >
-        {renderHistoricalPrizeCollisionHitList(
+        {!coverageOnly ? renderHistoricalPrizeCollisionHitList(
           "Stored line check",
           result.storedLineHits,
           result.storedLineMain.length < 6
             ? "Enter at least six numbers to check the stored line."
             : "No stored-line Division 1 or Division 2 collision found.",
-        )}
+        ) : null}
         {renderHistoricalPrizeCollisionHitList(
-          "Selected-set subset check",
+          "Combined selected-pool coverage, not a played-game prize",
           result.selectedSetHits,
           result.selectedNumbers.length < 6
             ? "Enter at least six numbers to check unordered selected-set subsets."
-            : "No unordered selected-set Division 1 or Division 2 collision found.",
+            : "No selected-pool coverage meeting the 6-main or 5-main-plus-supp threshold found.",
         )}
       </div>
       <div style={{ marginTop: 8, color: "#64748b", fontSize: 12, lineHeight: 1.45 }}>
-        Stored line uses the first six saved numbers as mains and the next two as supps when available. Selected-set subset ignores order and asks whether any subset of the selected numbers could have matched historical Division 1 or Division 2. This is an archive rarity check, not a future probability signal.
+        {coverageOnly ? "This shortlist has no main/supp roles and is not checked as a played line. " : "Stored line uses the first six saved numbers as mains and the next two as supps when available. "}Combined selected-pool coverage ignores line boundaries; it does not establish a prize for any entered game or a future probability advantage. Use Paste Games for independent six-number line checks.
         {result.skippedDraws > 0 ? ` ${result.skippedDraws} history row${result.skippedDraws === 1 ? "" : "s"} were skipped as simulated or incomplete.` : ""}
       </div>
     </section>
@@ -1338,10 +1420,11 @@ const summarizePredictionInputs = (entry: PredictionJournalEntry): string[] => {
   const inputs = entry.inputs;
   const parts: string[] = [];
   if (inputs.oddEvenRatio) parts.push(`O/E ${inputs.oddEvenRatio}`);
-  if (inputs.numbers?.length) parts.push(`${inputs.numbers.length} picked`);
+  if (inputs.numbers?.length) parts.push(`${inputs.numbers.length} ${entry.inputMode === "shortlist" ? "shortlist numbers" : "picked"}`);
   if (inputs.terminalDigits?.length) parts.push(`${inputs.terminalDigits.length} terminal digits`);
   if (inputs.monthlyBuckets && Object.keys(inputs.monthlyBuckets).length > 0) parts.push("bucket mix");
-  if (inputs.selectionReason) parts.push(`Reason: ${selectionReasonSummary(inputs.selectionReason)}`);
+  const reasons = getPredictionSelectionReasons(inputs);
+  if (reasons.length) parts.push(`Reason: ${formatPredictionSelectionReasons(reasons)}`);
   if (inputs.singleDouble) parts.push("single/double");
   if (inputs.sumRange) parts.push("sum range");
   if (inputs.trendRatio) parts.push(`U/D/F ${inputs.trendRatio}`);
@@ -1350,7 +1433,7 @@ const summarizePredictionInputs = (entry: PredictionJournalEntry): string[] => {
   if (inputs.droughtBreakCount !== undefined) parts.push(`drought ${inputs.droughtBreakCount}`);
   if (inputs.carryOverCount !== undefined) parts.push(`carry-over ${inputs.carryOverCount}`);
   if (inputs.confidence !== undefined) parts.push(`confidence ${inputs.confidence}`);
-  if (entry.setupSummary) parts.push("Saved setup");
+  if (entry.setupSummary) parts.push(entry.inputMode === "playedGames" ? "Entry-time context" : "Saved setup");
   if (inputs.notes) parts.push("notes");
   return parts;
 };
@@ -1380,7 +1463,8 @@ const summarizeTargetDrawDate = (entry: { targetDraws?: Draw[] }): string | null
   return `${firstDate} to ${lastDate}`;
 };
 
-const scoreImmediateNextDraw = (entry: { inputs: PredictionJournalInputs; targetDraws?: Draw[] }): ImmediateNextDrawScore | null => {
+const scoreImmediateNextDraw = (entry: { inputs: PredictionJournalInputs; targetDraws?: Draw[]; inputMode?: PredictionJournalEntry["inputMode"] }): ImmediateNextDrawScore | null => {
+  if (entry.inputMode === "shortlist") return null;
   const predicted = entry.inputs.numbers ?? [];
   const nextDraw = entry.targetDraws?.[0];
   if (!nextDraw || predicted.length === 0) return null;
@@ -1457,6 +1541,7 @@ const scoreLatestDrawReplayPrize = (
 };
 
 const scoreEntryTargetPrizeRows = (entry: ScoredPredictionJournalEntry): JournalEntryTargetPrizeRow[] => {
+  if (entry.inputMode === "shortlist") return [];
   const predicted = entry.inputs.numbers ?? [];
   if (predicted.length < 6 || entry.targetDraws.length === 0) return [];
 
@@ -1482,12 +1567,13 @@ const scoreEntryAgainstLatestDraw = (
 
   return {
     ...replayScore,
+    result: entry.inputMode === "shortlist" ? "recorded" : replayScore.result,
     anchorLatestDrawDate: entry.anchorLatestDrawDate,
     entryId: entry.id,
-    prize: scoreLatestDrawReplayPrize(predicted, latestDraw),
+    prize: entry.inputMode === "shortlist" ? null : scoreLatestDrawReplayPrize(predicted, latestDraw),
     reviewStatus: normalizeReviewStatus(entry.reviewStatus),
     status: entry.status,
-    targetLabel: targetLabels[entry.targetKind],
+    targetLabel: `${entry.inputMode === "shortlist" ? "Shortlist coverage · " : ""}${targetLabels[entry.targetKind]}`,
     targetDrawDate: summarizeTargetDrawDate(entry),
   };
 };
@@ -1800,11 +1886,15 @@ const derivePredictionJournalAutoFill = (
 
 export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
   history,
+  onSimulateEvidencePortfolioCandidate,
   initialEntries,
   now = () => new Date().toISOString(),
   getSetupSnapshot,
   newPredictionDraft,
   viewEntriesRequestId,
+  captureSession,
+  onSimulateGame,
+  onSimulatePredictorGame,
 }) => {
   const [entries, setEntries] = useState<PredictionJournalEntry[]>(() => (
     initialEntries ?? (typeof window === "undefined" ? [] : loadPredictionJournalEntries())
@@ -1829,9 +1919,10 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
   const [carryOverCount, setCarryOverCount] = useState("");
   const [confidence, setConfidence] = useState("");
   const [reviewStatus, setReviewStatus] = useState<PredictionJournalReviewStatus>("notReviewed");
-  const [selectionReasonKey, setSelectionReasonKey] = useState<PredictionJournalSelectionReasonFormValue>("");
-  const [selectionReasonIncludesOther, setSelectionReasonIncludesOther] = useState(false);
-  const [selectionReasonOtherText, setSelectionReasonOtherText] = useState("");
+  const [selectionReasons, setSelectionReasons] = useState<PredictionJournalSelectionReason[]>([]);
+  const [inputMode, setInputMode] = useState<"hypothesis" | "playedGames" | "shortlist">(() => newPredictionDraft?.inputMode === "playedGames" ? "playedGames" : "hypothesis");
+  const [gamesDraftSeed, setGamesDraftSeed] = useState<{ text: string; inputs: PredictionJournalInputs } | null>(null);
+  const [confirmedShortlistText, setConfirmedShortlistText] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
   const [draftCaptureBatch, setDraftCaptureBatch] = useState<PredictionCaptureBatch | null>(null);
   const [message, setMessage] = useState("");
@@ -1909,17 +2000,20 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
     const map = new Map<string, HistoricalPrizeCollisionResult>();
     for (const entry of scoredEntries) {
       if (!entry.inputs.numbers?.length) continue;
-      map.set(entry.id, analyzeHistoricalPrizeCollision(history, entry.inputs.numbers));
+      map.set(entry.id, analyzeHistoricalPrizeCollision(preparePredictionGameHistory(history, entry.anchorLatestDrawDate).draws, entry.inputs.numbers));
     }
     return map;
   }, [history, scoredEntries]);
-  const draftHistoricalPrizeCollision = useMemo(
-    () => analyzeHistoricalPrizeCollision(history, uniqueValidLotteryNumbersInInputOrder(numbersText)),
-    [history, numbersText],
-  );
   const editingEntry = useMemo(
     () => entries.find((entry) => entry.id === editingId) ?? null,
     [editingId, entries],
+  );
+  const draftHistoricalPrizeCollision = useMemo(
+    () => analyzeHistoricalPrizeCollision(
+      preparePredictionGameHistory(history, editingEntry?.anchorLatestDrawDate ?? latestDraw?.date ?? "").draws,
+      uniqueValidLotteryNumbersInInputOrder(numbersText),
+    ),
+    [history, numbersText, editingEntry?.anchorLatestDrawDate, latestDraw?.date],
   );
 
   const canApplyAutoFillValue = (current: string, previousAutoFill: string): boolean => (
@@ -1958,6 +2052,7 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
     setShowUnreviewedSaveAlert(false);
     setShowHistoricalPrizeCollisionSaveAlert(false);
     setNumbersText(value);
+    if (inputMode !== "shortlist") setConfirmedShortlistText(null);
     applyNumbersAutoFill(value);
   };
 
@@ -1983,26 +2078,24 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
     setShowUnreviewedSaveAlert(false);
   };
 
-  const handleSelectionReasonChange = (value: PredictionJournalSelectionReasonFormValue) => {
-    setSelectionReasonKey(value);
-    setNotes((current) => mergeSelectionReasonIntoNotes(current, value, selectionReasonIncludesOther, selectionReasonOtherText));
-  };
-
-  const handleSelectionReasonOtherToggle = (checked: boolean) => {
-    setSelectionReasonIncludesOther(checked);
-    setNotes((current) => mergeSelectionReasonIntoNotes(current, selectionReasonKey, checked, selectionReasonOtherText));
-  };
-
-  const handleSelectionReasonOtherTextChange = (value: string) => {
-    setSelectionReasonOtherText(value);
-    if (selectionReasonIncludesOther) {
-      setNotes((current) => mergeSelectionReasonIntoNotes(current, selectionReasonKey, true, value));
-    }
+  const handleSelectionReasonsChange = (value: PredictionJournalSelectionReason[]) => {
+    setSelectionReasons(value);
+    setNotes((current) => mergeSelectionReasonIntoNotes(current, value));
   };
 
   useEffect(() => {
     if (hasControlledInitialEntries) return;
     setEntries(loadPredictionJournalEntries());
+    const refresh = () => {
+      const stored = loadPredictionJournalEntries();
+      setEntries(current => JSON.stringify(current) === JSON.stringify(stored) ? current : stored);
+    };
+    window.addEventListener(PREDICTION_JOURNAL_UPDATED_EVENT, refresh);
+    window.addEventListener("storage", refresh);
+    return () => {
+      window.removeEventListener(PREDICTION_JOURNAL_UPDATED_EVENT, refresh);
+      window.removeEventListener("storage", refresh);
+    };
   }, [hasControlledInitialEntries]);
 
   useEffect(() => {
@@ -2011,28 +2104,14 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
   }, [entries, hasControlledInitialEntries]);
 
   const formInputs = useMemo<PredictionJournalInputs>(() => {
+    if (inputMode === "shortlist") return normalizePredictionJournalShortlistInputs({
+      numbers: splitNumbers(numbersText), confidence: integerOrUndefined(confidence), selectionReasons, notes,
+    });
     const monthlyBuckets: PredictionJournalInputs["monthlyBuckets"] = {};
     for (const field of BUCKET_FIELDS) {
       const value = integerOrUndefined(bucketText[field.key]);
       if (value !== undefined) monthlyBuckets[field.key] = value;
     }
-    const cleanedSelectionReasonOtherText = selectionReasonIncludesOther ? selectionReasonOtherText.trim() : "";
-    const selectionReason = selectionReasonKey
-      ? {
-          version: 1 as const,
-          key: selectionReasonKey,
-          label: PREDICTION_JOURNAL_SELECTION_REASON_LABELS[selectionReasonKey],
-          ...(cleanedSelectionReasonOtherText ? { detail: cleanedSelectionReasonOtherText } : {}),
-        }
-      : selectionReasonIncludesOther
-        ? {
-            version: 1 as const,
-            key: "other" as const,
-            label: PREDICTION_JOURNAL_SELECTION_REASON_LABELS.other,
-            ...(cleanedSelectionReasonOtherText ? { detail: cleanedSelectionReasonOtherText } : {}),
-          }
-        : undefined;
-
     return normalizePredictionJournalInputs({
       oddEvenRatio,
       numbers: splitNumbers(numbersText),
@@ -2052,7 +2131,7 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
       droughtBreakCount: integerOrUndefined(droughtBreakCount),
       carryOverCount: integerOrUndefined(carryOverCount),
       confidence: integerOrUndefined(confidence),
-      selectionReason,
+      selectionReasons,
       notes,
     });
   }, [
@@ -2066,20 +2145,30 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
     oddEvenRatio,
     previousNeighbourHitCount,
     previousRepeatCount,
-    selectionReasonIncludesOther,
-    selectionReasonKey,
-    selectionReasonOtherText,
+    selectionReasons,
     singleText,
     sumMaxText,
     sumMinText,
     terminalDigitsText,
     trendRatio,
+    inputMode,
   ]);
 
   const hasPredictionContent = Object.keys(formInputs).length > 0 || Boolean(draftCaptureBatch?.games.length);
+  const multiLineGamesDetected = looksLikePastedGameRows(numbersText);
 
   const validationErrors = useMemo(() => {
     const errors: string[] = [];
+    if (inputMode === "shortlist") {
+      const numbers = splitSignedNumbers(numbersText);
+      if (!numbers.length) errors.push("Add at least one number to the shortlist.");
+      if (numbers.some(number => !Number.isInteger(number) || number < 1 || number > 45)) errors.push("Numbers must be whole values from 1 to 45.");
+      const confidenceError = validateNonNegativeIntegerText("Confidence", confidence);
+      if (confidenceError) errors.push(confidenceError);
+      if ((integerOrUndefined(confidence) ?? 0) > 100) errors.push("Confidence cannot exceed 100.");
+      return errors;
+    }
+    if (multiLineGamesDetected && confirmedShortlistText !== numbersText) errors.push("Multiple game-like rows found. Choose Open as games or Keep as one shortlist before saving.");
     const numberLimit = targetNumberLimit(targetKind);
     const drawCount = targetDrawCount(targetKind);
 
@@ -2192,6 +2281,9 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
     sumMinText,
     targetKind,
     terminalDigitsText,
+    multiLineGamesDetected,
+    confirmedShortlistText,
+    inputMode,
   ]);
 
   const fillFormFromInputs = (inputs: PredictionJournalInputs) => {
@@ -2216,18 +2308,19 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
     setDroughtBreakCount(inputs.droughtBreakCount === undefined ? "" : String(inputs.droughtBreakCount));
     setCarryOverCount(inputs.carryOverCount === undefined ? "" : String(inputs.carryOverCount));
     setConfidence(inputs.confidence === undefined ? "" : String(inputs.confidence));
-    setSelectionReasonKey(inputs.selectionReason?.key === "other" ? "" : inputs.selectionReason?.key ?? "");
-    setSelectionReasonIncludesOther(inputs.selectionReason?.key === "other" || Boolean(inputs.selectionReason?.detail));
-    setSelectionReasonOtherText(inputs.selectionReason?.detail ?? "");
+    setSelectionReasons(getPredictionSelectionReasons(inputs));
     setNotes(inputs.notes ?? "");
   };
 
   const resetForm = () => {
     setEditingId(null);
+    setInputMode("hypothesis");
     setTargetKind("nextDraw");
     fillFormFromInputs({});
     setReviewStatus("notReviewed");
     setDraftCaptureBatch(null);
+    setGamesDraftSeed(null);
+    setConfirmedShortlistText(null);
     setShowUnreviewedSaveAlert(false);
     setShowHistoricalPrizeCollisionSaveAlert(false);
     setShowValidationErrors(false);
@@ -2237,11 +2330,14 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
     const inputs = entry.inputs;
     revealDraftRegionRef.current = true;
     setEditingId(entry.id);
+    setInputMode(entry.inputMode ?? "hypothesis");
     setJournalViewMode("draft");
     setExpandedEntryId(null);
     setTargetKind(entry.targetKind);
     setReviewStatus(normalizeReviewStatus(entry.reviewStatus));
     setDraftCaptureBatch(entry.captureBatch ?? null);
+    setGamesDraftSeed(null);
+    setConfirmedShortlistText(null);
     setShowUnreviewedSaveAlert(false);
     setShowHistoricalPrizeCollisionSaveAlert(false);
     fillFormFromInputs(inputs);
@@ -2261,7 +2357,9 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
 
   useEffect(() => {
     if (!newPredictionDraft) return;
-    const draft = buildPredictionJournalDraftFromSetup(newPredictionDraft.setupSnapshot ?? getSetupSnapshot?.());
+    const draft = newPredictionDraft.inputMode === "playedGames"
+      ? { inputs: {}, targetKind: "nextDraw" as const, sourceSummary: [] }
+      : buildPredictionJournalDraftFromSetup(newPredictionDraft.setupSnapshot ?? getSetupSnapshot?.());
     const overrideNotes = newPredictionDraft.inputOverrides?.notes?.trim();
     const baseNotes = draft.inputs.notes?.trim();
     const mergedInputs = normalizePredictionJournalInputs({
@@ -2271,6 +2369,9 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
     });
     setJournalViewMode("draft");
     setEditingId(null);
+    setGamesDraftSeed(null);
+    setConfirmedShortlistText(null);
+    setInputMode(newPredictionDraft.inputMode === "playedGames" ? "playedGames" : "hypothesis");
     setTargetKind(draft.targetKind);
     setReviewStatus("notReviewed");
     setShowUnreviewedSaveAlert(false);
@@ -2311,9 +2412,9 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
       setMessage("This entry is locked because its target draw has arrived.");
       return;
     }
-    if (draftHistoricalPrizeCollision.hasRarePrizeCollision && !options.allowHistoricalPrizeCollision) {
+    if (inputMode !== "shortlist" && draftHistoricalPrizeCollision.storedLineHits.length > 0 && !options.allowHistoricalPrizeCollision) {
       setShowHistoricalPrizeCollisionSaveAlert(true);
-      setMessage("Historical Division 1/2 collision found. Review it before saving, or save anyway if this is intentional.");
+      setMessage("Historical Division 1/2 saved-line match found. Review it before saving, or save anyway if this is intentional.");
       return;
     }
 
@@ -2324,7 +2425,8 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
       inputs: formInputs,
       setupSnapshot: getSetupSnapshot?.() ?? editingEntry?.setupSnapshot,
       reviewStatus,
-      captureBatch: draftCaptureBatch ?? editingEntry?.captureBatch,
+      inputMode: inputMode === "shortlist" ? "shortlist" : null,
+      captureBatch: inputMode === "shortlist" ? null : draftCaptureBatch ? { ...draftCaptureBatch, selectionReasons } : editingEntry?.captureBatch,
       now: now(),
     });
 
@@ -2339,6 +2441,24 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
     setShowHistoricalPrizeCollisionSaveAlert(false);
     setShowUnreviewedSaveAlert(savedAsUnreviewed);
     setMessage(editingEntry ? "Prediction updated." : "Prediction saved.");
+  };
+
+  const handleSavePlayedGames = (value: PlayedGamesDraftValue): string | null => {
+    if (!latestDraw) return "Load real draw history before saving games.";
+    if (editingEntry && !canEditPredictionJournalEntry(editingEntry, history)) return "This entry is locked because its target draw has arrived.";
+    if (!value.batch.games.length) return "Paste at least one complete six-number game.";
+    const entry = buildPredictionJournalEntry({
+      previousEntry: editingEntry ?? undefined, latestDraw, targetKind: "nextDraw", inputMode: "playedGames",
+      inputs: value.inputs, reviewStatus: value.reviewStatus, captureBatch: value.batch,
+      setupSnapshot: editingEntry?.setupSnapshot ?? getSetupSnapshot?.(), now: now(),
+    });
+    setEntries(current => [entry, ...current.filter(item => item.id !== entry.id)]);
+    resetForm();
+    setJournalViewMode("entries");
+    setExpandedEntryId(null);
+    setShowUnreviewedSaveAlert(value.reviewStatus === "notReviewed");
+    setMessage(editingEntry ? "Prediction updated." : "Prediction saved.");
+    return null;
   };
 
   const handleDelete = (entry: PredictionJournalEntry) => {
@@ -2537,7 +2657,23 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
           </div>
         ) : null}
       </JournalLegendBox>
-      {journalViewMode === "draft" ? (
+      {journalViewMode === "draft" && inputMode === "playedGames" ? (
+        <PredictionJournalGamesDraft
+          key={`${editingId ?? "new"}-${newPredictionDraft?.id ?? 0}`}
+          latestDraw={latestDraw}
+          history={history}
+          targetDate={nextDrawContext.nextDrawDate}
+          initialText={gamesDraftSeed?.text}
+          session={captureSession}
+          initialBatch={editingEntry?.captureBatch}
+          initialInputs={gamesDraftSeed?.inputs ?? editingEntry?.inputs}
+          initialReviewStatus={gamesDraftSeed ? "notReviewed" : normalizeReviewStatus(editingEntry?.reviewStatus)}
+          now={now}
+          onSave={handleSavePlayedGames}
+          onSimulateGame={onSimulateGame}
+          onCancel={() => { resetForm(); setJournalViewMode("entries"); }}
+        />
+      ) : journalViewMode === "draft" ? (
         <div
           ref={draftRegionRef}
           data-testid="prediction-journal-draft-region"
@@ -2616,19 +2752,21 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
           </div>
         </JournalLegendBox>
         <HigField label="Target window">
-          <select value={targetKind} onChange={(event) => handleTargetKindChange(event.target.value)}>
+          <select value={targetKind} disabled={Boolean(editingEntry?.evidencePortfolio || editingEntry?.windfallPredictor)} onChange={(event) => handleTargetKindChange(event.target.value)}>
             <option value="nextDraw">Next draw</option>
             <option value="next2Draws">Next 2 draws</option>
             <option value="next3Draws">Next 3 draws</option>
             <option value="restOfMonth">Rest of current month</option>
           </select>
           <div style={{ marginTop: 5, fontSize: 12, color: "#657385", fontWeight: 750 }}>
-            Next draw: {nextDrawContext.weekday} {nextDrawContext.nextDrawDate}
+            {editingEntry?.evidencePortfolio
+              ? `Frozen portfolio target: ${editingEntry.evidencePortfolio.targetDate}. Rows and recipe remain unchanged.`
+              : `Next draw: ${nextDrawContext.weekday} ${nextDrawContext.nextDrawDate}`}
           </div>
         </HigField>
-        <HigField label="Odd/even ratio" help="Optional. Use mains + supps format, for example 2:6.">
+        {inputMode !== "shortlist" ? <HigField label="Odd/even ratio" help="Optional. Use mains + supps format, for example 2:6.">
           <input value={oddEvenRatio} onChange={(event) => setOddEvenRatio(event.target.value)} placeholder="2:6" />
-        </HigField>
+        </HigField> : null}
         <HigField label="Confidence" help="Optional 0-100 self-rating, stored for future calibration.">
           <input value={confidence} onChange={(event) => setConfidence(event.target.value)} inputMode="numeric" placeholder="65" />
         </HigField>
@@ -2644,7 +2782,7 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
           <JournalLegendBox
             title="Numbers"
             className="windfall-prediction-journal-text-box"
-            help="Optional. Paste exact numbers or a shortlist; punctuation is fine. Editing this field auto-fills derived diagnostics while preserving fields you have manually changed."
+            help={inputMode === "shortlist" ? "A shortlist can contain up to 45 distinct numbers from 1 to 45. It has no main/supp roles. Notes and reasons are saved; draw-level prediction fields are not saved in this mode." : "Optional. Paste exact numbers or a shortlist. Editing this field auto-fills derived diagnostics while preserving fields you have manually changed."}
           >
             <textarea
               aria-label="Numbers"
@@ -2653,8 +2791,30 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
               rows={3}
               placeholder="12, 14, 22, 27"
             />
+            {multiLineGamesDetected || inputMode === "shortlist" || (formInputs.numbers?.length ?? 0) > (targetNumberLimit(targetKind) ?? 45) ? <div role="status" data-testid="prediction-multiline-games-notice" style={{ display: "grid", gap: 8, marginTop: 8, fontSize: 12, color: "#31506b" }}>
+              <strong>{inputMode === "shortlist" ? "Saving as one shortlist." : multiLineGamesDetected ? "These look like separate games." : "This is a number pool, not a single draw."}</strong>
+              <span>{inputMode === "shortlist"
+                ? `${formInputs.numbers?.length ?? 0} distinct numbers in one pool (maximum 45). Coverage only: no main/supp roles, prize claims or predictive hit/miss score. Notes and reasons are retained; draw-level fields are not saved.`
+                : "Open as games keeps each line separate and checks it independently. Keep as one shortlist saves one number pool of up to 45 distinct numbers for coverage only. Notes and reasons are retained; broader hypothesis fields are not copied."}</span>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {multiLineGamesDetected ? <HigButton size="compact" onClick={() => {
+                  setGamesDraftSeed({ text: numbersText, inputs: { selectionReasons, notes } });
+                  setInputMode("playedGames");
+                  setReviewStatus("notReviewed");
+                  setShowValidationErrors(false);
+                  setShowHistoricalPrizeCollisionSaveAlert(false);
+                }}>Open as games</HigButton> : null}
+                <HigButton size="compact" variant="quiet" aria-pressed={inputMode === "shortlist"} onClick={() => {
+                  setInputMode("shortlist");
+                  setConfirmedShortlistText(numbersText);
+                  setShowValidationErrors(false);
+                  setShowHistoricalPrizeCollisionSaveAlert(false);
+                }}>Keep as one shortlist</HigButton>
+                {inputMode === "shortlist" ? <HigButton size="compact" variant="quiet" onClick={() => { setInputMode("hypothesis"); setConfirmedShortlistText(null); setShowValidationErrors(false); }}>Use draw hypothesis</HigButton> : null}
+              </div>
+            </div> : null}
           </JournalLegendBox>
-          <JournalLegendBox
+          {inputMode !== "shortlist" ? <JournalLegendBox
             title="Terminal digits"
             className="windfall-prediction-journal-text-box"
             help="Optional. 12 is accepted as terminal digit 2."
@@ -2666,99 +2826,14 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
               rows={3}
               placeholder="1, 4, 9"
             />
-          </JournalLegendBox>
+          </JournalLegendBox> : null}
         </div>
         <JournalLegendBox
           title="Selection reason"
           className="windfall-prediction-journal-text-box windfall-prediction-journal-reason-field"
-          help="Optional. This stores a structured reason and keeps a matching Selection reason line in Notes for later review."
+          help="Optional. Choose any combination. Your declared reasons are saved individually and mirrored into Notes."
         >
-          <div
-            role="radiogroup"
-            aria-label="Primary selection reason"
-            className="windfall-prediction-journal-reason-options"
-          >
-            <label
-              style={{
-                display: "flex",
-                alignItems: "flex-start",
-                gap: 8,
-                minHeight: 30,
-                color: "#475569",
-                fontSize: 12,
-                fontWeight: 800,
-                lineHeight: 1.3,
-                cursor: "pointer",
-              }}
-            >
-              <input
-                type="radio"
-                name="prediction-selection-reason"
-                value=""
-                checked={selectionReasonKey === ""}
-                onChange={() => handleSelectionReasonChange("")}
-              />
-              No shortcut
-            </label>
-            {selectionReasonOptions.map((option) => (
-              <label
-                key={option.key}
-                style={{
-                  display: "flex",
-                  alignItems: "flex-start",
-                  gap: 8,
-                  minHeight: 30,
-                  color: "#26313d",
-                  fontSize: 12,
-                  fontWeight: 800,
-                  lineHeight: 1.3,
-                  cursor: "pointer",
-                }}
-              >
-                <input
-                  type="radio"
-                  name="prediction-selection-reason"
-                  value={option.key}
-                  checked={selectionReasonKey === option.key}
-                  onChange={() => handleSelectionReasonChange(option.key)}
-                />
-                <span>{option.label}</span>
-              </label>
-            ))}
-          </div>
-          <label
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 8,
-              minHeight: 30,
-              marginTop: 4,
-              color: "#26313d",
-              fontSize: 12,
-              fontWeight: 800,
-              lineHeight: 1.3,
-              cursor: "pointer",
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={selectionReasonIncludesOther}
-              onChange={(event) => handleSelectionReasonOtherToggle(event.target.checked)}
-            />
-            Other
-          </label>
-          {selectionReasonIncludesOther ? (
-            <HigField label="Other reason">
-              <input
-                value={selectionReasonOtherText}
-                onChange={(event) => handleSelectionReasonOtherTextChange(event.target.value)}
-                placeholder="Describe the reason briefly"
-              />
-            </HigField>
-          ) : null}
-          <div style={{ color: "#64748b", fontSize: 11, lineHeight: 1.35 }}>
-            The selected shortcut and optional Other note are saved as structured data and mirrored into Notes.
-          </div>
+          <PredictionSelectionReasonOptions value={selectionReasons} onChange={handleSelectionReasonsChange} />
         </JournalLegendBox>
         <JournalLegendBox
           title="Notes"
@@ -2775,9 +2850,9 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
         </JournalLegendBox>
       </div>
 
-      {renderHistoricalPrizeCollision(draftHistoricalPrizeCollision, "draft")}
+      {!multiLineGamesDetected || inputMode === "shortlist" || confirmedShortlistText === numbersText ? renderHistoricalPrizeCollision(draftHistoricalPrizeCollision, "draft", inputMode === "shortlist") : null}
 
-      <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
+      {inputMode !== "shortlist" ? <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
         <JournalLegendBox title="Target draw bucket-origin mix">
           <div style={{ fontSize: 12, color: "#657385", marginBottom: 8 }}>
             Counts of drawn balls expected to originate from each current-month bucket, not the full bucket state at entry time.
@@ -2831,7 +2906,7 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
             </HigField>
           </div>
         </JournalLegendBox>
-      </div>
+      </div> : null}
 
       <div style={{ marginTop: 12, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <HigButton variant="primary" onClick={() => handleSave()} disabled={!latestDraw && !editingEntry}>
@@ -2860,7 +2935,7 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
           }}
         >
           <div>
-            Historical Division 1/2 collision found. This is rare in the loaded real history and does not change future draw probability, but it is worth reviewing before saving.
+            Historical Division 1/2 saved-line match found. This does not change future draw probability. Combined-pool coverage alone does not trigger this alert.
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <HigButton size="compact" variant="secondary" onClick={() => setShowHistoricalPrizeCollisionSaveAlert(false)}>
@@ -2973,14 +3048,20 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
                 const isExpanded = expandedEntryId === entry.id;
                 const detailId = `prediction-journal-entry-${domSafeId(entry.id)}`;
                 const inputSummary = summarizePredictionInputs(entry);
-                const scoreSummary = summarizeScoreResults(entry);
+                const captureScore = entry.captureBatch && entry.targetDraws[0] ? scorePredictionCaptureBatch(entry.captureBatch, entry.targetDraws[0]) : null;
+                const scoreSummary = entry.inputMode === "playedGames"
+                  ? captureScore ? `${captureScore.distinctGameCount} games checked · ${captureScore.gameScores.filter(game => game.division !== "—").length} prize-eligible games` : "Awaiting real target draw"
+                  : summarizeScoreResults(entry);
                 const targetDrawDate = summarizeTargetDrawDate(entry);
                 const immediateNextDrawScore = scoreImmediateNextDraw(entry);
                 const normalizedReviewStatus = normalizeReviewStatus(entry.reviewStatus);
                 const terminalDigitHistory = terminalDigitHistoryByEntryId.get(entry.id);
                 const historicalPrizeCollision = historicalPrizeCollisionByEntryId.get(entry.id);
                 const targetPrizeRows = scoreEntryTargetPrizeRows(entry);
-                const bestTargetPrize = targetPrizeRows[0] ?? null;
+                const predictorPrize = entry.windfallPredictor ? scoreWindfallPredictor(entry.windfallPredictor, history).games
+                  .filter(game => game.division && game.division !== "—")
+                  .sort((a, b) => rankWeekdayWindfallPrizeDivision(a.division!) - rankWeekdayWindfallPrizeDivision(b.division!))[0] : undefined;
+                const bestTargetPrize = targetPrizeRows[0] ?? (captureScore && captureScore.bestDivision !== "—" ? { division: captureScore.bestDivision } : predictorPrize?.division ? {division: predictorPrize.division} : null);
                 return (
                   <article key={entry.id} style={{ border: "1px solid #dbe3ec", borderRadius: 8, background: "#fff", overflow: "hidden" }}>
                     <button
@@ -3008,6 +3089,8 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
                       <span style={{ minWidth: 0 }}>
                         <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                           <span style={{ fontWeight: 800 }}>{targetLabels[entry.targetKind]}</span>
+                          {entry.evidencePortfolio ? <span style={{ color: "#15559a", fontSize: 12, fontWeight: 700 }}>Evidence Portfolio · 4 forecasts</span> : null}
+                          {entry.windfallPredictor ? <span data-testid="prediction-predictor-badge" style={{ color: "#15559a", fontSize: 12, fontWeight: 700 }}>Created by Predictor · {entry.windfallPredictor.version} · 4 games</span> : null}
                           {targetDrawDate ? <span style={{ color: "#475569", fontSize: 12, fontWeight: 800 }}>{targetDrawDate}</span> : null}
                           <span style={statusPillStyle(entry.status)}>{statusLabels[entry.status]}</span>
                           <span style={reviewPillStyle(normalizedReviewStatus)}>{reviewStatusLabels[normalizedReviewStatus]}</span>
@@ -3026,7 +3109,7 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
                           {inputSummary.length ? ` · ${inputSummary.join(" · ")}` : ""}
                           {entry.canEdit ? " · Editable until first target draw appears" : " · Locked after target draw arrived"}
                         </span>
-                        {renderCollapsedPickedNumbers(entry.inputs.numbers)}
+                        {renderCollapsedPickedNumbers(entry.inputs.numbers, entry.inputMode === "shortlist")}
                         {entry.captureBatch ? (
                           <span style={{ display: "block", marginTop: 4, color: "#31506b", fontSize: 12, fontWeight: 850 }}>
                             Played portfolio: {entry.captureBatch.sourceSummary.distinctGames} distinct game{entry.captureBatch.sourceSummary.distinctGames === 1 ? "" : "s"} · {entry.captureBatch.sourceSummary.purchasedLines} line{entry.captureBatch.sourceSummary.purchasedLines === 1 ? "" : "s"}
@@ -3052,7 +3135,15 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
                               </HigButton>
                             ) : entry.canEdit ? (
                               <>
-                                <HigButton size="compact" variant="secondary" onClick={() => fillFormFromEntry(entry)}>Edit prediction</HigButton>
+                                {entry.windfallPredictor ? <HigButton size="compact" variant="secondary" onClick={() => {
+                                  const updated = buildPredictionJournalEntry({previousEntry:entry,latestDraw:entry.windfallPredictor!.cutoffDraw,
+                                    targetKind:"nextDraw",inputs:entry.inputs,now:now(),
+                                    reviewStatus:entry.reviewStatus === "reviewedByUser" ? "notReviewed" : "reviewedByUser"});
+                                  const next = entries.map(candidate => candidate.id === entry.id ? updated : candidate);
+                                  try { savePredictionJournalEntries(next); setEntries(next); setMessage("Predictor review status updated; frozen games and evidence unchanged."); }
+                                  catch (error) { setMessage(error instanceof Error ? error.message : "Review status could not be saved."); }
+                                }}>{entry.reviewStatus === "reviewedByUser" ? "Mark not reviewed" : "Mark reviewed"}</HigButton>
+                                  : <HigButton size="compact" variant="secondary" onClick={() => fillFormFromEntry(entry)}>Edit prediction</HigButton>}
                                 <HigButton size="compact" variant="danger" onClick={() => handleDelete(entry)}>Delete</HigButton>
                               </>
                             ) : (
@@ -3067,7 +3158,7 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
                         ) : null}
                         {entry.setupSummary ? (
                           <div style={{ marginTop: 10, border: "1px solid #e2e8f0", borderRadius: 8, padding: 10, background: "#f8fafc" }}>
-                            <div style={{ fontSize: 12, fontWeight: 800, color: "#334155", marginBottom: 6 }}>Saved setup</div>
+                            <div style={{ fontSize: 12, fontWeight: 800, color: "#334155", marginBottom: 6 }}>{entry.inputMode === "playedGames" ? "Entry-time setup context, not verified game origin" : "Saved setup"}</div>
                             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                               {[
                                 entry.setupSummary.window,
@@ -3094,11 +3185,13 @@ export const PredictionJournalPanel: React.FC<PredictionJournalPanelProps> = ({
                             </div>
                           </div>
                         ) : null}
-                        {entry.provenance ? renderStructuredProvenance(entry.provenance) : null}
-                        {entry.captureBatch ? renderPredictionCaptureScorecard(entry.captureBatch, entry.targetDraws[0], normalizedReviewStatus) : null}
+                        {entry.provenance && !entry.windfallPredictor && entry.inputMode !== "playedGames" && entry.inputMode !== "shortlist" ? renderStructuredProvenance(entry.provenance) : null}
+                        {entry.captureBatch ? renderPredictionCaptureScorecard(entry.captureBatch, entry.targetDraws[0], normalizedReviewStatus, history, entry.anchorLatestDrawDate, onSimulateGame) : null}
+                        {entry.evidencePortfolio ? <EvidencePortfolioRecord snapshot={entry.evidencePortfolio} history={history} onSimulate={onSimulateEvidencePortfolioCandidate} /> : null}
+                        {entry.windfallPredictor ? <WindfallPredictorRecord snapshot={entry.windfallPredictor} history={history} onSimulate={onSimulatePredictorGame} /> : null}
                         {entry.setupSnapshot?.effectiveSettingsLedger && <EffectiveSettings ledger={entry.setupSnapshot.effectiveSettingsLedger} status="Captured setup for this entry; not the current setup." />}
                         {terminalDigitHistory ? renderTerminalDigitHistory(terminalDigitHistory) : null}
-                        {historicalPrizeCollision ? renderHistoricalPrizeCollision(historicalPrizeCollision, "entry") : null}
+                        {historicalPrizeCollision ? renderHistoricalPrizeCollision(historicalPrizeCollision, "entry", entry.inputMode === "shortlist") : null}
                         {entry.reason ? <div style={{ marginTop: 8, color: "#8a4b00", fontSize: 12 }}>{entry.reason}</div> : null}
                         {renderJournalEntryTargetPrizeReplay(targetPrizeRows)}
                         {immediateNextDrawScore ? (

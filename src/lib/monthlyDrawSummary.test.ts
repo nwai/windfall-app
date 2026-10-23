@@ -76,7 +76,7 @@ describe("analyzeMonthlyDrawSummary", () => {
     expect(summary.rows.at(-1)).toMatchObject({
       monthLabel: "2026-05",
       drawCount: 0,
-      totalDrawCount: 1,
+      totalDrawCount: 13,
     });
     expect(summary.effectiveMonthLabel).toBe("2026-05");
     expect(summary.effectiveMonthIsSynthetic).toBe(true);
@@ -107,7 +107,7 @@ describe("analyzeMonthlyDrawSummary", () => {
     expect(planningRow).toMatchObject({
       monthLabel: "2026-07",
       drawCount: 0,
-      totalDrawCount: 13,
+      totalDrawCount: 14,
       validNumberOccurrences: 0,
       expectedNumberSlots: 0,
     });
@@ -120,7 +120,7 @@ describe("analyzeMonthlyDrawSummary", () => {
     expect(summary.idealDraw?.bucketCounts.reduce((sum, bucket) => sum + bucket.count, 0)).toBe(8);
   });
 
-  it("uses the latest month's weekday rhythm instead of the historical max when deciding completion", () => {
+  it("uses the Monday/Wednesday/Friday schedule instead of the historical max when deciding completion", () => {
     const mondayWednesdayFriday = [1, 3, 5];
     const summary = analyzeMonthlyDrawSummary([
       ...weekdayDraws("2025-10", mondayWednesdayFriday, 1),
@@ -146,7 +146,7 @@ describe("analyzeMonthlyDrawSummary", () => {
     expect(summary.effectiveBucketSets.undrawn.size).toBe(45);
   });
 
-  it("uses the latest observed month rhythm when older recent rows include extra weekdays", () => {
+  it("keeps the scheduled calendar stable when historical rows include extra weekdays", () => {
     const mondayWednesdayFriday = [1, 3, 5];
     const summary = analyzeMonthlyDrawSummary([
       ...weekdayDraws("2025-10", mondayWednesdayFriday, 1),
@@ -182,6 +182,26 @@ describe("analyzeMonthlyDrawSummary", () => {
       expectedDrawCount: 14,
       completedDrawCount: 0,
       targetStageDrawCount: 1,
+      expectedDrawCountSource: "auto",
+    });
+  });
+
+  it("does not mistake an incomplete October's observed weekdays for a nine-draw month", () => {
+    const history = [
+      ...weekdayDraws("2026-09", [1, 3, 5], 1),
+      draw("2026-10-02", [1, 2, 3, 4, 5, 6], [7, 8]),
+      draw("2026-10-05", [9, 10, 11, 12, 13, 14], [15, 16]),
+    ];
+
+    const stageContext = resolveMonthlyStageDrawContext(history, {
+      today: new Date("2026-10-06T12:00:00"),
+    });
+
+    expect(stageContext).toMatchObject({
+      workingMonthLabel: "2026-10",
+      expectedDrawCount: 13,
+      completedDrawCount: 2,
+      targetStageDrawCount: 3,
       expectedDrawCountSource: "auto",
     });
   });
@@ -271,7 +291,7 @@ describe("analyzeMonthlyDrawSummary", () => {
     expect(summary.currentDistribution[1]).toBe(8);
   });
 
-  it("forwards the ideal-draw planning month when the current month has already reached the observed monthly max", () => {
+  it("does not treat the observed historical maximum as proof that the current month is complete", () => {
     const summary = analyzeMonthlyDrawSummary([
       draw("2026-04-03", [1, 2, 3, 4, 5, 6], [7, 8]),
       draw("2026-04-10", [9, 10, 11, 12, 13, 14], [15, 16]),
@@ -282,10 +302,10 @@ describe("analyzeMonthlyDrawSummary", () => {
     });
 
     expect(summary.latestRow?.monthLabel).toBe("2026-05");
-    expect(summary.effectiveMonthLabel).toBe("2026-06");
-    expect(summary.effectiveMonthIsSynthetic).toBe(true);
-    expect(summary.currentDistribution[0]).toBe(45);
-    expect(summary.idealDraw?.bucketCounts.find((bucket) => bucket.times === 0)?.count).toBe(8);
+    expect(summary.effectiveMonthLabel).toBe("2026-05");
+    expect(summary.effectiveMonthIsSynthetic).toBe(false);
+    expect(summary.currentDistribution[0]).toBe(29);
+    expect(summary.currentDistribution[1]).toBe(16);
   });
 
   it("parses slash-formatted dates consistently when building monthly buckets", () => {

@@ -8,14 +8,21 @@ const KEY_NORMALIZE_MODE = "zpa:normalizeMode:v1";
 
 export type WeightsByNumber = Record<number, number>;
 export type NormalizeMode = "all" | "selected";
+const WEIGHTS_CHANGED_EVENT = "windfall:zone-weights-changed";
+let cachedWeightsRaw: string | null | undefined;
+let cachedWeights: WeightsByNumber | null = null;
 
 export function getSavedZoneWeights(): WeightsByNumber | null {
   try {
     const s = localStorage.getItem(KEY_WEIGHTS);
-    if (!s) return null;
-    const obj = JSON.parse(s);
-    if (!obj || typeof obj !== "object") return null;
-    return obj as WeightsByNumber;
+    if (s === cachedWeightsRaw) return cachedWeights;
+    cachedWeightsRaw = s;
+    cachedWeights = null;
+    if (s) {
+      const obj = JSON.parse(s);
+      if (obj && typeof obj === "object" && !Array.isArray(obj)) cachedWeights = obj as WeightsByNumber;
+    }
+    return cachedWeights;
   } catch {
     return null;
   }
@@ -24,7 +31,20 @@ export function getSavedZoneWeights(): WeightsByNumber | null {
 export function setSavedZoneWeights(w: WeightsByNumber) {
   try {
     localStorage.setItem(KEY_WEIGHTS, JSON.stringify(w));
+    window.dispatchEvent(new Event(WEIGHTS_CHANGED_EVENT));
   } catch {}
+}
+
+export function subscribeSavedZoneWeights(listener: () => void): () => void {
+  const onStorage = (event: StorageEvent) => {
+    if (event.storageArea === localStorage && (event.key === KEY_WEIGHTS || event.key === null)) listener();
+  };
+  window.addEventListener(WEIGHTS_CHANGED_EVENT, listener);
+  window.addEventListener("storage", onStorage);
+  return () => {
+    window.removeEventListener(WEIGHTS_CHANGED_EVENT, listener);
+    window.removeEventListener("storage", onStorage);
+  };
 }
 
 export function getSavedGroups(): ZoneGroups | null {

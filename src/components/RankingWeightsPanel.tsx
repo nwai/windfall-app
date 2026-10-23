@@ -14,9 +14,10 @@ interface Props {
   setWeights: React.Dispatch<React.SetStateAction<RankingWeights>>;
   scope?: "all" | "oga" | "recency";
   title?: string;
+  selectedNumberCount?: number;
 }
 
-export const RankingWeightsPanel: React.FC<Props> = ({ weights, setWeights, scope = "all", title = "Ranking Weights" }) => {
+export const RankingWeightsPanel: React.FC<Props> = ({ weights, setWeights, scope = "all", title = "Ranking Weights", selectedNumberCount = 0 }) => {
   const { oga, selHitsEnabled, sel, recentHitsEnabled, recent, selBonusThreshold, selBonusWeight } = weights;
   const effectiveSel = selHitsEnabled ? sel : 0;
   const effectiveRecent = recentHitsEnabled ? recent : 0;
@@ -27,6 +28,10 @@ export const RankingWeightsPanel: React.FC<Props> = ({ weights, setWeights, scop
   const recencySum = effectiveSel + effectiveRecent;
   const recencySelShare = recencySum > 0 ? (effectiveSel / recencySum) * 100 : 0;
   const recencyRecentShare = recencySum > 0 ? (effectiveRecent / recencySum) * 100 : 0;
+  const bonusActive = selHitsEnabled && selectedNumberCount > 0 && selBonusWeight > 0;
+  const bonusSummary = bonusActive
+    ? `SelHits bonus: +${selBonusWeight.toFixed(2)} if SelHits >= ${selBonusThreshold}`
+    : `SelHits bonus: Off${!selHitsEnabled ? " (SelHits Off)" : selectedNumberCount === 0 ? " (no user-selected numbers)" : " (zero bonus)"}`;
 
   function update(partial: Partial<RankingWeights>) {
     setWeights((current) => ({ ...current, ...partial }));
@@ -52,12 +57,12 @@ export const RankingWeightsPanel: React.FC<Props> = ({ weights, setWeights, scop
   const handleSelBonusThresholdChange = (valStr: string) => {
     const v = Number(valStr);
     if (!Number.isFinite(v)) return;
-    update({ selBonusThreshold: Math.max(0, Math.floor(v)) });
+    update({ selBonusThreshold: Math.min(8, Math.max(0, Math.floor(v))) });
   };
   const handleSelBonusWeightChange = (valStr: string) => {
     const v = Number(valStr);
     if (!Number.isFinite(v)) return;
-    update({ selBonusWeight: Math.max(0, v) });
+    update({ selBonusWeight: Math.min(5, Math.max(0, v)) });
   };
 
   return (
@@ -65,7 +70,7 @@ export const RankingWeightsPanel: React.FC<Props> = ({ weights, setWeights, scop
       <h4 style={{ margin: "0 0 6px" }}>{title}</h4>
       <div style={row}>
         {(scope === "all" || scope === "oga") && (
-          <label title="Dominant geometric quality signal (OGA percentile)">
+          <label title="Historical OGA number-group score percentile; not a calibrated forecast">
             OGA
             <input
               type="number"
@@ -124,7 +129,7 @@ export const RankingWeightsPanel: React.FC<Props> = ({ weights, setWeights, scop
                 style={{ ...inp, opacity: recentHitsEnabled ? 1 : 0.45 }}
               />
             </label>
-            <label title="Apply a fixed bonus if SelHits meet or exceed this threshold (before normalization)">
+            <label title="Apply a fixed survivor bonus when the candidate meets this user-selected-number hit threshold">
               Sel bonus @≥
               <input
                 type="number"
@@ -132,11 +137,12 @@ export const RankingWeightsPanel: React.FC<Props> = ({ weights, setWeights, scop
                 min={0}
                 max={8}
                 value={selBonusThreshold}
+                disabled={!selHitsEnabled}
                 onChange={e => handleSelBonusThresholdChange(e.target.value)}
                 style={inp}
               />
             </label>
-            <label title="Bonus added to composite score when threshold is met (before final sort)">
+            <label title="Bonus added after weight normalization, only while SelHits is On and user-selected numbers exist">
               Bonus weight
               <input
                 type="number"
@@ -144,6 +150,7 @@ export const RankingWeightsPanel: React.FC<Props> = ({ weights, setWeights, scop
                 min={0}
                 max={5}
                 value={selBonusWeight}
+                disabled={!selHitsEnabled}
                 onChange={e => handleSelBonusWeightChange(e.target.value)}
                 style={inp}
               />
@@ -154,13 +161,15 @@ export const RankingWeightsPanel: React.FC<Props> = ({ weights, setWeights, scop
       <div style={foot}>
         {scope === "recency" ? (
           <>
-            Active recency survivor weights: SelHits {selHitsEnabled ? `${recencySelShare.toFixed(0)}%` : "off"} • RecentHits {recentHitsEnabled ? `${recencyRecentShare.toFixed(0)}%` : "off"} (bonus adds {selBonusWeight.toFixed(2)} if SelHits ≥ {selBonusThreshold})
+            Active recency survivor weights: SelHits {selHitsEnabled ? `${recencySelShare.toFixed(0)}%` : "off"} • RecentHits {recentHitsEnabled ? `${recencyRecentShare.toFixed(0)}%` : "off"}. {bonusSummary}.
             <br />
             SelHits and RecentHits default off. Their numeric weights only affect survivor ranking after their switches are turned on.
+            {" "}The bonus is separate from normalised weights; a positive bonus works even with SelHits weight 0. Hard filters still apply.
           </>
         ) : (
           <>
-            Normalized: OGA {normOGA.toFixed(0)}% • Sel {normSel.toFixed(0)}% • Recent {normRecent.toFixed(0)}% (bonus adds {selBonusWeight.toFixed(2)} if SelHits ≥ {selBonusThreshold})
+            Normalized: OGA {normOGA.toFixed(0)}% • Sel {normSel.toFixed(0)}% • Recent {normRecent.toFixed(0)}%
+            {scope === "all" && <>. {bonusSummary}.</>}
             {scope === "all" && (
               <>
                 <br />

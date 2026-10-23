@@ -46,7 +46,7 @@ export interface DgaConstellationDiagnostic {
   historyScopeLabel: string;
   matrixRows: Array<{ drawDate: string; drawNumber: number; isFuture?: boolean; cells: DgaConstellationCell[] }>;
   radius: number;
-  radiusSummaries: DgaConstellationRadiusSummary[];
+  radiusSummary: DgaConstellationRadiusSummary;
   warnings: string[];
 }
 
@@ -61,6 +61,8 @@ const MIN_NUMBER = 1;
 const MAX_NUMBER = 45;
 const DEFAULT_RADIUS = 3;
 const DEFAULT_FORWARD_HORIZON = 3;
+export const MAX_CONSTELLATION_RADIUS = 156;
+export const MAX_CONSTELLATION_HORIZON = 156;
 
 const clampInteger = (value: number, min: number, max: number): number => {
   if (!Number.isFinite(value)) return min;
@@ -121,34 +123,18 @@ const uniqueCells = (cells: Array<DgaConstellationCell | null>): DgaConstellatio
   return unique.sort((left, right) => (left.drawNumber - right.drawNumber) || (left.number - right.number));
 };
 
-const countHistoryHitsForNumbers = (history: Draw[], numbers: Set<number>): number => {
-  let hits = 0;
-  for (const draw of history) {
-    for (const number of numbers) {
-      if (roleForNumber(draw, number) !== "none") hits += 1;
-    }
-  }
-  return hits;
-};
-
-const combination = (n: number, k: number): number => {
-  if (k < 0 || k > n) return 0;
-  const shortK = Math.min(k, n - k);
-  let result = 1;
-  for (let i = 1; i <= shortK; i += 1) {
-    result = (result * (n - shortK + i)) / i;
-  }
-  return result;
-};
-
 const binomialUpperTail = (n: number, p: number, observedHits: number): number | null => {
   if (n <= 0 || p < 0 || p > 1) return null;
   if (observedHits <= 0) return 1;
   if (p === 0) return observedHits > 0 ? 0 : 1;
   if (p === 1) return observedHits <= n ? 1 : 0;
+  // Log recurrence avoids overflowing combinations in wide diagnostic windows.
+  let logMass = n * Math.log1p(-p);
+  const logOdds = Math.log(p) - Math.log1p(-p);
   let probability = 0;
-  for (let k = observedHits; k <= n; k += 1) {
-    probability += combination(n, k) * (p ** k) * ((1 - p) ** (n - k));
+  for (let k = 0; k <= n; k += 1) {
+    if (k >= observedHits) probability += Math.exp(logMass);
+    if (k < n) logMass += Math.log(n - k) - Math.log(k + 1) + logOdds;
   }
   return Math.min(1, Math.max(0, probability));
 };
@@ -156,7 +142,8 @@ const binomialUpperTail = (n: number, p: number, observedHits: number): number |
 const buildMetric = (
   label: string,
   cells: DgaConstellationCell[],
-  history: Draw[],
+  historyDrawCount: number,
+  numberHitCounts: readonly number[],
   fallbackBaselineRate: number,
 ): DgaConstellationMetric => {
   const possibleCells = cells.length;
@@ -164,8 +151,8 @@ const buildMetric = (
   const mainHits = cells.filter((cell) => cell.role === "main").length;
   const suppHits = cells.filter((cell) => cell.role === "supp").length;
   const numbers = new Set(cells.map((cell) => cell.number));
-  const baselineRate = numbers.size > 0 && history.length > 0
-    ? countHistoryHitsForNumbers(history, numbers) / (history.length * numbers.size)
+  const baselineRate = numbers.size > 0 && historyDrawCount > 0
+    ? [...numbers].reduce((sum, number) => sum + numberHitCounts[number], 0) / (historyDrawCount * numbers.size)
     : fallbackBaselineRate;
   const expectedHits = possibleCells * baselineRate;
   const variance = possibleCells * baselineRate * (1 - baselineRate);
@@ -193,14 +180,14 @@ const cellsForLocalWindow = (
   radius: number,
 ): DgaConstellationCell[] => {
   const cells: Array<DgaConstellationCell | null> = [];
-  for (let drawOffset = -radius; drawOffset <= radius; drawOffset += 1) {
-    for (let numberOffset = -radius; numberOffset <= radius; numberOffset += 1) {
+  for (let drawNumber = Math.max(1, centerDrawNumber - radius); drawNumber <= Math.min(history.length, centerDrawNumber + radius); drawNumber += 1) {
+    for (let number = Math.max(MIN_NUMBER, centerNumber - radius); number <= Math.min(MAX_NUMBER, centerNumber + radius); number += 1) {
       cells.push(buildCell(
         history,
         centerDrawNumber,
         centerNumber,
-        centerDrawNumber + drawOffset,
-        centerNumber + numberOffset,
+        drawNumber,
+        number,
       ));
     }
   }
@@ -235,9 +222,9 @@ const cellsForForwardBand = (
   horizon: number,
 ): DgaConstellationCell[] => {
   const cells: Array<DgaConstellationCell | null> = [];
-  for (let drawOffset = 1; drawOffset <= horizon; drawOffset += 1) {
-    for (let numberOffset = -radius; numberOffset <= radius; numberOffset += 1) {
-      cells.push(buildCell(history, centerDrawNumber, centerNumber, centerDrawNumber + drawOffset, centerNumber + numberOffset));
+  for (let drawNumber = centerDrawNumber + 1; drawNumber <= Math.min(history.length, centerDrawNumber + horizon); drawNumber += 1) {
+    for (let number = Math.max(MIN_NUMBER, centerNumber - radius); number <= Math.min(MAX_NUMBER, centerNumber + radius); number += 1) {
+      cells.push(buildCell(history, centerDrawNumber, centerNumber, drawNumber, number));
     }
   }
   return uniqueCells(cells);
@@ -251,9 +238,9 @@ const cellsForLeadInBand = (
   horizon: number,
 ): DgaConstellationCell[] => {
   const cells: Array<DgaConstellationCell | null> = [];
-  for (let drawOffset = -horizon; drawOffset <= -1; drawOffset += 1) {
-    for (let numberOffset = -radius; numberOffset <= radius; numberOffset += 1) {
-      cells.push(buildCell(history, centerDrawNumber, centerNumber, centerDrawNumber + drawOffset, centerNumber + numberOffset));
+  for (let drawNumber = Math.max(1, centerDrawNumber - horizon); drawNumber < centerDrawNumber; drawNumber += 1) {
+    for (let number = Math.max(MIN_NUMBER, centerNumber - radius); number <= Math.min(MAX_NUMBER, centerNumber + radius); number += 1) {
+      cells.push(buildCell(history, centerDrawNumber, centerNumber, drawNumber, number));
     }
   }
   return uniqueCells(cells);
@@ -300,8 +287,8 @@ export function buildDgaConstellationDiagnostic(
   const drawCount = Math.max(1, realHistory.length);
   const centerDrawNumber = clampInteger(options.centerDrawNumber, 1, drawCount);
   const centerNumber = clampInteger(options.centerNumber, MIN_NUMBER, MAX_NUMBER);
-  const radius = clampInteger(options.radius ?? DEFAULT_RADIUS, 1, 8);
-  const forwardHorizon = clampInteger(options.forwardHorizon ?? DEFAULT_FORWARD_HORIZON, 1, 8);
+  const radius = clampInteger(options.radius ?? DEFAULT_RADIUS, 1, MAX_CONSTELLATION_RADIUS);
+  const forwardHorizon = clampInteger(options.forwardHorizon ?? DEFAULT_FORWARD_HORIZON, 1, MAX_CONSTELLATION_HORIZON);
   if (centerDrawNumber !== Math.round(options.centerDrawNumber)) {
     warnings.push(`Center draw was adjusted to D${centerDrawNumber}.`);
   }
@@ -309,9 +296,13 @@ export function buildDgaConstellationDiagnostic(
     warnings.push(`Center number was adjusted to ${centerNumber}.`);
   }
 
-  const totalHits = realHistory.reduce((sum, draw) => (
-    sum + new Set([...draw.main, ...draw.supp].filter((number) => number >= MIN_NUMBER && number <= MAX_NUMBER)).size
-  ), 0);
+  const numberHitCounts = Array<number>(MAX_NUMBER + 1).fill(0);
+  for (const draw of realHistory) {
+    for (const number of new Set([...draw.main, ...draw.supp])) {
+      if (Number.isInteger(number) && number >= MIN_NUMBER && number <= MAX_NUMBER) numberHitCounts[number]++;
+    }
+  }
+  const totalHits = numberHitCounts.reduce((sum, count) => sum + count, 0);
   const baselineRate = realHistory.length > 0 ? totalHits / (realHistory.length * MAX_NUMBER) : 0;
   const centerCell = buildCell(realHistory, centerDrawNumber, centerNumber, centerDrawNumber, centerNumber) ?? {
     drawDate: "",
@@ -322,36 +313,37 @@ export function buildDgaConstellationDiagnostic(
     role: "none" as const,
   };
 
-  const radiusSummaries = Array.from({ length: radius }, (_, index) => {
-    const currentRadius = index + 1;
-    const risingDiagonal = cellsForRisingDiagonal(realHistory, centerDrawNumber, centerNumber, currentRadius);
-    const fallingDiagonal = cellsForFallingDiagonal(realHistory, centerDrawNumber, centerNumber, currentRadius);
-    const diagonalCross = uniqueCells([...risingDiagonal, ...fallingDiagonal]);
-    return {
-      diagonalCross: buildMetric(`Diagonal cross r${currentRadius}`, diagonalCross, realHistory, baselineRate),
-      fallingDiagonal: buildMetric(`Falling diagonal r${currentRadius}`, fallingDiagonal, realHistory, baselineRate),
-      followThrough: buildMetric(
-        `Forward band r${currentRadius}`,
-        cellsForForwardBand(realHistory, centerDrawNumber, centerNumber, currentRadius, forwardHorizon),
-        realHistory,
-        baselineRate,
-      ),
-      leadIn: buildMetric(
-        `Lead-in band r${currentRadius}`,
-        cellsForLeadInBand(realHistory, centerDrawNumber, centerNumber, currentRadius, forwardHorizon),
-        realHistory,
-        baselineRate,
-      ),
-      localWindow: buildMetric(
-        `Local window r${currentRadius}`,
-        cellsForLocalWindow(realHistory, centerDrawNumber, centerNumber, currentRadius),
-        realHistory,
-        baselineRate,
-      ),
-      radius: currentRadius,
-      risingDiagonal: buildMetric(`Rising diagonal r${currentRadius}`, risingDiagonal, realHistory, baselineRate),
-    };
-  });
+  // Only the selected radius is displayed. Avoid retaining every nested window.
+  const risingDiagonal = cellsForRisingDiagonal(realHistory, centerDrawNumber, centerNumber, radius);
+  const fallingDiagonal = cellsForFallingDiagonal(realHistory, centerDrawNumber, centerNumber, radius);
+  const diagonalCross = uniqueCells([...risingDiagonal, ...fallingDiagonal]);
+  const radiusSummary: DgaConstellationRadiusSummary = {
+    diagonalCross: buildMetric(`Diagonal cross r${radius}`, diagonalCross, realHistory.length, numberHitCounts, baselineRate),
+    fallingDiagonal: buildMetric(`Falling diagonal r${radius}`, fallingDiagonal, realHistory.length, numberHitCounts, baselineRate),
+    followThrough: buildMetric(
+      `Forward band r${radius}`,
+      cellsForForwardBand(realHistory, centerDrawNumber, centerNumber, radius, forwardHorizon),
+      realHistory.length,
+      numberHitCounts,
+      baselineRate,
+    ),
+    leadIn: buildMetric(
+      `Lead-in band r${radius}`,
+      cellsForLeadInBand(realHistory, centerDrawNumber, centerNumber, radius, forwardHorizon),
+      realHistory.length,
+      numberHitCounts,
+      baselineRate,
+    ),
+    localWindow: buildMetric(
+      `Local window r${radius}`,
+      cellsForLocalWindow(realHistory, centerDrawNumber, centerNumber, radius),
+      realHistory.length,
+      numberHitCounts,
+      baselineRate,
+    ),
+    radius,
+    risingDiagonal: buildMetric(`Rising diagonal r${radius}`, risingDiagonal, realHistory.length, numberHitCounts, baselineRate),
+  };
 
   return {
     baselineRate,
@@ -363,7 +355,7 @@ export function buildDgaConstellationDiagnostic(
     historyScopeLabel: `${realHistory.length} real chronological DGA draw${realHistory.length === 1 ? "" : "s"}`,
     matrixRows: buildMatrixRows(realHistory, centerDrawNumber, centerNumber, radius, forwardHorizon),
     radius,
-    radiusSummaries,
+    radiusSummary,
     warnings,
   };
 }

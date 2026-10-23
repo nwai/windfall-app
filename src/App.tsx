@@ -6,11 +6,18 @@
 // - Trace: append a concise block for factors affecting generation.
 //
 // Keep existing imports; removed unused ones previously.
-import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useRef, useEffect, useMemo, useCallback, useTransition } from "react";
+import { NumberConstraintSourcesSummary } from "./components/shared/NumberConstraintSourcesSummary";
+import { type NumberConstraintSource, type NumberConstraintKind, type ClearedNumberConstraintSource } from "./lib/numberConstraintSources";
 import { useSettingsPersistence } from "./hooks/useSettingsPersistence";
 import { EffectiveSettings } from "./components/shared/EffectiveSettings";
 import { SETTINGS_MODEL_VERSION, lastDrawBiasMultiplier, effectiveSettingsTrace, withRestoredSettingSources, type EffectiveSettingsLedger } from "./lib/settingsTransparency";
 import "./App.css";
+import EvidencePortfolioPanel, { type EvidencePortfolioSimulationSource } from "./components/EvidencePortfolioPanel";
+import { WindfallPredictorPanel } from "./components/WindfallPredictorPanel";
+import { predictorConstraintKey, type PredictorGame, type WindfallPredictorSnapshot } from "./lib/windfallPredictor";
+import { createWindfallPredictorEntry } from "./lib/windfallPredictorJournal";
+import { portfolioHistoryFingerprint, preparePortfolioHistory, type EvidencePortfolioSnapshot, type PortfolioCandidate } from "./lib/evidencePortfolio";
 
 import { LotteryPlatformShell } from "./components/lottery/LotteryPlatformShell";
 import { ForcedNumbersProvider } from "./context/ForcedNumbersContext";
@@ -20,7 +27,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { MonteCarloPanel } from "./components/candidates/MonteCarloPanel";
 import { NumberTrendsTable, NumberTrend, NUMBER_TREND_MONTH_DRAW_WINDOW } from "./components/NumberTrendsTable";
 import { entropy, minHamming, maxJaccard } from "./analytics";
-import { buildDemoDrawHistory, fetchDraws, loadCsvFallbackDraws } from "./lib/fetchDraws";
+import { buildDemoDrawHistory, fetchDraws } from "./lib/fetchDraws";
 import { getUniqueRandomNumbers } from "./lib/random";
 import { parseCSVorJSON } from "./parseCSVorJSON";
 import { getSDE1FilteredPool } from "./sde1";
@@ -86,11 +93,13 @@ import { NumberFrequencyPanel } from "./components/candidates/NumberFrequencyPan
 import { TargetSetQuickStatsPanel } from "./components/candidates/TargetSetQuickStatsPanel";
 import type { ZoneGroups } from "./lib/groupPatterns";
 import { applyZoneWeightBiasToScores } from "./lib/zoneWeightBias";
-import { getSavedZoneWeights, getSavedGroups, setSavedGroups, getSavedSelectedZones, setSavedSelectedZones, getSavedNormalizeMode, setSavedNormalizeMode } from "./lib/zpaStorage";
+import { getSavedGroups, setSavedGroups, getSavedSelectedZones, setSavedSelectedZones, getSavedNormalizeMode, setSavedNormalizeMode } from "./lib/zpaStorage";
+import { useSavedZoneWeights } from "./hooks/useSavedZoneWeights";
 import { WindowStatsPanel } from "./components/WindowStatsPanel";
 import { showToast } from "./lib/toastBus";
 import { GlobalZoneWeighting } from "./components/GlobalZoneWeighting";
 import DrawHistoryManager from "./components/DrawHistoryManager";
+import DrawHistoryTable from "./components/DrawHistoryTable";
 import DrawHistoryIntegrityPanel from "./components/DrawHistoryIntegrityPanel";
 import {
   HeatmapLegendBar,
@@ -126,9 +135,25 @@ import {
 } from "./generateCandidates";
 import { useGenerateWorker, serializeMonthlyBuckets, serializeTrendMap } from "./hooks/useGenerateWorker";
 import { usePlanningDrawContext } from "./hooks/usePlanningDrawContext";
+import TerminalShapeQuotaControls from "./components/TerminalShapeQuotaControls";
+import { buildTerminalShapeOptions, buildTerminalShapeQuotas, applyCompositionQuotas, type TerminalShapeQuotaOptions } from "./lib/terminalShapeQuotas";
+import { terminalRunEvidence, linkedTerminalShapeEvidence, observedTerminalRunKeys, buildTerminalRunQuotas, TERMINAL_RUN_RULE_VERSION, type TerminalRunRuleOptions } from "./lib/terminalDigitRuns";
+import { applyTerminalRunCompositionQuotas } from "./lib/terminalRunQuotas";
+import TerminalRunQuotaControls from "./components/TerminalRunQuotaControls";
+import TerminalCompositionPlanner from "./components/TerminalCompositionPlanner";
+import TerminalCompositionMirror from "./components/TerminalCompositionMirror";
+import { analyzeGenerationPreflight, generationPreflightTrace, removedForcedInclusions, type ForcedRemoval } from "./lib/generationPreflight";
+import { captureRwR45Composition, generatedCompositionTrace, type GeneratedCompositionSnapshot } from "./lib/generatedComposition";
+import RwR45OutputSummary from "./components/RwR45OutputSummary";
 import type { GenerateWorkerArgs } from "./workers/generateWorker";
 import { ModulationDiagnosticsPanel } from "./components/ModulationDiagnosticsPanel";
-import { SelectionInsightsPanel, SelectionInsightsPredictionPanel } from "./components/SelectionInsightsPanel";
+import {
+  SelectionInsightsNeighbourAtlasCard,
+  SelectionInsightsPanel,
+  SelectionInsightsPredictionPanel,
+} from "./components/SelectionInsightsPanel";
+import { SelectionInsightsSuppPairs } from "./components/SelectionInsightsSuppPairs";
+import { SupplementaryPolicyReplayCard } from "./components/SupplementaryPolicyReplayCard";
 import {
   buildSelectionInsightPredictedCompanions,
   buildSelectionInsightsAnalytics,
@@ -140,8 +165,15 @@ import { ScoringSystemDiagnosticsPanel } from "./components/ScoringSystemDiagnos
 import { analyzeScoringSystemDiagnostics } from "./lib/scoringSystemDiagnostics";
 import {
   buildScoringGenerationProfile,
+  scoreCandidateWithScoringProfile,
   type ScoringGenerationInfluence,
 } from "./lib/scoringGenerationInfluence";
+import { countCandidateWindowPatternMatches } from "./lib/windowPatternMatching";
+import {
+  applySurvivorRankingBoosts,
+  buildSurvivorRankingBoostState,
+  survivorRankingBoostDescriptions,
+} from "./lib/survivorRankingBoosts";
 import {
   buildDroughtEvidenceGovernorProfile,
   normalizeDroughtEvidenceGovernorMode,
@@ -152,6 +184,7 @@ import { DroughtEvidenceGovernorControls } from "./components/DroughtEvidenceGov
 import { MonthlyBucketTransitionGovernorControls } from "./components/MonthlyBucketTransitionGovernorControls";
 import {
   buildMonthlyBucketTransitionGovernorProfile,
+  monthlyBucketTransitionGovernorDisplaySummary,
   normalizeMonthlyBucketTransitionGovernorMode,
   type MonthlyBucketTransitionGovernorMode,
 } from "./lib/monthlyBucketTransitionGovernor";
@@ -165,6 +198,16 @@ import {
   type DrawBucketPatternGenerationInfluenceRow,
 } from "./lib/drawBucketPatternInfluence";
 import { PreviousNeighbourBacktestPanel } from "./components/PreviousNeighbourBacktestPanel";
+import ConsecutiveRunMonthlyWatchPanel from "./components/ConsecutiveRunMonthlyWatchPanel";
+import {
+  buildPreviousNeighbourAtlasEvidence,
+  matchNumbersToPreviousNeighbourAtlas,
+  type PreviousNeighbourAtlasEvidenceSnapshot,
+  type PreviousNeighbourAtlasHistorySource,
+} from "./lib/previousNeighbourAtlasEvidence";
+import { analyzePreviousNeighbourCountShapeAtlas } from "./lib/previousNeighbourCountShapeAtlas";
+import { analyzeConsecutiveRunMonthlyWatch } from "./lib/consecutiveRunMonthlyWatch";
+import type { PreviousNeighbourScope } from "./lib/previousNeighbourBacktest";
 import { GuidedWorkflowPanel, type GuidedWorkflowStep } from "./components/GuidedWorkflowPanel";
 import { CollapsibleSection } from "./components/shared/CollapsibleSection";
 import { InlineCollapsibleCard } from "./components/shared/InlineCollapsibleCard";
@@ -172,8 +215,11 @@ import { HigButton, HigField, HigSlider, InfoHelp } from "./components/shared/Hi
 import { AppWorkflowNav, WorkflowAnchor } from "./components/layout/AppWorkflowNav";
 import { PanelFavoritesStrip } from "./components/layout/PanelFavoritesStrip";
 import { PanelFavoritesProvider } from "./context/PanelFavoritesContext";
-import { NextDrawProbabilitiesPanel } from "./components/NextDrawProbabilitiesPanel";
+import { HistoricalOgaDistribution } from "./components/HistoricalOgaDistribution";
+import NumberGroupFrequencyAuditPanel from "./components/NumberGroupFrequencyAuditPanel";
 import { forecastOGA } from "./lib/ogaForecast";
+import { OgaForecastBiasControls } from "./components/OgaForecastBiasControls";
+import { ogaForecastBiasSummary, type OgaForecastBiasOptions } from "./lib/ogaDecileAcceptance";
 import { MostLikelyNotDrawnPanel } from "./components/MostLikelyNotDrawnPanel";
 import { BacktestPanel } from "./components/BacktestPanel";
 import { DroughtBacktestPanel } from "./components/DroughtBacktestPanel";
@@ -188,6 +234,7 @@ import MonthlyOverlapPanel from "./components/MonthlyOverlapPanel";
 import MonthlyDrawsSummaryPanel, { MONTHLY_DRAWS_STAGE_IDM_TARGET_ID, type AppliedBucketMixTarget, type MonthlyConstraintPayload, type MonthlyFrequencyConstraints, type MonthlyBucketSets, type MonthlyIdealDrawState, type StageIdealDrawState } from "./components/MonthlyDrawsSummaryPanel";
 import { computeIdealMonthlyDraw, type MonthlyBucketKey } from "./lib/monthlyDrawSummary";
 import MonthlyBucketTransitionLabPanel from "./components/MonthlyBucketTransitionLabPanel";
+import DecadeMonthlyBucketWatchPanel from "./components/DecadeMonthlyBucketWatchPanel";
 import MonthlyFirstLastPanel from "./components/MonthlyFirstLastPanel";
 import MonthlyDigitOccurrencePanel from "./components/MonthlyDigitOccurrencePanel";
 import MonthEndCarryOverBucketsPanel from "./components/MonthEndCarryOverBucketsPanel";
@@ -219,7 +266,6 @@ import {
   isFilePickerCancelError,
   parseCsv,
   pickCsvFile,
-  readCsvFromHandle,
   toCsv,
   writeCsvToHandle,
 } from "./lib/drawHistory";
@@ -233,12 +279,14 @@ import {
   rowsFromDraws,
   sortHistoryRows,
 } from "./lib/drawHistoryReview";
-import { clearCachedDrawHistory, loadCachedDrawHistory, saveCachedDrawHistory } from "./lib/historyPersistence";
+import { clearCachedDrawHistory, saveCachedDrawHistory } from "./lib/historyPersistence";
+import { useCsvHistoryTarget } from "./hooks/useCsvHistoryTarget";
+import { readCsvHistoryTarget } from "./lib/csvHistoryTarget";
 import {
   computeWeekdayWindfallPrizeDivision,
   rankWeekdayWindfallPrizeDivision,
 } from "./lib/prizeDivisions";
-import { chooseInitialDrawHistory, type InitialDrawHistoryChoice } from "./lib/initialDrawHistory";
+import type { InitialDrawHistoryChoice } from "./lib/initialDrawHistory";
 import {
   DIGIT_WIDTH_PERCENT_OPTIONS,
   deriveDigitWidthTargets,
@@ -298,7 +346,7 @@ import {
 } from "./lib/previousNeighbourTargets";
 import { buildLatestNeighbourStageMatchCompatibilityTrace } from "./lib/latestNeighbourStageMatchCompatibility";
 import type { LatestNeighbourSupportMode } from "./lib/latestNeighbourSupport";
-import { analyzeHotColdRanking } from "./lib/hotColdRanking";
+import { analyzeHotColdRankingProfile, normalizeHotColdRankingSettings, formatHotColdWindowChoiceLabel, parseHotColdWindowChoice } from "./lib/hotColdRanking";
 import { buildPortfolioWindowShapeEvidence } from "./lib/portfolioWindowShape";
 import { summarizeDrawHistoryProvenance } from "./lib/drawHistoryProvenance";
 import { filterRealDrawHistory } from "./lib/realDrawHistory";
@@ -317,10 +365,11 @@ import {
 } from "./lib/panelFavorites";
 import { dateFromMonthLabel } from "./lib/planningDrawContext";
 import { findNextHistoryDrawDate } from "./lib/drawHistoryNextDraw";
-import { PREDICTION_JOURNAL_SELECTION_REASON_LABELS, drawFingerprint } from "./lib/predictionJournal";
+import { PREDICTION_JOURNAL_SELECTION_REASON_LABELS, drawFingerprint, buildPredictionJournalEntry, loadPredictionJournalEntries, savePredictionJournalEntries } from "./lib/predictionJournal";
 import {
   appendPredictionCaptureRun,
   createPredictionCaptureSession,
+  normalizePredictionCaptureGame,
   setPredictionCaptureSessionStatus,
   type PredictionCaptureAction,
   type PredictionCaptureBatch,
@@ -434,8 +483,8 @@ const RDY_WEIGHT_COPY: Record<RdyWeightKey, {
   },
   oga: {
     shortLabel: "OGA",
-    label: "Geometry Alignment",
-    help: "OGA percentile similarity from DGA geometry. Independent of monthly frequency analysis.",
+    label: "Number-group score",
+    help: "Historical percentile of the OGA number-group frequency score. Not geometric distance, symmetry or a calibrated forecast.",
   },
 };
 
@@ -789,7 +838,13 @@ const MONTHLY_TRANSITION_GOVERNOR_TARGET_ID = "windfall-monthly-transition-gover
 const GENERATION_SETUP_SUMMARY_TARGET_IDS = {
   forcedExcluded: "windfall-generation-forced-excluded-report",
   ratios: "windfall-generation-odd-even-ratios",
+  compositionQuotas: "panel-odd-even-ratio-filters",
+  terminalShapes: "windfall-terminal-shape-quotas",
+  terminalRuns: "windfall-terminal-run-quotas",
+  endingDigits: ACTIVE_SETUP_PROVENANCE_TARGET_IDS.endingBuckets,
+  overlap: ACTIVE_SETUP_PROVENANCE_TARGET_IDS.recencyLatestDraw,
   numbersDiagnostic: "windfall-generation-numbers-diagnostic",
+  ogaForecast: "windfall-generation-oga-forecast",
   droughtGovernor: "windfall-generation-drought-governor",
   monthlyTransition: MONTHLY_TRANSITION_GOVERNOR_TARGET_ID,
   d1Sgi: "windfall-generation-d1-sgi",
@@ -874,6 +929,8 @@ const formatGenerationTraceLines = (options: {
       ["end9", stats.mainNineSet],
       ["digitWidth", stats.digitWidth],
       ["repFamilies", stats.repeatedTerminalFamilies],
+      ["terminalShapes", stats.terminalShapes ?? 0],
+      ["terminalRuns", stats.terminalRuns ?? 0],
     ])}`,
     `[TRACE] ${label} Rejects · shape/recency: ${formatTracePairs([
       ["oddEven", stats.oddEven],
@@ -1409,6 +1466,8 @@ function monthLabelForHistoryScope(draw: Draw): string | null {
 function AppInner(): JSX.Element {
   const { runGenerate, cancelGenerate, getGenerationSeed } = useGenerateWorker();
   const [history, setHistory] = useState<Draw[]>([]);
+  const historyRevisionRef = useRef(0);
+  const [isHistoryRefreshPending, startHistoryRefreshTransition] = useTransition();
   const [startupHistoryChoice, setStartupHistoryChoice] = useState<InitialDrawHistoryChoice | null>(null);
   const realHistoryResult = useMemo(
     () => filterRealDrawHistory(history, "app-wide evidence panels and generation weights"),
@@ -1437,6 +1496,10 @@ function AppInner(): JSX.Element {
   const baselineHistoryScopeLabel = baselineHistoryScope.excludedMonthLabels.length
     ? `Windfall baseline history (${baselineHistory.length} real draws; excludes ${baselineHistoryScope.excludedMonthLabels.join(", ")})`
     : `Windfall baseline history (${baselineHistory.length} real draws)`;
+  const consecutiveRunMonthlyWatch = useMemo(
+    () => analyzeConsecutiveRunMonthlyWatch(realHistory, { now: planningDrawContext.todayIso }),
+    [realHistory, planningDrawContext.todayIso],
+  );
   const [windowMode, setWindowMode] = useState<"W" | "F" | "M" | "Q" | "Y" | "H" | "Custom">("H");
   const [customDrawCount, setCustomDrawCount] = useState<number>(1);
   const [windowEnabled, setWindowEnabled] = useState<boolean>(true);
@@ -1538,7 +1601,7 @@ function AppInner(): JSX.Element {
   const [sumFilter, setSumFilter] = useState<{ enabled: boolean; min: number; max: number; includeSupp: boolean }>({
     enabled: false,
     min: 0,
-    max: 0,
+    max: 332,
     includeSupp: true,
   });
 
@@ -1845,6 +1908,8 @@ function AppInner(): JSX.Element {
 
   const [selectedNumbers, setSelectedNumbers] = useState<number[]>([]);
   const [candidates, setCandidates] = useState<CandidateSet[]>([]);
+  const [rwR45Composition, setRwR45Composition] = useState<GeneratedCompositionSnapshot | null>(null);
+  const [forcedRemovalNotice, setForcedRemovalNotice] = useState<ForcedRemoval[]>([]);
   const [pasteWeightedPortfolioCandidates, setPasteWeightedPortfolioCandidates] = useState<CandidateSet[]>([]);
   const [keptGeneratedCandidateRows, setKeptGeneratedCandidateRows] = useState<KeptGeneratedCandidateRow[]>([]);
   const [generationSessionActive, setGenerationSessionActive] = useState<boolean>(false);
@@ -2165,7 +2230,7 @@ function AppInner(): JSX.Element {
   const [maxCount, setMaxCount] = useState<number>(0);
   const [focusedDgaCol, setFocusedDgaCol] = useState<number | null>(null);
   const [dgaHoveredNumber, setDgaHoveredNumber] = useState<number | null>(null);
-  const [engineRankingExpanded, setEngineRankingExpanded] = useState<boolean>(true);
+  const [engineRankingExpanded, setEngineRankingExpanded] = useState<boolean>(false);
   const [shapeBucketQuotasExpanded, setShapeBucketQuotasExpanded] = useState<boolean>(false);
   const [recencyLatestDrawExpanded, setRecencyLatestDrawExpanded] = useState<boolean>(false);
   const [hardFiltersExpanded, setHardFiltersExpanded] = useState<boolean>(false);
@@ -2225,13 +2290,14 @@ function AppInner(): JSX.Element {
   }, []);
   const [highlightMsg, setHighlightMsg] = useState<string>("");
   const [highlights, setHighlights] = useState<any[]>([]);
-  const [dgaHeatmapExpanded, setDgaHeatmapExpanded] = useState<boolean>(true);
-  const [dgaSectionOpen, setDgaSectionOpen] = useState<boolean>(true);
+  const [dgaHeatmapExpanded, setDgaHeatmapExpanded] = useState<boolean>(false);
+  const [dgaSectionOpen, setDgaSectionOpen] = useState<boolean>(false);
   const dgaWorkflowBodyId = "workflow-dga-body";
-  const [dgaGridExpanded, setDgaGridExpanded] = useState<boolean>(true);
+  const [dgaGridExpanded, setDgaGridExpanded] = useState<boolean>(false);
 
   const [excludedNumbers, setExcludedNumbers] = useState<number[]>([]);
   const [hotColdForcedNumbers, setHotColdForcedNumbers] = useState<number[]>([]);
+  const [hotColdRankingSettings, setHotColdRankingSettings] = useState(normalizeHotColdRankingSettings);
   const [hotColdExcludedNumbers, setHotColdExcludedNumbers] = useState<number[]>([]);
   const [droughtBreakSelectedNumbers, setDroughtBreakSelectedNumbers] = useState<number[]>([]);
   const [pasteWeightedForcedNumbers, setPasteWeightedForcedNumbers] = useState<number[]>([]);
@@ -2259,6 +2325,15 @@ function AppInner(): JSX.Element {
   );
   const [ratioOptions, setRatioOptions] = useState<{ ratio: string; count: number; percent: number }[]>([]);
   const [selectedRatios, setSelectedRatios] = useState<string[]>([]);
+  const [independentTerminalShapeQuotaEnabled, setTerminalShapeQuotaEnabled] = useState(false);
+  const [independentSelectedTerminalShapes, setSelectedTerminalShapes] = useState<string[]>([]);
+  const [independentTerminalShapeAllocationBasis, setTerminalShapeAllocationBasis] = useState<"history" | "equal">("history");
+  const [terminalRunShapeLinkEnabled, setTerminalRunShapeLinkEnabled] = useState(false);
+  const [terminalRunRuleEnabled, setTerminalRunRuleEnabled] = useState(false);
+  const [manualTerminalRunMode, setTerminalRunMode] = useState<TerminalRunRuleOptions["mode"]>("allocation");
+  const [manualSelectedTerminalRuns, setSelectedTerminalRuns] = useState<string[]>([]);
+  const [terminalRunUseAllObserved, setTerminalRunUseAllObserved] = useState(false);
+  const [manualTerminalRunAllocationBasis, setTerminalRunAllocationBasis] = useState<"history" | "equal">("history");
   const [useTrickyRule, setUseTrickyRule] = useState<boolean>(false);
   const [trendLookback, setTrendLookback] = useState<number>(4);
   const [trendThreshold, setTrendThreshold] = useState<number>(0.02);
@@ -2335,38 +2410,21 @@ function AppInner(): JSX.Element {
   }, [insightsEnabled]);
 
   const commitHistory = useCallback((nextHistory: Draw[]) => {
-    setHistory(nextHistory);
-    setStartupHistoryChoice(null);
-    setHighlights([]);
+    historyRevisionRef.current += 1;
     const cacheableRealHistory = strictValidateDraws(nextHistory.filter((draw) => !draw.isSimulated));
     if (cacheableRealHistory.length > 0) {
       saveCachedDrawHistory(rowsFromDraws(cacheableRealHistory));
     } else {
       clearCachedDrawHistory();
     }
-  }, [setHighlights]);
+    startHistoryRefreshTransition(() => {
+      setHistory(nextHistory);
+      setStartupHistoryChoice(null);
+      setHighlights([]);
+    });
+  }, [setHighlights, startHistoryRefreshTransition]);
 
-  useEffect(() => {
-    const cachedRows = loadCachedDrawHistory();
-    const cachedHistory = cachedRows && cachedRows.length > 0 ? drawsFromRows(cachedRows) : null;
-    const bundledHistory = loadCsvFallbackDraws(strictValidateDraws);
-    const choice = chooseInitialDrawHistory(cachedHistory, bundledHistory);
-
-    if (choice.history.length > 0) {
-      commitHistory(choice.history);
-      setTraceMaybe((t) => [...t,
-        choice.source === "cache"
-          ? `[TRACE] Loaded ${choice.history.length} draws from saved local draw history state. ${choice.reason}`
-          : `[TRACE] Loaded ${choice.history.length} draws from default bundled CSV (src/windfall_history_lottolyzer.csv). ${choice.reason}`
-      ]);
-      return;
-    }
-
-    setHistory([]);
-    setHighlights([]);
-    setStartupHistoryChoice(choice);
-    setTraceMaybe((t) => [...t, `[TRACE] No startup draw history loaded. ${choice.reason}`]);
-  }, [commitHistory]);
+  const csvHistoryTarget = useCsvHistoryTarget({ onLoad: commitHistory, onMissing: setStartupHistoryChoice, setTrace, historyRevision: historyRevisionRef });
 
   function getActiveWindowSize() {
     if (!windowEnabled) return history.length;
@@ -2509,6 +2567,17 @@ function AppInner(): JSX.Element {
     () => generationForcedNumbers.slice().sort((left, right) => left - right),
     [generationForcedNumbers],
   );
+  const forcedInclusionSources = useMemo(() => {
+    const activeSet = new Set(generationForcedNumbers);
+    return [
+      { label: "Number Trends", numbers: trendSelectedNumbers, clear: () => setTrendSelectedNumbers([]), remove: (number: number) => setTrendSelectedNumbers((current) => current.filter((value) => value !== number)) },
+      { label: "Latest draw ±1/±2 builder", numbers: previousNeighbourConstraintNumbers, clear: () => setPreviousNeighbourConstraintNumbers([]), remove: (number: number) => setPreviousNeighbourConstraintNumbers((current) => current.filter((value) => value !== number)) },
+      { label: "Hot vs Cold", numbers: hotColdForcedNumbers, clear: () => setHotColdForcedNumbers([]), remove: (number: number) => setHotColdForcedNumbers((current) => current.filter((value) => value !== number)) },
+      { label: "Drought-break shortlist", numbers: droughtBreakSelectedNumbers, clear: () => setDroughtBreakSelectedNumbers([]), remove: (number: number) => setDroughtBreakSelectedNumbers((current) => current.filter((value) => value !== number)) },
+      { label: "Paste-Weighted", numbers: pasteWeightedForcedNumbers, clear: () => setPasteWeightedForcedNumbers([]), remove: (number: number) => setPasteWeightedForcedNumbers((current) => current.filter((value) => value !== number)) },
+      { label: "Signal Confluence", numbers: signalConfluenceForcedNumbers, clear: () => setSignalConfluenceForcedNumbers([]), remove: (number: number) => setSignalConfluenceForcedNumbers((current) => current.filter((value) => value !== number)) },
+    ].map((source) => ({ ...source, numbers: source.numbers.filter((number) => activeSet.has(number)) }));
+  }, [generationForcedNumbers, trendSelectedNumbers, previousNeighbourConstraintNumbers, hotColdForcedNumbers, droughtBreakSelectedNumbers, pasteWeightedForcedNumbers, signalConfluenceForcedNumbers]);
 
   const previousNeighbourConstraintNumberSet = useMemo(
     () => new Set(previousNeighbourConstraintNumbers),
@@ -2516,12 +2585,8 @@ function AppInner(): JSX.Element {
   );
 
   const numberTrendExternalSelectedNumbers = useMemo(
-    () => normalizeHotColdGenerationNumbers([
-      ...droughtBreakSelectedNumbers,
-      ...pasteWeightedForcedNumbers,
-      ...signalConfluenceForcedNumbers,
-    ]),
-    [droughtBreakSelectedNumbers, pasteWeightedForcedNumbers, signalConfluenceForcedNumbers],
+    () => generationForcedNumbers.filter((number) => !trendSelectedNumbers.includes(number)),
+    [generationForcedNumbers, trendSelectedNumbers],
   );
 
   const generationForcedOverflow = generationForcedNumbers.length > 8;
@@ -2665,27 +2730,6 @@ function AppInner(): JSX.Element {
     () => new Set(mainConstraintAutoExclusions.excludedNumbers),
     [mainConstraintAutoExclusions.excludedNumbers]
   );
-
-  const pruneManualExcludedNumbers = useCallback((current: number[], limit?: number): number[] => {
-    const pruned = removeUserExcludedNumbers(current, excludedNumbers);
-    const next = typeof limit === "number" ? pruned.slice(0, limit) : pruned;
-    return keepExistingNumberListWhenEqual(current, next);
-  }, [excludedNumbers]);
-
-  useEffect(() => {
-    setTrendSelectedNumbers((current) => pruneManualExcludedNumbers(current));
-    setPreviousNeighbourConstraintNumbers((current) => pruneManualExcludedNumbers(current));
-    setHotColdForcedNumbers((current) => pruneManualExcludedNumbers(current));
-    setDroughtBreakSelectedNumbers((current) => pruneManualExcludedNumbers(current, MAX_DROUGHT_BREAK_FORCED_NUMBERS));
-    setPasteWeightedForcedNumbers((current) => pruneManualExcludedNumbers(current));
-    setSignalConfluenceForcedNumbers((current) => pruneManualExcludedNumbers(current));
-    setUserSelectedNumbers((current) => pruneManualExcludedNumbers(current));
-    setManualSimSelected((current) => keepExistingNumberListWhenEqual(
-      current,
-      normalizeManualPrizeCheckNumbers(current, excludedNumbers),
-    ));
-    setSelectedCarryOverBoostNumbers((current) => pruneManualExcludedNumbers(current));
-  }, [excludedNumbers, pruneManualExcludedNumbers]);
 
   const mainConstraintAutoExcludedLabel = useMemo(() => {
     if (!mainConstraintAutoExclusions.shouldApply) return "";
@@ -3188,6 +3232,25 @@ function AppInner(): JSX.Element {
   }, [selectionUnavailableNumbers]);
 
   useEffect(() => {
+    const removed = removedForcedInclusions([
+      { label: "Number Trends", numbers: trendSelectedNumbers },
+      { label: "Latest draw +/-1/+/-2 builder", numbers: previousNeighbourConstraintNumbers },
+      { label: "Hot vs Cold", numbers: hotColdForcedNumbers },
+      { label: "Drought-break shortlist", numbers: droughtBreakSelectedNumbers },
+      { label: "Paste-Weighted", numbers: pasteWeightedForcedNumbers },
+      { label: "Signal Confluence", numbers: signalConfluenceForcedNumbers },
+    ], [
+      { label: "User Exclusions", numbers: excludedNumbers },
+      { label: "Hot vs Cold exclusions", numbers: hotColdExcludedNumbers },
+      { label: "Exclude unselected", numbers: autoExcludedFromSelection },
+      { label: "Ending-digit auto-exclusions", numbers: mainConstraintAutoExclusions.excludedNumbers },
+      { label: "SDE1", numbers: sde1Exclusions },
+      { label: "HC3", numbers: hc3Exclusions },
+    ]);
+    if (removed.length) {
+      setForcedRemovalNotice(removed);
+      setTrace((current) => [...current, ...removed.map((row) => `[TRACE] Exclusions removed forced inclusion ${row.number} from ${row.inclusionSources.join(", ")}: excluded by ${row.exclusionSources.join(", ")}.`)]);
+    }
     setTrendSelectedNumbers((current) => pruneSelectionUnavailableNumbers(current));
     setPreviousNeighbourConstraintNumbers((current) => pruneSelectionUnavailableNumbers(current));
     setHotColdForcedNumbers((current) => pruneSelectionUnavailableNumbers(current));
@@ -3195,12 +3258,10 @@ function AppInner(): JSX.Element {
     setPasteWeightedForcedNumbers((current) => pruneSelectionUnavailableNumbers(current));
     setSignalConfluenceForcedNumbers((current) => pruneSelectionUnavailableNumbers(current));
     setUserSelectedNumbers((current) => pruneSelectionUnavailableNumbers(current));
-    setManualSimSelected((current) => keepExistingNumberListWhenEqual(
-      current,
-      normalizeManualPrizeCheckNumbers(current, selectionUnavailableNumbers),
-    ));
     setSelectedCarryOverBoostNumbers((current) => pruneSelectionUnavailableNumbers(current));
-  }, [pruneSelectionUnavailableNumbers]);
+  }, [pruneSelectionUnavailableNumbers, trendSelectedNumbers, previousNeighbourConstraintNumbers, hotColdForcedNumbers,
+    droughtBreakSelectedNumbers, pasteWeightedForcedNumbers, signalConfluenceForcedNumbers, excludedNumbers,
+    hotColdExcludedNumbers, autoExcludedFromSelection, mainConstraintAutoExclusions.excludedNumbers, sde1Exclusions, hc3Exclusions]);
 
   const temperatureSignal = useMemo(
     () => computeTemperatureSignal(realFilteredHistory, {
@@ -3214,14 +3275,14 @@ function AppInner(): JSX.Element {
     [realFilteredHistory]
   );
 
+  const sharedHotColdSummary = useMemo(
+    () => analyzeHotColdRankingProfile(realHistory, hotColdRankingSettings, activeWindowSize),
+    [realHistory, hotColdRankingSettings, activeWindowSize],
+  );
+  const hotColdScopeLabel = `Hot vs Cold profile: ${sharedHotColdSummary.totalDraws} all real draws; ${hotColdRankingSettings.includeSupp ? "mains + supps" : "mains only"}; recent ${sharedHotColdSummary.recentWindow}; half-life ${formatHotColdWindowChoiceLabel(parseHotColdWindowChoice(hotColdRankingSettings.halfLifeChoice, 10), realHistory.length, 10, "halfLife", activeWindowSize)}.`;
   const portfolioHotColdRows = useMemo<PortfolioHotColdEvidenceRow[]>(() => {
-    if (realFilteredHistory.length === 0) return [];
-    const summary = analyzeHotColdRanking(realFilteredHistory, {
-      includeSupp: true,
-      recentWindow: Math.min(20, Math.max(1, realFilteredHistory.length)),
-      halfLife: Math.min(10, Math.max(1, realFilteredHistory.length)),
-    });
-    return summary.rows.map((row) => ({
+    if (sharedHotColdSummary.totalDraws === 0) return [];
+    return sharedHotColdSummary.rows.map((row) => ({
       number: row.number,
       status: row.status,
       hotScore: row.hotScore,
@@ -3230,7 +3291,7 @@ function AppInner(): JSX.Element {
       recentCount: row.recentCount,
       weightedRank: row.weightedRank,
     }));
-  }, [realFilteredHistory]);
+  }, [sharedHotColdSummary]);
 
   const portfolioWindowShapeRows = useMemo(
     () => buildPortfolioWindowShapeEvidence(realFilteredHistory, { includeSupp: false }).rows,
@@ -3245,8 +3306,67 @@ function AppInner(): JSX.Element {
   const [predictionJournalDraftRequest, setPredictionJournalDraftRequest] = useState<PredictionJournalDraftRequest | null>(null);
   const [predictionJournalEntriesRequestId, setPredictionJournalEntriesRequestId] = useState(0);
   const [nextDrawEvidenceResultForConfluence, setNextDrawEvidenceResultForConfluence] = useState<NextDrawEvidenceResult | null>(null);
+  const [previousNeighbourAtlasScope, setPreviousNeighbourAtlasScope] = useState<PreviousNeighbourScope>("mains-plus-supps");
+  const [previousNeighbourAtlasLookback, setPreviousNeighbourAtlasLookback] = useState<1 | 2>(1);
+  const [previousNeighbourAtlasHistorySource, setPreviousNeighbourAtlasHistorySource] = useState<PreviousNeighbourAtlasHistorySource>("baseline");
+  const [showDgaNeighbourAtlasOverlay, setShowDgaNeighbourAtlasOverlay] = useState(false);
   const predictionJournalDraftIdRef = useRef(0);
   const predictionJournalEntriesRequestIdRef = useRef(0);
+
+  const previousNeighbourAtlasAnalysis = useMemo(
+    () => analyzePreviousNeighbourCountShapeAtlas(
+      previousNeighbourAtlasHistorySource === "baseline" ? realHistory : realFilteredHistory,
+      {
+        scope: previousNeighbourAtlasScope,
+        lookbackDraws: previousNeighbourAtlasLookback,
+        excludedTargetMonthLabels: previousNeighbourAtlasHistorySource === "baseline"
+          ? baselineHistoryScope.excludedMonthLabels
+          : [],
+      },
+    ),
+    [
+      baselineHistoryScope.excludedMonthLabels,
+      previousNeighbourAtlasHistorySource,
+      previousNeighbourAtlasLookback,
+      previousNeighbourAtlasScope,
+      realFilteredHistory,
+      realHistory,
+    ],
+  );
+  const previousNeighbourAtlasEvidence = useMemo<PreviousNeighbourAtlasEvidenceSnapshot>(
+    () => buildPreviousNeighbourAtlasEvidence(previousNeighbourAtlasAnalysis, {
+      historySource: previousNeighbourAtlasHistorySource,
+      historySourceLabel: previousNeighbourAtlasHistorySource === "baseline"
+        ? baselineHistoryScopeLabel
+        : `Current WFMQYH (${realFilteredHistory.length} real draws)`,
+      targetDate: planningDrawContext.targetDrawDate,
+      targetDrawOrdinal: planningDrawContext.targetDrawOrdinal,
+      targetMonthExpectedDrawCount: planningDrawContext.targetMonthExpectedDrawCount,
+    }),
+    [
+      baselineHistoryScopeLabel,
+      planningDrawContext.targetDrawDate,
+      planningDrawContext.targetDrawOrdinal,
+      planningDrawContext.targetMonthExpectedDrawCount,
+      previousNeighbourAtlasAnalysis,
+      previousNeighbourAtlasHistorySource,
+      realFilteredHistory.length,
+    ],
+  );
+
+  const dgaNeighbourAtlasOverlayNumbers = useMemo(
+    () => previousNeighbourAtlasEvidence?.currentCloud?.targetNumbers ?? [],
+    [previousNeighbourAtlasEvidence],
+  );
+  const dgaNeighbourAtlasOverlayLabels = useMemo(
+    () => Object.fromEntries(
+      (previousNeighbourAtlasEvidence?.currentCloud?.numbers ?? []).map((row) => [
+        row.number,
+        row.directions.length ? row.directions.join("/") : "target",
+      ]),
+    ) as Record<number, string>,
+    [previousNeighbourAtlasEvidence],
+  );
 
   const selectionInsightsAnchorNumbers = useMemo(
     () => mergeSelectionInsightAnchorNumbers(userSelectedNumbers, generationForcedNumbers),
@@ -3362,6 +3482,7 @@ function AppInner(): JSX.Element {
   const dgaGridRef = useRef<HTMLDivElement>(null);
   const [simScrollOriginY, setSimScrollOriginY] = useState<number | null>(null);
   const scrollToDGA = useCallback(() => {
+    setDgaSectionOpen(true);
     setDgaGridExpanded(true);
     setSimScrollOriginY(window.scrollY);
     requestAnimationFrame(() => {
@@ -3424,35 +3545,26 @@ function AppInner(): JSX.Element {
     });
   }, []);
 
-  const navigateToMonthlyTransitionEvidence = useCallback(() => {
-    setShapeBucketQuotasExpanded(true);
-    if (typeof window === "undefined") return;
-
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => {
-        const element = document.getElementById(MONTHLY_TRANSITION_GOVERNOR_TARGET_ID);
-        if (!(element instanceof HTMLElement)) return;
-        element.scrollIntoView({ behavior: "smooth", block: "center" });
-        element.focus({ preventScroll: true });
-        element.classList.add("windfall-provenance-target-pulse");
-        window.setTimeout(() => element.classList.remove("windfall-provenance-target-pulse"), 1200);
-      });
-    });
-  }, []);
-
   const navigateToGenerationSetupSummaryTarget = useCallback((target: GenerationSetupSummaryTarget) => {
     if (target === "forcedExcluded") setActiveSetupSummaryExpanded(true);
-    if (target === "ratios" || target === "droughtGovernor" || target === "latestNeighbour") {
+    if (target === "ratios" || target === "droughtGovernor" || target === "latestNeighbour" || target === "overlap") {
       setRecencyLatestDrawExpanded(true);
     }
-    if (target === "numbersDiagnostic" || target === "d1Sgi") setEngineRankingExpanded(true);
-    if (target === "monthlyTransition" || target === "carryOver" || target === "bucketPlan") {
+    if (target === "numbersDiagnostic" || target === "d1Sgi" || target === "ogaForecast") setEngineRankingExpanded(true);
+    if (target === "monthlyTransition" || target === "carryOver" || target === "bucketPlan" || target === "endingDigits") {
       setShapeBucketQuotasExpanded(true);
     }
     if (target === "readinessFilters") setHardFiltersExpanded(true);
     if (typeof window === "undefined") return;
 
     const targetId = GENERATION_SETUP_SUMMARY_TARGET_IDS[target];
+    if (target === "terminalShapes" || target === "terminalRuns") {
+      const panel = document.getElementById(GENERATION_SETUP_SUMMARY_TARGET_IDS.compositionQuotas);
+      if (panel instanceof HTMLDetailsElement && !panel.open) {
+        const summary = panel.querySelector("summary");
+        if (summary instanceof HTMLElement) summary.click();
+      }
+    }
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
         const element = document.getElementById(targetId);
@@ -3474,6 +3586,10 @@ function AppInner(): JSX.Element {
       });
     });
   }, []);
+
+  const navigateToMonthlyTransitionEvidence = useCallback(() => {
+    navigateToGenerationSetupSummaryTarget("monthlyTransition");
+  }, [navigateToGenerationSetupSummaryTarget]);
 
   const handleDgaStripChange = useCallback((nums: number[]) => {
     const sorted = removeUserExcludedNumbers(normalizeDgaSelectedNumbers(nums), selectionUnavailableNumbers);
@@ -3622,13 +3738,15 @@ function AppInner(): JSX.Element {
       let csv = toCsv(nextRows);
       if (supportsFileSystemAccess) {
         try {
-          const handle = await pickCsvFile();
-          const file = await handle.getFile();
-          const existingCsv = await readCsvFromHandle(handle).catch(() => "");
+          const handle = csvHistoryTarget.target?.handle ?? await pickCsvFile();
+          const readable = await readCsvHistoryTarget(handle, true);
+          if (!readable) { showToast("CSV read permission was not granted. History was not changed."); return; }
+          const existingCsv = readable.csvText ?? "";
           const header = existingCsv ? parseCsv(existingCsv).header : undefined;
           csv = toCsv(nextRows, header);
           await writeCsvToHandle(handle, csv);
-          persistenceLabel = `saved to ${file.name}`;
+          await csvHistoryTarget.remember({ ...readable, csvText: csv });
+          persistenceLabel = `saved to ${readable.fileName}`;
         } catch (caught) {
           if (isFilePickerCancelError(caught)) {
             const message = "Save Official Draw Result cancelled. History was not changed and no CSV fallback was created.";
@@ -3662,6 +3780,8 @@ function AppInner(): JSX.Element {
     }
   }, [
     commitHistory,
+    csvHistoryTarget.target,
+    csvHistoryTarget.remember,
     isSavingManualPrizeCheckAsDraw,
     planningDrawContext.today,
     realHistory,
@@ -3732,6 +3852,15 @@ function AppInner(): JSX.Element {
       supp,
     };
   }, []);
+  const navigateToHotColdSettings = useCallback(() => {
+    const panel = document.getElementById("panel-hot-cold-ranking");
+    if (!(panel instanceof HTMLDetailsElement)) return;
+    if (!panel.open) (panel.querySelector("summary") as HTMLElement | null)?.click();
+    window.requestAnimationFrame(() => {
+      panel.scrollIntoView({ behavior: "smooth", block: "start" });
+      (panel.querySelector("select") as HTMLSelectElement | null)?.focus({ preventScroll: true });
+    });
+  }, []);
 
   const syncUserSelectionForExternalSimulation = useCallback((numbers: number[]) => {
     if (autoExcludeUnselected) return;
@@ -3752,6 +3881,46 @@ function AppInner(): JSX.Element {
     } as any);
     setSimSource('candidate');
     setSimCandidateIdx(idx);
+    scrollToDGA();
+  };
+
+  const handleSimulateEvidencePortfolioCandidate = (candidate: PortfolioCandidate, source: EvidencePortfolioSimulationSource) => {
+    const numbers = [...candidate.main, ...candidate.supp];
+    const unavailable = numbers.filter(number => selectionUnavailableNumbers.includes(number));
+    if (unavailable.length === 0) syncUserSelectionForExternalSimulation(numbers);
+    setSelectedCandidateIdx(-1);
+    setSimulatedDraw({ main: candidate.main.slice(), supp: candidate.supp.slice(), date: source === "shadow-baseline" ? "EvidencePortfolioShadow" : "EvidencePortfolio", isSimulated: true });
+    setSimSource("candidate");
+    setSimCandidateIdx(null);
+    const label = source === "shadow-baseline" ? "Unplayed shadow baseline" : `Evidence Portfolio ${candidate.role}`;
+    showToast(`${label} simulated in DGA with its saved mains and supps.${unavailable.length ? ` Shared selections kept unchanged because ${unavailable.join(", ")} are actively excluded.` : autoExcludeUnselected ? " Exclude-unselected pool kept unchanged." : ""}`);
+    setTraceMaybe(lines => [...lines, `[TRACE] ${label} DGA simulation: mains [${candidate.main.join(", ")}]; supps [${candidate.supp.join(", ")}]; simulated only, no history or frozen portfolio changes.`]);
+    setDgaSectionOpen(true);
+    scrollToDGA();
+  };
+
+  const handleSimulateJournalGame = (numbers: number[]) => {
+    const main = normalizePredictionCaptureGame(numbers);
+    if (!main) { showToast("Journal simulation needs exactly six distinct numbers from 1 to 45."); return; }
+    const unavailable = main.filter(number => selectionUnavailableNumbers.includes(number));
+    if (!unavailable.length) syncUserSelectionForExternalSimulation(main);
+    setSelectedCandidateIdx(-1);
+    setSimulatedDraw({ main, supp: [], date: "PredictionJournalGame", isSimulated: true });
+    setSimSource("candidate");
+    setSimCandidateIdx(null);
+    setDgaSectionOpen(true);
+    showToast(`Journal game simulated in DGA: six mains, no supplementary choices.${unavailable.length ? " Shared selections kept unchanged because some numbers are actively excluded." : autoExcludeUnselected ? " Exclude-unselected pool kept unchanged." : ""}`);
+    setTraceMaybe(lines => [...lines, `[TRACE] Prediction Journal game DGA simulation: mains [${main.join(", ")}]; supps []; simulated only. History, saved entries and forced constraints unchanged.`]);
+    scrollToDGA();
+  };
+
+  const handleSimulatePredictorGame = (game: PredictorGame) => {
+    const numbers = [...game.main, ...game.supp];
+    if (!numbers.some(number => selectionUnavailableNumbers.includes(number))) syncUserSelectionForExternalSimulation(numbers);
+    setSelectedCandidateIdx(-1);
+    setSimulatedDraw({ main: game.main.slice(), supp: game.supp.slice(), date: "WindfallPredictor", isSimulated: true });
+    setSimSource("candidate"); setSimCandidateIdx(null);
+    setTraceMaybe(lines => [...lines, `[TRACE] Windfall Predictor DGA simulation: ${game.recipe}; mains [${game.main.join(", ")}]; suggested supps [${game.supp.join(", ")}]. Simulation only; official history and frozen receipt unchanged.`]);
     scrollToDGA();
   };
 
@@ -4120,6 +4289,40 @@ function AppInner(): JSX.Element {
     () => buildOddEvenRatioQuotas(numCandidates, selectedRatios, ratioOptions),
     [numCandidates, ratioOptions, selectedRatios],
   );
+  const independentTerminalShapeOptions = useMemo(() => buildTerminalShapeOptions(realFilteredHistory), [realFilteredHistory]);
+  const handleTerminalShapeEnabled = (enabled: boolean) => {
+    if (enabled && !independentSelectedTerminalShapes.length) {
+      setSelectedTerminalShapes(independentTerminalShapeOptions.filter((item) => item.count > 0).map((item) => item.shape));
+    }
+    setTerminalShapeQuotaEnabled(enabled);
+  };
+  const terminalRunHistoryEvidence = useMemo(() => terminalRunEvidence(realFilteredHistory, realHistory), [realFilteredHistory, realHistory]);
+  const selectedTerminalRuns = useMemo(() => terminalRunUseAllObserved
+    ? observedTerminalRunKeys(terminalRunHistoryEvidence.options) : manualSelectedTerminalRuns,
+  [terminalRunUseAllObserved, terminalRunHistoryEvidence, manualSelectedTerminalRuns]);
+  const terminalRunMode = terminalRunUseAllObserved ? "allocation" : manualTerminalRunMode;
+  const terminalRunAllocationBasis = terminalRunUseAllObserved ? "history" : manualTerminalRunAllocationBasis;
+  const terminalRunRuleOptions = useMemo<TerminalRunRuleOptions>(() => ({
+    enabled: terminalRunRuleEnabled, mode: terminalRunMode, selectedRuns: selectedTerminalRuns,
+    useAllObservedRuns: terminalRunUseAllObserved, allocationBasis: terminalRunAllocationBasis,
+    runOptions: terminalRunHistoryEvidence.options, finalRequested: numCandidates,
+  }), [terminalRunRuleEnabled, terminalRunMode, selectedTerminalRuns, terminalRunUseAllObserved, terminalRunAllocationBasis, terminalRunHistoryEvidence, numCandidates]);
+  const terminalRunShapeLinkActive = terminalRunShapeLinkEnabled && terminalRunRuleEnabled;
+  const terminalShapeLinkEvidence = useMemo(() => terminalRunShapeLinkActive
+    ? linkedTerminalShapeEvidence(realFilteredHistory, terminalRunRuleOptions) : null,
+  [terminalRunShapeLinkActive, realFilteredHistory, terminalRunRuleOptions]);
+  const terminalShapeQuotaEnabled = terminalRunShapeLinkActive || independentTerminalShapeQuotaEnabled;
+  const selectedTerminalShapes = terminalShapeLinkEvidence?.selectedShapes ?? independentSelectedTerminalShapes;
+  const terminalShapeOptions = terminalShapeLinkEvidence?.shapeOptions ?? independentTerminalShapeOptions;
+  const terminalShapeQuotaOptions = useMemo<TerminalShapeQuotaOptions>(() => ({
+    enabled: terminalShapeQuotaEnabled, selectedShapes: selectedTerminalShapes,
+    shapeOptions: terminalShapeOptions, finalRequested: numCandidates, sourceError: terminalShapeLinkEvidence?.error,
+    allocationBasis: terminalRunShapeLinkActive ? "history" : independentTerminalShapeAllocationBasis,
+  }), [terminalShapeQuotaEnabled, selectedTerminalShapes, terminalShapeOptions, numCandidates, terminalShapeLinkEvidence, terminalRunShapeLinkActive, independentTerminalShapeAllocationBasis]);
+  const handleTerminalRunShapeLink = (enabled: boolean) => {
+    setTerminalRunShapeLinkEnabled(enabled);
+    if (enabled) setTerminalRunRuleEnabled(true);
+  };
 
   // Minimum number of prior draws required for a stable OGA baseline.
   // Draws computed against fewer than this many draws produce unreliable scores
@@ -4144,6 +4347,21 @@ function AppInner(): JSX.Element {
     },
     [pastOGAScores]
   );
+  const ogaForecastBaselineHistory = ogaBaselineMode === "window" ? realFilteredHistory : realHistory;
+  const ogaForecastStats = useMemo(
+    () => forecastOGA(realFilteredHistory, ogaForecastBaselineHistory, ogaSpokeCount),
+    [realFilteredHistory, ogaForecastBaselineHistory, ogaSpokeCount],
+  );
+  const ogaForecastBiasOptions = useMemo<OgaForecastBiasOptions>(() => ({
+    enabled: enableOGAForecastBias,
+    preferredBand: ogaPreferredBand,
+    bands: ogaForecastStats.bands,
+    deciles: ogaForecastStats.deciles,
+    preferredDeciles: ogaPreferredDeciles,
+    baselineHistory: ogaForecastBaselineHistory,
+    baselineLabel: `${ogaBaselineMode === "all" ? "Full History" : "Windowed"} (${ogaForecastBaselineHistory.length} real draws)`,
+    evidenceDrawCount: ogaForecastStats.n,
+  }), [enableOGAForecastBias, ogaPreferredBand, ogaForecastStats, ogaPreferredDeciles, ogaForecastBaselineHistory, ogaBaselineMode]);
 
   /** Monthly Repeat Bias: compute per-number weights for once-drawn numbers this month.
    *
@@ -4354,6 +4572,9 @@ function AppInner(): JSX.Element {
     planningDrawContext.targetMonthLabel,
     realHistory,
   ]);
+  const monthlyTransitionDisplaySummary = monthlyBucketTransitionGovernorDisplaySummary(
+    monthlyBucketTransitionGovernorProfile, rwr45Enabled,
+  );
   const activeDroughtEvidenceGovernorProfile = droughtEvidenceGovernorMode !== "off"
     ? droughtEvidenceGovernorProfile
     : undefined;
@@ -4390,9 +4611,7 @@ function AppInner(): JSX.Element {
     return map;
   }, [conditionalProb, temperatureSignal]);
 
-  const savedZoneWeights = useMemo(() => {
-    try { return getSavedZoneWeights(); } catch { return null; }
-  }, []);
+  const savedZoneWeights = useSavedZoneWeights();
 
   const [applyZoneBias, setApplyZoneBias] = useState<boolean>(false);
 
@@ -4417,6 +4636,15 @@ function AppInner(): JSX.Element {
       carryOver: monthEndCarryOverBiasEnabled && carryOverWeight > 0,
       scoring: Boolean(activeScoringGenerationProfile),
       carryOverWeight,
+      boosts: buildSurvivorRankingBoostState({
+        selHitsEnabled: rankingWeights.selHitsEnabled,
+        selectedNumberCount: userSelectedNumbers.length,
+        selBonusThreshold: rankingWeights.selBonusThreshold,
+        selBonusWeight: rankingWeights.selBonusWeight,
+        patternMode: patternConstraintMode,
+        selectedPatternCount: selectedWindowPatterns.length,
+        patternBoostFactor,
+      }),
     };
   }
 
@@ -4441,10 +4669,13 @@ function AppInner(): JSX.Element {
     if (survivorState.selected) activeSignals.push(`SelHits weight ${rankingWeights.sel}`);
     if (survivorState.recent) activeSignals.push(`RecentHits weight ${rankingWeights.recent}`);
     if (survivorState.carryOver) activeSignals.push(`carry-over weight ${survivorState.carryOverWeight}`);
+    activeSignals.push(...survivorRankingBoostDescriptions(survivorState.boosts));
     if (survivorState.scoring && activeScoringGenerationProfile) {
-      activeSignals.push(`Numbers diagnostic ${activeScoringGenerationProfile.influence}`);
+      activeSignals.push(`Numbers diagnostic ${activeScoringGenerationProfile.influence} (mean Numbers score only; tie-break)`);
     }
     if (selectedRatios.length > 0) activeSignals.push(`odd/even quota ${selectedRatios.join(", ")}`);
+    if (terminalShapeQuotaEnabled) activeSignals.push(`terminal shape quotas ${selectedTerminalShapes.join(", ") || "none selected"}`);
+    if (terminalRunRuleEnabled) activeSignals.push(`exact terminal runs ${terminalRunMode}: ${selectedTerminalRuns.join(", ") || "none selected"}`);
 
     const sliceSummary = poolBeforeSlice > requested
       ? `pool ${poolBeforeSlice} -> kept ${kept}`
@@ -4499,6 +4730,10 @@ function AppInner(): JSX.Element {
           (survivorState.selected ? wSel * (selHits / 8) : 0) +
           (survivorState.recent ? wRecent * (recentHits / 8) : 0) +
           (survivorState.carryOver ? wCarryOver * carryOver.normalizedScore : 0);
+        const patternMatches = countCandidateWindowPatternMatches(c, selectedWindowPatterns, patternSumTolerance);
+        const rankingBoost = applySurvivorRankingBoosts(finalComposite, selHits, patternMatches, survivorState.boosts);
+        const evidence = activeScoringGenerationProfile
+          ? scoreCandidateWithScoringProfile(c, activeScoringGenerationProfile) : undefined;
         const { label: prizeLabel, rank: prizeRank } = computePrize(c.main, c.supp);
         return {
           ...c,
@@ -4508,7 +4743,12 @@ function AppInner(): JSX.Element {
           recentHits,
           carryOverHits: carryOver.hits,
           carryOverScore: carryOver.normalizedScore,
-          finalCompositeAdj: finalComposite,
+          patternMatches,
+          patternRankingBonus: rankingBoost.patternBonus,
+          selHitsRankingBonus: rankingBoost.selectedBonus,
+          finalCompositeAdj: rankingBoost.score,
+          scoreEvidence: evidence?.normalizedScore,
+          scoreEvidenceTrace: evidence?.trace,
           prizeLabel,
           prizeRank,
         };
@@ -4630,6 +4870,49 @@ function AppInner(): JSX.Element {
     return excluded;
   }
 
+  const inclusionResetSources: NumberConstraintSource[] = [
+    ...forcedInclusionSources.map(source => ({
+      id: source.label, label: source.label, numbers: source.numbers,
+      clearImpact: source.label === "Latest draw ±1/±2 builder" && mirrorDgaStripToPreviousNeighbour
+        ? "Clear the builder's forced numbers and turn off DGA strip mirroring. Ordinary user selections remain."
+        : "Clear the forced-number selections from this source; ordinary user selections remain.",
+      onClear: () => { if (source.label === "Latest draw ±1/±2 builder") setMirrorDgaStripToPreviousNeighbour(false); source.clear(); },
+      onRemoveNumber: source.remove,
+    })),
+    { id: "dga-mirror", label: "DGA strip mirroring", numbers: [], enabled: mirrorDgaStripToPreviousNeighbour,
+      detail: "An enabled mirror can repopulate the latest-draw builder when user selections change.",
+      clearImpact: "Turn off Mirror strip to ±1/±2 builder. Keep ordinary user selections and the DGA simulation.",
+      onClear: () => setMirrorDgaStripToPreviousNeighbour(false) },
+  ];
+  const exclusionResetSources: NumberConstraintSource[] = [
+    { id: "manual", label: "User Exclusions / Next Hot Blocks", numbers: excludedNumbers,
+      detail: "These controls share one stored list; Windfall does not retain a separate origin for each number.",
+      clearImpact: "Clear the shared manual and Next Hot Blocks exclusion list.", onClear: () => setExcludedNumbers([]) },
+    { id: "hot-cold", label: "Hot vs Cold exclusions", numbers: hotColdExcludedNumbers,
+      clearImpact: "Clear numbers selected in Hot vs Cold exclusion mode.", onClear: () => setHotColdExcludedNumbers([]) },
+    { id: "unselected", label: "Exclude unselected", numbers: autoExcludedFromSelection, enabled: autoExcludeUnselected,
+      clearImpact: "Turn off Exclude unselected. Keep the ordinary user-selected number pool.", onClear: () => setAutoExcludeUnselected(false) },
+    { id: "sde1", label: "SDE1", numbers: sde1Exclusions, enabled: knobs.enableSDE1,
+      clearImpact: "Turn off SDE1 so its exclusions are no longer rebuilt.", onClear: () => setKnobs(current => ({ ...current, enableSDE1: false })) },
+    { id: "hc3", label: "HC3", numbers: hc3Exclusions, enabled: knobs.enableHC3,
+      clearImpact: "Turn off HC3 so its exclusions are no longer rebuilt.", onClear: () => setKnobs(current => ({ ...current, enableHC3: false })) },
+    { id: "ending-auto", label: "Ending-digit derived exclusions", numbers: mainConstraintAutoExclusions.excludedNumbers,
+      enabled: mainConstraintAutoExclusions.shouldApply,
+      detail: mainConstraintAutoExclusions.shouldApply ? `Derived from enabled At most caps totalling ${mainConstraintAutoExclusions.totalSelectedMax}.` : undefined,
+      clearImpact: `Turn off the enabled At most ending-digit caps that activate this derived list: ${exactConstraintRows.filter(row => row.enabled && row.mode === "atMost").map(row => row.label).join(", ") || "none"}. Stored counts and soft boosts stay unchanged.`,
+      onClear: () => { if (mainConstraintAutoExclusions.shouldApply) exactConstraintRows.filter(row => row.enabled && row.mode === "atMost").forEach(row => row.setEnabled(false)); } },
+    { id: "mian", label: "MiAN zero-count hard exclusions", numbers: getMianHardExclusions(), enabled: acceptanceNeedsHardExclude,
+      scope: "generation-only", detail: acceptanceNeedsEnabled ? "Applies only inside generation, not the shared number-strip exclusion list." : "Armed setting; MiAN is currently off.",
+      clearImpact: "Turn off MiAN zero-count hard exclusions. Keep the monthly minimum-count settings.", onClear: () => setAcceptanceNeedsHardExclude(false) },
+  ];
+  const handleNumberConstraintsCleared = (kind: NumberConstraintKind, report: ClearedNumberConstraintSource[]) => {
+    setTraceMaybe(current => [...current, `[TRACE] Cleared forced ${kind} sources: ${report.map(source => `${source.label} [${source.numbers.join(", ") || "no current numbers"}] - ${source.clearImpact}`).join(" | ")}. Other candidate filters, weights, user selections, history and journal entries were not reset.`]);
+    showToast(`Cleared ${kind} from ${report.length} source${report.length === 1 ? "" : "s"}. Ordinary user selections were kept.`);
+  };
+  const renderNumberConstraintSummary = (expanded = false) => <NumberConstraintSourcesSummary
+    inclusionSources={inclusionResetSources} exclusionSources={exclusionResetSources}
+    busy={isGenerating || isBatching || isBatchSessionRunning} defaultExpanded={expanded} onCleared={handleNumberConstraintsCleared} />;
+
   function buildLatestNeighbourStageMatchCompatibilityLine(excludedForRun: readonly number[]): string | null {
     if (!latestNeighbourSupportEnabled) return null;
     const hasMonthlyDrawSummaryCounts = !!monthlyConstraintPayload;
@@ -4689,7 +4972,64 @@ function AppInner(): JSX.Element {
     return `Monthly buckets — sizes und:${sizes.undrawn} 1x:${sizes.times1} 2x:${sizes.times2} 3x:${sizes.times3} 4x:${sizes.times4} 5x:${sizes.times5} 6x:${sizes.times6} 7x:${sizes.times7} 8x+:${sizes.times8}; required ≥ und:${req.undrawn} 1x:${req.times1} 2x:${req.times2} 3x:${req.times3} 4x:${req.times4} 5x:${req.times5} 6x:${req.times6} 7x:${req.times7} 8x+:${req.times8}`;
   };
 
-  function buildGenerationCompatibilityAuditTraceLines(label: string): string[] {
+  const terminalPlannerContext = useMemo(() => {
+    const buckets = monthlyConstraintPayload?.buckets ?? monthlyBucketSetsAlways ?? null;
+    const hardBuckets = monthlyBucketSetsAlways ?? buckets;
+    const excluded = new Set([...allExclusions, ...(acceptanceNeedsEnabled && acceptanceNeedsHardExclude && hardBuckets
+      ? MONTHLY_FREQUENCY_KEYS.flatMap(key => effectiveMianCounts[key] === 0 ? [...hardBuckets[key]] : []) : [])]);
+    return {
+      available: Array.from({ length: 45 }, (_, i) => i + 1).filter(n => !excluded.has(n)),
+      forced: generationForcedNumbers.filter(n => !excluded.has(n)),
+      monthly: { buckets, counts: maxMonthlyFrequencyConstraints(monthlyConstraintPayload?.constraints, acceptanceNeedsEnabled ? effectiveMianCounts : null) },
+    };
+  }, [monthlyConstraintPayload, monthlyBucketSetsAlways, allExclusions, acceptanceNeedsEnabled, acceptanceNeedsHardExclude, effectiveMianCounts, generationForcedNumbers]);
+
+  const generationPreflight = useMemo(() => {
+    const counts = rwr45Enabled
+      ? monthlyConstructiveEnabled && monthlyConstraintPayload ? monthlyConstraintPayload.constraints : zeroMonthlyFrequencyConstraints()
+      : maxMonthlyFrequencyConstraints(monthlyConstraintPayload?.constraints, acceptanceNeedsEnabled ? effectiveMianCounts : null);
+    const buckets = monthlyConstraintPayload?.buckets ?? monthlyBucketSetsAlways ?? null;
+    const mianBuckets = monthlyBucketSetsAlways ?? monthlyConstraintPayload?.buckets ?? null;
+    const mianExclusions = acceptanceNeedsEnabled && acceptanceNeedsHardExclude && mianBuckets
+      ? MONTHLY_FREQUENCY_KEYS.flatMap((key) => effectiveMianCounts[key] === 0 ? [...mianBuckets[key]] : []) : [];
+    const bypassedRules = [
+      selectedRatios.length ? "Odd/even quotas" : null,
+      terminalShapeQuotaEnabled ? "Terminal shape quotas" : null,
+      terminalRunRuleEnabled ? "Terminal run rules" : null,
+      exactConstraintRows.some((row) => row.enabled) ? "Ending-digit count checks (derived hard exclusions still apply)" : null,
+      lastDrawOverlapRuleMode !== "off" || repeatUnionEnabled ? "Latest-draw overlap / newest-draw pool" : null,
+      latestNeighbourSupportEnabled ? latestNeighbourSupportTraceLabel(latestNeighbourSupportMode) : null,
+      strictDroughtQuotaEffectiveMin > 0 || empiricalDroughtQuotaEffectiveMin > 0 ? "Drought quotas" : null,
+      enableOGAForecastBias ? "OGA acceptance bias" : null,
+    ].filter((label): label is string => !!label);
+    return analyzeGenerationPreflight({
+      mode: rwr45Enabled ? "rwr45" : "standard", requested: numCandidates,
+      forcedNumbers: generationForcedNumbers, excludedNumbers: [...allExclusions, ...mianExclusions],
+      excludeUnselected: autoExcludeUnselected, userSelectedNumbers,
+      ratios: selectedRatios, ratioOptions, shapes: terminalShapeQuotaOptions, runs: terminalRunRuleOptions,
+      endingDigits: [mainDigitGenerationOptions.main0, mainDigitGenerationOptions.main1, mainDigitGenerationOptions.main2,
+        mainDigitGenerationOptions.main3, mainDigitGenerationOptions.main4, mainDigitGenerationOptions.main5,
+        mainDigitGenerationOptions.main6, mainDigitGenerationOptions.main7, mainDigitGenerationOptions.main8, mainDigitGenerationOptions.main9],
+      repeatedFamilies: repeatedTerminalFamiliesRule,
+      monthly: { counts, buckets }, bypassedRules,
+      ogaForecast: ogaForecastBiasOptions,
+      requirements: [
+        ...(previousNeighbourLatestDraw && (minRecentMatches > 0 || maxLastDrawMatchesEnabled) ? [{ label: "Last-draw overlap", numbers: [...previousNeighbourLatestDraw.main, ...previousNeighbourLatestDraw.supp],
+          min: minRecentMatches, max: maxLastDrawMatchesEnabled ? maxLastDrawMatchesValue : 8, target: "overlap" as const }] : []),
+        ...(repeatUnionEnabled ? [{ label: "Newest-draw pool", numbers: [...repeatUnionNumbers], min: minFromRecentUnionM, target: "overlap" as const }] : []),
+        ...(strictDroughtQuotaEffectiveMin > 0 ? [{ label: "Strict drought quota", numbers: strictDroughtQuotaEligibleNumbers, min: strictDroughtQuotaEffectiveMin, target: "droughtGovernor" as const }] : []),
+        ...(empiricalDroughtQuotaEffectiveMin > 0 ? [{ label: "Empirical drought quota", numbers: empiricalDroughtQuotaEligibleNumbers, min: empiricalDroughtQuotaEffectiveMin, target: "droughtGovernor" as const }] : []),
+      ],
+    });
+  }, [rwr45Enabled, numCandidates, monthlyConstructiveEnabled, monthlyConstraintPayload, acceptanceNeedsEnabled, acceptanceNeedsHardExclude,
+    effectiveMianCounts, monthlyBucketSetsAlways, generationForcedNumbers, allExclusions, autoExcludeUnselected, userSelectedNumbers,
+    selectedRatios, ratioOptions, terminalShapeQuotaOptions, terminalRunRuleOptions, mainDigitGenerationOptions, repeatedTerminalFamiliesRule,
+    minRecentMatches, maxLastDrawMatchesEnabled, maxLastDrawMatchesValue, previousNeighbourLatestDraw, repeatUnionEnabled, repeatUnionNumbers,
+    minFromRecentUnionM, strictDroughtQuotaEffectiveMin, strictDroughtQuotaEligibleNumbers, empiricalDroughtQuotaEffectiveMin, empiricalDroughtQuotaEligibleNumbers,
+    terminalShapeQuotaEnabled, terminalRunRuleEnabled, exactConstraintRows, lastDrawOverlapRuleMode, latestNeighbourSupportEnabled, latestNeighbourSupportMode, enableOGAForecastBias, ogaForecastBiasOptions]);
+
+  function buildGenerationCompatibilityAuditTraceLines(label: string, mode: "standard" | "rwr45" | "batch" = "standard"): string[] {
+    if (mode === "rwr45") return [`[TRACE] ${label} compatibility audit · RwR45 hard inclusions/exclusions and enabled constructive Acceptance Needs checked; standard evidence and terminal quotas bypassed; ${generationPreflight.blockers.length ? `blockers: ${generationPreflight.blockers.map((issue) => issue.message).join(" | ")}` : "no known conflict detected"}. Readiness post-filters can still reduce final rows.`];
     const activeHardGates: string[] = [];
     const blockers: string[] = [];
     const cautions: string[] = [];
@@ -4712,6 +5052,8 @@ function AppInner(): JSX.Element {
     if (selectedRatios.length > 0 && !useTrickyRule) {
       activeHardGates.push(`odd/even quotas ${selectedRatios.join(", ")}`);
     }
+    if (terminalShapeQuotaEnabled) activeHardGates.push(`terminal shape quotas ${selectedTerminalShapes.join(", ") || "none selected"}`);
+    if (terminalRunRuleEnabled) activeHardGates.push(`exact maximal terminal runs ${terminalRunMode}: ${selectedTerminalRuns.join(", ") || "none selected"}`);
     if (useTrickyRule) {
       activeHardGates.push("Tricky Rule excludes 0:8 and 8:0");
     }
@@ -4846,6 +5188,7 @@ function AppInner(): JSX.Element {
       rankingWeights.recentHitsEnabled && rankingWeights.recent > 0 ? `RecentHits ${rankingWeights.recent}` : null,
       monthEndCarryOverBiasEnabled ? `carry-over ${monthEndCarryOverStrengthSettings.label}` : null,
       activeScoringGenerationProfile ? `Numbers diagnostic ${formatScoringInfluenceLabel(scoringGenerationInfluence)}` : null,
+      ...survivorRankingBoostDescriptions(getSurvivorSelectionState().boosts),
     ].filter(Boolean).join(", ") || "none";
     const hardFilterSummaryForTrace = [
       entropyEnabled ? `Entropy>=${entropyThreshold}` : null,
@@ -4890,7 +5233,13 @@ function AppInner(): JSX.Element {
     const lines = [
       `[TRACE] ${options.label} active setup · ${requestParts} · WFMQYH real ${realFilteredHistory.length}/${filteredHistory.length} · all real ${realHistory.length} · latest ${mostRecentDrawDateLabel}`,
       `[TRACE] ${options.label} active filters · hard ${hardFilterSummaryForTrace} · odd/even ${useTrickyRule ? "Tricky ON; ratio choices ignored" : ratioSummaryForTrace} · trend ${allowedTrendRatios.length ? allowedTrendRatios.join(", ") : "off"}`,
+      `[TRACE] ${options.label} terminal shape quotas ${terminalShapeQuotaEnabled ? `ON · shares ${terminalShapeQuotaOptions.allocationBasis === "equal" ? "manual equal (not historical support)" : "historical counts"} · ${terminalShapeLinkEvidence ? "matching run" : "WFMQYH"} valid eight-number draws ${terminalShapeOptions.reduce((sum, item) => sum + item.count, 0)} · requested targets ${Object.entries(buildTerminalShapeQuotas(options.requested, terminalShapeQuotaOptions)).map(([shape, count]) => `${shape}=${count}`).join(", ") || "none; selection needs attention"} · joint odd/even allocation${options.mode === "rwr45" ? " · bypassed by RwR45/PNUaRW45" : ""}` : "OFF"}`,
+      `[TRACE] ${options.label} terminal run rules ${terminalRunRuleEnabled ? `${terminalRunMode} · ${terminalRunUseAllObserved ? "all observed runs" : "manual selection"} · ${terminalRunHistoryEvidence.draws} valid real WFMQYH draws · selected ${selectedTerminalRuns.join(", ") || "none"} · ${terminalRunMode === "allocation" ? `${terminalRunAllocationBasis === "equal" ? "equal user allocation, not historical support" : "real WFMQYH count shares"} · assigned targets ${Object.entries(buildTerminalRunQuotas(options.requested, terminalRunRuleOptions)).map(([run, count]) => `${run}=${count}`).join(", ") || "none; selection needs attention"}` : "every selected run required"} · exact maximal circular runs; no sub-run credit${options.mode === "rwr45" ? " · bypassed by RwR45/PNUaRW45" : ""}` : "OFF"}`,
+      `[TRACE] Terminal run / shape link ${terminalShapeLinkEvidence ? `ON · ${terminalShapeLinkEvidence.modelVersion} · ${terminalRunMode === "requireAll" ? "all" : "any"} selected exact runs · ${terminalShapeLinkEvidence.matchingDraws}/${terminalShapeLinkEvidence.sourceDraws} matching valid real WFMQYH draws · counted once per draw · ${terminalShapeLinkEvidence.error ?? terminalShapeOptions.filter((row) => row.count > 0).map((row) => `${row.shape}: ${row.count} draws/${row.percent.toFixed(1)}%`).join(", ")}${options.mode === "rwr45" ? " · bypassed by RwR45/PNUaRW45" : ""}` : terminalRunShapeLinkEnabled ? "paused; run rules off; independent shape settings active" : "OFF; independent shape settings"}`,
       `[TRACE] ${options.label} active recency · ${latestNeighbourSupportTraceLabel(latestNeighbourSupportMode)} ${latestNeighbourSupportEnabled ? "ON" : "off"} · latest ±1/±2 forced ${previousNeighbourConstraintNumbers.length ? previousNeighbourConstraintNumbers.join(", ") : "off"} · drought quotas ${droughtQuotaSummary}`,
+      previousNeighbourAtlasEvidence
+        ? `[TRACE] Neighbour Atlas reference (observe-only): ${previousNeighbourAtlasEvidence.historySourceLabel}; scope ${previousNeighbourAtlasEvidence.scope === "mains" ? "mains only" : "mains + supps"}; lookback ${previousNeighbourAtlasEvidence.lookbackDraws}; target D${previousNeighbourAtlasEvidence.targetDrawOrdinal ?? "?"}${previousNeighbourAtlasEvidence.targetMonthExpectedDrawCount ? `/${previousNeighbourAtlasEvidence.targetMonthExpectedDrawCount}` : ""}; cloud ${previousNeighbourAtlasEvidence.currentCloud?.targetCount ?? 0}; ${previousNeighbourAtlasEvidence.ordinalEvidence ? `${previousNeighbourAtlasEvidence.ordinalEvidence.sampleQuality.toLowerCase()} ${previousNeighbourAtlasEvidence.ordinalEvidence.trials} trials` : "no ordinal sample"}; no generation, filter, or rank effect. Please do not count this again as an independent signal.`
+        : "[TRACE] Neighbour Atlas reference (observe-only): unavailable; no generation, filter, or rank effect.",
       `[TRACE] ${options.label} active weighting · ${weightingSummaryForTrace} · survivor ranking ${survivorSignalsForTrace}`,
       `[TRACE] ${options.label} active monthly/provenance · ${monthlySummaryForTrace} · ${forcedAndExcludedSummary}`,
     ];
@@ -4898,15 +5247,31 @@ function AppInner(): JSX.Element {
 		    if (options.emitFullSnapshot) {
 		      lines.push(`[TRACE] ${options.label} active setup detail · user selected ${userSelectedNumbers.length} [${formatTraceNumberPreview(userSelectedNumbers)}] · manual exclusions ${excludedNumbers.length} [${formatTraceNumberPreview(excludedNumbers)}] · hot/cold exclusions ${hotColdExcludedNumbers.length} [${formatTraceNumberPreview(hotColdExcludedNumbers)}] · signal confluence forced ${signalConfluenceForcedNumbers.length} [${formatTraceNumberPreview(signalConfluenceForcedNumbers)}]`);
 		    }
-	    if (repeatUnionMonthlyCompatibilityTrace) {
+	    if (options.mode !== "rwr45" && repeatUnionMonthlyCompatibilityTrace) {
 	      lines.push(`[TRACE] ${repeatUnionMonthlyCompatibilityTrace}`);
 	    }
-      lines.push(...buildGenerationCompatibilityAuditTraceLines(options.label));
+      lines.push(...buildGenerationCompatibilityAuditTraceLines(options.label, options.mode));
       lines.push(...effectiveSettingsTrace(effectiveSettingsLedger));
       if (options.mode === "rwr45") lines.push("[TRACE] Effective Settings above describe configured standard generation. RwR45 bypasses evidence weights and quotas as reported separately.");
 
 	    return lines;
 	  }
+
+  function buildNeighbourAtlasCoverageTraceLine(label: string, rows: readonly CandidateSet[]): string {
+    if (!previousNeighbourAtlasEvidence?.currentCloud) {
+      return `[TRACE] ${label} Neighbour Atlas display audit: unavailable current cloud; no generation, filter, or rank effect.`;
+    }
+    if (!rows.length) {
+      return `[TRACE] ${label} Neighbour Atlas display audit: 0 displayed candidates; no generation, filter, or rank effect.`;
+    }
+    const counts = rows.map((candidate) => matchNumbersToPreviousNeighbourAtlas(
+      [...candidate.main, ...candidate.supp],
+      previousNeighbourAtlasEvidence,
+    ).matchedNumbers.length);
+    const rowsWithAny = counts.filter((count) => count > 0).length;
+    const average = counts.reduce((sum, count) => sum + count, 0) / counts.length;
+    return `[TRACE] ${label} Neighbour Atlas display audit: ${rowsWithAny}/${rows.length} rows cover at least one current Atlas target; unique matches min ${Math.min(...counts)}, avg ${average.toFixed(2)}, max ${Math.max(...counts)}. Post-generation observation only; Atlas did not influence construction, filtering, or survivor ranking.`;
+  }
 
   useEffect(() => {
     setCandidates(prev => {
@@ -4914,7 +5279,7 @@ function AppInner(): JSX.Element {
       const cleared = prev.map(c => ({ ...c, ogaScore: undefined, ogaPercentile: undefined }));
       return recomputeCompositeRanking(cleared);
     });
-  }, [rankingWeights, userSelectedNumbers, realFilteredHistory, stableOGAScores, ogaSpokeCount, monthEndCarryOverBiasEnabled, monthEndCarryOverWeightsForGeneration, monthEndCarryOverStrengthSettings.rankingWeight]);
+  }, [rankingWeights, userSelectedNumbers, realFilteredHistory, stableOGAScores, ogaSpokeCount, monthEndCarryOverBiasEnabled, monthEndCarryOverWeightsForGeneration, monthEndCarryOverStrengthSettings.rankingWeight, selectedWindowPatterns, patternConstraintMode, patternBoostFactor, patternSumTolerance, activeScoringGenerationProfile]);
 
   function withinSumRange(candidate: CandidateSet): boolean {
     // Hook for sum filter if you enable it later
@@ -4998,6 +5363,16 @@ function AppInner(): JSX.Element {
       return;
     }
 
+    if (generationPreflight.blockers.length > 0) {
+      setCandidates([]);
+      setQuotaWarning(generationPreflight.blockers.map((issue) => issue.message).join(" "));
+      setRatioSummary(summarizeOddEvenRatios([], rwr45Enabled ? RWR45_CANDIDATE_COUNT : numCandidates, 0));
+      setTrace(generationPreflightTrace(generationPreflight));
+      setIsGenerating(false);
+      return;
+    }
+    setTrace(generationPreflightTrace(generationPreflight));
+
     if (rwr45Enabled) {
       const t0 = performance.now();
       const rwr45MianExcl = getMianHardExclusions();
@@ -5041,6 +5416,9 @@ function AppInner(): JSX.Element {
       if (drawBucketPatternInfluenceEnabled) {
         setTraceMaybe((t) => [...t, "[TRACE] Draw Bucket Patterns influence is ON but RwR45/PNUaRW45 bypasses evidence weighting; leaderboard boost was not applied to this random-coverage run."]);
       }
+      if (enableOGAForecastBias) {
+        setTraceMaybe((t) => [...t, "[TRACE] OGA acceptance bias is ON but RwR45/PNUaRW45 bypasses this gate; selected OGA score bands were not applied."]);
+      }
       if (repeatedTerminalFamiliesRule) {
         setTraceMaybe((t) => [...t, "[TRACE] Repeated Terminal Digit Families is ON but RwR45/PNUaRW45 uses its own random-coverage partition; repeated-family rule was not applied to this random-coverage run."]);
       }
@@ -5067,6 +5445,11 @@ function AppInner(): JSX.Element {
       processedCandidates = readinessFilterResult.candidates;
       const dt = Math.round(performance.now() - t0);
       processedCandidates = captureGenerationSessionCandidates(processedCandidates);
+      const compositionBuckets = monthlyConstructiveEnabled && monthlyConstraintPayload
+        ? monthlyConstraintPayload.buckets : monthlyBucketSetsAlways ?? monthlyConstraintPayload?.buckets ?? null;
+      const composition = captureRwR45Composition(processedCandidates, compositionBuckets,
+        `${planningDrawContext.targetMonthLabel} before D${planningDrawContext.targetDrawOrdinal}; latest real draw ${mostRecentDrawDateLabel}`);
+      setRwR45Composition(composition);
       recordPredictionCaptureOutput("generated", processedCandidates);
 
       setCandidates(processedCandidates);
@@ -5080,13 +5463,17 @@ function AppInner(): JSX.Element {
       setTraceMaybe((t) => [
         ...t,
         ...result.traceLines,
+        ...generatedCompositionTrace(composition),
         ...(readinessHardFiltersActive || totalReadinessHardFilterRejects(readinessFilterResult.rejects) > 0 || readinessFilterResult.skipped.length > 0
           ? [
             `[TRACE] RwR45 / PNUaRW45: Rdy component hard filters ${readinessHardFilterSummary}; rejected IDM:${readinessFilterResult.rejects.idm} Conv:${readinessFilterResult.rejects.conv} OGA:${readinessFilterResult.rejects.oga}`,
             ...readinessFilterResult.skipped.map((message) => `[TRACE] RwR45 / PNUaRW45: ${message}`),
           ]
           : []),
+        buildNeighbourAtlasCoverageTraceLine("RwR45 / PNUaRW45", processedCandidates),
         `[TRACE] RwR45 / PNUaRW45 completed: displayed ${processedCandidates.length} candidates in ${dt}ms.`,
+        ...(survivorRankingBoostDescriptions(getSurvivorSelectionState().boosts).length
+          ? [`[TRACE] RwR45 / PNUaRW45 ranking bonuses order displayed rows only: ${survivorRankingBoostDescriptions(getSurvivorSelectionState().boosts).join("; ")}. Random construction is unchanged; no overgen survivor slice.`] : []),
       ]);
       setIsGenerating(false);
       return;
@@ -5105,9 +5492,6 @@ function AppInner(): JSX.Element {
       lambda: lambdaEnabled ? lambda : 0.0,
     };
 
-    // OGA forecast bands (KDE) based on selected baseline
-    const baselineForOGAForecast = ogaBaselineMode === "window" ? realFilteredHistory : realHistory;
-    const ogaStats = forecastOGA(realFilteredHistory, baselineForOGAForecast, ogaSpokeCount);
     const monthEndCarryOverWeights = monthEndCarryOverBiasEnabled ? monthEndCarryOverWeightsForGeneration : undefined;
     const latestNeighbourMonthlyBuckets = monthlyBucketSetsAlways ?? monthlyConstraintPayload?.buckets ?? dgaLiveMonthlyBuckets;
     const activeMonthlyBucketOptions = bucketCoveragePlannerCountTotal > 0 && bucketCoveragePlannerBuckets ? {
@@ -5234,20 +5618,14 @@ function AppInner(): JSX.Element {
       minFromRecentUnionM,
       trendMapEntries: allowedTrendRatios.length ? serializeTrendMap(activeTrendMap) : undefined,
       allowedTrendRatios: allowedTrendRatios.length ? allowedTrendRatios : undefined,
-      sumFilter: { enabled: false, min: 0, max: 0, includeSupp: true },
+      sumFilter,
       patternOptions: {
         constraints: selectedWindowPatterns,
         mode: patternConstraintMode,
         boostFactor: patternBoostFactor,
         sumTolerance: patternSumTolerance,
       },
-      ogaBiasOptions: {
-        enabled: enableOGAForecastBias,
-        preferredBand: ogaPreferredBand,
-        bands: ogaStats.bands,
-        deciles: ogaStats.deciles,
-        preferredDeciles: ogaPreferredDeciles,
-      },
+      ogaBiasOptions: ogaForecastBiasOptions,
       mainZeroOptions: mainDigitGenerationOptions.main0,
       mainFiveOptions: mainDigitGenerationOptions.main5,
       mainOneOptions: mainDigitGenerationOptions.main1,
@@ -5290,6 +5668,8 @@ function AppInner(): JSX.Element {
           scope: repeatedTerminalFamiliesRule.scope,
         }
         : undefined,
+      terminalShapeQuotaOptions,
+      terminalRunRuleOptions,
     };
 
     // Trace callback: appends messages as they arrive from the worker
@@ -5381,7 +5761,25 @@ function AppInner(): JSX.Element {
       const poolBeforeSlice = processedCandidates.length;
       let finalRatioTargets = result.ratioSummary.targetRatios;
       let finalRatioQuotaWarning: string | undefined;
-      if (processedCandidates.length > numCandidates) {
+      if (terminalRunRuleEnabled) {
+        if (generationSessionActive) processedCandidates = filterCandidatesForGenerationSession(processedCandidates, buildGenerationSessionMainKeySet(generationSessionRows)).candidates;
+        processedCandidates.sort(compareFinalSurvivorCandidates);
+        const allocation = applyTerminalRunCompositionQuotas(processedCandidates, numCandidates, useTrickyRule ? [] : selectedRatios, ratioOptions, terminalShapeQuotaOptions, terminalRunRuleOptions);
+        processedCandidates = allocation.candidates;
+        finalRatioTargets = Object.keys(allocation.ratioQuotas).length ? allocation.ratioQuotas : undefined;
+        finalRatioQuotaWarning = allocation.warning;
+        setTraceMaybe((lines) => [...lines, `[TRACE] Final terminal run composition: ${processedCandidates.length}/${numCandidates}; assigned runs ${Object.entries(allocation.runQuotas).map(([run, count]) => `${run}=${allocation.runCounts[run] ?? 0}/${count}`).join(", ") || "require all"}; odd/even ${JSON.stringify(allocation.ratioCounts)}; shapes ${JSON.stringify(allocation.shapeCounts)}. ${allocation.warning ?? "All selected allocations fulfilled; each candidate counted once."}`]);
+      } else if (terminalShapeQuotaEnabled) {
+        if (generationSessionActive) {
+          processedCandidates = filterCandidatesForGenerationSession(processedCandidates, buildGenerationSessionMainKeySet(generationSessionRows)).candidates;
+        }
+        processedCandidates.sort(compareFinalSurvivorCandidates);
+        const allocation = applyCompositionQuotas(processedCandidates, numCandidates, useTrickyRule ? [] : selectedRatios, ratioOptions, terminalShapeQuotaOptions);
+        processedCandidates = allocation.candidates;
+        finalRatioTargets = Object.keys(allocation.ratioQuotas).length ? allocation.ratioQuotas : undefined;
+        finalRatioQuotaWarning = allocation.warning;
+        setTraceMaybe((lines) => [...lines, `[TRACE] Final composition quotas: ${processedCandidates.length}/${numCandidates}; terminal shapes ${Object.entries(allocation.shapeQuotas).map(([shape, count]) => `${shape}=${allocation.shapeCounts[shape] ?? 0}/${count}`).join(", ")}. ${allocation.warning ?? "Both selected allocations fulfilled."}`]);
+      } else if (processedCandidates.length > numCandidates) {
         processedCandidates.sort(compareFinalSurvivorCandidates);
         if (selectedRatios.length > 0) {
           const quotaResult = applyOddEvenRatioQuotas(processedCandidates, numCandidates, selectedRatios, ratioOptions);
@@ -5440,6 +5838,10 @@ function AppInner(): JSX.Element {
           processedCandidates.length,
           numCandidates
         ),
+        buildNeighbourAtlasCoverageTraceLine(
+          stoppedByUser ? "Stopped generation" : "Generation",
+          processedCandidates,
+        ),
       ]);
 
       generationStopRequestedRef.current = false;
@@ -5486,8 +5888,6 @@ function AppInner(): JSX.Element {
       lambda: lambdaEnabled ? lambda : 0.0,
     };
 
-    const baselineForOGAForecast = ogaBaselineMode === "window" ? realFilteredHistory : realHistory;
-    const ogaStats = forecastOGA(realFilteredHistory, baselineForOGAForecast, ogaSpokeCount);
     const monthEndCarryOverWeights = monthEndCarryOverBiasEnabled ? monthEndCarryOverWeightsForGeneration : undefined;
     const latestNeighbourMonthlyBuckets = monthlyBucketSetsAlways ?? monthlyConstraintPayload?.buckets ?? dgaLiveMonthlyBuckets;
     const activeMonthlyBucketOptions = bucketCoveragePlannerCountTotal > 0 && bucketCoveragePlannerBuckets ? {
@@ -5606,20 +6006,14 @@ function AppInner(): JSX.Element {
       minFromRecentUnionM,
       allowedTrendRatios.length ? activeTrendMap : undefined,
       allowedTrendRatios.length ? allowedTrendRatios : undefined,
-      { enabled: false, min: 0, max: 0, includeSupp: true },
+      sumFilter,
       {
         constraints: selectedWindowPatterns,
         mode: patternConstraintMode,
         boostFactor: patternBoostFactor,
         sumTolerance: patternSumTolerance,
       },
-      {
-        enabled: enableOGAForecastBias,
-        preferredBand: ogaPreferredBand,
-        bands: ogaStats.bands,
-        deciles: ogaStats.deciles,
-        preferredDeciles: ogaPreferredDeciles,
-      },
+      ogaForecastBiasOptions,
       undefined,
       mainDigitGenerationOptions.main0,
       mainDigitGenerationOptions.main5,
@@ -5664,6 +6058,9 @@ function AppInner(): JSX.Element {
           scope: repeatedTerminalFamiliesRule.scope,
         }
         : undefined,
+      undefined,
+      { ...terminalShapeQuotaOptions, finalRequested: target },
+      { ...terminalRunRuleOptions, finalRequested: target },
     );
 
     const monthlyTrace = buildMonthlyTrace();
@@ -5729,7 +6126,17 @@ function AppInner(): JSX.Element {
       processed = recomputeCompositeRanking(processed);
     }
     const poolBeforeSlice = processed.length;
-    if (processed.length > target) {
+    if (terminalRunRuleEnabled) {
+      processed.sort(compareFinalSurvivorCandidates);
+      const allocation = applyTerminalRunCompositionQuotas(processed, target, useTrickyRule ? [] : selectedRatios, ratioOptions, terminalShapeQuotaOptions, terminalRunRuleOptions);
+      processed = allocation.candidates;
+      setTraceMaybe((lines) => [...lines, `[TRACE] ${traceLabel} final terminal run composition: ${processed.length}/${target}; ${Object.entries(allocation.runQuotas).map(([run, count]) => `${run}=${allocation.runCounts[run] ?? 0}/${count}`).join(", ") || "require all"}. ${allocation.warning ?? "All selected allocations fulfilled."}`]);
+    } else if (terminalShapeQuotaEnabled) {
+      processed.sort(compareFinalSurvivorCandidates);
+      const allocation = applyCompositionQuotas(processed, target, useTrickyRule ? [] : selectedRatios, ratioOptions, terminalShapeQuotaOptions);
+      processed = allocation.candidates;
+      setTraceMaybe((lines) => [...lines, `[TRACE] ${traceLabel} final composition quotas: ${processed.length}/${target}; ${Object.entries(allocation.shapeQuotas).map(([shape, count]) => `${shape}=${allocation.shapeCounts[shape] ?? 0}/${count}`).join(", ")}. ${allocation.warning ?? "Both selected allocations fulfilled."}`]);
+    } else if (processed.length > target) {
       processed.sort(compareFinalSurvivorCandidates);
       if (selectedRatios.length > 0) {
         const quotaResult = applyOddEvenRatioQuotas(processed, target, selectedRatios, ratioOptions);
@@ -6097,6 +6504,12 @@ function AppInner(): JSX.Element {
         { label: "Drought governor", value: droughtEvidenceGovernorProfile.summaryLabel },
         { label: "Drought quotas", value: droughtQuotaSummary },
         { label: "Prev ±1/±2", value: previousNeighbourConstraintNumbers.length ? previousNeighbourConstraintNumbers.join(", ") : "off" },
+        {
+          label: "Neighbour Atlas",
+          value: previousNeighbourAtlasEvidence
+            ? `${previousNeighbourAtlasEvidence.historySourceLabel} · ${previousNeighbourAtlasEvidence.scope === "mains" ? "mains" : "mains + supps"} · lookback ${previousNeighbourAtlasEvidence.lookbackDraws} · D${previousNeighbourAtlasEvidence.targetDrawOrdinal ?? "?"}${previousNeighbourAtlasEvidence.targetMonthExpectedDrawCount ? `/${previousNeighbourAtlasEvidence.targetMonthExpectedDrawCount}` : ""} · cloud ${previousNeighbourAtlasEvidence.currentCloud?.targetCount ?? 0} · ${previousNeighbourAtlasEvidence.ordinalEvidence ? `${previousNeighbourAtlasEvidence.ordinalEvidence.sampleQuality.toLowerCase()} ${previousNeighbourAtlasEvidence.ordinalEvidence.trials} trials` : "no ordinal sample"} · observe-only`
+            : "unavailable · observe-only",
+        },
         { label: "Drought-break", value: droughtBreakSelectedNumbers.length ? droughtBreakSelectedNumbers.join(", ") : "off" },
         { label: "Signal Confluence", value: signalConfluenceForcedNumbers.length ? signalConfluenceForcedNumbers.join(", ") : "off" },
         { label: "Repeat", value: repeatUnionSummary },
@@ -6118,6 +6531,8 @@ function AppInner(): JSX.Element {
       target: "endingBuckets",
       targetLabel: "Go to Shape & Bucket Quotas",
       items: [
+        { label: "Terminal shape quotas", value: terminalShapeQuotaEnabled ? `${terminalShapeLinkEvidence ? "Linked to runs; " : ""}${terminalShapeQuotaOptions.allocationBasis === "equal" ? "Equal manual shares; " : "Historical shares; "}${selectedTerminalShapes.join(", ") || "ON; none selected"}` : "off" },
+        { label: "Exact terminal runs", value: terminalRunRuleEnabled ? `${terminalRunUseAllObserved ? "all observed" : "manual"} · ${terminalRunMode}${terminalRunMode === "allocation" ? ` (${terminalRunAllocationBasis === "equal" ? "equal user allocation" : "WFMQYH count shares"})` : ""}: ${selectedTerminalRuns.join(", ") || "none selected"}` : "off" },
         { label: "End limits", value: endDigitSetSummary },
         { label: "Repeated families", value: repeatedTerminalFamiliesSummary },
         { label: "Digit width", value: digitWidthConstraintTargets.enabled ? `${digitWidthConstraintTargets.singleDigitPercent}/${digitWidthConstraintTargets.twoDigitPercent} ${formatDigitWidthScopeLabel(digitWidthConstraintTargets.scope)} => ${digitWidthConstraintTargets.singleDigitCount}/${digitWidthConstraintTargets.twoDigitCount}` : "off" },
@@ -6137,7 +6552,7 @@ function AppInner(): JSX.Element {
             ? `${monthEndCarryOverStrengthSettings.label} · ${monthEndCarryOverWeighting.targetMonthLabel} · active ${monthEndCarryOverWeighting.activeNumbers.length}${monthEndCarryOverPoolBreakdown ? ` (${monthEndCarryOverPoolBreakdown})` : ""} · undrawn ${monthEndCarryOverIncludeMonthEndUndrawn ? "on" : "off"} · boundary ${monthEndCarryOverIncludeBoundaryRepeats ? "on" : "off"}${selectedCarryOverBoostSummary ? ` · selected ${selectedCarryOverBoostSummary} x${selectedCarryOverBoostFactor}` : ""}`
             : `off · early-month Auto ${monthEndCarryOverAutoEnabled ? "enabled, no signal" : "off"}`,
         },
-        { label: "Monthly transition", value: monthlyBucketTransitionGovernorProfile.summaryLabel },
+        { label: "Monthly transition", value: monthlyTransitionDisplaySummary },
       ],
     },
   ];
@@ -6151,9 +6566,11 @@ function AppInner(): JSX.Element {
     { key: "forced", text: `Forced ${generationForcedNumbers.length}`, target: "forcedExcluded", targetLabel: "Show forced-number provenance" },
     { key: "excluded", text: `Excluded ${allExclusions.length}`, target: "forcedExcluded", targetLabel: "Show exclusion provenance" },
     { key: "ratios", text: `Ratios ${selectedRatios.length ? selectedRatios.join(" ") : "off"}`, target: "ratios", targetLabel: "Go to odd/even ratio controls" },
+    { key: "terminal-shapes", text: `Terminal shapes ${terminalShapeQuotaEnabled ? `${selectedTerminalShapes.length} ${terminalShapeLinkEvidence ? "linked" : "selected"}` : "off"}`, target: "terminalShapes", targetLabel: "Go to Terminal Repetition Shapes" },
+    { key: "terminal-runs", text: `Terminal runs ${terminalRunRuleEnabled ? `${terminalRunMode} ${selectedTerminalRuns.length} selected` : "off"}`, target: "terminalRuns", targetLabel: "Go to Terminal Run Quotas" },
     { key: "numbers", text: `Numbers diagnostic ${formatScoringInfluenceLabel(scoringGenerationInfluence)}`, target: "numbersDiagnostic", targetLabel: "Go to Numbers diagnostic influence" },
     { key: "drought", text: `Drought governor ${droughtEvidenceGovernorProfile.summaryLabel}`, target: "droughtGovernor", targetLabel: "Go to Drought Evidence Governor" },
-    { key: "monthly-transition", text: `Monthly transition ${monthlyBucketTransitionGovernorProfile.summaryLabel}`, target: "monthlyTransition", targetLabel: "Go to Monthly Bucket Transition Governor" },
+    { key: "monthly-transition", text: `Monthly transition ${monthlyTransitionDisplaySummary}`, target: "monthlyTransition", targetLabel: "Go to Monthly Bucket Transition Governor" },
     { key: "d1-sgi", text: `D1 SGI ${d1TerminalMomentumSgiEnabled ? formatD1TerminalMomentumStrength(d1TerminalMomentumGenerationProfile.internalStrength) : "off"}`, target: "d1Sgi", targetLabel: "Go to D1 terminal momentum SGI" },
     { key: "latest-neighbour", text: `${latestNeighbourSupportTraceLabel(latestNeighbourSupportMode)} ${latestNeighbourSupportEnabled ? "on" : "off"}`, target: "latestNeighbour", targetLabel: "Go to Latest Draw neighbour support" },
     { key: "readiness", text: `Rdy filters ${readinessHardFilterSummary}`, target: "readinessFilters", targetLabel: "Go to Readiness hard filters" },
@@ -6166,11 +6583,14 @@ function AppInner(): JSX.Element {
     version: SETTINGS_MODEL_VERSION,
     rows: [
       { id: "generation-mode", label: "Generation mode", requested: rwr45Enabled ? "RwR45" : "Standard", applied: rwr45Enabled ? "Random coverage; evidence weights and quotas bypassed" : `Count ${numCandidates}; overgen ${overgenFactor}x; attempts ${attemptMultiplier} per pool row`, source: "Control", effect: "Generation path", scope: "Main generator", reason: "The rows below describe standard-mode configuration; RwR45 bypasses evidence settings. Trace reports each run's actual path." },
+      { id: "oga-acceptance", label: "OGA acceptance bias", requested: enableOGAForecastBias ? "On" : "Off", applied: rwr45Enabled && enableOGAForecastBias ? "Bypassed by RwR45" : ogaForecastBiasSummary(ogaForecastBiasOptions), source: "Control", effect: "Candidate acceptance gate", scope: `${ogaForecastStats.n} active real draws; reference ${ogaForecastBiasOptions.baselineLabel}`, reason: "Selected deciles are authoritative; weights control algorithm acceptance, not quotas or winning probabilities. Low/Mid/High applies only with no detailed selections. Cutoff ties go to the lower interval." },
       { id: "numbers", label: "Numbers diagnostic influence", requested: scoringGenerationInfluence, applied: activeScoringGenerationProfile ? activeScoringGenerationProfile.traceLabel : "Off", source: "Control", effect: "Sampling and survivor ranking", scope: historyWindowName, reason: "Number ranks use Light 0.9-1.2x, Normal 0.75-1.55x, Strong 0.55-2.2x; tied scores are neutral. Diagnostic support, not win probability." },
       { id: "selected", label: "Selected-number boost", requested: selectedBoostEnabled ? `${selectedBoostFactor}x` : "Off", applied: selectedBoostEnabled ? `${selectedBoostFactor}x for [${userSelectedNumbers.join(", ") || "none"}]` : "Off", source: "Control", effect: "Sampling", scope: "User selection", reason: "Selection alone does not enable this boost. Forced inclusion is a separate constraint." },
       { id: "forced", label: "Forced / excluded numbers", requested: `Forced [${generationForcedNumbers.join(", ") || "none"}]; exclusions [${allExclusions.join(", ") || "none"}]`, applied: `MiAN exclusions [${getMianHardExclusions().join(", ") || "none"}]; SDE1 ${knobs.enableSDE1 ? "On" : "Off"}; HC3 ${knobs.enableHC3 ? "On" : "Off"}; exclude-unselected ${autoExcludeUnselected ? "On" : "Off"}`, source: "Control", effect: "Hard inclusion / exclusion", scope: "Main generator", reason: "Current derived lists reflect the enabled rules. Compatibility checks flag conflicts; runtime Trace also records row-specific pool changes." },
       { id: "monthly-counts", label: "Monthly construction", requested: `Constructive ${monthlyConstructiveEnabled ? "On" : "Off"}; MiAN ${acceptanceNeedsEnabled ? "On" : "Off"}`, applied: `Construction: ${monthlyConstructiveEnabled && monthlyConstraintPayload ? formatMonthlyConstraintCountsForTrace(monthlyConstraintPayload.constraints) : "Off"}; MiAN: ${acceptanceNeedsEnabled ? formatMonthlyConstraintCountsForTrace(effectiveMianCounts) : "Off"}`, source: "Control", effect: "Construction and hard minimums", scope: planningDrawContext.targetMonthLabel, reason: `Coverage ${bucketCoveragePlannerEnabled ? bucketCoveragePlannerPreview.label : "Off"}; ignored undrawn coverage ${bucketCoveragePlannerIgnoreUndrawn ? "On" : "Off"}.` },
       { id: "survivors", label: "Survivor ranking", requested: `OGA ${knobs.enableOGA ? rankingWeights.oga : 0}; SelHits ${rankingWeights.selHitsEnabled ? rankingWeights.sel : 0}; RecentHits ${rankingWeights.recentHitsEnabled ? rankingWeights.recent : 0}`, applied: `Numbers ${activeScoringGenerationProfile ? scoringGenerationInfluence : "Off"}; carry-over ${monthEndCarryOverBiasEnabled ? monthEndCarryOverStrength : "Off"}`, source: "Control", effect: "Final pool selection", scope: "Main generator", reason: "These signals operate after hard filters. Odd/even quotas remain enforced; a construction boost does not guarantee survival into the displayed rows." },
+      { id: "sel-bonus", label: "SelHits threshold bonus", requested: `+${rankingWeights.selBonusWeight} at >=${rankingWeights.selBonusThreshold}`, applied: getSurvivorSelectionState().boosts.selectedActive ? `+${getSurvivorSelectionState().boosts.selectedBonus} at >=${getSurvivorSelectionState().boosts.selectedThreshold}` : "Off", source: "Control", effect: "Final survivor ranking", scope: "User selection", reason: "Added after weight normalization. Requires SelHits On, user-selected numbers and a positive bonus; ordinary SelHits weight may be 0. Never bypasses hard filters." },
+      { id: "pattern-bonus", label: "Window Stats pattern bonus", requested: `${patternConstraintMode}; +${patternBoostFactor} per match; ${selectedWindowPatterns.length} patterns`, applied: getSurvivorSelectionState().boosts.patternActive ? `+${getSurvivorSelectionState().boosts.patternBonusPerMatch} per distinct match; sum tolerance +/-${patternSumTolerance}` : patternConstraintMode === "restrict" && selectedWindowPatterns.length > 0 ? "Restrict (no ranking bonus)" : "Off", source: "Control", effect: "Final survivor ranking; Restrict is a hard gate", scope: "Captured six-main or eight-number patterns", reason: "Bonus is additive after normalization; 0 is neutral. Pattern counts preserve captured scope. No sampling-weight change or quota bypass." },
       { id: "window", label: "WFMQYH", requested: windowMode === "Custom" ? `Custom ${customDrawCount}` : historyWindowName, applied: `${realFilteredHistory.length} real draws`, source: "Control", effect: "Evidence scope", scope: historyWindowName, reason: "Manual counts are retained when history changes; only available draws are used." },
       { id: "repeat", label: "Newest-draw pool", requested: `${repeatWindowSizeW} draws, minimum ${minFromRecentUnionM}`, applied: `${effectiveRepeatWindowSizeW} draws, ${repeatUnionUniqueCount} unique; ${minFromRecentUnionM > repeatUnionCandidateMax ? "BLOCKED" : `minimum ${minFromRecentUnionM}`}`, source: repeatWindowAuto ? "Automatic" : "Control", effect: "Hard minimum", scope: historyWindowName, reason: repeatWindowAuto ? "Current-month default is enabled." : "Manual window preserved; impossible minimums block generation." },
       { id: "recency", label: "Last-draw bias", requested: String(recentMatchBias), applied: `${lastDrawBiasMultiplier(recentMatchBias, minRecentMatches).toFixed(3)}x latest-draw numbers`, source: "Control", effect: "Sampling only", scope: "Latest active real draw", reason: "Positive minimum: boost 1+bias. Otherwise penalty 1/(1+bias). Never rejects by itself." },
@@ -6178,7 +6598,7 @@ function AppInner(): JSX.Element {
       ...([ ["Strict", strictDroughtQuotaMode, strictDroughtQuotaManualMin, strictDroughtQuotaEffectiveMin, strictDroughtQuotaEligibleNumbers], ["Empirical", empiricalDroughtQuotaMode, empiricalDroughtQuotaManualMin, empiricalDroughtQuotaEffectiveMin, empiricalDroughtQuotaEligibleNumbers] ] as const).map(([name, mode, requested, minimum, numbers]) => ({ id: name, label: `${name} drought quota`, requested: mode === "manual" ? `Manual minimum ${requested}` : mode, applied: minimum > numbers.length ? `BLOCKED: ${numbers.length} eligible` : `minimum ${minimum}; ${numbers.length} eligible`, source: mode === "advised" ? "Automatic" as const : "Control" as const, effect: "Hard minimum", scope: "Current shortlist", reason: `Numbers: ${numbers.join(", ") || "none"}. Rank weighting ${droughtQuotaBoostEnabled && minimum > 0 ? "On: 2x first down to 1+1/list-size last" : "Off: neutral 1x"}.` })),
       { id: "carry", label: "Month-end carry-over", requested: monthEndCarryOverAutoEnabled ? "Early-month Auto" : monthEndCarryOverManualEnabled ? "Manual On" : "Off", applied: monthEndCarryOverBiasEnabled ? monthEndCarryOverStrength : "Off", source: monthEndCarryOverAutoEnabled ? "Automatic" : "Control", effect: "Sampling and survivor ranking", scope: monthEndCarryOverWeighting.targetMonthLabel, reason: monthEndCarryOverDefaultLabel },
       { id: "drought-governor", label: "Drought Evidence Governor", requested: droughtEvidenceGovernorMode, applied: droughtEvidenceGovernorProfile.summaryLabel, source: droughtEvidenceGovernorMode === "auto" ? "Automatic" : "Control", effect: "Sampling", scope: droughtEvidenceGovernorProfile.contextLabel, reason: droughtEvidenceGovernorProfile.traceLabel },
-      { id: "month-governor", label: "Monthly Transition Governor", requested: monthlyBucketTransitionGovernorMode, applied: monthlyBucketTransitionGovernorProfile.summaryLabel, source: monthlyBucketTransitionGovernorMode === "auto" ? "Automatic" : "Control", effect: "Sampling", scope: planningDrawContext.targetMonthLabel, reason: "Fixed stage rules; manual mode bypasses the evidence gate, not hard filters." },
+      { id: "month-governor", label: "Monthly Transition Governor", requested: monthlyBucketTransitionGovernorMode, applied: monthlyTransitionDisplaySummary, source: monthlyBucketTransitionGovernorMode === "auto" ? "Automatic" : "Control", effect: "Sampling", scope: planningDrawContext.targetMonthLabel, reason: "Fixed stage rules; manual mode bypasses the evidence gate, not hard filters. RwR45/PNUaRW45 bypasses these weights." },
       { id: "d1", label: "D1 terminal momentum", requested: d1TerminalMomentumSgiEnabled ? "Auto On" : "Off", applied: d1TerminalMomentumGenerationProfile.internalStrength, source: "Automatic", effect: "Sampling", scope: planningDrawContext.targetMonthLabel, reason: d1TerminalMomentumGenerationProfile.traceLabel },
       ...activeSetupProvenanceGroups.flatMap(group => group.items.map(item => ({ id: `${group.title}:${item.label}`, label: `${group.title}: ${item.label}`, requested: String(item.value), applied: String(item.value), source: "Control" as const, effect: "Configured rule / weight", scope: historyWindowName, reason: "Current setup, including restored choices. Off values are inactive. Runtime conflicts and combined weights appear in Trace." }))),
       { id: "temperature", label: "Temperature recipe", requested: tempMetric, applied: "alpha 0.25; hybrid 0.6; 10 buckets", source: "Fixed model", effect: "Diagnostic classification", scope: "Panel-labelled history", reason: "Classification, not a calibrated prediction; no automatic forced selections." },
@@ -6186,11 +6606,12 @@ function AppInner(): JSX.Element {
     ],
   }, restoredSettingsLedgerRef.current);
 
-  const handleNewPredictionDraft = () => {
+  const handleNewPredictionDraft = (inputMode?: "playedGames") => {
     predictionJournalDraftIdRef.current += 1;
     setPredictionJournalDraftRequest({
       id: predictionJournalDraftIdRef.current,
       setupSnapshot: buildSnapshot({ includePanelFavorites: true, includeDerivedPredictionEvidence: true }),
+      inputMode,
     });
     setPredictionJournalOpen(true);
     if (typeof window !== "undefined") {
@@ -6208,6 +6629,52 @@ function AppInner(): JSX.Element {
         ? "Evidence forecast mirrored to User Selected Numbers."
         : `Evidence forecast mirrored with ${numbers.length - available.length} active exclusion${numbers.length - available.length === 1 ? "" : "s"} kept out.`,
     );
+  };
+
+  const handleViewEvidencePortfolio = () => {
+    const panel = document.getElementById("panel-evidence-portfolio");
+    if (!(panel instanceof HTMLDetailsElement)) return;
+    if (!panel.open) (panel.querySelector("summary") as HTMLElement | null)?.click();
+    window.requestAnimationFrame(() => {
+      panel.scrollIntoView({ behavior: "smooth", block: "start" });
+      panel.focus({ preventScroll: true });
+    });
+  };
+
+  const handleSaveEvidencePortfolio = (snapshot: EvidencePortfolioSnapshot, reviewed: boolean) => {
+    const prepared = preparePortfolioHistory(realHistory).draws;
+    if (portfolioHistoryFingerprint(prepared) !== snapshot.historyFingerprint || snapshot.targetDate !== planningDrawContext.targetDrawDate) {
+      throw new Error("History or the target changed. Build a fresh portfolio before saving.");
+    }
+    const entries = loadPredictionJournalEntries();
+    if (entries.some(entry => entry.evidencePortfolio?.id === snapshot.id)) return;
+    const entry = buildPredictionJournalEntry({
+      id: snapshot.id,
+      latestDraw: snapshot.cutoffDraw,
+      targetKind: "nextDraw",
+      reviewStatus: reviewed ? "reviewedByUser" : "notReviewed",
+      setupSnapshot: snapshot.settingsSnapshot,
+      evidencePortfolio: snapshot,
+      inputs: {
+        selectionReason: { version: 1, key: "evidencePortfolio", label: PREDICTION_JOURNAL_SELECTION_REASON_LABELS.evidencePortfolio },
+        notes: `Evidence Portfolio ${snapshot.modelVersion}: four frozen 6+2 hypotheses for ${snapshot.targetDate}. Seed ${snapshot.seed}; cutoff ${snapshot.cutoffDate}. Unplayed shadow baseline and leave-one-group-out alternatives saved. Purchase status is not inferred.`,
+      },
+    });
+    savePredictionJournalEntries([entry, ...entries]);
+    setTraceMaybe(lines => [...lines, `[TRACE] Evidence Portfolio ${snapshot.modelVersion} saved: target ${snapshot.targetDate} D${snapshot.targetOrdinal}/${snapshot.monthLength}; seed ${snapshot.seed}; four rows, four unplayed controls; groups ${snapshot.groups.filter(group => group.active).map(group => group.id).join(", ")}; forced [${snapshot.appliedConstraints.forced.join(", ") || "none"}]; excluded [${snapshot.appliedConstraints.excluded.join(", ") || "none"}]; journal ${entry.id}.`]);
+  };
+
+  const handleSaveWindfallPredictor = (snapshot: WindfallPredictorSnapshot, reviewed: boolean) => {
+    if (portfolioHistoryFingerprint(preparePortfolioHistory(realHistory).draws) !== snapshot.historyFingerprint
+      || snapshot.targetDate !== planningDrawContext.targetDrawDate
+      || predictorConstraintKey(generationForcedNumbers, allExclusions) !== predictorConstraintKey(snapshot.constraints.forced, snapshot.constraints.excluded)) {
+      throw new Error("History, target or number constraints changed. Create a new Predictor batch before saving.");
+    }
+    const entries = loadPredictionJournalEntries();
+    if (entries.some(entry => entry.windfallPredictor?.id === snapshot.id)) return;
+    const entry = createWindfallPredictorEntry(snapshot, reviewed);
+    savePredictionJournalEntries([entry, ...entries]);
+    setTraceMaybe(lines => [...lines, `[TRACE] Windfall Predictor ${snapshot.version} saved: target ${snapshot.targetDate} D${snapshot.ordinal}/${snapshot.monthLength}; ${snapshot.liveDates.length} current-month live draws; ${snapshot.trainingMonths.length} completed training months; seed ${snapshot.seed}; 4 games + 4 unplayed controls; gated families ${snapshot.audits.filter(audit => audit.cleared).map(audit => audit.family).join(", ") || "none (neutral)"}; forced [${snapshot.constraints.forced.join(", ") || "none"}]; excluded [${snapshot.constraints.excluded.join(", ") || "none"}]; journal ${entry.id}. Entertainment only.`]);
   };
 
   const handleNextDrawEvidenceJournalDraft = (result: NextDrawEvidenceResult) => {
@@ -6527,6 +6994,13 @@ function AppInner(): JSX.Element {
         {drawHistoryProvenance.warning ? <> <b>Warning:</b> {drawHistoryProvenance.warning}</> : null}
       </div>
 
+      <div role="status" data-testid="csv-target-startup-status" style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, margin: "8px 0", color: "#526070", fontSize: 12 }}>
+        <span style={{ minWidth: 0, flex: "1 1 240px", overflowWrap: "anywhere" }}><strong>CSV target:</strong> {csvHistoryTarget.message}</span>
+        {csvHistoryTarget.target ? <HigButton size="compact" onClick={() => void csvHistoryTarget.reload()}>
+          {csvHistoryTarget.needsReconnect ? "Reconnect CSV" : "Reload CSV target"}
+        </HigButton> : null}
+      </div>
+
       <GuidedWorkflowPanel
         setupSummary={guidedSetupSummary}
         preDrawSteps={guidedPreDrawSteps}
@@ -6588,28 +7062,13 @@ function AppInner(): JSX.Element {
         summary="Load, validate, and choose the active draw window before interpreting any downstream signal."
       />
 
-      {/* [ORDER-ANCHOR] 01 Number Trends Table */}
-      <CollapsibleSection panelId="number-trends" title={<b>Number Trends Table</b>} summaryHint="Click a number to mark for forced inclusion" defaultOpen={false}>
-        <NumberTrendsTable
-          trends={numberTrends}
-          onToggle={(n) => {
-            if (selectionUnavailableSet.has(n)) return;
-            setTrendSelectedNumbers(prev => prev.includes(n) ? prev.filter(x => x !== n) : [...prev, n]);
-          }}
-          selected={trendSelectedNumbers}
-          externalSelectedNumbers={numberTrendExternalSelectedNumbers}
-          externalSelectedLabel="other forced selections"
-          excludedNumbers={selectionUnavailableNumbers}
-        />
-        <div style={{ fontSize: 12, color: "#888", marginBottom: 8 }}>
-          Colored rows indicate numbers you have selected for forced inclusion.
-        </div>
-      </CollapsibleSection>
-
-      {/* [ORDER-ANCHOR] 02 Draw History Manager */}
-      <CollapsibleSection panelId="draw-history-manager" title={<b>Draw History Manager ({history.length} draws • latest {mostRecentDrawDateLabel})</b>} defaultOpen={false}>
+      {/* [ORDER-ANCHOR] 01 Draw History Manager */}
+      <CollapsibleSection key="draw-history-manager" panelId="draw-history-manager" title={<b>Draw History Manager ({history.length} draws • latest {mostRecentDrawDateLabel}{isHistoryRefreshPending ? " • refreshing analyses" : ""})</b>} defaultOpen={false} deferContentWhileCollapsed>
         {/* In-app CSV updater */}
         <DrawHistoryManager
+          csvTarget={csvHistoryTarget.target}
+          onCsvTargetSelected={csvHistoryTarget.remember}
+          onForgetCsvTarget={csvHistoryTarget.forget}
           csvPathHint="Bundled fallback: src/windfall_history_lottolyzer.csv"
           currentRows={rowsFromDraws(history)}
           mainCount={6}
@@ -6634,16 +7093,7 @@ function AppInner(): JSX.Element {
           minNumber={1}
           maxNumber={45}
         />
-        <pre style={{ maxHeight: 160, overflow: "auto", fontSize: 12 }}>
-        {filteredHistory.map((d, idx) => {
-          const numsAll = [...d.main, ...d.supp];
-          const odd = numsAll.filter((n) => n % 2 === 1).length;
-          const even = numsAll.length - odd;
-          const oga = pastOGAScores[idx] ?? null;
-          return `${d.date}: [${d.main.join(", ")}] | Sup: [${d.supp.join(", ")}]${oga !== null ? ` | OGA=${oga.toFixed(2)}` : ""} | Odd/Even=${odd}:${even}`;
-        }).join("\n")}
-        {filteredHistory.length === 0 ? "\nNo draws loaded yet. Check network or click \"Re-fetch Draws\"." : ""}
-        </pre>
+        <DrawHistoryTable draws={filteredHistory} ogaHistory={realFilteredHistory} ogaScores={pastOGAScores} />
         <div style={{ marginTop: 8 }}>
           <button onClick={() => fileInputRef.current?.click()} style={{ marginRight: 8, marginBottom: 5 }}>
             Import Draws (CSV/JSON)
@@ -6677,13 +7127,15 @@ function AppInner(): JSX.Element {
         </div>
       </CollapsibleSection>
 
-      {/* [ORDER-ANCHOR] 02.1 Next Draw Empirical Diagnostics */}
-      <CollapsibleSection panelId="next-draw-probabilities" title={<b>Next Draw Empirical Diagnostics</b>} defaultOpen={false}>
-        <NextDrawProbabilitiesPanel history={realFilteredHistory} allHistory={realHistory} title={`Next Draw Empirical Diagnostics (${historyWindowName})`} />
-      </CollapsibleSection>
-
-      {/* [ORDER-ANCHOR] 03 Windowed Draw Filtering (WFMQYH) */}
-      <CollapsibleSection panelId="windowed-draw-filtering" title={<b>Windowed Draw Filtering (WFMQYH)</b>} defaultOpen={false}>
+      {/* [ORDER-ANCHOR] 02 Windowed Draw Filtering (WFMQYH) */}
+      <CollapsibleSection
+        key="windowed-draw-filtering"
+        panelId="windowed-draw-filtering"
+        title={<b>Windowed Draw Filtering (WFMQYH)</b>}
+        defaultOpen={false}
+        deferContentWhileCollapsed
+        headerActions={<HigButton size="compact" variant="secondary" onClick={handleViewEvidencePortfolio}>Evidence Portfolio</HigButton>}
+      >
         {(() => (
           <>
             <div
@@ -7074,14 +7526,35 @@ function AppInner(): JSX.Element {
         ))()}
       </CollapsibleSection>
 
+      {/* [ORDER-ANCHOR] 03 Number Trends Table */}
+      <CollapsibleSection key="number-trends" panelId="number-trends" title={<b>Number Trends Table</b>} summaryHint="Click a number to mark for forced inclusion" defaultOpen={false} deferContentWhileCollapsed>
+        <NumberTrendsTable
+          history={realFilteredHistory}
+          allHistory={realHistory}
+          strictDroughtNumbers={realHistory.length ? strictDroughtQuotaShortlist.numbers : undefined}
+          empiricalDroughtNumbers={realFilteredHistory.length ? empiricalDroughtQuotaShortlist.numbers : undefined}
+          onToggle={(n) => {
+            if (selectionUnavailableSet.has(n)) return;
+            setTrendSelectedNumbers(prev => prev.includes(n) ? prev.filter(x => x !== n) : [...prev, n]);
+          }}
+          selected={trendSelectedNumbers}
+          externalSelectedNumbers={numberTrendExternalSelectedNumbers}
+          externalSelectedLabel="other forced selections"
+          excludedNumbers={selectionUnavailableNumbers}
+        />
+        <div style={{ fontSize: 12, color: "#888", marginBottom: 8 }}>
+          Colored rows indicate numbers you have selected for forced inclusion.
+        </div>
+      </CollapsibleSection>
+
       <WorkflowAnchor
         id="workflow-signals"
         title="Signals"
         summary="Review observed history, diagnostic rankings, and model evidence before using those signals in generation."
       />
 
-      {/* [ORDER-ANCHOR] 04 Odd/Even Ratio Filters */}
-      <CollapsibleSection panelId="odd-even-ratio-filters" title={<b>Odd/Even Ratio Filters</b>} summaryHint="Select one or more ratios, or use Tricky Rule" defaultOpen={false}>
+      {/* [ORDER-ANCHOR] 04 Draw Composition Quotas */}
+      <CollapsibleSection panelId="odd-even-ratio-filters" title={<b>Draw Composition Quotas</b>} summaryHint="Odd/even ratios, repetition shapes and exact terminal runs · real WFMQYH" defaultOpen={false} deferContentWhileCollapsed>
         <div style={{ marginBottom: 8 }}>
           <label style={{ fontWeight: "bold", display: "inline-block", marginRight: 16 }}>
             <input
@@ -7102,13 +7575,20 @@ function AppInner(): JSX.Element {
           {drawWindowMode === "range" && (
             <>
               <span>From</span>
-              <input type="number" min={1} max={history.length} value={rangeFrom} onChange={e => setRangeFrom(Number(e.target.value))} style={{ width: 60 }} />
+              <input type="number" aria-label="Composition history range from draw" min={1} max={history.length} value={rangeFrom} onChange={e => setRangeFrom(Number(e.target.value))} style={{ width: 60 }} />
               <span>to</span>
-              <input type="number" min={1} max={history.length} value={rangeTo} onChange={e => setRangeTo(Number(e.target.value))} style={{ width: 60 }} />
+              <input type="number" aria-label="Composition history range to draw" min={1} max={history.length} value={rangeTo} onChange={e => setRangeTo(Number(e.target.value))} style={{ width: 60 }} />
               <span>(inclusive)</span>
             </>
           )}
         </div>
+        <div className="draw-composition-quotas">
+        <section aria-labelledby="composition-odd-even-heading">
+        <h3 id="composition-odd-even-heading">Odd/Even Ratios</h3>
+        <p style={{ fontSize: 12, color: "#475569", lineHeight: 1.45 }}>
+          Historical source: {historyWindowName} · {realFilteredHistory.length} real draws, mains + supps.
+          Source shares describe observed history, not winning probabilities. Selecting ratios changes candidate quotas, not the source counts.
+        </p>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", marginBottom: 10 }}>
           <button
             type="button"
@@ -7133,7 +7613,7 @@ function AppInner(): JSX.Element {
           </span>
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-          {ratioOptions.map(({ ratio, count, percent }) => {
+          {ratioOptions.map(({ ratio, count }) => {
             const selected = selectedRatios.includes(ratio);
             const activeShare = activeOddEvenRatioShares[ratio] ?? 0;
             const target = activeOddEvenRatioQuotas[ratio] ?? 0;
@@ -7164,9 +7644,9 @@ function AppInner(): JSX.Element {
                 <span>
                   <strong>{ratio}</strong>
                   <span style={{ display: "block", fontSize: 11, color: "#64748b" }}>
-                    Source: {count} draw{count === 1 ? "" : "s"} · {percent}%
+                    Source: {count} draw{count === 1 ? "" : "s"} · {realFilteredHistory.length ? `${(count / realFilteredHistory.length * 100).toFixed(1)}%` : "share unavailable"}
                   </span>
-                  {selected && !useTrickyRule && (
+                  {selected && !useTrickyRule && !rwr45Enabled && (
                     <span style={{ display: "block", fontSize: 11, color: "#174ea6", fontWeight: 800 }}>
                       Active: {activeShare.toFixed(1)}% · quota target {target}/{numCandidates}
                     </span>
@@ -7184,9 +7664,43 @@ function AppInner(): JSX.Element {
               : "No odd/even quota is active. Select one or more ratios to allocate 100% of the requested candidates across them."}
           {" "}Ratios apply to all 8 numbers. Only ratios observed in the active real WFMQYH window are shown.
         </div>
+        </section>
+        {rwR45Composition && <div style={{ fontSize: 12, color: "#475569", marginBottom: 10 }} aria-label="Last RwR45 odd/even output">
+          <strong>Last RwR45 ratios:</strong>{" "}{Object.entries(rwR45Composition.ratioCounts).map(([ratio, count]) => `${ratio}: ${count}/${rwR45Composition.rows.length} rows`).join("; ") || "None"}.
+          {" "}{rwR45Composition.context}. Actual output only; selected quotas unchanged.
+        </div>}
+        <TerminalCompositionPlanner runs={terminalRunRuleOptions} shapes={terminalShapeQuotaOptions} linked={terminalRunShapeLinkActive}
+          bypassed={rwr45Enabled} {...terminalPlannerContext} selectedRatios={selectedRatios} observedRatios={ratioOptionValues}
+          blockers={generationPreflight.blockers} onEnabledChange={setTerminalRunRuleEnabled}
+          onIntentChange={intent => { setTerminalRunMode(intent === "together" ? "requireAll" : "allocation"); setTerminalRunAllocationBasis(intent === "alternatives" ? "equal" : "history"); }}
+          onShapeModeChange={mode => {
+            setTerminalRunShapeLinkEnabled(mode === "linked");
+            if (mode === "linked") setTerminalRunRuleEnabled(true);
+            else handleTerminalShapeEnabled(mode === "independent");
+          }}
+          onRunsChange={setSelectedTerminalRuns} onRatiosChange={setSelectedRatios} />
+        <TerminalShapeQuotaControls options={terminalShapeQuotaOptions} requested={numCandidates} bypassed={rwr45Enabled}
+          outputSnapshot={rwR45Composition}
+          onEnabledChange={handleTerminalShapeEnabled} onSelectionChange={setSelectedTerminalShapes}
+          onAllocationBasisChange={setTerminalShapeAllocationBasis}
+          linkedEvidence={terminalShapeLinkEvidence ?? undefined} />
+        <TerminalRunQuotaControls plannerManaged options={terminalRunRuleOptions} sourceDraws={terminalRunHistoryEvidence.draws} requested={numCandidates} bypassed={rwr45Enabled}
+          outputSnapshot={rwR45Composition}
+          onAllObservedChange={setTerminalRunUseAllObserved}
+          shapeLink={{ enabled: terminalRunShapeLinkEnabled, active: terminalRunShapeLinkActive,
+            matchingDraws: terminalShapeLinkEvidence?.matchingDraws ?? 0, shapeCount: terminalShapeLinkEvidence?.selectedShapes.length ?? 0,
+            error: terminalShapeLinkEvidence?.error ?? null, onChange: handleTerminalRunShapeLink }}
+          onChange={(options) => {
+            setTerminalRunRuleEnabled(options.enabled);
+            if (!terminalRunUseAllObserved) {
+              setTerminalRunMode(options.mode); setSelectedTerminalRuns(options.selectedRuns);
+              setTerminalRunAllocationBasis(options.allocationBasis ?? "history");
+            }
+          }} />
+        </div>
       </CollapsibleSection>
 
-      <CollapsibleSection panelId="odd-even-ratio-cadence" title={<b>Odd/Even Ratio Cadence</b>} summaryHint="Observed ratio timeline and intervals" defaultOpen={false}>
+      <CollapsibleSection panelId="odd-even-ratio-cadence" title={<b>Odd/Even Ratio Cadence</b>} summaryHint="Observed ratio timeline and intervals" defaultOpen={false} deferContentWhileCollapsed>
         <OddEvenRatioCadencePanel draws={realFilteredHistory} />
       </CollapsibleSection>
 
@@ -7197,6 +7711,7 @@ function AppInner(): JSX.Element {
           ? "observe-only base, full-history, and WFMQYH scores"
           : `generation influence: ${formatScoringInfluenceLabel(scoringGenerationInfluence)}`}
         defaultOpen={false}
+        deferContentWhileCollapsed
       >
         <ScoringSystemDiagnosticsPanel
           realHistory={realHistory}
@@ -7206,7 +7721,7 @@ function AppInner(): JSX.Element {
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 05 Survival Analyzer */}
-      <CollapsibleSection panelId="survival-analyzer" title={<b>Survival Analyzer</b>} defaultOpen={false}>
+      <CollapsibleSection panelId="survival-analyzer" title={<b>Survival Analyzer</b>} defaultOpen={false} deferContentWhileCollapsed>
         <SurvivalAnalyzer
           history={baselineHistory}
           excludedNumbers={allExclusions}
@@ -7226,7 +7741,7 @@ function AppInner(): JSX.Element {
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 06 Temperature Transition */}
-      <CollapsibleSection panelId="temperature-transition" title={<b>Temperature Transition</b>} defaultOpen={false}>
+      <CollapsibleSection panelId="temperature-transition" title={<b>Temperature Transition</b>} defaultOpen={false} deferContentWhileCollapsed>
         <TemperatureTransitionPanel
           history={baselineHistory}
           historyScopeLabel={baselineHistoryScopeLabel}
@@ -7247,7 +7762,7 @@ function AppInner(): JSX.Element {
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 07 Monte Carlo Analyzer */}
-      <CollapsibleSection panelId="monte-carlo-analyzer" title={<b>Monte Carlo Analyzer</b>} defaultOpen={false}>
+      <CollapsibleSection panelId="monte-carlo-analyzer" title={<b>Monte Carlo Analyzer</b>} defaultOpen={false} deferContentWhileCollapsed>
         <MonteCarloPanel
           history={realFilteredHistory}
           historyScopeLabel={`Current WFMQYH window (${realFilteredHistory.length} real draws)`}
@@ -7268,6 +7783,7 @@ function AppInner(): JSX.Element {
         title={<b>Drought-break shortlist (mains + supps)</b>}
         summaryHint={`Strict drought support · forced selections ${droughtBreakSelectedNumbers.length}/${MAX_DROUGHT_BREAK_FORCED_NUMBERS}`}
         defaultOpen={false}
+        deferContentWhileCollapsed
       >
         <DroughtHazardPanel
           history={realFilteredHistory}
@@ -7275,7 +7791,7 @@ function AppInner(): JSX.Element {
           baselineHistory={baselineHistory}
           baselineHistoryScopeLabel={baselineHistoryScopeLabel}
           wfmqyhHistoryScopeLabel={`Current WFMQYH window (${realFilteredHistory.length} real draw${realFilteredHistory.length === 1 ? "" : "s"})`}
-          top={8}
+          top={STRICT_DROUGHT_QUOTA_TOP_K}
           title="Drought-break shortlist (mains + supps)"
           bucketLabels={monthlyBucketLabels}
           targetDrawDate={planningDrawContext.targetDrawDate}
@@ -7286,11 +7802,12 @@ function AppInner(): JSX.Element {
           excludedNumbers={selectionUnavailableNumbers}
           maxForcedSelections={MAX_DROUGHT_BREAK_FORCED_NUMBERS}
           onToggleNumber={toggleDroughtBreakSelectedNumber}
+          onClearForcedNumbers={() => setDroughtBreakSelectedNumbers([])}
         />
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 07.1 Most Likely NOT Drawn */}
-      <CollapsibleSection panelId="most-likely-not-drawn" title={<b>Most Likely NOT Drawn</b>} defaultOpen={false}>
+      <CollapsibleSection panelId="most-likely-not-drawn" title={<b>Most Likely NOT Drawn</b>} defaultOpen={false} deferContentWhileCollapsed>
         <MostLikelyNotDrawnPanel history={realFilteredHistory} allHistory={realHistory} title="Most Likely NOT Drawn" />
       </CollapsibleSection>
 
@@ -7301,7 +7818,7 @@ function AppInner(): JSX.Element {
       />
 
       {/* [ORDER-ANCHOR] 07.16 Research Diary & Draw Reminders */}
-      <CollapsibleSection panelId="research-diary" title={<b>Research Diary & Draw Reminders</b>} summaryHint="observe-only recurring draw-context reminders" defaultOpen={false}>
+      <CollapsibleSection panelId="research-diary" title={<b>Research Diary & Draw Reminders</b>} summaryHint="observe-only recurring draw-context reminders" defaultOpen={false} deferContentWhileCollapsed>
         <ResearchDiaryPanel
           history={realHistory}
           getSetupSnapshot={() => buildSnapshot({ includePanelFavorites: true })}
@@ -7311,7 +7828,7 @@ function AppInner(): JSX.Element {
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 07.2 Backtest Validation Dashboard */}
-      <CollapsibleSection panelId="backtest-validation" title={<b>Backtest Validation</b>} defaultOpen={false}>
+      <CollapsibleSection panelId="backtest-validation" title={<b>Backtest Validation</b>} defaultOpen={false} deferContentWhileCollapsed>
         <BacktestPanel history={baselineHistory} historyScopeLabel={baselineHistoryScopeLabel} />
       </CollapsibleSection>
 
@@ -7321,6 +7838,7 @@ function AppInner(): JSX.Element {
         title={<b>Strict Drought Shortlist Replay</b>}
         summaryHint="no-lookahead drought-break validation"
         defaultOpen={false}
+        deferContentWhileCollapsed
       >
         <DroughtBacktestPanel history={baselineHistory} historyScopeLabel={baselineHistoryScopeLabel} />
       </CollapsibleSection>
@@ -7331,6 +7849,7 @@ function AppInner(): JSX.Element {
         title={<b>Settings Sensitivity Replay</b>}
         summaryHint="Retrospective target-draw scoring without changing generation"
         defaultOpen={false}
+        deferContentWhileCollapsed
       >
         <SettingsSensitivityReplayPanel
           history={realHistory}
@@ -7342,11 +7861,21 @@ function AppInner(): JSX.Element {
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 07.25 Previous ±1/±2 Neighbour Diagnostics */}
-      <CollapsibleSection panelId="previous-neighbour-backtest" title={<b>Previous ±1/±2 Neighbour Diagnostics</b>} summaryHint="observe-only adjacent-neighbour diagnostics" defaultOpen={false}>
+      <CollapsibleSection panelId="previous-neighbour-backtest" title={<b>Previous ±1/±2 Neighbour Diagnostics</b>} summaryHint="observe-only adjacent-neighbour diagnostics" defaultOpen={false} deferContentWhileCollapsed>
         <PreviousNeighbourBacktestPanel
           draws={realFilteredHistory}
           auditDraws={baselineHistory}
           auditHistoryScopeLabel={baselineHistoryScopeLabel}
+          atlasAnalysis={previousNeighbourAtlasAnalysis}
+          scope={previousNeighbourAtlasScope}
+          onScopeChange={setPreviousNeighbourAtlasScope}
+          directionalLookback={previousNeighbourAtlasLookback}
+          onDirectionalLookbackChange={setPreviousNeighbourAtlasLookback}
+          atlasHistorySource={previousNeighbourAtlasHistorySource}
+          onAtlasHistorySourceChange={setPreviousNeighbourAtlasHistorySource}
+          planningTargetDate={planningDrawContext.targetDrawDate}
+          planningTargetDrawOrdinal={planningDrawContext.targetDrawOrdinal}
+          planningTargetMonthExpectedDrawCount={planningDrawContext.targetMonthExpectedDrawCount}
           liveNeighbourMode={latestNeighbourSupportMode}
           liveNeighbourEnabled={latestNeighbourSupportEnabled}
           userSelectedNumbers={userSelectedNumbers}
@@ -7355,8 +7884,19 @@ function AppInner(): JSX.Element {
         />
       </CollapsibleSection>
 
+      {/* [ORDER-ANCHOR] 07.26 Consecutive Run Monthly Watch */}
+      <CollapsibleSection
+        panelId="consecutive-run-monthly-watch"
+        title={<b>Consecutive Run Monthly Watch</b>}
+        summaryHint="observe-only mains + supps first-occurrence evidence"
+        defaultOpen={false}
+        deferContentWhileCollapsed
+      >
+        <ConsecutiveRunMonthlyWatchPanel analysis={consecutiveRunMonthlyWatch} />
+      </CollapsibleSection>
+
       {/* [ORDER-ANCHOR] 08 Trend Ratio Diagnostics */}
-      <CollapsibleSection panelId="trend-ratio-history" title={<b>Trend Ratio Diagnostics (Up / Down / Flat, mains + supps)</b>} defaultOpen={false}>
+      <CollapsibleSection panelId="trend-ratio-history" title={<b>Trend Ratio Diagnostics (Up / Down / Flat, mains + supps)</b>} defaultOpen={false} deferContentWhileCollapsed>
         <TrendRatioHistoryPanel
           stats={historicalTrendRatioStats}
           allowedTrendRatios={allowedTrendRatios}
@@ -7369,20 +7909,23 @@ function AppInner(): JSX.Element {
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 09 Group Pattern Analyzer */}
-      <CollapsibleSection panelId="group-pattern-analyzer" title={<b>Group Pattern Analyzer</b>} defaultOpen={false}>
+      <CollapsibleSection panelId="group-pattern-analyzer" title={<b>Group Pattern Analyzer</b>} defaultOpen={false} deferContentWhileCollapsed>
         <GroupPatternPanel key={zpaReloadKey} history={realFilteredHistory} groups={custom} />
         <GlobalZoneWeighting />
       </CollapsibleSection>
 
-      {/* [ORDER-ANCHOR] 10 Pattern Stats */}
-      <CollapsibleSection panelId="pattern-stats" title={<b>Pattern Stats</b>} summaryHint="collapsed" defaultOpen={false}>
-        <div style={{ overflowX: "auto", fontSize: 12, marginTop: 8, background: "#fff", border: "1px solid #eee", borderRadius: 6, padding: 8 }}>
-          <PatternStatsPanel draws={realFilteredHistory} numBins={10} />
-        </div>
+      {/* [ORDER-ANCHOR] 10 Historical Draw Composition */}
+      <CollapsibleSection panelId="pattern-stats" title={<b>Historical Draw Composition</b>} summaryHint="Observe-only WFMQYH composition summary" defaultOpen={false} deferContentWhileCollapsed>
+        <PatternStatsPanel draws={realFilteredHistory} selectedNumbers={userSelectedNumbers} />
+      </CollapsibleSection>
+
+      {/* [ORDER-ANCHOR] 10.1 Number-Group Frequency Audit */}
+      <CollapsibleSection panelId="number-group-frequency-audit" title={<b>Number-Group Frequency Audit</b>} summaryHint="observe-only group-frequency replay, mains + supps" defaultOpen={false} deferContentWhileCollapsed>
+        <NumberGroupFrequencyAuditPanel history={history} today={planningDrawContext.todayIso} />
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 11 Number Frequency */}
-      <CollapsibleSection panelId="number-frequency" title={<b>Number Frequency</b>} summaryHint="compact, collapsed" defaultOpen={false}>
+      <CollapsibleSection panelId="number-frequency" title={<b>Number Frequency</b>} summaryHint="compact, collapsed" defaultOpen={false} deferContentWhileCollapsed>
         <div style={{ overflowX: "auto", fontSize: 12, marginTop: 8 }}>
           <NumberFrequencyPanel draws={realFilteredHistory} allDraws={realHistory} />
         </div>
@@ -7405,7 +7948,7 @@ function AppInner(): JSX.Element {
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 11.35 Ending Digit Sequences */}
-      <CollapsibleSection panelId="ending-digit-sequences" title={<b>Ending Digit Sequences</b>} summaryHint="within-draw motifs and cross-draw terminal transitions" defaultOpen={false}>
+      <CollapsibleSection panelId="ending-digit-sequences" title={<b>Ending Digit Sequences</b>} summaryHint="within-draw motifs and cross-draw terminal transitions" defaultOpen={false} deferContentWhileCollapsed>
         <div style={{ marginTop: 8 }}>
           <EndingDigitSequencePanel
             draws={realFilteredHistory}
@@ -7416,22 +7959,27 @@ function AppInner(): JSX.Element {
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 11.5 Adjacent Combos (Pairs/Triples) */}
-      <CollapsibleSection panelId="adjacent-combos" title={<b>Adjacent Combos (Pairs / Triples)</b>} summaryHint="Runs, gaps, recent streaks" defaultOpen={false}>
+      <CollapsibleSection panelId="adjacent-combos" title={<b>Adjacent Combos (Pairs / Triples)</b>} summaryHint="Runs, gaps, recent streaks" defaultOpen={false} deferContentWhileCollapsed>
         <AdjacentCombosPanel history={realFilteredHistory} allHistory={realHistory} />
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 12 Window Stats (Low/Mid/High, Odd/Even, Sum) */}
-      <CollapsibleSection panelId="window-stats" title={<b>Window Stats (Low/Mid/High, Odd/Even, Sum)</b>} summaryHint="WFMQYH" defaultOpen={false}>
+      <CollapsibleSection panelId="window-stats" title={<b>Window Stats (Low/Mid/High, Odd/Even, Sum)</b>} summaryHint="WFMQYH" defaultOpen={false} deferContentWhileCollapsed>
         <div style={{ marginTop: 8 }}>
           <WindowStatsPanel
             draws={realFilteredHistory}
-            sumMin={0}
-            sumMax={999}
-            includeSupp={true}
-            onSumFilterChange={() => {}}
+            sumMin={sumFilter.min}
+            sumMax={sumFilter.max}
+            includeSupp={sumFilter.includeSupp}
+            sumFilterEnabled={sumFilter.enabled}
+            onSumFilterEnabledChange={(enabled) => setSumFilter((current) => ({ ...current, enabled }))}
+            onSumFilterChange={(range) => setSumFilter({ ...range, enabled: true })}
             patternsSelected={selectedWindowPatterns}
             constraintMode={patternConstraintMode}
             patternBoostFactor={patternBoostFactor}
+            onConstraintModeChange={setPatternConstraintModeode}
+            onPatternBoostFactorChange={setPatternBoostFactor}
+            onSumToleranceChange={setPatternSumTolerance}
             sumTolerance={patternSumTolerance}
             onTogglePattern={(p) => {
               setSelectedWindowPatterns(prev => {
@@ -7452,12 +8000,12 @@ function AppInner(): JSX.Element {
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 13 Target Set Quick Stats */}
-      <CollapsibleSection panelId="target-set-quick-stats" title={<b>Target Set Quick Stats</b>} defaultOpen={false}>
+      <CollapsibleSection panelId="target-set-quick-stats" title={<b>Target Set Quick Stats</b>} defaultOpen={false} deferContentWhileCollapsed>
         <TargetSetQuickStatsPanel forcedNumbers={generationForcedNumbers} selectedNumbers={userSelectedNumbers} />
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 14 Advanced Survival & State Diagnostics */}
-      <CollapsibleSection panelId="survival-churn-diagnostic-models" title={<b>Advanced Survival &amp; State Diagnostics</b>} summaryHint="descriptive state and recurrent-gap evidence" defaultOpen={false}>
+      <CollapsibleSection panelId="survival-churn-diagnostic-models" title={<b>Advanced Survival &amp; State Diagnostics</b>} summaryHint="descriptive state and recurrent-gap evidence" defaultOpen={false} deferContentWhileCollapsed>
         <div style={{ marginTop: 12 }}>
           <div style={{ borderLeft: "3px solid #73777f", background: "#f5f5f7", padding: "10px 12px", color: "#3a3a3c", fontSize: 12, lineHeight: 1.5 }}>
             <b>Truthfulness repair:</b> the former churn classifier, return predictor, Cox top-picks, and cross-model consensus have been removed from the active app. They did not have comparable temporally labelled out-of-sample evidence, so their scores could not honestly be combined or described as next-draw predictions. The remaining tables are descriptive diagnostics only.
@@ -7482,7 +8030,7 @@ function AppInner(): JSX.Element {
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 16 State Presets */}
-      <CollapsibleSection panelId="state-presets" title={<b>State Presets</b>} summaryHint="Save and recall all current options" defaultOpen={false}>
+      <CollapsibleSection panelId="state-presets" title={<b>State Presets</b>} summaryHint="Save and recall all current options" defaultOpen={false} deferContentWhileCollapsed>
         <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", background: "#f7fafe", border: "1px solid #e3f2fd", padding: 10, borderRadius: 6, marginTop: 8 }}>
           <label>
             Preset:
@@ -7520,19 +8068,19 @@ function AppInner(): JSX.Element {
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 17 Trend Ratio Filter (UP / DOWN / FLAT) */}
-      <CollapsibleSection panelId="trend-ratio-filter" title={<b>Trend Ratio Filter (UP / DOWN / FLAT)</b>} defaultOpen={false}>
+      <CollapsibleSection panelId="trend-ratio-filter" title={<b>Trend Ratio Filter (UP / DOWN / FLAT)</b>} defaultOpen={false} deferContentWhileCollapsed>
         <div style={{ marginTop: 6, fontSize: 11, color: "#555" }}>
           Use the Add/On controls in Trend Ratio Diagnostics to toggle active U/D/F ratio filtering. Default state is off; selected ratios are passed into generation and shown in Trace.
         </div>
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 18 Parameter Search */}
-      <CollapsibleSection panelId="parameter-search" title={<b>Parameter Search</b>} defaultOpen={false}>
+      <CollapsibleSection panelId="parameter-search" title={<b>Parameter Search</b>} defaultOpen={false} deferContentWhileCollapsed>
         <ParameterSearchPanel
           userSelectedNumbers={userSelectedNumbers}
           weightedTargets={weightedTargets}
           forcedNumbers={generationForcedNumbers}
-          excludedNumbers={effectiveExcludedNumbers}
+          excludedNumbers={allExclusions}
           recentSignal={temperatureSignal}
           conditionalProb={ conditionalProb}
           onAdoptParameters={p => setBatesParams(p)}
@@ -7543,7 +8091,7 @@ function AppInner(): JSX.Element {
       {/* [ORDER-ANCHOR] 19 Bates Weighting Panel */}
       <CollapsibleSection panelId="bates-weighting" title={<b>Bates Weighting Panel</b>} defaultOpen={false}>
         <BatesPanel
-          excludedNumbers={effectiveExcludedNumbers}
+          excludedNumbers={allExclusions}
           forcedNumbers={generationForcedNumbers}
           recentSignal={temperatureSignal}
           conditionalProb={conditionalProb}
@@ -7555,29 +8103,34 @@ function AppInner(): JSX.Element {
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 20 Weighted Target List */}
-      <CollapsibleSection panelId="weighted-target-list" title={<b>Weighted Target List</b>} defaultOpen={false}>
+      <CollapsibleSection panelId="weighted-target-list" title={<b>Weighted Target List</b>} defaultOpen={false} deferContentWhileCollapsed>
         <WeightedTargetListPanel userSelectedNumbers={userSelectedNumbers} weightedTargets={weightedTargets} setWeightedTargets={setWeightedTargets} />
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 21 Modulation Diagnostics */}
-      <CollapsibleSection panelId="modulation-diagnostics" title={<b>Modulation Diagnostics</b>} defaultOpen={false}>
+      <CollapsibleSection panelId="modulation-diagnostics" title={<b>Modulation Diagnostics</b>} defaultOpen={false} deferContentWhileCollapsed>
         <ModulationDiagnosticsPanel diagnostics={null} currentBatesParams={batesParams as any} />
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 21.5 Monthly Panels (relocated) */}
-      <CollapsibleSection panelId="monthly-overlap" title={<b>Monthly Numbers Overlap</b>} defaultOpen={false} summaryHint="Selected draw vs earlier draws each month">
+      <CollapsibleSection panelId="monthly-overlap" title={<b>Monthly Numbers Overlap</b>} defaultOpen={false} summaryHint="Selected draw vs earlier draws each month" deferContentWhileCollapsed>
         <MonthlyOverlapPanel history={realHistory} today={planningDrawContext.today} />
       </CollapsibleSection>
 
-      <CollapsibleSection panelId="monthly-first-last-hits" title={<b>Monthly First ↔ Last Draw Hits</b>} defaultOpen={false} summaryHint="Hits between first & last draw within / across months">
+      <CollapsibleSection panelId="monthly-first-last-hits" title={<b>Monthly First ↔ Last Draw Hits</b>} defaultOpen={false} summaryHint="Hits between first & last draw within / across months" deferContentWhileCollapsed>
         <MonthlyFirstLastPanel history={realHistory} />
       </CollapsibleSection>
 
       <CollapsibleSection panelId="monthly-draws-summary" title={<b>Monthly Draws Summary</b>} defaultOpen={false} summaryHint="All drawn numbers per month with counts">
         <MonthlyDrawsSummaryPanel
+          rwR45Composition={rwR45Composition}
           history={realHistory}
           today={planningDrawContext.today}
           sde1Hc3Advice={sde1Hc3ContextBacktest.advice}
+          neighbourAtlasEvidence={previousNeighbourAtlasEvidence}
+          monthlyTransitionInfluenceProfile={monthlyBucketTransitionGovernorProfile}
+          monthlyTransitionBypassed={rwr45Enabled}
+          onEditMonthlyTransitionInfluence={navigateToMonthlyTransitionEvidence}
           onConstraintsChange={handleMonthlyConstraintsChange}
           onUseSelectedNumbers={(nums) => setUserSelectedNumbers(removeUserExcludedNumbers(nums, selectionUnavailableNumbers))}
           excludedNumbers={selectionUnavailableNumbers}
@@ -7593,11 +8146,20 @@ function AppInner(): JSX.Element {
         />
       </CollapsibleSection>
 
-      <CollapsibleSection panelId="monthly-bucket-transition-lab" title={<b>Monthly Bucket Transition Lab</b>} defaultOpen={false} summaryHint="Observe bucket movement, survival, and month-length differences">
-        <MonthlyBucketTransitionLabPanel history={realHistory} />
+      <CollapsibleSection panelId="monthly-bucket-transition-lab" title={<b>Monthly Bucket Transition Lab</b>} defaultOpen={false} summaryHint="Observe bucket movement, survival, and month-length differences" deferContentWhileCollapsed>
+        <MonthlyBucketTransitionLabPanel
+          history={realHistory}
+          monthlyTransitionInfluenceProfile={monthlyBucketTransitionGovernorProfile}
+          monthlyTransitionBypassed={rwr45Enabled}
+          onEditMonthlyTransitionInfluence={navigateToMonthlyTransitionEvidence}
+        />
       </CollapsibleSection>
 
-      <CollapsibleSection panelId="month-end-carry-over-buckets" title={<b>Month-End Carry-Over Buckets</b>} defaultOpen={false} summaryHint="Last draw → first draw by monthly frequency bucket">
+      <CollapsibleSection panelId="decade-monthly-bucket-watch" title={<b>Decade × Monthly Bucket Watch</b>} defaultOpen={false} summaryHint="observe-only group counts with no generation influence" deferContentWhileCollapsed>
+        <DecadeMonthlyBucketWatchPanel history={realHistory} today={planningDrawContext.todayIso} />
+      </CollapsibleSection>
+
+      <CollapsibleSection panelId="month-end-carry-over-buckets" title={<b>Month-End Carry-Over Buckets</b>} defaultOpen={false} summaryHint="Last draw → first draw by monthly frequency bucket" deferContentWhileCollapsed>
         <MonthEndCarryOverBucketsPanel
           history={realHistory}
           selectedBoostNumbers={selectedCarryOverBoostNumbers}
@@ -7606,12 +8168,14 @@ function AppInner(): JSX.Element {
         />
       </CollapsibleSection>
 
-      <CollapsibleSection panelId="monthly-digit-occurrences" title={<b>Monthly 1-Digit vs 2-Digit Occurrences</b>} defaultOpen={false} summaryHint="Monthly counts for numbers 1–9 versus 10–45">
+      <CollapsibleSection panelId="monthly-digit-occurrences" title={<b>Monthly 1-Digit vs 2-Digit Occurrences</b>} defaultOpen={false} summaryHint="Monthly counts for numbers 1–9 versus 10–45" deferContentWhileCollapsed>
         <MonthlyDigitOccurrencePanel history={realHistory} />
       </CollapsibleSection>
 
-      <CollapsibleSection panelId="hot-cold-ranking" title={<b>Hot vs Cold Ranking</b>} defaultOpen={false} summaryHint="Historical vs recent vs weighted number heat">
+      <CollapsibleSection panelId="hot-cold-ranking" title={<b>Hot vs Cold Ranking</b>} defaultOpen={false} summaryHint="Historical vs recent vs weighted number heat" deferContentWhileCollapsed>
         <HotColdRankingPanel
+          settings={hotColdRankingSettings}
+          onSettingsChange={setHotColdRankingSettings}
           history={realHistory}
           wfmqyhWindowSize={activeWindowSize}
           forcedNumbers={hotColdForcedNumbers}
@@ -7644,6 +8208,7 @@ function AppInner(): JSX.Element {
         title={<b>Signal Confluence / Number Consensus Ledger</b>}
         summaryHint="observe-only cross-panel number support"
         defaultOpen={false}
+        deferContentWhileCollapsed
       >
         <SignalConfluencePanel
           activeHistory={realFilteredHistory}
@@ -7656,10 +8221,13 @@ function AppInner(): JSX.Element {
           empiricalDroughtNumbers={empiricalDroughtQuotaEligibleNumbers}
           sharedAnalysisSelectionNumbers={selectedNumbers}
           hotColdRows={portfolioHotColdRows}
+          hotColdScopeLabel={hotColdScopeLabel}
+          onEditHotColdSettings={navigateToHotColdSettings}
           drawBucketPatternRows={signalConfluenceDrawBucketPatternRows}
           scoringNumberRows={signalConfluenceScoringNumberRows}
           selectionInsightRows={selectionInsightsPredictedCompanionRows}
           nextDrawEvidenceResult={nextDrawEvidenceResultForConfluence}
+          neighbourAtlasEvidence={previousNeighbourAtlasEvidence}
           monthlyBuckets={monthlyBucketSetsAlways ?? monthlyConstraintPayload?.buckets ?? null}
           userSelectedNumbers={userSelectedNumbers}
           forcedNumbers={generationForcedNumbers}
@@ -7678,6 +8246,7 @@ function AppInner(): JSX.Element {
         defaultOpen={false}
         open={predictionJournalOpen}
         onOpenChange={setPredictionJournalOpen}
+        deferContentWhileCollapsed
         headerActions={
           <>
             <HigButton
@@ -7691,19 +8260,47 @@ function AppInner(): JSX.Element {
             <HigButton
               size="compact"
               variant="primary"
-              onClick={handleNewPredictionDraft}
+              onClick={() => handleNewPredictionDraft()}
               title="Open the journal and prefill a new prediction from the current app setup"
             >
               New Prediction
+            </HigButton>
+            <HigButton size="compact" variant="secondary" onClick={() => handleNewPredictionDraft("playedGames")}>
+              Paste Games
             </HigButton>
           </>
         }
       >
         <PredictionJournalPanel
           history={realHistory}
+          onSimulatePredictorGame={handleSimulatePredictorGame}
+          onSimulateEvidencePortfolioCandidate={handleSimulateEvidencePortfolioCandidate}
           getSetupSnapshot={() => buildSnapshot({ includePanelFavorites: true, includeDerivedPredictionEvidence: true })}
           newPredictionDraft={predictionJournalDraftRequest}
           viewEntriesRequestId={predictionJournalEntriesRequestId || undefined}
+          captureSession={predictionCaptureSession}
+          onSimulateGame={handleSimulateJournalGame}
+        />
+      </CollapsibleSection>
+
+      <CollapsibleSection
+        panelId="evidence-portfolio"
+        title={<b>Evidence Portfolio</b>}
+        summaryHint="four frozen candidate roles and forward family audit"
+        defaultOpen={false}
+        deferContentWhileCollapsed
+      >
+        <EvidencePortfolioPanel
+          history={realHistory}
+          activeHistory={realFilteredHistory}
+          targetDate={planningDrawContext.targetDrawDate}
+          windowLabel={historyWindowName}
+          forcedNumbers={generationForcedNumbers}
+          excludedNumbers={allExclusions}
+          getSetupSnapshot={() => buildSnapshot({ includePanelFavorites: true, includeDerivedPredictionEvidence: true })}
+          onSave={handleSaveEvidencePortfolio}
+          onViewJournal={handleViewPredictionEntries}
+          onSimulate={handleSimulateEvidencePortfolioCandidate}
         />
       </CollapsibleSection>
 
@@ -7713,14 +8310,23 @@ function AppInner(): JSX.Element {
         summary="Create, compare, compress, and simulate candidate sets while keeping generation rules visible."
       />
 
+      <CollapsibleSection panelId="windfall-predictor" title="Windfall Predictor" summaryHint="entertainment-only experimental four-game suggestions and real-outcome review" defaultOpen={false} deferContentWhileCollapsed>
+        <WindfallPredictorPanel history={realHistory} targetDate={planningDrawContext.targetDrawDate}
+          forced={generationForcedNumbers} excluded={allExclusions} onSave={handleSaveWindfallPredictor}
+          onViewJournal={handleViewPredictionEntries} onSimulate={handleSimulatePredictorGame} />
+      </CollapsibleSection>
+
       {/* [ORDER-ANCHOR] 22 User Selected Numbers */}
-      <CollapsibleSection panelId="user-selected-numbers" title={<b>User Selected Numbers</b>} defaultOpen={true}>
+      <CollapsibleSection panelId="user-selected-numbers" title={<b>User Selected Numbers</b>} defaultOpen={false}>
         <UserSelectedNumbersPanel
           userSelectedNumbers={userSelectedNumbers}
           setUserSelectedNumbers={setUserSelectedNumbers}
           excludedNumbers={selectionUnavailableNumbers}
-          externalSelectedNumbers={droughtBreakSelectedNumbers}
-          externalSelectedLabel="Drought-break shortlist"
+          externalSelectedNumbers={generationForcedNumbers}
+          externalSelectedLabel="shared forced-inclusion controls"
+          forcedInclusionSources={forcedInclusionSources}
+          numberConstraintSummary={renderNumberConstraintSummary()}
+          onReviewForcedInclusions={() => navigateToGenerationSetupSummaryTarget("forcedExcluded")}
           autoExcludeUnselected={autoExcludeUnselected}
           onToggleAutoExclude={setAutoExcludeUnselected}
           monthlyBuckets={monthlyBucketSetsAlways ?? monthlyConstraintPayload?.buckets ?? null}
@@ -7748,7 +8354,7 @@ function AppInner(): JSX.Element {
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 23 Selection Insights */}
-      <CollapsibleSection panelId="selection-insights" title={<b>Selection Insights</b>} defaultOpen={false}>
+      <CollapsibleSection panelId="selection-insights" title={<b>Selection Insights</b>} defaultOpen={false} deferContentWhileCollapsed>
         <div style={{ marginTop: 8 }}>
           <label style={{ fontSize: 12 }}>
             <input
@@ -7763,6 +8369,10 @@ function AppInner(): JSX.Element {
 
         {insightsEnabled && (
           <div className="windfall-selection-insights-grid">
+            <SelectionInsightsNeighbourAtlasCard
+              evidence={previousNeighbourAtlasEvidence}
+              selected={selectionInsightsAnchorNumbers}
+            />
             {/* Windowed (WFMQYH) version */}
             <div className="windfall-selection-insights-card">
               <div className="windfall-selection-insights-card__title">Windowed (WFMQYH)</div>
@@ -7811,6 +8421,13 @@ function AppInner(): JSX.Element {
                 title="Predicted"
               />
             </div>
+            <SelectionInsightsSuppPairs
+              selected={selectionInsightsAnchorNumbers}
+              activeHistory={realFilteredHistory}
+              fullHistory={realHistory}
+              historyWindowName={historyWindowName}
+            />
+            <SupplementaryPolicyReplayCard fullHistory={realHistory} activeDrawCount={realFilteredHistory.length} />
           </div>
         )}
       </CollapsibleSection>
@@ -7819,7 +8436,7 @@ function AppInner(): JSX.Element {
             panelId="candidate-generation-influences"
             title={<b>Candidate Generation Setup</b>}
             summaryHint="Configure filters, weighting, evidence, and forced/excluded numbers before generation"
-            defaultOpen={true}
+            defaultOpen={false}
           >
             <div className="windfall-generation-setup-summary-strip" aria-label="Active generation setup summary">
               {generationSetupSummaryItems.map((item) => (
@@ -7843,8 +8460,8 @@ function AppInner(): JSX.Element {
                 id={ACTIVE_SETUP_PROVENANCE_TARGET_IDS.geometryPattern}
                 title="Engine & Ranking"
                 subtitle="Ranking references, OGA forecast bias, diagnostic influence, recency weighting, and GPWF controls."
-                collapsedSummary={`Numbers ${formatScoringInfluenceLabel(scoringGenerationInfluence)} · D1 SGI ${d1TerminalMomentumSgiEnabled ? formatD1TerminalMomentumStrength(d1TerminalMomentumGenerationProfile.internalStrength) : "off"} · Drought ${droughtEvidenceGovernorProfile.summaryLabel} · Monthly transition ${monthlyBucketTransitionGovernorProfile.summaryLabel} · OGA ${ogaRefMode} · KDE ${enableOGAForecastBias ? "on" : "off"} · λ ${lambdaEnabled ? lambda.toFixed(2) : "off"} · GPWF ${gpwfEnabled ? "on" : "off"}`}
-                defaultExpanded={true}
+                collapsedSummary={`Numbers ${formatScoringInfluenceLabel(scoringGenerationInfluence)} · D1 SGI ${d1TerminalMomentumSgiEnabled ? formatD1TerminalMomentumStrength(d1TerminalMomentumGenerationProfile.internalStrength) : "off"} · Drought ${droughtEvidenceGovernorProfile.summaryLabel} · OGA ${ogaRefMode} · KDE ${enableOGAForecastBias ? "on" : "off"} · λ ${lambdaEnabled ? lambda.toFixed(2) : "off"} · GPWF ${gpwfEnabled ? "on" : "off"}`}
+                defaultExpanded={false}
                 expanded={engineRankingExpanded}
                 onExpandedChange={setEngineRankingExpanded}
               >
@@ -7852,7 +8469,7 @@ function AppInner(): JSX.Element {
               <div className="windfall-influence-card windfall-engine-ranking-section">
                 <h3 className="windfall-influence-card__title">OGA Reference And Ranking</h3>
                 <p className="windfall-influence-card__subtitle">
-                  Geometry reference settings and ranking weights used when candidates are scored, sorted, and explained.
+                  Historical number-group reference settings and ranking weights used when candidates are scored, sorted, and explained.
                 </p>
                 <div className="windfall-engine-ranking-field-grid">
                   <HigField label="OGA reference" help="Windowed uses the active WFMQYH history. Full History uses every valid draw loaded in the app.">
@@ -7865,7 +8482,7 @@ function AppInner(): JSX.Element {
                       <option value="all">Full History</option>
                     </select>
                   </HigField>
-                  <HigField label="Windowed Spokes" help="Controls the number of spokes used by OGA geometry calculations and forecast bias diagnostics.">
+                  <HigField label="OGA number groups" help="Formerly Windowed Spokes. Splits 1-45 into consecutive number groups for the shared OGA score and its historical distribution. This does not measure angles, distances or symmetry.">
                     <input
                       type="number"
                       min={3}
@@ -7898,83 +8515,17 @@ function AppInner(): JSX.Element {
                 />
 
                 {/* OGA Forecast Bias (KDE) */}
-                <div className="windfall-engine-ranking-subsection">
-                  <div className="windfall-engine-ranking-subsection__title">OGA Forecast Bias (KDE)</div>
-                  <p className="windfall-engine-ranking-note">
-                    Optional generation acceptance bias from the OGA forecast distribution. This is diagnostic evidence, not a probability guarantee.
-                  </p>
-                  <label className="windfall-engine-ranking-toggle">
-                    <input type="checkbox" checked={enableOGAForecastBias} onChange={(e) => setEnableOGAForecastBias(e.target.checked)} style={{ marginRight: 6 }} />
-                    Enable bias by Next Draw OGA forecast
-                  </label>
-                  <div className="windfall-engine-ranking-field-grid">
-                    <HigField label="Forecast baseline" help="Windowed uses the active WFMQYH history. Full History uses every valid real draw loaded in the app.">
-                      <select value={ogaBaselineMode} onChange={(e) => setOGABaselineMode(e.target.value as any)} style={{ width: "100%" }}>
-                        <option value="window">Windowed</option>
-                        <option value="all">Full History</option>
-                      </select>
-                    </HigField>
-                    <HigField label="Preferred band" help="Auto chooses the strongest KDE-supported band. Manual bands restrict candidates by low, mid, or high OGA region.">
-                      <select value={ogaPreferredBand} onChange={(e) => setOGAPreferredBand(e.target.value as any)} style={{ width: "100%" }}>
-                        <option value="auto">Auto</option>
-                        <option value="low">Low (≤p10)</option>
-                        <option value="mid">Mid (p10–p90)</option>
-                        <option value="high">High (≥p90)</option>
-                      </select>
-                    </HigField>
-                  </div>
-                  {(() => {
-                    const dec = forecastOGA(realFilteredHistory, ogaBaselineMode === 'window' ? realFilteredHistory : realHistory, ogaSpokeCount).deciles;
-                    const thresholds = dec?.thresholds || [];
-                    return (
-                      <div style={{ marginTop: 6 }}>
-                        <div className="windfall-engine-ranking-subsection__title">Preferred decile bands</div>
-                        <div className="windfall-engine-decile-grid">
-                          {Array.from({ length: 10 }, (_, i) => i).map((i) => (
-                            <label key={i} className="windfall-engine-decile">
-                              <input
-                                type="checkbox"
-                                checked={ogaPreferredDeciles.some(d => d.index === i)}
-                                onChange={() => {
-                                  setOGAPreferredDeciles(prev => {
-                                    const exists = prev.some(d => d.index === i);
-                                    if (exists) return prev.filter(d => d.index !== i);
-                                    return [...prev, { index: i, weight: 1 }];
-                                  });
-                                }}
-                                style={{ marginRight: 6 }}
-                              />
-                              D{i} {thresholds[i - 1] !== undefined ? `≥ ${thresholds[i - 1].toFixed(2)}` : '(min)'}
-                              <input
-                                type="number"
-                                min={0}
-                                step={0.1}
-                                value={ogaPreferredDeciles.find(d => d.index === i)?.weight ?? 1}
-                                onChange={(e) => {
-                                  const w = Number(e.target.value);
-                                  setOGAPreferredDeciles(prev => {
-                                    const idx = prev.findIndex(d => d.index === i);
-                                    if (idx >= 0) {
-                                      const next = prev.slice();
-                                      next[idx] = { ...next[idx], weight: w };
-                                      return next;
-                                    }
-                                    return [...prev, { index: i, weight: w }];
-                                  });
-                                }}
-                                style={{ width: 54, marginLeft: 6 }}
-                                title="Weight"
-                              />
-                            </label>
-                          ))}
-                        </div>
-                        <div className="windfall-engine-ranking-note">
-                          Select one or more deciles and assign weights; candidates whose OGA falls in selected deciles are accepted with probability proportional to weight. If none are selected, low/mid/high is used.
-                        </div>
-                      </div>
-                    );
-                  })()}
-                </div>
+                <OgaForecastBiasControls options={ogaForecastBiasOptions}
+                  baselineMode={ogaBaselineMode} referenceDrawCount={ogaForecastBaselineHistory.length}
+                  bypassedByRandomCoverage={rwr45Enabled}
+                  onEnabledChange={setEnableOGAForecastBias} onBaselineModeChange={setOGABaselineMode}
+                  onPreferredBandChange={setOGAPreferredBand} onPreferredDecilesChange={setOGAPreferredDeciles} />
+                <InlineCollapsibleCard id="windfall-historical-oga-distribution" title="Historical OGA distribution (advanced)"
+                  defaultExpanded={false} collapsedSummary="Retrospective score distribution only. No next-draw prediction or additional generation influence.">
+                  <HistoricalOgaDistribution distribution={ogaForecastStats} historyLabel={`${historyWindowName} (WFMQYH)`}
+                    referenceLabel={ogaBaselineMode === "all" ? "Full History" : "Windowed (WFMQYH)"}
+                    referenceDrawCount={ogaForecastBaselineHistory.length} spokeCount={ogaSpokeCount} />
+                </InlineCollapsibleCard>
               </div>
 
               <div className="windfall-influence-card windfall-engine-ranking-section">
@@ -8001,7 +8552,7 @@ function AppInner(): JSX.Element {
                     </select>
                   </HigField>
                   <p className="windfall-engine-ranking-note">
-                    Applies the Numbers diagnostic evidence weighting before candidate filters run; selected constraints still decide which candidates survive.
+                    Applies Numbers-only evidence weighting before candidate filters run, then uses the mean Numbers score to break survivor-ranking ties. Ratio and terminal-pattern diagnostics are not included; selected constraints still decide which candidates survive.
                   </p>
                   <div className="windfall-engine-ranking-rule" aria-hidden="true" />
                   <label
@@ -8278,7 +8829,7 @@ function AppInner(): JSX.Element {
                 id={ACTIVE_SETUP_SHAPE_BUCKET_CARD_ID}
                 title="Shape & Bucket Quotas"
                 subtitle="Ending-digit, decade, monthly bucket, and carry-over composition controls."
-                collapsedSummary={`Digit width ${digitWidthConstraintTargets.enabled ? `${digitWidthConstraintTargets.singleDigitCount}/${digitWidthConstraintTargets.twoDigitCount}` : "off"} · repeated families ${repeatedTerminalFamiliesSummary} · MiAN ${acceptanceNeedsEnabled ? "on" : "off"} · bucket plan ${bucketCoveragePlannerEnabled ? `${bucketCoveragePlannerPreview.label}${bucketCoveragePlannerIgnoreUndrawn ? " / 0x random" : ""}` : "off"} · ending rules ${activeMainDigitRuleSummary || "off"} · ending boosts ${activeMainDigitBoostSummary || "off"} · decade ${activeMainDecadeBiasSummary || "off"} · MRB ${mrbEnabled ? "on" : "off"}`}
+                collapsedSummary={`Terminal shapes ${terminalShapeQuotaEnabled ? `${selectedTerminalShapes.length} selected` : "off"} · terminal runs ${terminalRunRuleEnabled ? `${selectedTerminalRuns.length} selected` : "off"} · Digit width ${digitWidthConstraintTargets.enabled ? `${digitWidthConstraintTargets.singleDigitCount}/${digitWidthConstraintTargets.twoDigitCount}` : "off"} · repeated families ${repeatedTerminalFamiliesSummary} · Monthly transition ${monthlyTransitionDisplaySummary} · MiAN ${acceptanceNeedsEnabled ? "on" : "off"} · bucket plan ${bucketCoveragePlannerEnabled ? `${bucketCoveragePlannerPreview.label}${bucketCoveragePlannerIgnoreUndrawn ? " / 0x random" : ""}` : "off"} · ending rules ${activeMainDigitRuleSummary || "off"} · ending boosts ${activeMainDigitBoostSummary || "off"} · decade ${activeMainDecadeBiasSummary || "off"} · MRB ${mrbEnabled ? "on" : "off"}`}
                 defaultExpanded={false}
                 expanded={shapeBucketQuotasExpanded}
                 onExpandedChange={setShapeBucketQuotasExpanded}
@@ -8298,12 +8849,22 @@ function AppInner(): JSX.Element {
                     aria-labelledby="ending-digit-limits-title"
                     tabIndex={-1}
                   >
+                    <TerminalCompositionMirror
+                      shapes={terminalShapeQuotaOptions}
+                      runs={terminalRunRuleOptions}
+                      requested={numCandidates}
+                      bypassed={rwr45Enabled}
+                      linked={terminalRunShapeLinkActive}
+                      outputSnapshot={rwR45Composition}
+                      onEdit={navigateToGenerationSetupSummaryTarget}
+                    />
                     <div className="windfall-constraint-section__header">
                       <div id="ending-digit-limits-title" className="windfall-constraint-section__title">Ending Digit Limits</div>
                       <div className="windfall-constraint-section__subtitle">
                         Choose Off, At least, Exactly, or At most for each terminal digit; boosts only adjust sampling weight.
                       </div>
                     </div>
+                    <RwR45OutputSummary snapshot={rwR45Composition} view="digits" />
                     <div className="windfall-influence-legend">
                       <span className="windfall-influence-legend__item">
                         <span aria-hidden="true" className="windfall-influence-legend__dot windfall-influence-legend__dot--boost" />
@@ -8793,6 +9354,18 @@ function AppInner(): JSX.Element {
                     </div>
                   </div>
 
+                    <div
+                      id={MONTHLY_TRANSITION_GOVERNOR_TARGET_ID}
+                      className="windfall-constraint-subgroup windfall-transition-governor-container"
+                      tabIndex={-1}
+                    >
+                      <MonthlyBucketTransitionGovernorControls
+                        profile={monthlyBucketTransitionGovernorProfile}
+                        onModeChange={setMonthlyBucketTransitionGovernorMode}
+                        bypassedByRandomCoverage={rwr45Enabled}
+                      />
+                    </div>
+
                     <div className="windfall-constraint-subgroup">
                       <div className="windfall-constraint-subgroup__title">Monthly bucket construction</div>
                   <label title="Require generated candidates to include a minimum number of numbers from each monthly frequency bucket">
@@ -9252,16 +9825,6 @@ function AppInner(): JSX.Element {
                   </div>
                     </div>
 
-                    <div
-                      id={MONTHLY_TRANSITION_GOVERNOR_TARGET_ID}
-                      className="windfall-constraint-subgroup windfall-transition-governor-container"
-                      tabIndex={-1}
-                    >
-                      <MonthlyBucketTransitionGovernorControls
-                        profile={monthlyBucketTransitionGovernorProfile}
-                        onModeChange={setMonthlyBucketTransitionGovernorMode}
-                      />
-                    </div>
                   </section>
                 </div>
               </div>
@@ -9490,6 +10053,39 @@ function AppInner(): JSX.Element {
                   </div>
                   <div style={{ marginTop: 5, color: "#64748b", fontSize: 11, lineHeight: 1.45 }}>
                     Default off until one or more target numbers are selected. Selected targets are combined with Number Trends forced numbers before candidate generation.
+                  </div>
+                  <div
+                    data-testid="latest-neighbour-atlas-reference"
+                    style={{
+                      marginTop: 8,
+                      padding: "8px 10px",
+                      border: "1px solid #bfdbfe",
+                      borderRadius: 8,
+                      background: "#f7fbff",
+                      color: "#334155",
+                      fontSize: 11,
+                      lineHeight: 1.45,
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                      <strong style={{ color: "#0f172a", fontSize: 12 }}>Shared Neighbour Atlas reference</strong>
+                      <span style={{ color: "#1d4ed8", fontWeight: 850 }}>Observe-only</span>
+                    </div>
+                    {previousNeighbourAtlasEvidence ? (
+                      <>
+                        <div style={{ marginTop: 4 }}>
+                          {previousNeighbourAtlasEvidence.historySourceLabel} · {previousNeighbourAtlasEvidence.scope === "mains" ? "mains only" : "mains + supps"} · lookback {previousNeighbourAtlasEvidence.lookbackDraws} · target D{previousNeighbourAtlasEvidence.targetDrawOrdinal ?? "?"}{previousNeighbourAtlasEvidence.targetMonthExpectedDrawCount ? ` of ${previousNeighbourAtlasEvidence.targetMonthExpectedDrawCount}` : ""}.
+                        </div>
+                        <div>
+                          Current cloud: {previousNeighbourAtlasEvidence.currentCloud?.targetCount ?? 0} unique targets; {previousNeighbourAtlasEvidence.currentCloud?.ambiguousTargetNumbers.length ?? 0} ambiguous. {previousNeighbourAtlasEvidence.ordinalEvidence ? `${previousNeighbourAtlasEvidence.ordinalEvidence.sampleQuality} sample · ${previousNeighbourAtlasEvidence.ordinalEvidence.trials} comparable D${previousNeighbourAtlasEvidence.targetDrawOrdinal ?? "?"} transitions · lift ${previousNeighbourAtlasEvidence.ordinalEvidence.lift === null ? "n/a" : `x${previousNeighbourAtlasEvidence.ordinalEvidence.lift.toFixed(2)}`}.` : "No matching draw-ordinal sample."}
+                        </div>
+                      </>
+                    ) : (
+                      <div style={{ marginTop: 4 }}>Atlas evidence is not available yet.</div>
+                    )}
+                    <div style={{ marginTop: 4, color: "#64748b" }}>
+                      This card supplies context only. It does not select builder targets, force numbers, or change Latest support.
+                    </div>
                   </div>
                   <div
                     id={GENERATION_SETUP_SUMMARY_TARGET_IDS.latestNeighbour}
@@ -9872,6 +10468,7 @@ function AppInner(): JSX.Element {
                   setWeights={setRankingWeights}
                   scope="recency"
                   title="SelHits / RecentHits Survivor Weights"
+                  selectedNumberCount={userSelectedNumbers.length}
                 />
               </div>
                 </div>
@@ -10025,33 +10622,7 @@ function AppInner(): JSX.Element {
               className="windfall-influence-report"
               tabIndex={-1}
             >
-              <div style={{ marginBottom: 6 }}>
-                <b>Forced numbers</b> ({generationForcedNumbers.length}): {generationForcedNumbers.length ? sortedGenerationForcedNumbers.join(", ") : "— none —"}
-                <span style={{ color: "#64748b" }}> Trend {trendSelectedNumbers.length}; latest ±1/±2 {previousNeighbourConstraintNumbers.length}; drought-break {droughtBreakSelectedNumbers.length}; paste-weighted {pasteWeightedForcedNumbers.length}; Signal Confluence {signalConfluenceForcedNumbers.length}.</span>
-              </div>
-              <div className="windfall-influence-report__grid">
-                <div>
-                  <div style={{ fontWeight: 700, marginBottom: 4 }}>User Exclusions</div>
-                  <div>
-                    Count: {effectiveExcludedNumbers.length}
-                  </div>
-                  <div>
-                    List: {effectiveExcludedNumbers.length ? effectiveExcludedNumbers.slice().sort((a,b)=>a-b).join(", ") : "— none —"}
-                  </div>
-                </div>
-                <div>
-                  <div style={{ fontWeight: 700, marginBottom: 4 }}>System Exclusions</div>
-                  <div>
-                    SDE1: {knobs.enableSDE1 ? "ON" : "OFF"} • Count: {sde1Exclusions.length}
-                  </div>
-                  <div>
-                    HC3: {knobs.enableHC3 ? "ON" : "OFF"} • Count: {hc3Exclusions.length}
-                  </div>
-                  <div style={{ marginTop: 4 }}>
-                    Combined: {allExclusions.length ? allExclusions.slice().sort((a,b)=>a-b).join(", ") : "— none —"}
-                  </div>
-                </div>
-              </div>
+              {renderNumberConstraintSummary(true)}
             </div>
               </InlineCollapsibleCard>
             </div>
@@ -10062,10 +10633,11 @@ function AppInner(): JSX.Element {
         panelId="paste-weighted-candidate-generator"
         title={<b>Paste-Weighted Candidate Generator</b>}
         summaryHint="Paste rows, weight numbers, generate six-number candidates"
-        defaultOpen={true}
+        defaultOpen={false}
       >
         <div style={{ marginTop: 8 }}>
           <PasteWeightedCandidatesPanel
+            generationForcedNumbers={generationForcedNumbers}
             onSimulateCandidate={handleSimulatePasteWeightedCandidate}
             onGeneratedCandidatesChange={setPasteWeightedPortfolioCandidates}
             keptGeneratedRows={keptGeneratedCandidateRows}
@@ -10080,6 +10652,9 @@ function AppInner(): JSX.Element {
             stageIdealDrawState={stageIdealDrawState}
             monthlyBucketSets={monthlyBucketSetsAlways ?? monthlyConstraintPayload?.buckets ?? null}
             monthlyAcceptanceNeeds={monthlyConstraintPayload?.constraints ?? null}
+            monthlyTransitionInfluenceProfile={monthlyBucketTransitionGovernorProfile}
+            monthlyTransitionBypassed={rwr45Enabled}
+            onEditMonthlyTransitionInfluence={navigateToMonthlyTransitionEvidence}
           />
         </div>
       </CollapsibleSection>
@@ -10089,7 +10664,7 @@ function AppInner(): JSX.Element {
         panelId="portfolio-compression"
         title={<b>Portfolio Compression / 12-Game Distiller</b>}
         summaryHint="Paste portfolio rows, count unique numbers, distil a top-six core"
-        defaultOpen={true}
+        defaultOpen={false}
       >
         <div style={{ marginTop: 8 }}>
           <PortfolioCompressionPanel
@@ -10098,6 +10673,8 @@ function AppInner(): JSX.Element {
             monthEndCarryOverBiasEnabled={monthEndCarryOverBiasEnabled}
             monthEndCarryOverWeights={monthEndCarryOverWeightsForGeneration}
             hotColdRows={portfolioHotColdRows}
+            hotColdScopeLabel={hotColdScopeLabel}
+            onEditHotColdSettings={navigateToHotColdSettings}
             windowShapeRows={portfolioWindowShapeRows}
             adjacentComboHistory={realFilteredHistory}
             monthlyBuckets={dgaEffectiveMonthlyBuckets}
@@ -10127,9 +10704,14 @@ function AppInner(): JSX.Element {
       </CollapsibleSection>
 
       {/* [ORDER-ANCHOR] 24 Generated Candidates */}
-      <CollapsibleSection panelId="generated-candidates" title={<b>Generated Candidates</b>} defaultOpen={true}>
+      <CollapsibleSection panelId="generated-candidates" title={<b>Generated Candidates</b>} defaultOpen={false}>
         <div style={{ padding: 32, fontFamily: "sans-serif" }}>
           <GeneratedCandidatesPanel
+            generationPreflight={generationPreflight}
+            forcedRemovalNotice={forcedRemovalNotice}
+            onDismissForcedRemovalNotice={() => setForcedRemovalNotice([])}
+            onReviewGenerationConflict={navigateToGenerationSetupSummaryTarget}
+            rwR45Composition={rwR45Composition}
             onGenerate={handleGenerate}
             onStopGenerate={handleStopGenerate}
             candidates={candidates}
@@ -10143,6 +10725,7 @@ function AppInner(): JSX.Element {
             monthlyTransitionInfluenceProfile={monthlyBucketTransitionGovernorProfile}
             monthlyTransitionTargetDrawOrdinal={planningDrawContext.targetDrawOrdinal}
             onReviewMonthlyTransitionEvidence={navigateToMonthlyTransitionEvidence}
+            neighbourAtlasEvidence={previousNeighbourAtlasEvidence}
             generationSessionActive={generationSessionActive}
             generationSessionCount={generationSessionRows.length}
             onStartGenerationSession={handleStartGenerationSession}
@@ -10174,6 +10757,9 @@ function AppInner(): JSX.Element {
             onSaveManualAsNextDraw={handleSaveManualPrizeCheckAsNextDraw}
             activeOGABand={activeOGABand}
             forcedNumbers={generationForcedNumbers}
+            forcedInclusionSources={forcedInclusionSources}
+            numberConstraintSummary={renderNumberConstraintSummary()}
+            onReviewForcedInclusions={() => navigateToGenerationSetupSummaryTarget("forcedExcluded")}
             activeSimCandidateIdx={simCandidateIdx ?? -1}
             simSourceKind={simSource}
             batchSize={batchSize}
@@ -10256,7 +10842,7 @@ function AppInner(): JSX.Element {
 
           <div style={{ marginTop: 12 }}>
             {/* [ORDER-ANCHOR] 24.5 Pick Six */}
-            <CollapsibleSection panelId="pick-six" title={<b>Pick Six</b>} defaultOpen={false} summaryHint="28 combos of 6 from 8">
+            <CollapsibleSection panelId="pick-six" title={<b>Pick Six</b>} defaultOpen={false} summaryHint="28 combos of 6 from 8" deferContentWhileCollapsed>
               <PickSixPanel
                 source={pickSixSource}
                 onSourceChange={setPickSixSource}
@@ -10288,7 +10874,7 @@ function AppInner(): JSX.Element {
         panelId="next-hot-blocks"
         title={<b>Next Hot Blocks</b>}
         summaryHint="Observed block heat/drift and block exclusions"
-        defaultOpen={true}
+        defaultOpen={false}
       >
         <div style={{ width: "100%", marginTop: 8, marginBottom: 10 }}>
           <NextHotBlocksPanel
@@ -10306,6 +10892,7 @@ function AppInner(): JSX.Element {
         title={<b>Tattslotto Ticket Grid Replay</b>}
         summaryHint="Observed 9x5 ticket-grid replay with pattern overlays"
         defaultOpen={false}
+        deferContentWhileCollapsed
       >
         <div style={{ width: "100%", marginTop: 8, marginBottom: 10 }}>
           <TattslottoTicketGridReplayPanel
@@ -10335,7 +10922,7 @@ function AppInner(): JSX.Element {
       {/* [ORDER-ANCHOR] 25 Diamond Grid Analysis (DGA) */}
       <CollapsibleSection
         title="Diamond Grid Analysis"
-        defaultOpen={true}
+        defaultOpen={false}
         chrome="bodyOnly"
         favoriteable={false}
         open={dgaSectionOpen}
@@ -10346,7 +10933,7 @@ function AppInner(): JSX.Element {
             title="DGA heatmap"
             subtitle={`${realFilteredHistory.length} real draw${realFilteredHistory.length === 1 ? "" : "s"} in the active window · heatmap view and simulation strip`}
             collapsedSummary="Shows the DGA heatmap with a view selector for temperature or monthly bucket-state mode, plus legend controls and the aligned simulation strip."
-            defaultExpanded={true}
+            defaultExpanded={false}
             expanded={dgaHeatmapExpanded}
             onExpandedChange={setDgaHeatmapExpanded}
             keepMounted={true}
@@ -10494,6 +11081,8 @@ function AppInner(): JSX.Element {
                   {/* Vertical simulation selections aligned to heatmap rows */}
                   <div style={{ position: "sticky", right: 0, top: 0 }}>
                     <DGASimulateStrip
+                      forcedNumbers={generationForcedNumbers}
+                      onReviewForcedInclusions={() => navigateToGenerationSetupSummaryTarget("forcedExcluded")}
                       selectedNumbers={dgaStripSelectedNumbers}
                       cellSize={DGA_CELL_SIZE}
                       monthlyBuckets={dgaEffectiveMonthlyBuckets}
@@ -10520,7 +11109,7 @@ function AppInner(): JSX.Element {
                 ? `${dgaGrid.length} rows · ${dgaDrawLabels.length} historical draw${dgaDrawLabels.length === 1 ? "" : "s"} · simulate strip and DGA tools`
                 : "No grid data loaded yet"}
               collapsedSummary="Shows the main DGA draw grid, simulate strip, and the grid’s highlight / diamond tools. Existing DGA grid settings stay in place while this panel is hidden."
-              defaultExpanded={true}
+              defaultExpanded={false}
               expanded={dgaGridExpanded}
               onExpandedChange={setDgaGridExpanded}
               keepMounted={true}
@@ -10530,6 +11119,36 @@ function AppInner(): JSX.Element {
                 {highlightMsg && (
                   <div style={{ color: "#c00", marginTop: 2, marginBottom: 12 }}>{highlightMsg}</div>
                 )}
+
+                <div
+                  data-testid="dga-neighbour-atlas-overlay-control"
+                  style={{
+                    marginBottom: 10,
+                    padding: "8px 10px",
+                    border: "1px solid #bfdbfe",
+                    borderRadius: 8,
+                    background: "#f7fbff",
+                    display: "grid",
+                    gap: 5,
+                    color: "#334155",
+                    fontSize: 12,
+                  }}
+                >
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontWeight: 850, flexWrap: "wrap" }}>
+                    <input
+                      type="checkbox"
+                      checked={showDgaNeighbourAtlasOverlay}
+                      disabled={!previousNeighbourAtlasEvidence?.currentCloud}
+                      onChange={(event) => setShowDgaNeighbourAtlasOverlay(event.currentTarget.checked)}
+                    />
+                    Neighbour Atlas next-column overlay
+                  </label>
+                  <div style={{ color: "#64748b", fontSize: 11, lineHeight: 1.45 }}>
+                    {previousNeighbourAtlasEvidence?.currentCloud
+                      ? `${showDgaNeighbourAtlasOverlay ? "On" : "Off"} · A marks ${previousNeighbourAtlasEvidence.currentCloud.targetCount} current Atlas target${previousNeighbourAtlasEvidence.currentCloud.targetCount === 1 ? "" : "s"} from ${previousNeighbourAtlasEvidence.historySourceLabel}, lookback ${previousNeighbourAtlasEvidence.lookbackDraws}. Visual only; it does not select, simulate, score, or force a number.`
+                      : "Unavailable until the shared Neighbour Atlas has published a current target cloud. Visual only; it never changes the DGA or generation."}
+                  </div>
+                </div>
 
                 <div className="windfall-dga-mirror-control" aria-label="DGA strip to Latest Draw ±1/±2 mirror">
                   <button
@@ -10581,6 +11200,8 @@ function AppInner(): JSX.Element {
                     ) : null}
                     gridSidecar={(
                       <DGASimulateStrip
+                        forcedNumbers={generationForcedNumbers}
+                        onReviewForcedInclusions={() => navigateToGenerationSetupSummaryTarget("forcedExcluded")}
                         selectedNumbers={dgaStripSelectedNumbers}
                         cellSize={DGA_CELL_SIZE}
                         monthlyBuckets={dgaEffectiveMonthlyBuckets}
@@ -10595,6 +11216,9 @@ function AppInner(): JSX.Element {
                         testIdPrefix="dga-grid-sim-strip"
                       />
                     )}
+                    atlasOverlayNumbers={dgaNeighbourAtlasOverlayNumbers}
+                    atlasOverlayLabels={dgaNeighbourAtlasOverlayLabels}
+                    showAtlasOverlay={showDgaNeighbourAtlasOverlay}
                   />
                 ) : (
                   <i>No grid data available.</i>
@@ -10646,7 +11270,7 @@ function AppInner(): JSX.Element {
       />
 
       {/* [ORDER-ANCHOR] 26 Undrawn Patterns (Empirical) */}
-      <CollapsibleSection panelId="undrawn-patterns" title={<b>Undrawn Patterns (Empirical)</b>} defaultOpen={false} summaryHint="Mains vs mains+supps toggle">
+      <CollapsibleSection panelId="undrawn-patterns" title={<b>Undrawn Patterns (Empirical)</b>} defaultOpen={false} summaryHint="Mains vs mains+supps toggle" deferContentWhileCollapsed>
         <UndrawnPatternsPanel
           history={realFilteredHistory}
           windowLabel={historyWindowName}
@@ -10691,9 +11315,34 @@ function AppInner(): JSX.Element {
       gpwf_floor,
       gpwf_scale_multiplier,
       selectedRatios: [...selectedRatios],
+      terminalShapeQuotaEnabled,
+      terminalShapeAllocationBasis: terminalShapeQuotaOptions.allocationBasis,
+      selectedTerminalShapes: [...selectedTerminalShapes],
+      terminalRunShapeLinkEnabled,
+      terminalShapeIndependentSettings: { enabled: independentTerminalShapeQuotaEnabled, selectedShapes: [...independentSelectedTerminalShapes], allocationBasis: independentTerminalShapeAllocationBasis },
+      terminalShapeLinkEvidence: terminalShapeLinkEvidence ? {
+        modelVersion: terminalShapeLinkEvidence.modelVersion, sourceDraws: terminalShapeLinkEvidence.sourceDraws,
+        matchingDraws: terminalShapeLinkEvidence.matchingDraws, mode: terminalRunMode, selectedRuns: [...selectedTerminalRuns],
+        rows: terminalShapeOptions.filter((row) => row.count > 0).map((row) => ({ ...row })), error: terminalShapeLinkEvidence.error,
+      } : undefined,
+      terminalRunRuleEnabled,
+      terminalRunMode,
+      terminalRunUseAllObserved,
+      terminalRunAllocationBasis,
+      terminalRunManualSettings: { mode: manualTerminalRunMode, selectedRuns: [...manualSelectedTerminalRuns], allocationBasis: manualTerminalRunAllocationBasis },
+      selectedTerminalRuns: [...selectedTerminalRuns],
+      terminalRunEvidence: {
+        modelVersion: TERMINAL_RUN_RULE_VERSION,
+        validDraws: terminalRunHistoryEvidence.draws,
+        rows: terminalRunHistoryEvidence.options.filter((row) => selectedTerminalRuns.includes(row.run)).map((row) => ({
+          run: row.run, count: row.count, occurrencePercent: row.percent, exactRandomPercent: row.expectedPercent,
+          candidateTarget: terminalRunRuleEnabled ? terminalRunMode === "requireAll" ? numCandidates : buildTerminalRunQuotas(numCandidates, terminalRunRuleOptions)[row.run] ?? null : null,
+        })),
+      },
       useTrickyRule,
       excludedNumbers: [...excludedNumbers],
       hotColdForcedNumbers: [...hotColdForcedNumbers],
+      hotColdRankingSettings: { ...hotColdRankingSettings },
       hotColdExcludedNumbers: [...hotColdExcludedNumbers],
       droughtBreakSelectedNumbers: [...droughtBreakSelectedNumbers],
       pasteWeightedForcedNumbers: [...pasteWeightedForcedNumbers],
@@ -10906,12 +11555,14 @@ function AppInner(): JSX.Element {
       snapshot.droughtEvidenceGovernorBoostedNumbers = sortedSnapshotNumbers(droughtEvidenceGovernorProfile.boostedNumbers);
       snapshot.droughtEvidenceGovernorTraceLabel = droughtEvidenceGovernorProfile.traceLabel;
       snapshot.droughtEvidenceGovernorNumberMultipliers = { ...droughtEvidenceGovernorProfile.numberMultipliers };
-      snapshot.monthlyBucketTransitionGovernorActive = monthlyBucketTransitionGovernorProfile.active;
-      snapshot.monthlyBucketTransitionGovernorSummaryLabel = monthlyBucketTransitionGovernorProfile.summaryLabel;
-      snapshot.monthlyBucketTransitionGovernorInternalStrength = monthlyBucketTransitionGovernorProfile.internalStrength;
-      snapshot.monthlyBucketTransitionGovernorBoostedNumbers = sortedSnapshotNumbers(monthlyBucketTransitionGovernorProfile.boostedNumbers);
-      snapshot.monthlyBucketTransitionGovernorTraceLabel = monthlyBucketTransitionGovernorProfile.traceLabel;
-      snapshot.monthlyBucketTransitionGovernorNumberMultipliers = { ...monthlyBucketTransitionGovernorProfile.numberMultipliers };
+      snapshot.monthlyBucketTransitionGovernorActive = monthlyBucketTransitionGovernorProfile.active && !rwr45Enabled;
+      snapshot.monthlyBucketTransitionGovernorSummaryLabel = monthlyTransitionDisplaySummary;
+      snapshot.monthlyBucketTransitionGovernorInternalStrength = rwr45Enabled ? "off" : monthlyBucketTransitionGovernorProfile.internalStrength;
+      snapshot.monthlyBucketTransitionGovernorBoostedNumbers = rwr45Enabled ? [] : sortedSnapshotNumbers(monthlyBucketTransitionGovernorProfile.boostedNumbers);
+      snapshot.monthlyBucketTransitionGovernorTraceLabel = rwr45Enabled && monthlyBucketTransitionGovernorProfile.userEnabled
+        ? `Monthly Bucket Transition Governor ${monthlyTransitionDisplaySummary}; no monthly-transition weights applied.`
+        : monthlyBucketTransitionGovernorProfile.traceLabel;
+      snapshot.monthlyBucketTransitionGovernorNumberMultipliers = rwr45Enabled ? {} : { ...monthlyBucketTransitionGovernorProfile.numberMultipliers };
       snapshot.selectionInsightsSnapshot = buildSelectionInsightsSnapshot({
         enabled: insightsEnabled,
         selected: selectionInsightsAnchorNumbers,
@@ -10920,6 +11571,9 @@ function AppInner(): JSX.Element {
         allHistory: realHistory,
         maxRows: 12,
       });
+      if (previousNeighbourAtlasEvidence) {
+        snapshot.neighbourAtlasEvidence = previousNeighbourAtlasEvidence;
+      }
     }
 
     return snapshot;
@@ -10949,9 +11603,19 @@ function AppInner(): JSX.Element {
     setGPWFFloor(s.gpwf_floor);
     setGPWFScaleMultiplier(s.gpwf_scale_multiplier);
     setSelectedRatios(s.selectedRatios);
+    setTerminalShapeQuotaEnabled(s.terminalShapeIndependentSettings?.enabled ?? !!s.terminalShapeQuotaEnabled);
+    setSelectedTerminalShapes(s.terminalShapeIndependentSettings?.selectedShapes ?? s.selectedTerminalShapes ?? []);
+    setTerminalShapeAllocationBasis(s.terminalShapeIndependentSettings?.allocationBasis ?? s.terminalShapeAllocationBasis ?? "history");
+    setTerminalRunShapeLinkEnabled(!!s.terminalRunShapeLinkEnabled);
+    setTerminalRunRuleEnabled(!!s.terminalRunRuleEnabled);
+    setTerminalRunUseAllObserved(!!s.terminalRunUseAllObserved);
+    setTerminalRunMode(s.terminalRunManualSettings?.mode ?? (s.terminalRunMode === "requireAll" ? "requireAll" : "allocation"));
+    setSelectedTerminalRuns(s.terminalRunManualSettings?.selectedRuns ?? s.selectedTerminalRuns ?? []);
+    setTerminalRunAllocationBasis(s.terminalRunManualSettings?.allocationBasis ?? (s.terminalRunAllocationBasis === "equal" ? "equal" : "history"));
     setUseTrickyRule(s.useTrickyRule);
     setExcludedNumbers(s.excludedNumbers);
     setHotColdForcedNumbers(normalizeHotColdGenerationNumbers(s.hotColdForcedNumbers));
+    setHotColdRankingSettings(normalizeHotColdRankingSettings(s.hotColdRankingSettings));
     setHotColdExcludedNumbers(normalizeHotColdGenerationNumbers(s.hotColdExcludedNumbers));
     setDroughtBreakSelectedNumbers(normalizeHotColdGenerationNumbers(s.droughtBreakSelectedNumbers).slice(0, MAX_DROUGHT_BREAK_FORCED_NUMBERS));
     setPasteWeightedForcedNumbers(normalizeHotColdGenerationNumbers(s.pasteWeightedForcedNumbers));

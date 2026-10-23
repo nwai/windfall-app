@@ -152,7 +152,7 @@ const compareNullableGap = (left: number | null, right: number | null): number =
   return left - right;
 };
 
-const comparePairEvidence = (
+export const compareDgaSuppPairSupport = (
   left: DgaSuppSuggestionPairEvidence,
   right: DgaSuppSuggestionPairEvidence,
 ): number => (
@@ -161,7 +161,14 @@ const comparePairEvidence = (
   right.individualFullSuppCount - left.individualFullSuppCount ||
   right.fullPairSuppCount - left.fullPairSuppCount ||
   compareNullableGap(left.activeLastPairSuppGap, right.activeLastPairSuppGap) ||
-  compareNullableGap(left.fullLastPairSuppGap, right.fullLastPairSuppGap) ||
+  compareNullableGap(left.fullLastPairSuppGap, right.fullLastPairSuppGap)
+);
+
+const comparePairEvidence = (
+  left: DgaSuppSuggestionPairEvidence,
+  right: DgaSuppSuggestionPairEvidence,
+): number => (
+  compareDgaSuppPairSupport(left, right) ||
   left.pair[0] - right.pair[0] ||
   left.pair[1] - right.pair[1]
 );

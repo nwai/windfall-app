@@ -183,7 +183,7 @@ export const BacktestPanel: React.FC<BacktestPanelProps> = ({ history, historySc
     <div style={{ marginTop: 12, background: '#fff', border: '1px solid #eee', padding: 10, borderRadius: 6 }}>
       {/* Controls row */}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-        <b>Backtest MLND</b>
+        <b>Legacy MLND model sandbox</b>
         {historyScopeLabel && (
           <span style={{ fontSize: 12, color: '#64748b' }}>Scope: {historyScopeLabel}</span>
         )}
@@ -195,7 +195,7 @@ export const BacktestPanel: React.FC<BacktestPanelProps> = ({ history, historySc
         <label>Mode:
           <select value={mode} onChange={e => setMode(e.target.value as 'heuristic' | 'calibrated')} style={{ marginLeft: 6 }}>
             <option value="heuristic">Heuristic MLND</option>
-            <option value="calibrated">Calibrated (train logistic)</option>
+            <option value="calibrated">Logistic experimental</option>
           </select>
         </label>
         <label>Random trials:
@@ -220,6 +220,11 @@ export const BacktestPanel: React.FC<BacktestPanelProps> = ({ history, historySc
           </button>
         )}
       </div>
+
+      <p style={{ fontSize: 12, lineHeight: 1.5, color: '#475569' }}>
+        This sandbox tests older heuristic and logistic predictors, not the current Exclusion Risk Ledger.
+        The authoritative MLND-C1 calibration audit is inside Most Likely NOT Drawn. Auto-Tune results here are exploratory comparisons, not independent validation.
+      </p>
 
       {/* Auto-tune progress */}
       {isAutoTuning && (

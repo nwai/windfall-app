@@ -3,8 +3,10 @@ import type { Draw } from "../types";
 import {
   buildSelectionInsightPredictedCompanions,
   buildSelectionInsightsAnalytics,
+  normalizeSelectionInsightNumbers,
   type SelectionInsightAnalytics,
 } from "../lib/selectionInsights";
+import type { PreviousNeighbourAtlasEvidenceSnapshot } from "../lib/previousNeighbourAtlasEvidence";
 import { computeOGA, getOGAPercentile } from "../utils/oga";
 
 export interface SelectionInsightsPanelProps {
@@ -28,6 +30,94 @@ export interface SelectionInsightsPredictionPanelProps {
   allHistoryAnalytics: SelectionInsightAnalytics;
   title?: string;
 }
+
+export interface SelectionInsightsNeighbourAtlasCardProps {
+  evidence: PreviousNeighbourAtlasEvidenceSnapshot | null;
+  selected: readonly number[];
+}
+
+const formatAtlasLift = (value: number | null | undefined): string => (
+  typeof value === "number" && Number.isFinite(value) ? `${value.toFixed(3)}x` : "n/a"
+);
+
+export const SelectionInsightsNeighbourAtlasCard: React.FC<SelectionInsightsNeighbourAtlasCardProps> = ({
+  evidence,
+  selected,
+}) => {
+  const selectedNumbers = normalizeSelectionInsightNumbers(selected);
+  const selectedSet = new Set(selectedNumbers);
+  const matchingRows = evidence?.currentCloud?.numbers.filter((row) => selectedSet.has(row.number)) ?? [];
+  const ordinal = evidence?.ordinalEvidence ?? null;
+  const targetStage = evidence?.targetDrawOrdinal
+    ? `D${evidence.targetDrawOrdinal}${evidence.targetMonthExpectedDrawCount ? `/${evidence.targetMonthExpectedDrawCount}` : ""}`
+    : "Target stage unknown";
+
+  return (
+    <section
+      aria-label="Selection Insights Neighbour Atlas context"
+      style={{
+        gridColumn: "1 / -1",
+        border: "1px solid #bfdbfe",
+        borderRadius: 8,
+        background: "#f8fbff",
+        padding: 10,
+        display: "grid",
+        gap: 8,
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+            <strong style={{ fontSize: 13, color: "#1e3a8a" }}>Neighbour Atlas context</strong>
+            <span style={{ border: "1px solid #bfdbfe", borderRadius: 999, padding: "2px 7px", color: "#1d4ed8", background: "#eff6ff", fontSize: 10, fontWeight: 900, textTransform: "uppercase" }}>
+              Observe-only
+            </span>
+          </div>
+          <div style={{ marginTop: 3, color: "#64748b", fontSize: 11, lineHeight: 1.4 }}>
+            Uses the exact shared atlas snapshot. It does not change companion rankings or candidate generation.
+          </div>
+        </div>
+        <a href="#panel-previous-neighbour-backtest" style={{ color: "#1d4ed8", fontSize: 12, fontWeight: 800 }}>
+          Review atlas
+        </a>
+      </div>
+
+      {evidence?.currentCloud ? (
+        <>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", color: "#334155", fontSize: 11 }}>
+            <span style={atlasContextPillStyle}>{evidence.historySourceLabel}</span>
+            <span style={atlasContextPillStyle}>{targetStage}</span>
+            <span style={atlasContextPillStyle}>{evidence.transitionCount} transitions</span>
+            <span style={atlasContextPillStyle}>{evidence.currentCloud.targetCount} eligible targets</span>
+            <span style={atlasContextPillStyle}>{evidence.currentCloud.ambiguousTargetNumbers.length} ambiguous</span>
+            {ordinal ? (
+              <span style={atlasContextPillStyle}>
+                {ordinal.sampleQuality} stage sample · {ordinal.trials} trials · lift {formatAtlasLift(ordinal.lift)}
+              </span>
+            ) : null}
+          </div>
+          <div style={{ fontSize: 12, color: "#334155", lineHeight: 1.5 }}>
+            <b>Selected anchors in the current target cloud:</b>{" "}
+            {!selectedNumbers.length
+              ? "Select numbers to inspect their atlas directions."
+              : matchingRows.length
+                ? matchingRows.map((row) => (
+                  <span key={row.number} style={{ ...atlasContextPillStyle, display: "inline-flex", margin: "2px 4px 2px 0" }}>
+                    {row.number} · {row.directions.join("/") || "direction unavailable"}{row.ambiguous ? " · ambiguous" : ""}
+                  </span>
+                ))
+                : "None of the current selected anchors is in this pre-draw target cloud."}
+          </div>
+          <div style={{ color: ordinal?.sampleQuality === "Thin" ? "#9a3412" : "#64748b", fontSize: 11, lineHeight: 1.4 }}>
+            Frozen from {evidence.currentCloud.sourceDateLabel}. No future result is used. {ordinal?.sampleQuality === "Thin" ? "Thin stage evidence is disclosed but never adds a boost." : "Stage evidence is contextual and never adds a boost here."}
+          </div>
+        </>
+      ) : (
+        <div style={{ color: "#64748b", fontSize: 12 }}>The shared atlas does not yet have a valid pre-draw target cloud.</div>
+      )}
+    </section>
+  );
+};
 
 export const SelectionInsightsPanel: React.FC<SelectionInsightsPanelProps> = ({
   history,
@@ -380,6 +470,16 @@ export const SelectionInsightsPredictionPanel: React.FC<SelectionInsightsPredict
 };
 
 /* Styles */
+const atlasContextPillStyle: React.CSSProperties = {
+  border: "1px solid #dbeafe",
+  borderRadius: 999,
+  padding: "2px 7px",
+  background: "#fff",
+  color: "#334155",
+  fontSize: 11,
+  fontWeight: 750,
+};
+
 const CARD_SCROLL_ROW_THRESHOLD = 12;
 const CARD_SCROLL_MAX_HEIGHT = 520;
 

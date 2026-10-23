@@ -14,6 +14,7 @@ import {
 import { parseDrawDateToEpoch, sortDrawsChronologically } from "./recentDraws";
 
 export const DROUGHT_LEARNING_MODEL_VERSION = "DLA-1";
+export const DROUGHT_STATE_IDENTITY_VERSION = "DSI-1";
 export const DROUGHT_LEARNING_MIN_HISTORY = 24;
 export const DROUGHT_LEARNING_PROMOTION_TRIALS = 60;
 
@@ -33,6 +34,8 @@ export interface DroughtLearningRankedNumber {
   number: number;
   strictRank: number;
   learnedRank: number;
+  stateId: string;
+  statePeers: number[];
   currentDrought: number;
   bucketCount: number;
   bucketLabel: string;
@@ -40,6 +43,19 @@ export interface DroughtLearningRankedNumber {
   baseTrials: number;
   coarseTrials: number;
   exactTrials: number;
+  sample: DroughtLearningSample;
+}
+
+export interface DroughtLearningStateAuditRow {
+  stateId: string;
+  targetDraws: number;
+  numberStateTrials: number;
+  hits: number;
+  expectedHits: number;
+  observedRate: number;
+  liftVsBaseline: number;
+  averageDrawLift: number;
+  drawLiftCi: [number, number] | null;
   sample: DroughtLearningSample;
 }
 
@@ -81,6 +97,7 @@ export interface DroughtLearningGate {
 
 export interface DroughtLearningAuditResult {
   modelVersion: typeof DROUGHT_LEARNING_MODEL_VERSION;
+  stateIdentityVersion: typeof DROUGHT_STATE_IDENTITY_VERSION;
   scope: "mains+supps";
   baselineProbability: number;
   threshold: number;
@@ -92,6 +109,7 @@ export interface DroughtLearningAuditResult {
   currentChampion: number[];
   currentChallenger: number[];
   currentRankedNumbers: DroughtLearningRankedNumber[];
+  stateAuditRows: DroughtLearningStateAuditRow[];
   gate: DroughtLearningGate;
   calibrationRows: DroughtLearningCalibrationRow[];
   challengerBrierScore: number | null;
@@ -133,6 +151,14 @@ interface LearningCounters {
   base: Map<string, Counter>;
   coarse: Map<string, Counter>;
   exact: Map<string, Counter>;
+  stateAudit: Map<string, StateAuditAccumulator>;
+}
+
+interface StateAuditAccumulator {
+  targetDraws: number;
+  numberStateTrials: number;
+  hits: number;
+  drawDifferences: number[];
 }
 
 interface NumberStateKeys {
@@ -157,6 +183,7 @@ const makeCounters = (): LearningCounters => ({
   base: new Map(),
   coarse: new Map(),
   exact: new Map(),
+  stateAudit: new Map(),
 });
 
 const drawNumbers = (draw: Draw): number[] => (
@@ -314,6 +341,7 @@ const updateLearningCounters = (
   monthDrawCount: number,
   threshold: number,
 ): void => {
+  const drawStates = new Map<string, { opportunities: number; hits: number }>();
   scoredRows.forEach((scored) => {
     const hit = actualNumbers.has(scored.row.number);
     const keys = stateKeys(scored.row, scored.bucketCount, drawOrdinal, monthDrawCount, threshold);
@@ -322,6 +350,26 @@ const updateLearningCounters = (
     updateCounter(counters.base, keys.base, hit);
     updateCounter(counters.coarse, keys.coarse, hit);
     updateCounter(counters.exact, keys.exact, hit);
+    const drawState = drawStates.get(keys.exact) ?? { opportunities: 0, hits: 0 };
+    drawState.opportunities += 1;
+    if (hit) drawState.hits += 1;
+    drawStates.set(keys.exact, drawState);
+  });
+
+  drawStates.forEach((drawState, stateId) => {
+    const audit = counters.stateAudit.get(stateId) ?? {
+      targetDraws: 0,
+      numberStateTrials: 0,
+      hits: 0,
+      drawDifferences: [],
+    };
+    audit.targetDraws += 1;
+    audit.numberStateTrials += drawState.opportunities;
+    audit.hits += drawState.hits;
+    audit.drawDifferences.push(
+      drawState.hits - (drawState.opportunities * DROUGHT_HAZARD_ANY_DRAWN_BASELINE),
+    );
+    counters.stateAudit.set(stateId, audit);
   });
 };
 
@@ -390,6 +438,31 @@ const sampleLabel = (trials: number): DroughtLearningSample => {
   if (trials < 50) return "limited";
   return "broader";
 };
+
+const buildStateAuditRows = (counters: LearningCounters): DroughtLearningStateAuditRow[] => (
+  [...counters.stateAudit.entries()]
+    .map(([stateId, row]) => {
+      const expectedHits = row.numberStateTrials * DROUGHT_HAZARD_ANY_DRAWN_BASELINE;
+      const observedRate = row.numberStateTrials > 0 ? row.hits / row.numberStateTrials : 0;
+      return {
+        stateId,
+        targetDraws: row.targetDraws,
+        numberStateTrials: row.numberStateTrials,
+        hits: row.hits,
+        expectedHits,
+        observedRate,
+        liftVsBaseline: observedRate - DROUGHT_HAZARD_ANY_DRAWN_BASELINE,
+        averageDrawLift: mean(row.drawDifferences),
+        drawLiftCi: pairedDifferenceCi(row.drawDifferences),
+        sample: sampleLabel(row.targetDraws),
+      };
+    })
+    .sort((left, right) => (
+      right.targetDraws - left.targetDraws
+      || right.numberStateTrials - left.numberStateTrials
+      || left.stateId.localeCompare(right.stateId)
+    ))
+);
 
 const calibrationRows = (
   records: readonly DroughtLearningAuditRecord[],
@@ -510,10 +583,27 @@ export const analyzeDroughtLearningAudit = (
   );
   const currentOrdered = learnedOrder(currentScored);
   const learnedRankByNumber = new Map(currentOrdered.map((row, index) => [row.row.number, index + 1]));
+  const currentStateByNumber = new Map<number, string>();
+  const currentPeersByState = new Map<string, number[]>();
+  currentScored.forEach((row) => {
+    const stateId = stateKeys(
+      row.row,
+      row.bucketCount,
+      targetDrawOrdinal,
+      targetMonthExpectedDrawCount,
+      threshold,
+    ).exact;
+    currentStateByNumber.set(row.row.number, stateId);
+    currentPeersByState.set(stateId, [...(currentPeersByState.get(stateId) ?? []), row.row.number]);
+  });
   const currentRankedNumbers = currentOrdered.map((row): DroughtLearningRankedNumber => ({
     number: row.row.number,
     strictRank: row.row.strictRank ?? 0,
     learnedRank: learnedRankByNumber.get(row.row.number) ?? 0,
+    stateId: currentStateByNumber.get(row.row.number) ?? "unclassified",
+    statePeers: (currentPeersByState.get(currentStateByNumber.get(row.row.number) ?? "") ?? [])
+      .slice()
+      .sort((left, right) => left - right),
     currentDrought: row.row.currentDrought,
     bucketCount: row.bucketCount,
     bucketLabel: bucketGroup(row.bucketCount),
@@ -527,6 +617,7 @@ export const analyzeDroughtLearningAudit = (
 
   return {
     modelVersion: DROUGHT_LEARNING_MODEL_VERSION,
+    stateIdentityVersion: DROUGHT_STATE_IDENTITY_VERSION,
     scope: "mains+supps",
     baselineProbability: DROUGHT_HAZARD_ANY_DRAWN_BASELINE,
     threshold,
@@ -538,6 +629,7 @@ export const analyzeDroughtLearningAudit = (
     currentChampion: currentStrictRows.slice(0, topK).map((row) => row.number),
     currentChallenger: currentOrdered.slice(0, topK).map((row) => row.row.number),
     currentRankedNumbers,
+    stateAuditRows: buildStateAuditRows(counters),
     gate: evaluateGate(records),
     calibrationRows: calibrationRows(records),
     challengerBrierScore: scores.challenger,

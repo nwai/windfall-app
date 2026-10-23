@@ -16,12 +16,33 @@ import {
   serializePredictionJournalBackup,
 } from "./predictionJournal";
 import { buildPredictionCaptureBatch, parsePredictionCaptureRows } from "./predictionCapture";
+import { buildPredictionJournalFindingsReport } from "./predictionJournalFindings";
 
 const draw = (date: string, main: number[], supp: number[] = []): Draw => ({ date, main, supp });
 
 describe("predictionJournal", () => {
   beforeEach(() => {
     clearPredictionJournalEntries();
+  });
+
+  it("round-trips shortlist mode and records pool coverage without predictive scores or invented number roles", () => {
+    const anchor = draw("6/24/26", [10, 11, 12, 13, 14, 15], [16, 17]);
+    const target = draw("6/26/26", [1, 2, 3, 4, 5, 6], [7, 8]);
+    const entry = buildPredictionJournalEntry({ latestDraw: anchor, targetKind: "nextDraw", inputMode: "shortlist", reviewStatus: "reviewedByUser",
+      inputs: { numbers: Array.from({ length: 20 }, (_, index) => index + 1), notes: "A pool, not a game", monthlyBuckets: { undrawn: 20 }, singleDouble: { single: 9, double: 11 }, terminalDigits: [0,1,2,3,4,5,6,7,8,9] } });
+    expect(entry.inputs).toEqual({ numbers: Array.from({ length: 20 }, (_, index) => index + 1), notes: "A pool, not a game" });
+    savePredictionJournalEntries([entry]);
+    expect(loadPredictionJournalEntries()[0].inputMode).toBe("shortlist");
+    const restored = parsePredictionJournalBackup(serializePredictionJournalBackup([entry])).entries[0];
+    expect(restored.inputMode).toBe("shortlist");
+    const scored = scorePredictionJournalEntry(restored, [anchor, target]);
+    expect(scored.scores).toHaveLength(1);
+    expect(scored.scores[0]).toMatchObject({ key: "shortlistCoverage", result: "recorded", hitCount: 8, predictedCount: 20, actualCount: 8 });
+    expect(scored.scores[0].detail).toContain("not a played-game prize");
+    expect(buildPredictionJournalFindingsReport([scored]).eligibleEntries).toBe(0);
+    const converted = buildPredictionJournalEntry({ previousEntry: entry, latestDraw: anchor, targetKind: "nextDraw", inputMode: null, inputs: { numbers: [1,2,3,4,5,6,7,8] } });
+    expect(converted.inputMode).toBeUndefined();
+    expect(scorePredictionJournalEntry(converted, [anchor, target]).scores[0].result).toBe("hit");
   });
 
   it("preserves a multi-game Prediction Capture batch through journal backup and restore", () => {
@@ -88,6 +109,22 @@ describe("predictionJournal", () => {
       },
     });
     expect(entry.anchorDrawFingerprint).toContain("6/24/26");
+  });
+  it("freezes terminal run allocation policy separately from genuine historical observations", () => {
+    const entry=buildPredictionJournalEntry({id:"manual-terminal-runs",now:"2026-10-10T00:00:00.000Z",
+      latestDraw:draw("10/9/26",[28,33,36,15,40,18],[44,4]),targetKind:"nextDraw",inputs:{notes:"Test an unobserved run."},
+      setupSnapshot:{terminalRunRuleEnabled:true,terminalRunMode:"allocation",terminalRunUseAllObserved:false,
+        terminalRunAllocationBasis:"equal",selectedTerminalRuns:["0-1-2"],
+        terminalRunManualSettings:{mode:"allocation",selectedRuns:["0-1-2"],allocationBasis:"equal"},
+        terminalRunEvidence:{modelVersion:"TRQ-2",validDraws:13,rows:[{run:"0-1-2",count:0,occurrencePercent:0,exactRandomPercent:4.47,candidateTarget:4}]},
+      } as any,
+    });
+    expect(entry.setupSummary?.generation).toContain("Exact terminal run rules: manual selection; allocation; equal user allocation, not historical support; 0-1-2; maximal circular runs only");
+    const restored=parsePredictionJournalBackup(serializePredictionJournalBackup([entry])).entries[0];
+    expect(restored.setupSnapshot?.terminalRunAllocationBasis).toBe("equal");
+    expect(restored.setupSnapshot?.terminalRunEvidence?.rows[0].count).toBe(0);
+    expect(restored.setupSnapshot?.terminalRunEvidence?.rows[0].occurrencePercent).toBe(0);
+    expect(restored.setupSnapshot?.terminalRunManualSettings).toEqual(entry.setupSnapshot?.terminalRunManualSettings);
   });
 
   it("records user review status separately from scoring status", () => {
@@ -228,6 +265,17 @@ describe("predictionJournal", () => {
       windowMode: "Custom",
       customDrawCount: 13,
       selectedRatios: ["5:3", "4:4"],
+      terminalShapeQuotaEnabled: true,
+      selectedTerminalShapes: ["2+2+1+1+1+1"],
+      terminalRunShapeLinkEnabled: true,
+      terminalShapeIndependentSettings: { enabled: false, selectedShapes: ["3+2+2+1"] },
+      terminalShapeLinkEvidence: { modelVersion: "TRSL-1", sourceDraws: 13, matchingDraws: 2, mode: "allocation",
+        selectedRuns: ["2-3-4"], rows: [{ shape: "2+2+1+1+1+1", count: 2, percent: 100 }], error: null },
+      terminalRunRuleEnabled: true,
+      terminalRunMode: "allocation",
+      selectedTerminalRuns: ["2-3-4"],
+      terminalRunEvidence: { modelVersion: "TRQ-1", validDraws: 13, rows: [{ run: "2-3-4", count: 2,
+        occurrencePercent: 2 / 13 * 100, exactRandomPercent: 4.5, candidateTarget: 8 }] },
       knobs: { enableSDE1: true, enableHC3: false },
       sumFilter: { enabled: true, min: 120, max: 220, includeSupp: true },
       scoringGenerationInfluence: "normal",
@@ -314,6 +362,13 @@ describe("predictionJournal", () => {
     });
 
     expect(entry.setupSnapshot).toEqual(setupSnapshot);
+    expect(entry.setupSummary?.generation).toContain("Terminal shape quotas: 2+2+1+1+1+1");
+    expect(entry.setupSummary?.generation).toContain("Terminal run / shape link: On; 2 matching real draws; each draw counted once; historical association only");
+    setupSnapshot.terminalShapeLinkEvidence.rows[0].count = 9;
+    expect(entry.setupSnapshot?.terminalShapeLinkEvidence?.rows[0].count).toBe(2);
+    expect(entry.setupSummary?.generation).toContain("Exact terminal run rules: manual selection; allocation; real WFMQYH count shares; 2-3-4; maximal circular runs only");
+    setupSnapshot.terminalRunEvidence.rows[0].count = 5;
+    expect(entry.setupSnapshot?.terminalRunEvidence?.rows[0].count).toBe(2);
     expect(entry.setupSummary?.generation).toContain("Drought Evidence Governor: Manual · strict · 1 boosted");
     expect(entry.setupSummary?.generation).toContain("Monthly Bucket Transition Governor: Manual normal · applied normal · 2 boosted");
     expect(entry.provenance).toMatchObject({
@@ -578,6 +633,90 @@ describe("predictionJournal", () => {
       actualCount: 2,
     });
     expect(dgaScore?.detail).toContain("1/2 Auto-suggested supp matched");
+  });
+
+  it("freezes Neighbour Atlas evidence and replays it as a neutral first-draw audit", () => {
+    const setupSnapshot = {
+      windowEnabled: true,
+      windowMode: "Custom",
+      customDrawCount: 13,
+      selectedRatios: [],
+      knobs: {},
+      userSelectedNumbers: [3, 12],
+      neighbourAtlasEvidence: {
+        version: 1,
+        observeOnly: true,
+        historySource: "baseline",
+        historySourceLabel: "Baseline history",
+        scope: "mains-plus-supps",
+        lookbackDraws: 1,
+        transitionCount: 30,
+        validDraws: 31,
+        excludedTargetDraws: 0,
+        excludedTargetMonthLabels: [],
+        targetDrawOrdinal: 8,
+        overall: { averageUniqueHits: 3, averageExpectedUniqueHits: 2.8, averageDirectionalHits: 3.2, lift: 1.071 },
+        composition: { oddLift: 1, evenLift: 1.1, oneDigitLift: 0.9, twoDigitLift: 1.1 },
+        ordinalEvidence: {
+          drawOrdinal: 8,
+          label: "D8",
+          trials: 3,
+          sampleQuality: "Thin",
+          averageUniqueHits: 3,
+          averageExpectedUniqueHits: 2.8,
+          lift: 1.071,
+          atLeastOneRate: 1,
+          atLeastThreeRate: 0.67,
+          atLeastFourRate: 0.33,
+          topPattern: "1/1/1/0",
+          topPatternCount: 1,
+        },
+        currentCloud: {
+          sourceDateLabel: "6/24/26",
+          sourceNumbers: [10, 11, 12, 13, 14, 15, 16, 17],
+          targetNumbers: [3, 12, 45],
+          ambiguousTargetNumbers: [],
+          targetCount: 3,
+          oddTargetCount: 2,
+          evenTargetCount: 1,
+          oneDigitTargetCount: 1,
+          twoDigitTargetCount: 2,
+          numbers: [
+            { number: 3, directions: ["-1"], ambiguous: false },
+            { number: 12, directions: ["+1"], ambiguous: false },
+            { number: 45, directions: ["+2"], ambiguous: false },
+          ],
+        },
+        warnings: ["Thin evidence"],
+      },
+    } as any;
+    const history = [
+      draw("6/24/26", [10, 11, 12, 13, 14, 15], [16, 17]),
+      draw("6/26/26", [1, 7, 12, 14, 22, 34], [3, 45]),
+    ];
+    const entry = buildPredictionJournalEntry({
+      id: "prediction-neighbour-atlas",
+      now: "2026-06-24T10:30:00.000Z",
+      latestDraw: history[0],
+      targetKind: "nextDraw",
+      inputs: { numbers: [3, 12] },
+      setupSnapshot,
+      reviewStatus: "reviewedByUser",
+    });
+    const scored = scorePredictionJournalEntry(entry, history);
+    const atlasScore = scored.scores.find((score) => score.key === "neighbourAtlasReplay");
+
+    expect(entry.provenance?.neighbourAtlas?.selectedTargetNumbers).toEqual([3, 12]);
+    expect(atlasScore).toMatchObject({
+      label: "Neighbour Atlas replay",
+      predicted: "3, 12, 45",
+      actual: "1, 3, 7, 12, 14, 22, 34, 45",
+      result: "recorded",
+      hitCount: 3,
+      predictedCount: 3,
+      actualCount: 8,
+    });
+    expect(atlasScore?.detail).toContain("observe-only audit; not scored as a predictive hit or miss");
   });
 
   it("distinguishes Monthly Draws Summary construction from the extra MiAN post-filter", () => {

@@ -12,9 +12,6 @@ export interface ScoringGenerationProfile {
   scope: ScoringDiagnosticsScope;
   numberScores: Record<number, number>;
   numberMultipliers: Record<number, number>;
-  ratioScores: Record<string, number>;
-  terminalDigitSetScores: Record<string, number>;
-  straightRunScores: Record<string, number>;
   traceLabel: string;
 }
 
@@ -23,9 +20,6 @@ export interface CandidateScoringEvidence {
   normalizedScore: number;
   components: {
     number: number;
-    ratio: number;
-    terminalDigitSet: number;
-    straightRun: number;
   };
   trace: string[];
 }
@@ -45,17 +39,6 @@ const clampInfluence = (value: ScoringGenerationInfluence | undefined): ScoringG
 };
 
 const round4 = (value: number): number => Number(value.toFixed(4));
-
-const terminalDigitSetKey = (numbers: readonly number[]): string => (
-  [...new Set(numbers.map((number) => number % 10))]
-    .sort((left, right) => left - right)
-    .join(",")
-);
-
-const ratioKey = (numbers: readonly number[]): string => {
-  const odd = numbers.filter((number) => number % 2 !== 0).length;
-  return `${odd}:${numbers.length - odd}`;
-};
 
 const normalizeScore = (value: number, max: number): number => (
   max > 0 ? Math.max(0, Math.min(1, value / max)) : 0
@@ -111,12 +94,9 @@ export function buildScoringGenerationProfile(
     scope,
     numberScores,
     numberMultipliers: numberMultipliers(numberScores, influence),
-    ratioScores: rowMap(diagnostics.ratioRows, (row) => row.ratio),
-    terminalDigitSetScores: rowMap(diagnostics.terminalDigitSetRows, (row) => row.key),
-    straightRunScores: rowMap(diagnostics.straightRunRows, (row) => row.key),
     traceLabel: influence === "off"
       ? "Numbers diagnostic evidence weighting off."
-      : `Numbers diagnostic ${influence} evidence weighting active during number sampling; diagnostic support only, not a calibrated next-draw measure.`,
+      : `Numbers diagnostic ${influence} evidence weighting active during number sampling; survivor tie-break uses mean Numbers score only. Diagnostic support only, not a calibrated next-draw measure.`,
   };
 }
 
@@ -135,40 +115,27 @@ export function scoreCandidateWithScoringProfile(
     return {
       score: 0,
       normalizedScore: 0,
-      components: { number: 0, ratio: 0, terminalDigitSet: 0, straightRun: 0 },
+      components: { number: 0 },
       trace: [],
     };
   }
 
-  const numbers = [...candidate.main, ...(candidate.supp ?? [])];
+  const numbers = profile.scope === "mains" ? candidate.main : [...candidate.main, ...candidate.supp];
   const numberScoreTotal = numbers.reduce((sum, number) => sum + (profile.numberScores[number] ?? 0), 0);
   const numberComponent = numbers.length > 0 ? numberScoreTotal / numbers.length : 0;
-  const ratio = ratioKey(numbers);
-  const setKey = terminalDigitSetKey(numbers);
-  const ratioComponent = profile.ratioScores[ratio] ?? 0;
-  const terminalDigitSetComponent = profile.terminalDigitSetScores[setKey] ?? 0;
-  const straightRunComponent = profile.straightRunScores[setKey] ?? 0;
-
   const components = {
     number: round4(numberComponent),
-    ratio: round4(ratioComponent),
-    terminalDigitSet: round4(terminalDigitSetComponent),
-    straightRun: round4(straightRunComponent),
   };
-  const score = round4(components.number + components.ratio + components.terminalDigitSet + components.straightRun);
+  const score = components.number;
   const maxNumberScore = Math.max(...Object.values(profile.numberScores), 1);
-  const maxRatioScore = Math.max(...Object.values(profile.ratioScores), 1);
-  const maxSetScore = Math.max(...Object.values(profile.terminalDigitSetScores), 1);
-  const maxStraightScore = Math.max(...Object.values(profile.straightRunScores), 0);
-  const maxScore = maxNumberScore + maxRatioScore + maxSetScore + maxStraightScore;
-  const normalizedScore = round4(normalizeScore(score, maxScore));
+  const normalizedScore = round4(normalizeScore(score, maxNumberScore));
 
   return {
     score,
     normalizedScore,
     components,
     trace: [
-      `Numbers diagnostic evidence ${Math.round(normalizedScore * 100)}% (${profile.influence}; number ${components.number.toFixed(1)}, ratio ${ratio} ${components.ratio.toFixed(1)}, terminal digits ${setKey} ${components.terminalDigitSet.toFixed(1)}${components.straightRun > 0 ? `, straight run ${components.straightRun.toFixed(1)}` : ""}).`,
+      `Numbers diagnostic evidence ${Math.round(normalizedScore * 100)}% (${profile.influence}; mean Numbers score ${components.number.toFixed(1)}; ${profile.scope}; number-only survivor tie-break).`,
     ],
   };
 }
